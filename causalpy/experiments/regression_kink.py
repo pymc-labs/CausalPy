@@ -94,6 +94,7 @@ class RegressionKink(BaseExperiment):
         super().__init__(model=model)
         self.expt_type = "Regression Kink"
         self.data = to_pandas(data)
+        self.data.index.name = "obs_ind"
         self.formula = formula
         self.running_variable_name = running_variable_name
         self.kink_point = kink_point

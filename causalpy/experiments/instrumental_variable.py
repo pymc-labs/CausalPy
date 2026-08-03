@@ -139,9 +139,11 @@ class InstrumentalVariable(BaseExperiment):
         super().__init__(model=model)
         self.expt_type = "Instrumental Variable Regression"
         self.data = to_pandas(data)
+        self.data.index.name = "obs_ind"
         self.instruments_data = to_pandas(
             instruments_data, argument_name="instruments_data"
         )
+        self.instruments_data.index.name = "obs_ind"
         self.formula = formula
         self.instruments_formula = instruments_formula
         self.vs_prior_type = vs_prior_type

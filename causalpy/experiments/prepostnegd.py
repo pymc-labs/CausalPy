@@ -115,6 +115,7 @@ class PrePostNEGD(BaseExperiment):
         self.pred_untreated: xr.DataArray
         self.pred_treated: xr.DataArray
         self.data = to_pandas(data)
+        self.data.index.name = "obs_ind"
         self.expt_type = "Pretest/posttest Nonequivalent Group Design"
         self.formula = formula
         self.group_variable_name = group_variable_name

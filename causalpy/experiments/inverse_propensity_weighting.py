@@ -95,6 +95,7 @@ class InversePropensityWeighting(BaseExperiment):
         super().__init__(model=model)
         self.expt_type = "Inverse Propensity Score Weighting"
         self.data = to_pandas(data)
+        self.data.index.name = "obs_ind"
         self.formula = formula
         self.outcome_variable = outcome_variable
         self.weighting_scheme = weighting_scheme

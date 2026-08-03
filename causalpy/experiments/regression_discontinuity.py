@@ -128,6 +128,7 @@ class RegressionDiscontinuity(BaseExperiment):
         # to_pandas returns a copy, so the treated indicator is normalized on
         # an owned frame rather than the caller's.
         self.data = to_pandas(data)
+        self.data.index.name = "obs_ind"
         self.formula = formula
         self.running_variable_name = running_variable_name
         self.treatment_threshold = treatment_threshold

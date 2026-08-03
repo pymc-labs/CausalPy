@@ -49,6 +49,21 @@ class TestToPandasWithTimeIndex:
         result = to_pandas_with_time_index(frame)
         assert result.index.tolist() == [10, 11]
 
+    def test_pandas_without_time_column_keeps_unsorted_duplicate_index(self):
+        """Native pandas indexes remain untouched without explicit time_column."""
+        frame = pd.DataFrame({"y": [1, 2, 3]}, index=pd.Index([2, 0, 0], name="t"))
+        result = to_pandas_with_time_index(frame)
+        assert result.index.equals(frame.index)
+
+    def test_pandas_without_time_column_preserves_named_datetime_index(self):
+        """The legacy pandas-index path retains its time-axis type and name."""
+        index = pd.date_range("2020-01-01", periods=2, name="date")
+        frame = pd.DataFrame({"y": [1, 2]}, index=index)
+        result = to_pandas_with_time_index(frame)
+        assert isinstance(result.index, pd.DatetimeIndex)
+        assert result.index.equals(index)
+        assert result.index.name == "date"
+
     def test_time_column_becomes_index(self):
         """time_column moves out of the columns and onto the index."""
         frame = pd.DataFrame({"t": [10, 11], "y": [1, 2]})
@@ -79,6 +94,13 @@ class TestToPandasWithTimeIndex:
         frame = pd.DataFrame(
             {"t": [100, 200], "y": [1, 2]}, index=pd.Index([7, 8], name="old")
         )
+        with pytest.raises(DataException, match="already has a meaningful index"):
+            to_pandas_with_time_index(frame, time_column="t")
+
+    def test_time_column_conflicting_with_named_range_index_raises(self):
+        """A named RangeIndex is meaningful and cannot be overwritten."""
+        frame = pd.DataFrame({"t": [100, 200], "y": [1, 2]})
+        frame.index.name = "row"
         with pytest.raises(DataException, match="already has a meaningful index"):
             to_pandas_with_time_index(frame, time_column="t")
 
@@ -183,13 +205,14 @@ class TestInterruptedTimeSeries:
         """The caller's index name survives construction."""
         data = its_simple_data.copy()
         data.index.name = "my_dates"
-        cp.InterruptedTimeSeries(
+        result = cp.InterruptedTimeSeries(
             data,
             pd.to_datetime("2015-01-01"),
             formula="timeseries ~ 1 + linear_trend",
             model=LinearRegression(),
         )
         assert data.index.name == "my_dates"
+        assert result.data.index.name == "obs_ind"
 
 
 class TestSyntheticControl:
@@ -264,6 +287,37 @@ class TestSyntheticDifferenceInDifferences:
             )
 
 
+class TestNativePandasTimeIndex:
+    """Index-based experiments preserve a pandas time axis without time_column."""
+
+    @pytest.mark.parametrize(
+        "experiment", ["SyntheticControl", "SyntheticDifferenceInDifferences"]
+    )
+    def test_native_datetime_index_is_preserved(
+        self, sc_data, mock_pymc_sample, experiment
+    ):
+        """A named DatetimeIndex remains the native time axis for SC and SDiD."""
+        index = pd.date_range("2020-01-01", periods=len(sc_data), freq="D", name="date")
+        data = sc_data.copy()
+        data.index = index
+        treatment_time = index[70]
+        kwargs = {
+            "control_units": ["a", "b", "c", "d", "e", "f", "g"],
+            "treated_units": ["actual"],
+        }
+        if experiment == "SyntheticControl":
+            kwargs["model"] = LinearRegression()
+        result = getattr(cp, experiment)(data, treatment_time, **kwargs)
+
+        expected_index = index.rename("obs_ind")
+        assert data.index.equals(index)
+        assert data.index.name == "date"
+        assert result.data.index.equals(expected_index)
+        assert result.data.index.name == "obs_ind"
+        assert result.datapre.index.equals(expected_index[:70])
+        assert result.datapost.index.equals(expected_index[70:])
+
+
 class TestTimestampMismatchMessage:
     """The treatment-time mismatch error states the right requirement.
 
@@ -335,6 +389,22 @@ class TestUnsortedTimeColumnEndToEnd:
         with pytest.raises(DataException, match="is not sorted"):
             getattr(cp, experiment)(
                 to_polars_with_time(shuffled, "time"),
+                70,
+                control_units=["a", "b", "c", "d", "e", "f", "g"],
+                treated_units=["actual"],
+                time_column="time",
+            )
+
+    @pytest.mark.parametrize(
+        "experiment", ["SyntheticControl", "SyntheticDifferenceInDifferences"]
+    )
+    def test_duplicate_time_column_raises(self, sc_data, experiment):
+        """A duplicate explicit time axis is refused at both public boundaries."""
+        duplicate = sc_data.rename_axis("time").reset_index()
+        duplicate.loc[1, "time"] = duplicate.loc[0, "time"]
+        with pytest.raises(DataException, match="duplicate values"):
+            getattr(cp, experiment)(
+                pl.from_pandas(duplicate),
                 70,
                 control_units=["a", "b", "c", "d", "e", "f", "g"],
                 treated_units=["actual"],

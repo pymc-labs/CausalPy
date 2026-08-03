@@ -63,6 +63,7 @@ def assert_positional_obs_ind(result_polars, attribute="data"):
     """
     index = getattr(result_polars, attribute).index
     assert index.tolist() == list(range(len(index)))
+    assert index.name == "obs_ind"
 
 
 def assert_model_input_matches(result_pandas, result_polars):
@@ -218,6 +219,7 @@ def test_instrumental_variable_accepts_polars(mock_pymc_sample):
     assert_data_matches(from_pandas, from_polars)
     assert_positional_obs_ind(from_polars)
     assert_data_matches(from_pandas, from_polars, attribute="instruments_data")
+    assert_positional_obs_ind(from_polars, attribute="instruments_data")
     assert_model_input_matches(from_pandas, from_polars)
 
 
