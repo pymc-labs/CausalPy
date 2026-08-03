@@ -25,7 +25,6 @@ from plotnine import (
     aes,
     geom_line,
     geom_point,
-
     ggplot,
     guides,
     labs,
@@ -431,17 +430,29 @@ class RegressionDiscontinuity(BaseExperiment):
         xcol = self.running_variable_name
         ycol = self.outcome_variable_name
 
-        points = self.data.copy()
-        if has_exclusion:
-            points["series"] = np.where(self._fit_mask, "fit data", "excluded data")
-            color_values = {"fit data": "k", "excluded data": "lightgray"}
-        else:
-            points["series"] = "data"
-            color_values = {"data": "k"}
+        plot_x = "__causalpy_plot_x"
+        plot_y = "__causalpy_plot_y"
+        plot_series = "__causalpy_plot_series"
+        points = pd.DataFrame(
+            {
+                plot_x: self.data[xcol],
+                plot_y: self.data[ycol],
+                plot_series: (
+                    np.where(self._fit_mask, "fit data", "excluded data")
+                    if has_exclusion
+                    else "data"
+                ),
+            }
+        )
+        color_values = (
+            {"fit data": "k", "excluded data": "lightgray"}
+            if has_exclusion
+            else {"data": "k"}
+        )
 
         # Plotnine provides the equivalent base geometry. Materialize it once so
         # the posterior helper can retain its Matplotlib-only rendering modes.
-        p = ggplot(points, aes(x=xcol, y=ycol, color="series")) + geom_point()
+        p = ggplot(points, aes(x=plot_x, y=plot_y, color=plot_series)) + geom_point()
 
         # create strings to compose title
         r2 = format_r2_score(self.score, round_to=round_to, context="on fit data")
@@ -462,12 +473,12 @@ class RegressionDiscontinuity(BaseExperiment):
             title = r2 + "\n" + discon
             model_fit = pd.DataFrame(
                 {
-                    xcol: self.x_pred[xcol],
-                    "prediction": self.pred.isel(chain=0, draw=0, treated_units=0),
-                    "series": "model fit",
+                    plot_x: self.x_pred[xcol],
+                    plot_y: self.pred.isel(chain=0, draw=0, treated_units=0),
+                    plot_series: "model fit",
                 }
             )
-            p += geom_line(model_fit, aes(x=xcol, y="prediction", color="series"))
+            p += geom_line(model_fit, aes(x=plot_x, y=plot_y, color=plot_series))
             color_values["model fit"] = "k"
 
         # Plotnine cannot provide the Axes-resident rule artists that the
