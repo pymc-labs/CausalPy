@@ -53,17 +53,9 @@ dependencies = [
     "patsy",
     "plotnine>=0.15.7",
     "polars",
-    # Floors per the PyMC 6 migration (#1039). Deliberately NOT pymc>=6.1
-    # (pymc-marketing v1.0.0 caps pymc<6.1.0, which would make the docs env
-    # unsolvable) and NOT pytensor>=3.2 (pymc 6.1.0 caps pytensor<3.2).
-    #
-    # Knock-on effect of that cap (#1048 deprecation cleanup): `pymc-extras`
-    # versions below 0.13 emit a `DeprecationWarning` from
-    # `BSplineBasis.infer_shape`'s fgraph path. The fix requires
-    # `pymc-extras>=0.13`, which requires `pymc>=6.1`; `pymc-marketing` v1.0.0
-    # currently caps `pymc<6.1`. Leave the warning visible -- do not add a
-    # warning filter -- until those dependency constraints can be resolved
-    # together.
+    # Keep these public major-version ranges broad. PyMC metadata supplies compatible PyTensor patch-level ranges, so base installs may select newer PyMC/PyTensor minors.
+    # The docs-only PyMC-Marketing transition snapshot in docs/requirements.txt has its own narrower resolver constraints; it does not restrict normal runtime installs.
+    # pymc-extras 0.11 is the first release that declares PyMC 6 support and provides the structural state-space API CausalPy imports.
     "pymc>=6.0.1,<7",
     "pytensor>=3,<4",
     "scikit-learn>=1",
@@ -71,7 +63,7 @@ dependencies = [
     "seaborn>=0.11.2",
     "statsmodels",
     "xarray>=v2022.11.0",
-    "pymc-extras>=0.8.0",
+    "pymc-extras>=0.11",
 ]
 
 # List additional groups of dependencies here (e.g. development dependencies). Users
