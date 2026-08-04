@@ -25,6 +25,7 @@ import pymc as pm
 import pytest
 import xarray as xr
 from matplotlib.figure import Figure
+from matplotlib.text import Text
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
@@ -2436,16 +2437,35 @@ def _make_calibration_check_result(
     return CheckResult(check_name="PlaceboInTime", passed=True, metadata=metadata)
 
 
+def _figure_texts(fig: Figure) -> list[str]:
+    """Collect every rendered string in a figure.
+
+    plotnine draws panel titles and legend labels as free text artists rather
+    than through ``Axes.set_title``, so assertions read them from here.
+    """
+    return [text.get_text() for text in fig.findobj(Text)]
+
+
 def test_plot_calibration_returns_three_panels():
     """The calibration plot has one panel per diagnostic."""
     fig = PlaceboInTime.plot_calibration(_make_calibration_check_result())
 
     assert isinstance(fig, Figure)
-    assert len(fig.axes) == 3
-    titles = [ax.get_title() for ax in fig.axes]
-    assert titles[0].startswith("A.")
-    assert titles[1].startswith("B.")
-    assert titles[2].startswith("C.")
+    assert len(fig.axes) >= 3
+    texts = _figure_texts(fig)
+    assert any(text.startswith("A. Placebo fold distributions") for text in texts)
+    assert any(text.startswith("B. Learned null distribution") for text in texts)
+    assert any(text.startswith("C. Actual effect vs null") for text in texts)
+    plt.close(fig)
+
+
+def test_plot_calibration_sets_the_suptitle():
+    """The caller's title reaches the drawn figure."""
+    fig = PlaceboInTime.plot_calibration(
+        _make_calibration_check_result(), title="UK Coal CO2"
+    )
+
+    assert "UK Coal CO2" in _figure_texts(fig)
     plt.close(fig)
 
 
@@ -2456,9 +2476,7 @@ def test_plot_calibration_labels_datetime_folds_by_year():
     )
     fig = PlaceboInTime.plot_calibration(result)
 
-    legend = fig.axes[0].get_legend()
-    assert legend is not None
-    assert "t*=2015" in legend.get_texts()[0].get_text()
+    assert "Fold 1 (t*=2015)" in _figure_texts(fig)
     plt.close(fig)
 
 
@@ -2467,27 +2485,12 @@ def test_plot_calibration_colors_more_folds_than_the_cycle():
     result = _make_calibration_check_result(n_folds=12)
     fig = PlaceboInTime.plot_calibration(result)
 
-    legend = fig.axes[0].get_legend()
-    assert legend is not None
-    assert len(legend.get_texts()) == 12
+    texts = _figure_texts(fig)
+    assert all(
+        any(text.startswith(f"Fold {fold} (") for text in texts)
+        for fold in range(1, 13)
+    )
     plt.close(fig)
-
-
-def test_plot_calibration_draws_into_supplied_axes():
-    """Passing axes composes the panels into an existing figure."""
-    target_fig, axes = plt.subplots(3, 1)
-    fig = PlaceboInTime.plot_calibration(_make_calibration_check_result(), axes=axes)
-
-    assert fig is target_fig
-    plt.close(target_fig)
-
-
-def test_plot_calibration_rejects_wrong_number_of_axes():
-    """The plot needs exactly three axes."""
-    target_fig, axes = plt.subplots(2, 1)
-    with pytest.raises(ValueError, match="exactly 3 axes"):
-        PlaceboInTime.plot_calibration(_make_calibration_check_result(), axes=axes)
-    plt.close(target_fig)
 
 
 def test_plot_calibration_warns_when_no_null_model():
@@ -2498,21 +2501,8 @@ def test_plot_calibration_warns_when_no_null_model():
         fig = PlaceboInTime.plot_calibration(result)
 
     assert isinstance(fig, Figure)
+    assert any("No null model: 2 folds completed." in t for t in _figure_texts(fig))
     plt.close(fig)
-
-
-def test_plot_calibration_without_null_model_uses_supplied_axes():
-    """The placeholder blanks the spare axes it was handed."""
-    target_fig, axes = plt.subplots(3, 1)
-    result = _make_calibration_check_result(with_null=False)
-
-    with pytest.warns(UserWarning, match="Not enough folds completed"):
-        fig = PlaceboInTime.plot_calibration(result, axes=axes)
-
-    assert fig is target_fig
-    assert not axes[1].axison
-    assert not axes[2].axison
-    plt.close(target_fig)
 
 
 def test_inconclusive_run_produces_no_figure():

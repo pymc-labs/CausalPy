@@ -38,7 +38,6 @@ from __future__ import annotations
 import inspect
 import logging
 import warnings
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Literal, cast
 
@@ -47,8 +46,20 @@ import numpy as np
 import pandas as pd
 import pymc as pm
 import xarray as xr
-from matplotlib.axes import Axes
+from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
+from plotnine import (
+    aes,
+    after_stat,
+    geom_histogram,
+    geom_text,
+    geom_vline,
+    ggplot,
+    labs,
+    scale_colour_manual,
+    scale_fill_manual,
+    theme_void,
+)
 
 from causalpy.checks.base import CheckResult, clone_model
 from causalpy.experiments.base import BaseExperiment
@@ -59,6 +70,8 @@ from causalpy.pipeline import PipelineContext
 logger = logging.getLogger(__name__)
 
 MIN_FOLD_OBSERVATIONS = 3
+# Suptitle position, just above the figure box the panels fill.
+_SUPTITLE_Y = 1.02
 MAX_RANDOM_SELECTION_RETRIES = 16
 
 # The hierarchical status-quo (null) model estimates the between-fold spread
@@ -1543,7 +1556,6 @@ class PlaceboInTime:
         check_result: CheckResult,
         title: str = "Placebo-in-Time calibration",
         figsize: tuple[float, float] = (7, 9),
-        axes: Sequence[Axes] | None = None,
     ) -> Figure:
         """Plot the three-panel calibration diagnostic for a placebo run.
 
@@ -1559,137 +1571,157 @@ class PlaceboInTime:
         title : str, default "Placebo-in-Time calibration"
             Figure suptitle.
         figsize : tuple of float, default (7, 9)
-            Size of the created figure.  Ignored when ``axes`` is given.
-        axes : sequence of matplotlib Axes, optional
-            Three existing axes to draw into.  When ``None`` (default) a new
-            figure is created.
+            Size of the drawn figure, in inches.
 
         Returns
         -------
         matplotlib.figure.Figure
-            The figure holding the panels.  When the run produced no null
-            model, a single annotated panel is returned instead and a
-            warning is emitted.
-
-        Raises
-        ------
-        ValueError
-            If ``axes`` is given but does not hold exactly three axes.
+            The drawn composition.  When the run produced no null model, a
+            single annotated panel is returned instead and a warning is
+            emitted.
         """
-        if axes is not None and len(axes) != 3:
-            raise ValueError(f"axes must hold exactly 3 axes, got {len(axes)}")
-
         metadata = check_result.metadata
         fold_results = metadata["fold_results"]
 
         if "null_samples" not in metadata:
-            return PlaceboInTime._plot_missing_null(fold_results, title, figsize, axes)
+            return PlaceboInTime._plot_missing_null(fold_results, title, figsize)
 
-        null_samples = metadata["null_samples"]
-        actual_samples = metadata["actual_cumulative_samples"]
+        null_samples = np.asarray(metadata["null_samples"]).ravel()
+        actual_samples = np.asarray(metadata["actual_cumulative_samples"]).ravel()
+        null_mean = float(np.mean(null_samples))
 
-        fig: Figure
-        if axes is None:
-            # A bare Figure, unlike plt.subplots, is not registered with
-            # pyplot, so run() building one by default neither leaks a
-            # managed figure nor makes the notebook backend display it at
-            # the end of whichever cell happened to call run().
-            fig = Figure(figsize=figsize)
-            panels: list[Axes] = list(fig.subplots(3, 1))
-        else:
-            panels = list(axes)
-            fig = cast(Figure, panels[0].get_figure())
+        fold_labels = [
+            f"Fold {fold_result.fold} "
+            f"(t*={PlaceboInTime._format_fold_time(fold_result.pseudo_treatment_time)})"
+            for fold_result in fold_results
+        ]
+        fold_samples = [
+            np.asarray(fold_result.cumulative_impact_samples.values).ravel()
+            for fold_result in fold_results
+        ]
+        fold_frame = pd.DataFrame(
+            {
+                "cumulative_impact": np.concatenate(fold_samples),
+                "fold": pd.Categorical(
+                    np.repeat(fold_labels, [len(s) for s in fold_samples]),
+                    categories=fold_labels,
+                ),
+            }
+        )
+        fold_mean_frame = pd.DataFrame(
+            {
+                "fold": pd.Categorical(fold_labels, categories=fold_labels),
+                "fold_mean": [fold_result.fold_mean for fold_result in fold_results],
+            }
+        )
+        # The palette follows the active matplotlib cycle so the panels keep
+        # their colours if a caller restyles the surrounding report.
+        cycle = cast(Any, mpl.rcParams["axes.prop_cycle"]).by_key()["color"]
+        fold_colors = [to_hex(cycle[i % len(cycle)]) for i in range(len(fold_labels))]
 
-        # Panel A: fold distributions
-        ax = panels[0]
-        colors = cast(Any, mpl.rcParams["axes.prop_cycle"]).by_key()["color"]
-        for i, fold_result in enumerate(fold_results):
-            color = colors[i % len(colors)]
-            t_star = fold_result.pseudo_treatment_time
-            t_label = f"{t_star:%Y}" if hasattr(t_star, "strftime") else f"{t_star}"
-            ax.hist(
-                fold_result.cumulative_impact_samples.values.ravel(),
+        panel_a = (
+            ggplot(fold_frame, aes("cumulative_impact"))
+            + geom_histogram(
+                aes(y=after_stat("density"), fill="fold"),
                 bins=40,
                 alpha=0.45,
-                color=color,
-                density=True,
-                label=f"Fold {fold_result.fold} (t*={t_label})",
+                position="identity",
             )
-            ax.axvline(fold_result.fold_mean, color=color, ls="--", lw=1.2)
-        ax.axvline(0, color="k", ls=":", lw=0.8, alpha=0.5)
-        ax.set_xlabel("Cumulative impact")
-        ax.set_ylabel("Density")
-        ax.set_title("A. Placebo fold distributions")
-        ax.legend(fontsize=7)
+            + geom_vline(
+                data=fold_mean_frame,
+                mapping=aes(xintercept="fold_mean", colour="fold"),
+                linetype="dashed",
+                show_legend=False,
+            )
+            + geom_vline(xintercept=0, linetype="dotted", alpha=0.5)
+            + scale_fill_manual(values=fold_colors)
+            + scale_colour_manual(values=fold_colors)
+            + labs(
+                x="Cumulative impact",
+                y="Density",
+                fill="",
+                title="A. Placebo fold distributions",
+            )
+        )
 
-        # Panel B: null distribution
-        ax = panels[1]
-        ax.hist(
-            null_samples,
-            bins=50,
-            alpha=0.5,
-            color="#94a3b8",
-            density=True,
-            label="Status-quo (null)",
+        panel_b = (
+            ggplot(pd.DataFrame({"cumulative_impact": null_samples}))
+            + geom_histogram(
+                aes("cumulative_impact", after_stat("density")),
+                bins=50,
+                fill="#94a3b8",
+                alpha=0.5,
+            )
+            + geom_vline(xintercept=0, linetype="dotted", alpha=0.5)
+            + geom_vline(xintercept=null_mean, colour="#64748b", linetype="dashed")
+            + labs(
+                x="Cumulative impact",
+                y="Density",
+                title=f"B. Learned null distribution (mean = {null_mean:.1f})",
+            )
         )
-        ax.axvline(0, color="k", ls=":", lw=0.8, alpha=0.5)
-        ax.axvline(
-            np.mean(null_samples),
-            color="#64748b",
-            ls="--",
-            lw=1.5,
-            label=f"Null mean = {np.mean(null_samples):.1f}",
-        )
-        ax.set_xlabel("Cumulative impact")
-        ax.set_title("B. Learned null distribution")
-        ax.legend(fontsize=8)
 
-        # Panel C: null vs actual
-        ax = panels[2]
-        ax.hist(
-            null_samples,
-            bins=50,
-            alpha=0.4,
-            color="#94a3b8",
-            density=True,
-            label="Null (status quo)",
+        sources = ["Null (status quo)", "Actual effect"]
+        comparison_frame = pd.DataFrame(
+            {
+                "cumulative_impact": np.concatenate([null_samples, actual_samples]),
+                "distribution": pd.Categorical(
+                    np.repeat(sources, [null_samples.size, actual_samples.size]),
+                    categories=sources,
+                ),
+            }
         )
-        ax.hist(
-            actual_samples,
-            bins=50,
-            alpha=0.4,
-            color="#E24A33",
-            density=True,
-            label="Actual effect",
+        panel_c = (
+            ggplot(comparison_frame, aes("cumulative_impact"))
+            + geom_histogram(
+                aes(y=after_stat("density"), fill="distribution"),
+                bins=50,
+                alpha=0.4,
+                position="identity",
+            )
+            + scale_fill_manual(values=["#94a3b8", "#E24A33"])
+            + labs(
+                x="Cumulative impact",
+                y="Density",
+                fill="",
+                title=(
+                    "C. Actual effect vs null "
+                    f"($p_{{cal}}$ = {metadata['p_effect_outside_null']:.3f})"
+                ),
+            )
         )
-        ax.text(
-            0.97,
-            0.95,
-            f"$p_{{cal}}$ = {metadata['p_effect_outside_null']:.3f}",
-            transform=ax.transAxes,
-            fontsize=9,
-            va="top",
-            ha="right",
-            bbox={
-                "boxstyle": "round,pad=0.3",
-                "facecolor": "white",
-                "edgecolor": "#e2e8f0",
-            },
-        )
-        ax.set_xlabel("Cumulative impact")
-        ax.set_title("C. Actual effect vs null")
-        ax.legend(fontsize=8)
 
-        fig.suptitle(title, fontsize=11, fontweight="bold", y=1.02)
-        fig.tight_layout()
-        return fig
+        return PlaceboInTime._draw(panel_a / panel_b / panel_c, title, figsize)
+
+    @staticmethod
+    def _format_fold_time(pseudo_treatment_time: Any) -> str:
+        """Format a pseudo treatment time for a fold label."""
+        if hasattr(pseudo_treatment_time, "strftime"):
+            return f"{pseudo_treatment_time:%Y}"
+        return f"{pseudo_treatment_time}"
+
+    @staticmethod
+    def _draw(plot: Any, title: str, figsize: tuple[float, float]) -> Figure:
+        """Draw a plotnine plot or composition and stamp the suptitle on it.
+
+        ``ggplot.draw`` returns a plain matplotlib figure, which is what
+        ``CheckResult.figures`` holds and what ``GenerateReport`` embeds, so
+        nothing downstream needs to know a plot was built with plotnine.
+        """
+        figure = plot.draw()
+        figure.set_size_inches(*figsize)
+        # plotnine composes panels with its own layout engine, which ignores
+        # subplots_adjust, so the suptitle goes above the figure box and the
+        # tight bounding box used by savefig and the notebook backend grows
+        # to include it.
+        figure.suptitle(title, fontsize=11, fontweight="bold", y=_SUPTITLE_Y)
+        return figure
 
     @staticmethod
     def _plot_missing_null(
         fold_results: list[PlaceboFoldResult],
         title: str,
         figsize: tuple[float, float],
-        axes: Sequence[Axes] | None,
     ) -> Figure:
         """Return an annotated placeholder when no null model was built."""
         warnings.warn(
@@ -1699,26 +1731,18 @@ class PlaceboInTime:
             UserWarning,
             stacklevel=3,
         )
-        fig: Figure
-        ax: Axes
-        if axes is None:
-            fig = Figure(figsize=figsize)
-            ax = cast(Axes, fig.subplots())
-        else:
-            ax = axes[0]
-            fig = cast(Figure, ax.get_figure())
-            for spare in axes[1:]:
-                spare.set_axis_off()
-
         lines = [f"No null model: {len(fold_results)} folds completed."]
         lines.extend(
-            f"Fold {fr.fold}: mean={fr.fold_mean:.2f}, sd={fr.fold_sd:.2f}"
-            for fr in fold_results
+            f"Fold {fold_result.fold}: mean={fold_result.fold_mean:.2f}, "
+            f"sd={fold_result.fold_sd:.2f}"
+            for fold_result in fold_results
         )
-        ax.text(0.5, 0.5, "\n".join(lines), ha="center", va="center", fontsize=9)
-        ax.set_axis_off()
-        fig.suptitle(title, fontsize=11, fontweight="bold")
-        return fig
+        placeholder = (
+            ggplot(pd.DataFrame({"x": [0.0], "y": [0.0], "label": ["\n".join(lines)]}))
+            + geom_text(aes("x", "y", label="label"))
+            + theme_void()
+        )
+        return PlaceboInTime._draw(placeholder, title, figsize)
 
     def __repr__(self) -> str:
         """Return a string representation of the check."""
