@@ -11,7 +11,7 @@ See the [python-environment skill](.agents/skills/python-environment/SKILL.md) f
 - If `$CONDA_EXE run -n CausalPy ...` fails because the named env cannot be resolved, inspect `$CONDA_EXE env list` and retry with `$CONDA_EXE run -p <full-prefix> <command>`.
 - In git worktrees, prefer reusing an existing env. Because the repo uses editable installs, rerun `make setup` in the current worktree only when that checkout has not been installed into the env yet or when dependencies changed.
 
-- Dependencies live in `pyproject.toml`; `environment.yml` is generated from it by a prek hook (do not edit by hand). Optional: `pymc-marketing` is in the `docs` extra only.
+- Dependencies live in `pyproject.toml`; `environment.yml` is generated from it by a prek hook (do not edit by hand). The docs-only PyMC-Marketing transition snapshot is pinned separately in `docs/requirements.txt`.
 - **Development**: The supported setup is the conda env (`environment.yml`). `pip install -e .[dev]` works but does not include conda-only tooling (e.g. `make`, `pymc-bart`, `marimo`); do not suggest pip-only dev as equivalent.
 
 ## Testing

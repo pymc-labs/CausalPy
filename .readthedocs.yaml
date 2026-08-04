@@ -53,8 +53,8 @@ sphinx:
 # Optionally declare the Python requirements required to build your docs
 python:
    install:
-   # Install the unpublished PyMC-6-compatible marketing branch first. Its
-   # metadata selects the matching PyMC, PyTensor, and pymc-extras versions.
+   # Install the docs-only PyMC-Marketing transition dependencies first.
+   # docs/requirements.txt pins its immutable source commit and dependency constraints.
    - requirements: docs/requirements.txt
    - method: pip
      path: .
