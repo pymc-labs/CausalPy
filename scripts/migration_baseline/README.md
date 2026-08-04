@@ -1,6 +1,6 @@
 # PyMC Migration Baseline Harness
 
-This permanent harness produces reproducible evidence for the PyMC 5 → PyMC 6 migration at the only two revisions that may be attributed to that migration: PyMC 5 reference `79c0a87072fd4653bfaed1eb085f965594c7f03a` and PyMC 6 migration candidate `7b3e257b4b006800f445bec6303a399ef7ec2ffc`. It rejects every other source revision so later features are investigated as separate changes rather than mislabeled migration drift.
+This permanent harness produces reproducible evidence for the PyMC 5 → PyMC 6 migration at the only two revisions that may be attributed to that migration: PyMC 5 reference `79c0a87072fd4653bfaed1eb085f965594c7f03a` and PyMC 6 migration candidate `ed425ae2e6c884256f7e3f12beba54d9184d021d`. It rejects every other source revision so later features are investigated as separate changes rather than mislabeled migration drift.
 
 The candidate was the head of the `pymc6_and_pymcmarketing1_migration` integration branch when it was pinned, so the evidence describes the tree proposed for `main`. It is deliberately not the harness checkout: run `scripts/migration_baseline/harness.py` from its own committed checkout, whose `HEAD` differs from both sampled revisions.
 
@@ -60,7 +60,7 @@ The protocol is not runnable on a small shared CI container or agent sandbox; it
 - **Wall time:** budget hours end to end and schedule it as one uninterrupted job. Sampling itself is the smaller part: 32 serial chain runs (4 captures × 2 models × 4 chains of 1,000 tune + 1,000 draws at `target_accept=0.95`) over small fixtures. The bulk of the wall time is creating the two prefixes and cold-compiling each stack.
 - **Isolation:** a clean host with no other memory-hungry work. The command block below points `PYTENSOR_FLAGS=compiledir=...` at a per-prefix directory so a PyTensor 2 and a PyTensor 3 stack never share a compile cache; the harness does not record or validate `compiledir`, so this one is on the coordinator.
 
-The coordinator must provision `PYMC6_ROOT` as a separate clean detached worktree at `7b3e257b4b006800f445bec6303a399ef7ec2ffc` and install it into its own editable-install prefix. Do not use the harness checkout (`MIGRATION_ROOT`) as `PYMC6_ROOT`: its `HEAD` intentionally differs from the migration candidate, so `capture` would reject it.
+The coordinator must provision `PYMC6_ROOT` as a separate clean detached worktree at `ed425ae2e6c884256f7e3f12beba54d9184d021d` and install it into its own editable-install prefix. Do not use the harness checkout (`MIGRATION_ROOT`) as `PYMC6_ROOT`: its `HEAD` intentionally differs from the migration candidate, so `capture` would reject it.
 
 Set the coordinator locations below to your own paths. `WORKTREES` is any
 directory outside every CausalPy checkout; `MAMBA` is whichever environment
@@ -111,7 +111,7 @@ A failed numerical comparison writes its fresh JSON decision and Markdown report
 
 ## Re-pinning the candidate revision
 
-`PYMC6_COMMIT` was first pinned at `18a524a1a8512aaa21c46e0ccddbc54501c9eb1a` (the merge of #1091). On 2026-08-01 it was moved to the current value, because 121 further commits had merged into the integration branch since, changing 60 files under `causalpy/`. Evidence captured at that superseded pin would have described a tree predating most of the migration. This section records why the pin moves; it is not a running changelog of every value it has held.
+`PYMC6_COMMIT` was first pinned at `18a524a1a8512aaa21c46e0ccddbc54501c9eb1a` (the merge of #1091), then moved on 2026-08-01 to `7b3e257b4b006800f445bec6303a399ef7ec2ffc` because 121 further commits had merged into the integration branch, changing 60 files under `causalpy/`. That value went stale the next day: #1121 changed `PlaceboInTime` verdict semantics, and the remaining 1.0.0 milestone work then landed as #1131, #1129, #1133, #1134, #1130, #1132, #1136, #1135 and #1137. The current value is the head after that programme completed and after the 1.0.0 version bump, so it is the tree actually proposed for `main`. This section records why the pin moves; it is not a running changelog of every value it has held.
 
 Move the pin again when behavioral change to `causalpy/` merges into the integration branch before a capture is run. Commits that change only this harness, its documentation or its tests do not make the pin stale, because they cannot change a sampled posterior — the harness is executed from its own checkout, not from the sampled candidate tree.
 
