@@ -231,27 +231,11 @@ exclude_lines = [
 files = "causalpy"
 exclude = "build|dist|docs|notebooks|tests|setup.py"
 ignore_missing_imports = true
-# Report an override below that stops matching a real module, so a rename or a deletion does not leave a stale allowlist entry behind unnoticed. This warns rather than fails: mypy prints ``note: unused section(s)`` and still exits 0, so it surfaces the staleness in the log without turning the gate red on its own.
+# Report a per-module override that stops matching a real module, so a rename or a deletion does not leave a stale entry behind unnoticed. This warns rather than fails: mypy prints ``note: unused section(s)`` and still exits 0. There are no overrides left, and this keeps it that way if one is ever added and then outlives its module.
 warn_unused_configs = true
-
-# Allowlist of modules that still fail, so the gate stays green and ratchets down. It started at 49 errors in 16 files and is now 10 in 5. Each entry disables only the error codes that module actually produces, so everything else is still checked there.
+# The allowlist is empty: the package type-checks clean. What could not be expressed in the type system is a handful of line-level ``type: ignore`` comments, each with the reasoning next to it.
 #
-# What is left is one question rather than a backlog of small fixes: several attributes and parameters are declared wider than the values that reach them. ``PyMCModel.fit`` declares ``X`` and ``y`` as ``DataArray`` while two experiments pass numpy arrays; ``self.idata`` and ``self.causal_impact`` are None before fitting and never None at the points that read them; and ``Axes.get_figure`` is Optional for a detached artist that cannot occur here. Settling those means deciding what the model lifecycle promises, so they are left for a maintainer rather than papered over.
-[[tool.mypy.overrides]]
-module = [
-    "causalpy.experiments.diff_in_diff",
-    "causalpy.experiments.instrumental_variable",
-    "causalpy.experiments.inverse_propensity_weighting",
-]
-disable_error_code = ["arg-type"]
-
-[[tool.mypy.overrides]]
-module = "causalpy.pymc_models"
-disable_error_code = ["return-value"]
-
-[[tool.mypy.overrides]]
-module = "causalpy.checks.operating_characteristics"
-disable_error_code = ["assignment"]
+# ``warn_unused_ignores`` would make those comments self-cleaning, and is worth turning on, but it currently reports 33 pre-existing unused ignores across 10 modules. Clearing those is its own change, not a rider on this one.
 
 [tool.marimo.runtime]
 watcher_on_save = "autorun"
