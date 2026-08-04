@@ -198,9 +198,9 @@ class PanelRegression(BaseExperiment):
 
         # to_pandas returns a copy, so this rename lands on ours, not the
         # caller's dataframe.
-        data = to_pandas(data)
-        data.index.name = "obs_ind"
-        self.data = data
+        pandas_data = to_pandas(data)
+        pandas_data.index.name = "obs_ind"
+        self.data = pandas_data
         self.expt_type = "Panel Regression"
         self.formula = formula
         self.unit_fe_variable = unit_fe_variable
@@ -210,7 +210,7 @@ class PanelRegression(BaseExperiment):
         # Store a copy of original data for recovering group means in demeaned
         # transformation.  Other experiment classes don't need this because
         # they don't demean the data before fitting.
-        self._original_data = data.copy()
+        self._original_data = pandas_data.copy()
 
         # Initialize storage for group means (used in demeaned transformation)
         self._group_means: dict[str, pd.DataFrame] = {}
@@ -219,8 +219,10 @@ class PanelRegression(BaseExperiment):
         self.input_validation()
 
         # Store panel dimensions (after validation confirms columns exist)
-        self.n_units = data[unit_fe_variable].nunique()
-        self.n_periods = data[time_fe_variable].nunique() if time_fe_variable else None
+        self.n_units = pandas_data[unit_fe_variable].nunique()
+        self.n_periods = (
+            pandas_data[time_fe_variable].nunique() if time_fe_variable else None
+        )
         self._build_design_matrices()
         self._prepare_data()
         self.algorithm()

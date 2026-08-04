@@ -121,9 +121,9 @@ class DifferenceInDifferences(BaseExperiment):
         self.causal_impact: xr.DataArray | float | None
         # to_pandas returns a copy, so index metadata is normalized on an
         # owned frame rather than the caller's.
-        data = to_pandas(data)
-        data.index.name = "obs_ind"
-        self.data = data
+        pandas_data = to_pandas(data)
+        pandas_data.index.name = "obs_ind"
+        self.data = pandas_data
         self.expt_type = "Difference in Differences"
         self.formula = formula
         self.time_variable_name = time_variable_name

@@ -189,11 +189,11 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         self.reference_event_time = reference_event_time
 
         # to_pandas returns a copy, so the caller's dataframe is left alone
-        data = to_pandas(data)
-        data.index.name = "obs_ind"
+        pandas_data = to_pandas(data)
+        pandas_data.index.name = "obs_ind"
 
         # Input validation
-        self.data = data
+        self.data = pandas_data
         self.input_validation()
 
         # Step 1: Compute treatment time G_i for each unit
