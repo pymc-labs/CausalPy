@@ -38,15 +38,35 @@ from __future__ import annotations
 import inspect
 import logging
 import warnings
-from dataclasses import dataclass, field
-from typing import Any, Literal
+from dataclasses import dataclass
+from numbers import Integral
+from typing import Any, Literal, cast
 
+import matplotlib as mpl
 import numpy as np
 import pandas as pd
 import pymc as pm
 import xarray as xr
+from matplotlib.colors import to_hex
+from matplotlib.figure import Figure
+from plotnine import (
+    aes,
+    after_stat,
+    geom_histogram,
+    geom_text,
+    geom_vline,
+    ggplot,
+    labs,
+    scale_colour_manual,
+    scale_fill_manual,
+    theme_void,
+)
 
 from causalpy.checks.base import CheckResult, clone_model
+from causalpy.checks.operating_characteristics import (
+    AssuranceResult,
+    compute_assurance_rates,
+)
 from causalpy.experiments.base import BaseExperiment
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.experiments.synthetic_control import SyntheticControl
@@ -56,6 +76,10 @@ logger = logging.getLogger(__name__)
 
 MIN_FOLD_OBSERVATIONS = 3
 MAX_RANDOM_SELECTION_RETRIES = 16
+# Suptitle position, just above the figure box the panels fill.
+_SUPTITLE_Y = 1.02
+_DEFAULT_PLOT_TITLE = "Placebo-in-Time calibration"
+_DEFAULT_FIGSIZE = (7.0, 9.0)
 
 # The hierarchical status-quo (null) model estimates the between-fold spread
 # ``tau_status_quo`` from the completed folds.  That spread is unidentified from
@@ -134,40 +158,6 @@ class PlaceboFoldResult:
     fold_sd: float
 
 
-@dataclass
-class AssuranceResult:
-    """Bayesian operating characteristics from design-level simulation.
-
-    Attributes
-    ----------
-    true_positive_rate : float
-        P(decide "positive" | alternative true).  This *is* the assurance.
-    false_positive_rate : float
-        P(decide "positive" | null true).
-    true_negative_rate : float
-        P(decide "null" | null true).
-    false_negative_rate : float
-        P(decide "null" | alternative true).
-    null_indeterminate_rate : float
-        P(decide "indeterminate" | null true).
-    alt_indeterminate_rate : float
-        P(decide "indeterminate" | alternative true).
-    null_decisions : np.ndarray
-        Raw decision strings under the null scenario.
-    alt_decisions : np.ndarray
-        Raw decision strings under the alternative scenario.
-    """
-
-    true_positive_rate: float
-    false_positive_rate: float
-    true_negative_rate: float
-    false_negative_rate: float
-    null_indeterminate_rate: float
-    alt_indeterminate_rate: float
-    null_decisions: np.ndarray = field(repr=False)
-    alt_decisions: np.ndarray = field(repr=False)
-
-
 class PlaceboInTime:
     """Placebo-in-time sensitivity check with hierarchical null model.
 
@@ -179,8 +169,8 @@ class PlaceboInTime:
     effect is compared against this learned null.
 
     When ``expected_effect_prior`` and ``rope_half_width`` are provided,
-    additionally computes Bayesian assurance (operating characteristics)
-    via simulation.
+    additionally computes exact closed-form Bayesian assurance (operating
+    characteristics).
 
     Parameters
     ----------
@@ -247,9 +237,9 @@ class PlaceboInTime:
         MCMC settings for the hierarchical status-quo model.
         Defaults to ``{"draws": 1000, "chains": 4, "target_accept": 0.97}``.
     threshold : float, default 0.95
-        Probability cutoff.  Used both for ``passed`` (P(actual effect
-        outside null) must exceed this) and for the ROPE decision rule
-        when computing assurance.
+        Finite probability cutoff in ``(0, 1)``. Used both for ``passed``
+        (P(actual effect outside null) must exceed this) and for the ROPE
+        decision rule when computing assurance.
     prior_scale : float, default 1.0
         Multiplier for auto-computed prior widths on the hierarchical
         model.  The priors are
@@ -257,24 +247,25 @@ class PlaceboInTime:
         ``tau ~ HalfNormal(2 * prior_scale * data_scale)``.
     expected_effect_prior : distribution or array, optional
         Prior belief about the true total effect under the alternative
-        hypothesis. Accepts any object with an ``.rvs(n)`` method
-        (PreliZ, scipy) or a numpy array of pre-drawn samples. When
-        ``random_seed`` is set, distributions exposing ``random_state``
-        receive a derived Generator; legacy ``.rvs(n)`` distributions remain
-        supported but emit a reproducibility warning and are recorded in
-        result metadata. Provided together with ``rope_half_width``, assurance
-        analysis runs automatically.
+        hypothesis. Accepts a frozen distribution exposing ``.cdf`` and
+        ``.sf``, any object with an ``.rvs(n)`` method (PreliZ, scipy), or a
+        numpy array of pre-drawn samples. Frozen distributions and arrays are
+        evaluated directly by the exact closed-form assurance calculation.
+        When ``random_seed`` is set, RVS-only distributions exposing
+        ``random_state`` receive a derived Generator; legacy ``.rvs(n)``
+        distributions remain supported but emit a reproducibility warning and
+        are recorded in result metadata. Provided together with
+        ``rope_half_width``, assurance analysis runs automatically.
     rope_half_width : float, optional
-        Half-width of the ROPE interval ``[-rope, +rope]``.  Required
-        when ``expected_effect_prior`` is provided.
+        Finite nonnegative half-width of the ROPE interval ``[-rope, +rope]``.
+        Required when ``expected_effect_prior`` is provided.
     n_design_replications : int, optional
-        Number of simulation replications for assurance.  Defaults to
-        ``min(theta_new.size, expected_effect_samples.size)``.
+        Number of prior samples drawn only for RVS-only expected-effect
+        priors. Defaults to the number of status-quo samples. It has no
+        effect for numpy arrays or frozen priors with ``.cdf`` and ``.sf``.
     random_seed : int, optional
-        Master RNG seed for random fold selection, automatically constructed
-        placebo-fold fits (using ``random_seed + fold_index``), hierarchical
-        posterior predictive sampling, and assurance simulation. It also
-        seeds the hierarchical ``pm.sample`` call unless
+        posterior predictive sampling, and RVS-only expected-effect-prior
+        sampling. It also seeds the hierarchical ``pm.sample`` call unless
         ``sample_kwargs["random_seed"]`` is explicitly supplied, which takes
         precedence for that call only.
     intervention_length : int, float, ``pd.Timedelta`` or ``pd.DateOffset``, optional
@@ -301,6 +292,11 @@ class PlaceboInTime:
         ``metadata["comparison_window"]`` and a warning is emitted when they
         disagree by more than the one-observation half-open-window artefact
         of the derived default.
+    make_figures : bool, default True
+        Whether :meth:`run` appends the calibration figure produced by
+        :meth:`plot_calibration` to ``CheckResult.figures``.  Every run
+        produces one, so ``figures[0]`` is safe to read; a run that reaches
+        no verdict gets the annotated placeholder instead of the panels.
 
     Examples
     --------
@@ -340,6 +336,7 @@ class PlaceboInTime:
         n_design_replications: int | None = None,
         random_seed: int | None = None,
         intervention_length: Any | None = None,
+        make_figures: bool = True,
     ) -> None:
         if n_folds < 1:
             raise ValueError("n_folds must be >= 1")
@@ -360,11 +357,47 @@ class PlaceboInTime:
             )
         if min_gap < 1:
             raise ValueError(f"min_gap must be >= 1, got {min_gap}")
+        if (
+            isinstance(threshold, (bool, np.bool_))
+            or not isinstance(threshold, (int, float, np.integer, np.floating))
+            or not np.isfinite(threshold)
+            or not 0 < threshold < 1
+        ):
+            raise ValueError(
+                f"threshold must be a finite probability in (0, 1), got {threshold!r}"
+            )
+        if rope_half_width is not None and (
+            isinstance(rope_half_width, (bool, np.bool_))
+            or not isinstance(rope_half_width, (int, float, np.integer, np.floating))
+            or not np.isfinite(rope_half_width)
+            or rope_half_width < 0
+        ):
+            raise ValueError(
+                "rope_half_width must be a finite nonnegative real number, "
+                f"got {rope_half_width!r}"
+            )
+        if random_seed is not None and (
+            isinstance(random_seed, (bool, np.bool_))
+            or not isinstance(random_seed, Integral)
+            or random_seed < 0
+        ):
+            raise ValueError(
+                f"random_seed must be a nonnegative integer or None, got {random_seed!r}"
+            )
         if expected_effect_prior is not None and rope_half_width is None:
             raise ValueError(
                 "rope_half_width is required when expected_effect_prior is "
                 "provided.  Specify the ROPE half-width that defines "
                 "practical significance."
+            )
+        if n_design_replications is not None and (
+            isinstance(n_design_replications, (bool, np.bool_))
+            or not isinstance(n_design_replications, Integral)
+            or n_design_replications < 1
+        ):
+            raise ValueError(
+                "n_design_replications must be a positive non-bool int when "
+                f"provided, got {n_design_replications!r}"
             )
         self.n_folds = n_folds
         self.selection_method = selection_method
@@ -374,13 +407,16 @@ class PlaceboInTime:
         self.exclude_periods = exclude_periods
         self.experiment_factory = experiment_factory
         self.sample_kwargs = {**_DEFAULT_SAMPLE_KWARGS, **(sample_kwargs or {})}
-        self.threshold = threshold
+        self.threshold = float(threshold)
         self.prior_scale = prior_scale
         self.expected_effect_prior = expected_effect_prior
-        self.rope_half_width = rope_half_width
+        self.rope_half_width = (
+            None if rope_half_width is None else float(rope_half_width)
+        )
         self.n_design_replications = n_design_replications
-        self.random_seed = random_seed
+        self.random_seed = None if random_seed is None else int(random_seed)
         self.intervention_length = intervention_length
+        self.make_figures = make_figures
 
     def validate(self, experiment: BaseExperiment) -> None:
         """Check the experiment is compatible with PlaceboInTime.
@@ -984,7 +1020,7 @@ class PlaceboInTime:
         *,
         unseeded_custom_priors: list[dict[str, str]] | None = None,
     ) -> np.ndarray:
-        """Draw samples from the expected-effect prior.
+        """Draw samples from an RVS-only expected-effect prior.
 
         Parameters
         ----------
@@ -994,12 +1030,7 @@ class PlaceboInTime:
             Run-local diagnostic records for legacy distributions that do not
             expose ``random_state``. With a master seed, seed-aware
             distributions receive ``.rvs(n, random_state=...)``; legacy
-            distributions fall back to ``.rvs(n)`` with a warning. Pre-drawn
-            numpy arrays are returned as-is, and :meth:`_compute_assurance`
-            cycles through them via ``i % len(prior)`` when the array is
-            shorter than the number of replications. A warning is emitted in
-            this case because short arrays can introduce spurious structure
-            in the simulated decisions.
+            distributions fall back to ``.rvs(n)`` with a warning.
 
         Returns
         -------
@@ -1009,18 +1040,6 @@ class PlaceboInTime:
         prior = self.expected_effect_prior
         if prior is None:
             raise ValueError("expected_effect_prior is not set.")
-        if isinstance(prior, np.ndarray):
-            if len(prior) < n:
-                warnings.warn(
-                    f"expected_effect_prior has {len(prior)} samples, fewer "
-                    f"than the {n} replications requested by the assurance "
-                    f"simulation; the array will be cycled through via "
-                    f"index % len(prior).  Pass a longer array or an object "
-                    f"with an .rvs(n) method (e.g. a PreliZ/scipy "
-                    f"distribution) to avoid cycling.",
-                    stacklevel=2,
-                )
-            return prior
         if hasattr(prior, "rvs"):
             if self.random_seed is None:
                 return np.asarray(prior.rvs(n))  # type: ignore[union-attr]
@@ -1041,96 +1060,52 @@ class PlaceboInTime:
                 )
             warnings.warn(
                 "expected_effect_prior.rvs does not expose random_state; "
-                "using unseeded legacy .rvs(n). Assurance simulation is "
+                "using unseeded legacy .rvs(n). Assurance analysis is "
                 "not reproducible for this custom prior; result metadata "
                 "marks its type as unseeded.",
                 stacklevel=2,
             )
             return np.asarray(prior.rvs(n))  # type: ignore[union-attr]
         raise TypeError(
-            f"expected_effect_prior must be a numpy array or have an "
-            f".rvs(n) method, got {type(prior).__name__}."
+            f"expected_effect_prior must have an .rvs(n) method, got "
+            f"{type(prior).__name__}."
         )
 
     def _compute_assurance(
         self,
         theta_new_samples: np.ndarray,
         fold_sds: np.ndarray,
-        n_posterior_samples: int,
         *,
         unseeded_custom_priors: list[dict[str, str]] | None = None,
     ) -> AssuranceResult:
-        """Simulate decisions under null and alternative to get assurance.
+        """Compute exact assurance rates for the learned status-quo distribution."""
+        prior = self.expected_effect_prior
+        if prior is None:
+            raise ValueError(
+                "expected_effect_prior must be set for assurance."
+            )  # pragma: no cover
 
-        Parameters
-        ----------
-        theta_new_samples : np.ndarray
-            Draws from the status-quo posterior predictive.
-        fold_sds : np.ndarray
-            Per-fold posterior SDs (used to simulate estimation noise).
-        n_posterior_samples : int
-            Number of posterior draws to simulate per replication.
-        unseeded_custom_priors : list[dict[str, str]], optional
-            Run-local diagnostic records for legacy expected-effect priors.
+        if not isinstance(prior, np.ndarray) and not (
+            hasattr(prior, "cdf") and hasattr(prior, "sf")
+        ):
+            n_prior_samples = self.n_design_replications or len(theta_new_samples)
+            prior = self._draw_expected_effect_samples(
+                n_prior_samples,
+                unseeded_custom_priors=unseeded_custom_priors,
+            )
 
-        Returns
-        -------
-        AssuranceResult
-        """
-        expected_samples = self._draw_expected_effect_samples(
-            len(theta_new_samples),
-            unseeded_custom_priors=unseeded_custom_priors,
-        )
-        n_reps = self.n_design_replications
-        if n_reps is None:
-            n_reps = min(len(theta_new_samples), len(expected_samples))
-
-        rng = self._rng_for_stage(1)
         rope = self.rope_half_width
         if rope is None:
             raise ValueError(
                 "rope_half_width must be set for assurance."
             )  # pragma: no cover
 
-        null_decisions: list[str] = []
-        for i in range(n_reps):
-            true_effect = float(theta_new_samples[i % len(theta_new_samples)])
-            sigma = float(rng.choice(fold_sds))
-            simulated_posterior = rng.normal(
-                loc=true_effect, scale=sigma, size=n_posterior_samples
-            )
-            null_decisions.append(
-                self.bayesian_rope_decision(simulated_posterior, rope, self.threshold)
-            )
-
-        alt_decisions: list[str] = []
-        for i in range(n_reps):
-            # Under the alternative, the observed effect is the expected
-            # treatment effect added on top of the null baseline noise,
-            # matching the paper's formulation: theta_new + expected_effect.
-            null_component = float(theta_new_samples[i % len(theta_new_samples)])
-            treatment_component = float(expected_samples[i % len(expected_samples)])
-            true_effect = null_component + treatment_component
-            sigma = float(rng.choice(fold_sds))
-            simulated_posterior = rng.normal(
-                loc=true_effect, scale=sigma, size=n_posterior_samples
-            )
-            alt_decisions.append(
-                self.bayesian_rope_decision(simulated_posterior, rope, self.threshold)
-            )
-
-        null_arr = np.array(null_decisions)
-        alt_arr = np.array(alt_decisions)
-
-        return AssuranceResult(
-            true_positive_rate=float((alt_arr == "positive").mean()),
-            false_positive_rate=float((null_arr == "positive").mean()),
-            true_negative_rate=float((null_arr == "null").mean()),
-            false_negative_rate=float((alt_arr == "null").mean()),
-            null_indeterminate_rate=float((null_arr == "indeterminate").mean()),
-            alt_indeterminate_rate=float((alt_arr == "indeterminate").mean()),
-            null_decisions=null_arr,
-            alt_decisions=alt_arr,
+        return compute_assurance_rates(
+            theta_new_samples,
+            fold_sds,
+            rope,
+            self.threshold,
+            prior,
         )
 
     def run(
@@ -1145,9 +1120,8 @@ class PlaceboInTime:
         fold, then fits a hierarchical Bayesian model to characterise
         the status-quo distribution.  Compares the actual intervention
         effect against this null.
-
         When ``expected_effect_prior`` was provided at construction,
-        also runs Bayesian assurance simulation.
+        also runs exact closed-form Bayesian assurance calculations.
 
         Can be used standalone (``context=None``) when
         ``experiment_factory`` was provided, or within a pipeline.
@@ -1416,22 +1390,24 @@ class PlaceboInTime:
             summary, verdict = inconclusive
             parts = [summary, verdict]
             parts.extend(fold_summaries)
-            return CheckResult(
-                check_name="PlaceboInTime",
-                passed=None,
-                text="\n".join(parts),
-                metadata={
-                    "fold_results": fold_results,
-                    "n_folds_requested": self.n_folds,
-                    "n_folds_completed": n_completed,
-                    "skipped_folds": skipped_folds,
-                    "intervention_length": intervention_length,
-                    "comparison_window": comparison_window,
-                    "rope_half_width": self.rope_half_width,
-                    "threshold": self.threshold,
-                    "expected_effect_prior": self.expected_effect_prior,
-                    "unseeded_custom_priors": unseeded_custom_priors,
-                },
+            return self._attach_figures(
+                CheckResult(
+                    check_name="PlaceboInTime",
+                    passed=None,
+                    text="\n".join(parts),
+                    metadata={
+                        "fold_results": fold_results,
+                        "n_folds_requested": self.n_folds,
+                        "n_folds_completed": n_completed,
+                        "skipped_folds": skipped_folds,
+                        "intervention_length": intervention_length,
+                        "comparison_window": comparison_window,
+                        "rope_half_width": self.rope_half_width,
+                        "threshold": self.threshold,
+                        "expected_effect_prior": self.expected_effect_prior,
+                        "unseeded_custom_priors": unseeded_custom_priors,
+                    },
+                )
             )
 
         # Reaching here means the null model was built successfully.
@@ -1478,6 +1454,7 @@ class PlaceboInTime:
             "fold_sds": fold_sds,
             "status_quo_idata": idata,
             "null_samples": theta_new_samples,
+            "actual_cumulative_samples": np.asarray(actual_cumulative.values).ravel(),
             "actual_cumulative_mean": actual_cumulative_mean,
             "p_effect_outside_null": p_outside,
             "rope_half_width": self.rope_half_width,
@@ -1486,13 +1463,10 @@ class PlaceboInTime:
             "unseeded_custom_priors": unseeded_custom_priors,
         }
 
-        n_posterior_samples = len(actual_cumulative.values)
-
         if self.expected_effect_prior is not None:
             assurance_result = self._compute_assurance(
                 theta_new_samples,
                 fold_sds,
-                n_posterior_samples,
                 unseeded_custom_priors=unseeded_custom_priors,
             )
             metadata["assurance_result"] = assurance_result
@@ -1516,12 +1490,246 @@ class PlaceboInTime:
                 f"{assurance_result.alt_indeterminate_rate:.3f}"
             )
 
-        return CheckResult(
-            check_name="PlaceboInTime",
-            passed=passed,
-            text=text,
-            metadata=metadata,
+        return self._attach_figures(
+            CheckResult(
+                check_name="PlaceboInTime",
+                passed=passed,
+                text=text,
+                metadata=metadata,
+            )
         )
+
+    def _attach_figures(self, result: CheckResult) -> CheckResult:
+        """Add the calibration figure to *result* when ``make_figures`` is on.
+
+        Every path through :meth:`run` goes through here, so a caller can
+        read ``figures[0]`` without first checking whether the run reached a
+        verdict; an inconclusive run gets the annotated placeholder.
+        """
+        if self.make_figures:
+            result.figures.append(
+                self._calibration_figure(
+                    result,
+                    _DEFAULT_PLOT_TITLE,
+                    _DEFAULT_FIGSIZE,
+                    warn_on_missing_null=False,
+                )
+            )
+        return result
+
+    @staticmethod
+    def plot_calibration(
+        check_result: CheckResult,
+        title: str = _DEFAULT_PLOT_TITLE,
+        figsize: tuple[float, float] = _DEFAULT_FIGSIZE,
+    ) -> Figure:
+        """Plot the three-panel calibration diagnostic for a placebo run.
+
+        Panel A shows the per-fold cumulative impact posteriors, panel B the
+        hierarchical status-quo null pooled from them, and panel C the null
+        against the actual effect.
+
+        Parameters
+        ----------
+        check_result : CheckResult
+            Result returned by :meth:`run`.  Everything the panels need is
+            read from its ``metadata``.
+        title : str, default "Placebo-in-Time calibration"
+            Figure suptitle.
+        figsize : tuple of float, default (7, 9)
+            Size of the drawn figure, in inches.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            The drawn composition.  When the run produced no null model, a
+            single annotated panel is returned instead and a warning is
+            emitted.
+        """
+        return PlaceboInTime._calibration_figure(
+            check_result, title, figsize, warn_on_missing_null=True
+        )
+
+    @staticmethod
+    def _calibration_figure(
+        check_result: CheckResult,
+        title: str,
+        figsize: tuple[float, float],
+        warn_on_missing_null: bool,
+    ) -> Figure:
+        """Build the calibration figure, optionally warning on a missing null.
+
+        :meth:`run` suppresses the warning because it already reports the
+        same condition through ``passed=None`` and the result text; a direct
+        call to :meth:`plot_calibration` has no such context and gets it.
+        """
+        metadata = check_result.metadata
+        fold_results = metadata["fold_results"]
+
+        if "null_samples" not in metadata:
+            return PlaceboInTime._plot_missing_null(
+                fold_results, title, figsize, warn_on_missing_null
+            )
+
+        null_samples = np.asarray(metadata["null_samples"]).ravel()
+        actual_samples = np.asarray(metadata["actual_cumulative_samples"]).ravel()
+        null_mean = float(np.mean(null_samples))
+
+        fold_labels = [
+            f"Fold {fold_result.fold} "
+            f"(t*={PlaceboInTime._format_fold_time(fold_result.pseudo_treatment_time)})"
+            for fold_result in fold_results
+        ]
+        fold_samples = [
+            np.asarray(fold_result.cumulative_impact_samples.values).ravel()
+            for fold_result in fold_results
+        ]
+        fold_frame = pd.DataFrame(
+            {
+                "cumulative_impact": np.concatenate(fold_samples),
+                "fold": pd.Categorical(
+                    np.repeat(fold_labels, [len(s) for s in fold_samples]),
+                    categories=fold_labels,
+                ),
+            }
+        )
+        fold_mean_frame = pd.DataFrame(
+            {
+                "fold": pd.Categorical(fold_labels, categories=fold_labels),
+                "fold_mean": [fold_result.fold_mean for fold_result in fold_results],
+            }
+        )
+        # The palette follows the active matplotlib cycle so the panels keep
+        # their colours if a caller restyles the surrounding report.
+        cycle = cast(Any, mpl.rcParams["axes.prop_cycle"]).by_key()["color"]
+        fold_colors = [to_hex(cycle[i % len(cycle)]) for i in range(len(fold_labels))]
+
+        panel_a = (
+            ggplot(fold_frame, aes("cumulative_impact"))
+            + geom_histogram(
+                aes(y=after_stat("density"), fill="fold"),
+                bins=40,
+                alpha=0.45,
+                position="identity",
+            )
+            + geom_vline(
+                data=fold_mean_frame,
+                mapping=aes(xintercept="fold_mean", colour="fold"),
+                linetype="dashed",
+                show_legend=False,
+            )
+            + geom_vline(xintercept=0, linetype="dotted", alpha=0.5)
+            + scale_fill_manual(values=fold_colors)
+            + scale_colour_manual(values=fold_colors)
+            + labs(
+                x="Cumulative impact",
+                y="Density",
+                fill="",
+                title="A. Placebo fold distributions",
+            )
+        )
+
+        panel_b = (
+            ggplot(pd.DataFrame({"cumulative_impact": null_samples}))
+            + geom_histogram(
+                aes("cumulative_impact", after_stat("density")),
+                bins=50,
+                fill="#94a3b8",
+                alpha=0.5,
+            )
+            + geom_vline(xintercept=0, linetype="dotted", alpha=0.5)
+            + geom_vline(xintercept=null_mean, colour="#64748b", linetype="dashed")
+            + labs(
+                x="Cumulative impact",
+                y="Density",
+                title=f"B. Learned null distribution (mean = {null_mean:.1f})",
+            )
+        )
+
+        sources = ["Null (status quo)", "Actual effect"]
+        comparison_frame = pd.DataFrame(
+            {
+                "cumulative_impact": np.concatenate([null_samples, actual_samples]),
+                "distribution": pd.Categorical(
+                    np.repeat(sources, [null_samples.size, actual_samples.size]),
+                    categories=sources,
+                ),
+            }
+        )
+        panel_c = (
+            ggplot(comparison_frame, aes("cumulative_impact"))
+            + geom_histogram(
+                aes(y=after_stat("density"), fill="distribution"),
+                bins=50,
+                alpha=0.4,
+                position="identity",
+            )
+            + scale_fill_manual(values=["#94a3b8", "#E24A33"])
+            + labs(
+                x="Cumulative impact",
+                y="Density",
+                fill="",
+                title=(
+                    "C. Actual effect vs null "
+                    f"($p_{{cal}}$ = {metadata['p_effect_outside_null']:.3f})"
+                ),
+            )
+        )
+
+        return PlaceboInTime._draw(panel_a / panel_b / panel_c, title, figsize)
+
+    @staticmethod
+    def _format_fold_time(pseudo_treatment_time: Any) -> str:
+        """Format a pseudo treatment time for a fold label."""
+        if hasattr(pseudo_treatment_time, "strftime"):
+            return f"{pseudo_treatment_time:%Y}"
+        return f"{pseudo_treatment_time}"
+
+    @staticmethod
+    def _draw(plot: Any, title: str, figsize: tuple[float, float]) -> Figure:
+        """Draw a plotnine plot or composition and stamp the suptitle on it.
+
+        ``ggplot.draw`` returns a plain matplotlib figure, which is what
+        ``CheckResult.figures`` holds and what ``GenerateReport`` embeds, so
+        nothing downstream needs to know a plot was built with plotnine.
+        """
+        figure = plot.draw()
+        figure.set_size_inches(*figsize)
+        # plotnine composes panels with its own layout engine, which ignores
+        # subplots_adjust, so the suptitle goes above the figure box and the
+        # tight bounding box used by savefig and the notebook backend grows
+        # to include it.
+        figure.suptitle(title, fontsize=11, fontweight="bold", y=_SUPTITLE_Y)
+        return figure
+
+    @staticmethod
+    def _plot_missing_null(
+        fold_results: list[PlaceboFoldResult],
+        title: str,
+        figsize: tuple[float, float],
+        warn: bool,
+    ) -> Figure:
+        """Return an annotated placeholder when no null model was built."""
+        if warn:
+            warnings.warn(
+                f"Not enough folds completed to build a null model "
+                f"({len(fold_results)} completed), so the calibration panels "
+                f"cannot be drawn.",
+                UserWarning,
+                stacklevel=4,
+            )
+        lines = [f"No null model: {len(fold_results)} folds completed."]
+        lines.extend(
+            f"Fold {fold_result.fold}: mean={fold_result.fold_mean:.2f}, "
+            f"sd={fold_result.fold_sd:.2f}"
+            for fold_result in fold_results
+        )
+        placeholder = (
+            ggplot(pd.DataFrame({"x": [0.0], "y": [0.0], "label": ["\n".join(lines)]}))
+            + geom_text(aes("x", "y", label="label"))
+            + theme_void()
+        )
+        return PlaceboInTime._draw(placeholder, title, figsize)
 
     def __repr__(self) -> str:
         """Return a string representation of the check."""
@@ -1534,4 +1742,6 @@ class PlaceboInTime:
             parts.append("allow_overlap=True")
         if self.expected_effect_prior is not None:
             parts.append("assurance=True")
+        if not self.make_figures:
+            parts.append("make_figures=False")
         return f"PlaceboInTime({', '.join(parts)})"

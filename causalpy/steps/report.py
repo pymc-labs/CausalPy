@@ -41,7 +41,9 @@ class GenerateReport:
     Parameters
     ----------
     include_plots : bool, default True
-        Whether to include diagnostic plots in the report.
+        Whether to include diagnostic plots in the report.  Covers both the
+        experiment plot and any figures the sensitivity checks attached to
+        their results, so turning it off leaves the report imageless.
     include_effect_summary : bool, default True
         Whether to include the effect summary section.
     include_sensitivity : bool, default True
@@ -79,6 +81,14 @@ class GenerateReport:
             Pipeline context (unused; required by the step interface).
         """
 
+    @staticmethod
+    def _encode_figure(fig: Any) -> str:
+        """Encode a matplotlib figure as a base64 PNG string."""
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+        buf.seek(0)
+        return base64.b64encode(buf.read()).decode("utf-8")
+
     def _render_plot(self, experiment: Any) -> list[str]:
         """Render experiment plots as base64-encoded PNG strings."""
         plots: list[str] = []
@@ -86,14 +96,29 @@ class GenerateReport:
             import matplotlib.pyplot as plt
 
             fig, _ = experiment.plot()
-            buf = io.BytesIO()
-            fig.savefig(buf, format="png", dpi=100, bbox_inches="tight")
+            plots.append(self._encode_figure(fig))
             plt.close(fig)
-            buf.seek(0)
-            plots.append(base64.b64encode(buf.read()).decode("utf-8"))
         except Exception as exc:
             logger.debug("Could not render plot: %s", exc)
         return plots
+
+    def _render_check_figures(self, check_result: Any) -> list[str]:
+        """Render the figures a check attached to its result.
+
+        The figures are not closed: they belong to the ``CheckResult`` the
+        caller still holds, and closing them would blank it.
+        """
+        figures: list[str] = []
+        for fig in check_result.figures:
+            try:
+                figures.append(self._encode_figure(fig))
+            except Exception as exc:
+                logger.debug(
+                    "Could not render figure from check %s: %s",
+                    check_result.check_name,
+                    exc,
+                )
+        return figures
 
     def run(self, context: PipelineContext) -> PipelineContext:
         """Generate the HTML report and store it in the context.
@@ -136,6 +161,9 @@ class GenerateReport:
                     "passed": cr.passed,
                     "text": cr.text,
                     "table_html": None,
+                    "figures": (
+                        self._render_check_figures(cr) if self.include_plots else []
+                    ),
                 }
                 if cr.table is not None:
                     entry["table_html"] = cr.table.to_html(

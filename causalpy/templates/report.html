@@ -123,6 +123,11 @@
         {% if check_result.table_html %}
         {{ check_result.table_html | safe }}
         {% endif %}
+        {% for figure_b64 in check_result.figures %}
+        <div class="plot">
+            <img src="data:image/png;base64,{{ figure_b64 | safe }}" alt="{{ check_result.check_name }} figure">
+        </div>
+        {% endfor %}
     </div>
     {% endfor %}
     {% endif %}
