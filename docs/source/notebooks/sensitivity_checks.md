@@ -83,7 +83,9 @@ cp.SensitivityAnalysis(
 
 `PlaceboInTime` moves the intervention backward into the pre-treatment period and re-fits the model. If those pseudo-interventions often produce effects comparable to the observed one, the original result looks less credible. In synthetic control settings, placebo and falsification exercises are a standard part of design assessment {cite:p}`abadie2021using`; in interrupted time series settings, the same logic aligns with broader falsification practice in pre/post intervention designs {cite:p}`lopezbernal2017its`.
 
-This check requires a PyMC-backed model because it works with posterior impact draws. In CausalPy it can also fit a hierarchical null model and, optionally, estimate Bayesian assurance for a user-supplied expected effect prior.
+This check requires a PyMC-backed model because it works with posterior impact draws. Its identified placebo null calibrates the design and identification uncertainty that a posterior HDI does not contain; it does not replace the within-model practical/sign statement from HDI+ROPE. Use the two together: interpret HDI+ROPE within the fitted model, then ask whether the effect remains distinctive against the placebo null. The {doc}`reporting statistics guide <../knowledgebase/reporting_statistics>` explains that division of responsibility.
+
+For an identified null, `cp.checks.operating_characteristics()` computes the exact, deterministic conditional decision probabilities for each true effect size: correct detection, wrong-sign misclassification, and indeterminate outcomes under the configured ROPE rule. It is not an assurance calculation by itself. Assurance is the detection curve integrated against an explicit expected-effect prior, so it answers a design question only after you state which effects you expect. When `PlaceboInTime` is **INCONCLUSIVE**, no identified null exists and neither calibration-based operating characteristics nor assurance should be interpreted.
 
 #### Fold eligibility and the pre-period constraint
 

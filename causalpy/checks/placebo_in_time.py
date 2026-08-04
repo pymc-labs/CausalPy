@@ -38,7 +38,8 @@ from __future__ import annotations
 import inspect
 import logging
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from numbers import Integral
 from typing import Any, Literal, cast
 
 import matplotlib as mpl
@@ -62,6 +63,10 @@ from plotnine import (
 )
 
 from causalpy.checks.base import CheckResult, clone_model
+from causalpy.checks.operating_characteristics import (
+    AssuranceResult,
+    compute_assurance_rates,
+)
 from causalpy.experiments.base import BaseExperiment
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.experiments.synthetic_control import SyntheticControl
@@ -153,40 +158,6 @@ class PlaceboFoldResult:
     fold_sd: float
 
 
-@dataclass
-class AssuranceResult:
-    """Bayesian operating characteristics from design-level simulation.
-
-    Attributes
-    ----------
-    true_positive_rate : float
-        P(decide "positive" | alternative true).  This *is* the assurance.
-    false_positive_rate : float
-        P(decide "positive" | null true).
-    true_negative_rate : float
-        P(decide "null" | null true).
-    false_negative_rate : float
-        P(decide "null" | alternative true).
-    null_indeterminate_rate : float
-        P(decide "indeterminate" | null true).
-    alt_indeterminate_rate : float
-        P(decide "indeterminate" | alternative true).
-    null_decisions : np.ndarray
-        Raw decision strings under the null scenario.
-    alt_decisions : np.ndarray
-        Raw decision strings under the alternative scenario.
-    """
-
-    true_positive_rate: float
-    false_positive_rate: float
-    true_negative_rate: float
-    false_negative_rate: float
-    null_indeterminate_rate: float
-    alt_indeterminate_rate: float
-    null_decisions: np.ndarray = field(repr=False)
-    alt_decisions: np.ndarray = field(repr=False)
-
-
 class PlaceboInTime:
     """Placebo-in-time sensitivity check with hierarchical null model.
 
@@ -198,8 +169,8 @@ class PlaceboInTime:
     effect is compared against this learned null.
 
     When ``expected_effect_prior`` and ``rope_half_width`` are provided,
-    additionally computes Bayesian assurance (operating characteristics)
-    via simulation.
+    additionally computes exact closed-form Bayesian assurance (operating
+    characteristics).
 
     Parameters
     ----------
@@ -266,9 +237,9 @@ class PlaceboInTime:
         MCMC settings for the hierarchical status-quo model.
         Defaults to ``{"draws": 1000, "chains": 4, "target_accept": 0.97}``.
     threshold : float, default 0.95
-        Probability cutoff.  Used both for ``passed`` (P(actual effect
-        outside null) must exceed this) and for the ROPE decision rule
-        when computing assurance.
+        Finite probability cutoff in ``(0, 1)``. Used both for ``passed``
+        (P(actual effect outside null) must exceed this) and for the ROPE
+        decision rule when computing assurance.
     prior_scale : float, default 1.0
         Multiplier for auto-computed prior widths on the hierarchical
         model.  The priors are
@@ -276,24 +247,25 @@ class PlaceboInTime:
         ``tau ~ HalfNormal(2 * prior_scale * data_scale)``.
     expected_effect_prior : distribution or array, optional
         Prior belief about the true total effect under the alternative
-        hypothesis. Accepts any object with an ``.rvs(n)`` method
-        (PreliZ, scipy) or a numpy array of pre-drawn samples. When
-        ``random_seed`` is set, distributions exposing ``random_state``
-        receive a derived Generator; legacy ``.rvs(n)`` distributions remain
-        supported but emit a reproducibility warning and are recorded in
-        result metadata. Provided together with ``rope_half_width``, assurance
-        analysis runs automatically.
+        hypothesis. Accepts a frozen distribution exposing ``.cdf`` and
+        ``.sf``, any object with an ``.rvs(n)`` method (PreliZ, scipy), or a
+        numpy array of pre-drawn samples. Frozen distributions and arrays are
+        evaluated directly by the exact closed-form assurance calculation.
+        When ``random_seed`` is set, RVS-only distributions exposing
+        ``random_state`` receive a derived Generator; legacy ``.rvs(n)``
+        distributions remain supported but emit a reproducibility warning and
+        are recorded in result metadata. Provided together with
+        ``rope_half_width``, assurance analysis runs automatically.
     rope_half_width : float, optional
-        Half-width of the ROPE interval ``[-rope, +rope]``.  Required
-        when ``expected_effect_prior`` is provided.
+        Finite nonnegative half-width of the ROPE interval ``[-rope, +rope]``.
+        Required when ``expected_effect_prior`` is provided.
     n_design_replications : int, optional
-        Number of simulation replications for assurance.  Defaults to
-        ``min(theta_new.size, expected_effect_samples.size)``.
+        Number of prior samples drawn only for RVS-only expected-effect
+        priors. Defaults to the number of status-quo samples. It has no
+        effect for numpy arrays or frozen priors with ``.cdf`` and ``.sf``.
     random_seed : int, optional
-        Master RNG seed for random fold selection, automatically constructed
-        placebo-fold fits (using ``random_seed + fold_index``), hierarchical
-        posterior predictive sampling, and assurance simulation. It also
-        seeds the hierarchical ``pm.sample`` call unless
+        posterior predictive sampling, and RVS-only expected-effect-prior
+        sampling. It also seeds the hierarchical ``pm.sample`` call unless
         ``sample_kwargs["random_seed"]`` is explicitly supplied, which takes
         precedence for that call only.
     intervention_length : int, float, ``pd.Timedelta`` or ``pd.DateOffset``, optional
@@ -385,11 +357,47 @@ class PlaceboInTime:
             )
         if min_gap < 1:
             raise ValueError(f"min_gap must be >= 1, got {min_gap}")
+        if (
+            isinstance(threshold, (bool, np.bool_))
+            or not isinstance(threshold, (int, float, np.integer, np.floating))
+            or not np.isfinite(threshold)
+            or not 0 < threshold < 1
+        ):
+            raise ValueError(
+                f"threshold must be a finite probability in (0, 1), got {threshold!r}"
+            )
+        if rope_half_width is not None and (
+            isinstance(rope_half_width, (bool, np.bool_))
+            or not isinstance(rope_half_width, (int, float, np.integer, np.floating))
+            or not np.isfinite(rope_half_width)
+            or rope_half_width < 0
+        ):
+            raise ValueError(
+                "rope_half_width must be a finite nonnegative real number, "
+                f"got {rope_half_width!r}"
+            )
+        if random_seed is not None and (
+            isinstance(random_seed, (bool, np.bool_))
+            or not isinstance(random_seed, Integral)
+            or random_seed < 0
+        ):
+            raise ValueError(
+                f"random_seed must be a nonnegative integer or None, got {random_seed!r}"
+            )
         if expected_effect_prior is not None and rope_half_width is None:
             raise ValueError(
                 "rope_half_width is required when expected_effect_prior is "
                 "provided.  Specify the ROPE half-width that defines "
                 "practical significance."
+            )
+        if n_design_replications is not None and (
+            isinstance(n_design_replications, (bool, np.bool_))
+            or not isinstance(n_design_replications, Integral)
+            or n_design_replications < 1
+        ):
+            raise ValueError(
+                "n_design_replications must be a positive non-bool int when "
+                f"provided, got {n_design_replications!r}"
             )
         self.n_folds = n_folds
         self.selection_method = selection_method
@@ -399,12 +407,14 @@ class PlaceboInTime:
         self.exclude_periods = exclude_periods
         self.experiment_factory = experiment_factory
         self.sample_kwargs = {**_DEFAULT_SAMPLE_KWARGS, **(sample_kwargs or {})}
-        self.threshold = threshold
+        self.threshold = float(threshold)
         self.prior_scale = prior_scale
         self.expected_effect_prior = expected_effect_prior
-        self.rope_half_width = rope_half_width
+        self.rope_half_width = (
+            None if rope_half_width is None else float(rope_half_width)
+        )
         self.n_design_replications = n_design_replications
-        self.random_seed = random_seed
+        self.random_seed = None if random_seed is None else int(random_seed)
         self.intervention_length = intervention_length
         self.make_figures = make_figures
 
@@ -1010,7 +1020,7 @@ class PlaceboInTime:
         *,
         unseeded_custom_priors: list[dict[str, str]] | None = None,
     ) -> np.ndarray:
-        """Draw samples from the expected-effect prior.
+        """Draw samples from an RVS-only expected-effect prior.
 
         Parameters
         ----------
@@ -1020,12 +1030,7 @@ class PlaceboInTime:
             Run-local diagnostic records for legacy distributions that do not
             expose ``random_state``. With a master seed, seed-aware
             distributions receive ``.rvs(n, random_state=...)``; legacy
-            distributions fall back to ``.rvs(n)`` with a warning. Pre-drawn
-            numpy arrays are returned as-is, and :meth:`_compute_assurance`
-            cycles through them via ``i % len(prior)`` when the array is
-            shorter than the number of replications. A warning is emitted in
-            this case because short arrays can introduce spurious structure
-            in the simulated decisions.
+            distributions fall back to ``.rvs(n)`` with a warning.
 
         Returns
         -------
@@ -1035,18 +1040,6 @@ class PlaceboInTime:
         prior = self.expected_effect_prior
         if prior is None:
             raise ValueError("expected_effect_prior is not set.")
-        if isinstance(prior, np.ndarray):
-            if len(prior) < n:
-                warnings.warn(
-                    f"expected_effect_prior has {len(prior)} samples, fewer "
-                    f"than the {n} replications requested by the assurance "
-                    f"simulation; the array will be cycled through via "
-                    f"index % len(prior).  Pass a longer array or an object "
-                    f"with an .rvs(n) method (e.g. a PreliZ/scipy "
-                    f"distribution) to avoid cycling.",
-                    stacklevel=2,
-                )
-            return prior
         if hasattr(prior, "rvs"):
             if self.random_seed is None:
                 return np.asarray(prior.rvs(n))  # type: ignore[union-attr]
@@ -1067,96 +1060,52 @@ class PlaceboInTime:
                 )
             warnings.warn(
                 "expected_effect_prior.rvs does not expose random_state; "
-                "using unseeded legacy .rvs(n). Assurance simulation is "
+                "using unseeded legacy .rvs(n). Assurance analysis is "
                 "not reproducible for this custom prior; result metadata "
                 "marks its type as unseeded.",
                 stacklevel=2,
             )
             return np.asarray(prior.rvs(n))  # type: ignore[union-attr]
         raise TypeError(
-            f"expected_effect_prior must be a numpy array or have an "
-            f".rvs(n) method, got {type(prior).__name__}."
+            f"expected_effect_prior must have an .rvs(n) method, got "
+            f"{type(prior).__name__}."
         )
 
     def _compute_assurance(
         self,
         theta_new_samples: np.ndarray,
         fold_sds: np.ndarray,
-        n_posterior_samples: int,
         *,
         unseeded_custom_priors: list[dict[str, str]] | None = None,
     ) -> AssuranceResult:
-        """Simulate decisions under null and alternative to get assurance.
+        """Compute exact assurance rates for the learned status-quo distribution."""
+        prior = self.expected_effect_prior
+        if prior is None:
+            raise ValueError(
+                "expected_effect_prior must be set for assurance."
+            )  # pragma: no cover
 
-        Parameters
-        ----------
-        theta_new_samples : np.ndarray
-            Draws from the status-quo posterior predictive.
-        fold_sds : np.ndarray
-            Per-fold posterior SDs (used to simulate estimation noise).
-        n_posterior_samples : int
-            Number of posterior draws to simulate per replication.
-        unseeded_custom_priors : list[dict[str, str]], optional
-            Run-local diagnostic records for legacy expected-effect priors.
+        if not isinstance(prior, np.ndarray) and not (
+            hasattr(prior, "cdf") and hasattr(prior, "sf")
+        ):
+            n_prior_samples = self.n_design_replications or len(theta_new_samples)
+            prior = self._draw_expected_effect_samples(
+                n_prior_samples,
+                unseeded_custom_priors=unseeded_custom_priors,
+            )
 
-        Returns
-        -------
-        AssuranceResult
-        """
-        expected_samples = self._draw_expected_effect_samples(
-            len(theta_new_samples),
-            unseeded_custom_priors=unseeded_custom_priors,
-        )
-        n_reps = self.n_design_replications
-        if n_reps is None:
-            n_reps = min(len(theta_new_samples), len(expected_samples))
-
-        rng = self._rng_for_stage(1)
         rope = self.rope_half_width
         if rope is None:
             raise ValueError(
                 "rope_half_width must be set for assurance."
             )  # pragma: no cover
 
-        null_decisions: list[str] = []
-        for i in range(n_reps):
-            true_effect = float(theta_new_samples[i % len(theta_new_samples)])
-            sigma = float(rng.choice(fold_sds))
-            simulated_posterior = rng.normal(
-                loc=true_effect, scale=sigma, size=n_posterior_samples
-            )
-            null_decisions.append(
-                self.bayesian_rope_decision(simulated_posterior, rope, self.threshold)
-            )
-
-        alt_decisions: list[str] = []
-        for i in range(n_reps):
-            # Under the alternative, the observed effect is the expected
-            # treatment effect added on top of the null baseline noise,
-            # matching the paper's formulation: theta_new + expected_effect.
-            null_component = float(theta_new_samples[i % len(theta_new_samples)])
-            treatment_component = float(expected_samples[i % len(expected_samples)])
-            true_effect = null_component + treatment_component
-            sigma = float(rng.choice(fold_sds))
-            simulated_posterior = rng.normal(
-                loc=true_effect, scale=sigma, size=n_posterior_samples
-            )
-            alt_decisions.append(
-                self.bayesian_rope_decision(simulated_posterior, rope, self.threshold)
-            )
-
-        null_arr = np.array(null_decisions)
-        alt_arr = np.array(alt_decisions)
-
-        return AssuranceResult(
-            true_positive_rate=float((alt_arr == "positive").mean()),
-            false_positive_rate=float((null_arr == "positive").mean()),
-            true_negative_rate=float((null_arr == "null").mean()),
-            false_negative_rate=float((alt_arr == "null").mean()),
-            null_indeterminate_rate=float((null_arr == "indeterminate").mean()),
-            alt_indeterminate_rate=float((alt_arr == "indeterminate").mean()),
-            null_decisions=null_arr,
-            alt_decisions=alt_arr,
+        return compute_assurance_rates(
+            theta_new_samples,
+            fold_sds,
+            rope,
+            self.threshold,
+            prior,
         )
 
     def run(
@@ -1171,9 +1120,8 @@ class PlaceboInTime:
         fold, then fits a hierarchical Bayesian model to characterise
         the status-quo distribution.  Compares the actual intervention
         effect against this null.
-
         When ``expected_effect_prior`` was provided at construction,
-        also runs Bayesian assurance simulation.
+        also runs exact closed-form Bayesian assurance calculations.
 
         Can be used standalone (``context=None``) when
         ``experiment_factory`` was provided, or within a pipeline.
@@ -1515,13 +1463,10 @@ class PlaceboInTime:
             "unseeded_custom_priors": unseeded_custom_priors,
         }
 
-        n_posterior_samples = len(actual_cumulative.values)
-
         if self.expected_effect_prior is not None:
             assurance_result = self._compute_assurance(
                 theta_new_samples,
                 fold_sds,
-                n_posterior_samples,
                 unseeded_custom_priors=unseeded_custom_priors,
             )
             metadata["assurance_result"] = assurance_result

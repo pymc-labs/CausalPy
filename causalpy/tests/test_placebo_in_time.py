@@ -30,11 +30,11 @@ from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
 from causalpy.checks.base import Check, CheckResult
-from causalpy.checks.placebo_in_time import (
+from causalpy.checks.operating_characteristics import (
     AssuranceResult,
-    PlaceboFoldResult,
-    PlaceboInTime,
+    compute_assurance_rates,
 )
+from causalpy.checks.placebo_in_time import PlaceboFoldResult, PlaceboInTime
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.pipeline import Pipeline, PipelineContext
 from causalpy.steps.report import GenerateReport
@@ -241,6 +241,27 @@ def test_custom_threshold():
     assert check.threshold == 0.99
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"threshold": 0.0},
+        {"threshold": 1.0},
+        {"threshold": np.nan},
+        {"threshold": True},
+        {"rope_half_width": -1.0},
+        {"rope_half_width": np.inf},
+        {"rope_half_width": True},
+        {"random_seed": -1},
+        {"random_seed": 1.5},
+        {"random_seed": True},
+    ],
+)
+def test_invalid_operating_configuration_raises_early(kwargs):
+    """Decision, ROPE, and seed controls are valid before fitting starts."""
+    with pytest.raises(ValueError):
+        PlaceboInTime(**kwargs)
+
+
 def test_custom_prior_scale():
     """Test custom prior scale."""
     check = PlaceboInTime(prior_scale=2.0)
@@ -260,6 +281,13 @@ def test_expected_effect_prior_with_rope_ok():
         rope_half_width=0.5,
     )
     assert check.rope_half_width == 0.5
+
+
+@pytest.mark.parametrize("n_design_replications", [0, -1, 1.5, True])
+def test_invalid_n_design_replications_raises(n_design_replications):
+    """Prior draw counts must be positive, integer, and non-boolean."""
+    with pytest.raises(ValueError, match="positive non-bool int"):
+        PlaceboInTime(n_design_replications=n_design_replications)
 
 
 def test_satisfies_check_protocol():
@@ -377,129 +405,41 @@ def test_rope_decision_barely_below_threshold():
 
 
 # ===========================================================================
-# Assurance formula validation (unit — no sampling)
+# Exact assurance invariants (unit — no sampling)
 # ===========================================================================
-#
-# These tests pin the assurance-simulation formula
-# ``true_effect = theta_new + expected_effect`` (the corrected version).
-# The old formula ``true_effect = expected_effect`` ignored the status-quo
-# baseline, which understated the noise floor under the alternative and
-# inflated assurance.  The invariants below would fail under that old
-# formula.
 
 
-def test_assurance_formula_zero_expected_matches_null():
-    """When expected_effect == 0, alt and null decision rates should match.
-
-    Under the corrected formula ``true_effect = theta_new + expected_effect``,
-    expected_effect=0 makes the alternative distribution identical to the
-    null distribution, so TP rate must approximately equal FP rate.
-
-    Under the OLD (buggy) formula ``true_effect = expected_effect``,
-    true_effect would collapse to 0 under the alternative and TP rate
-    would be ~0 regardless of theta_new — which is what the fix corrects.
-    """
-    rng = np.random.default_rng(0)
-    theta_new_samples = rng.normal(loc=0.0, scale=5.0, size=2000)
-    fold_sds = np.array([1.0, 1.0, 1.0])
-
-    check = PlaceboInTime(
-        n_folds=2,
-        expected_effect_prior=np.zeros(2000),
+def test_exact_assurance_zero_effect_matches_null_rates():
+    """A point-mass zero alternative has the exact null operating rates."""
+    result = compute_assurance_rates(
+        null_samples=np.array([-2.0, 0.0, 2.0]),
+        fold_sds=np.array([0.5, 1.0]),
         rope_half_width=1.0,
-        random_seed=123,
-    )
-    ar = check._compute_assurance(
-        theta_new_samples=theta_new_samples,
-        fold_sds=fold_sds,
-        n_posterior_samples=500,
+        threshold=0.95,
+        prior=np.array([0.0]),
     )
 
-    # With expected_effect identically zero the alt and null scenarios
-    # share the same true-effect distribution.
-    assert abs(ar.true_positive_rate - ar.false_positive_rate) < 0.05
-    assert abs(ar.true_negative_rate - ar.false_negative_rate) < 0.05
+    assert result.true_positive_rate == result.false_positive_rate
+    assert result.false_negative_rate == result.true_negative_rate
+    assert result.alt_indeterminate_rate == result.null_indeterminate_rate
+    assert result.null_decisions is None
+    assert result.alt_decisions is None
 
 
-def test_assurance_formula_large_expected_effect_dominates_baseline():
-    """Large expected_effect should push true positives well above false positives.
-
-    This pins the sign and direction of the fix: adding ``expected_effect``
-    on top of ``theta_new`` (rather than replacing it) means that when
-    expected_effect is large and positive the alternative scenario
-    detects the intervention much more often than the null does.
-    """
-    theta_new_samples = np.zeros(1000)  # null baseline tightly around 0
-    fold_sds = np.array([0.5])
-
-    check = PlaceboInTime(
-        n_folds=2,
-        expected_effect_prior=np.full(1000, 10.0),  # large effect
+def test_exact_assurance_large_effect_is_detected():
+    """A large point-mass effect is detected without random replications."""
+    result = compute_assurance_rates(
+        null_samples=np.zeros(5),
+        fold_sds=np.array([0.5]),
         rope_half_width=1.0,
-        random_seed=123,
-    )
-    ar = check._compute_assurance(
-        theta_new_samples=theta_new_samples,
-        fold_sds=fold_sds,
-        n_posterior_samples=500,
+        threshold=0.95,
+        prior=np.array([10.0]),
     )
 
-    assert ar.true_positive_rate > 0.9
-    assert ar.false_positive_rate < 0.1
-    assert ar.true_positive_rate > ar.false_positive_rate
-
-
-def _assurance_rates(check: PlaceboInTime) -> tuple[float, ...]:
-    """Run the assurance simulation on fixed inputs and return its rates."""
-    result = check._compute_assurance(
-        theta_new_samples=np.linspace(-5.0, 5.0, 500),
-        fold_sds=np.array([0.5, 1.0, 2.0]),
-        n_posterior_samples=200,
-    )
-    return (
-        result.true_positive_rate,
-        result.false_positive_rate,
-        result.true_negative_rate,
-        result.false_negative_rate,
-    )
-
-
-def _make_assurance_check(random_seed: int | None) -> PlaceboInTime:
-    """Build a check whose assurance stage is driven only by ``random_seed``."""
-    return PlaceboInTime(
-        n_folds=2,
-        expected_effect_prior=np.linspace(0.0, 4.0, 500),
-        rope_half_width=1.0,
-        random_seed=random_seed,
-    )
-
-
-def test_assurance_simulation_is_reproducible_under_master_seed():
-    """The assurance stage must not drift between runs sharing a seed."""
-    first = _make_assurance_check(2024)
-    second = _make_assurance_check(2024)
-
-    assert _assurance_rates(first) == _assurance_rates(second)
-    # Repeating on the same instance must also be stable: the stage RNG is
-    # derived from the master seed, never carried across calls.
-    assert _assurance_rates(first) == _assurance_rates(first)
-
-
-def test_assurance_simulation_differs_across_master_seeds():
-    """Different seeds must actually exercise different simulation draws."""
-    assert _assurance_rates(_make_assurance_check(2024)) != _assurance_rates(
-        _make_assurance_check(99)
-    )
-
-
-def test_assurance_stage_rng_is_independent_of_prior_draw_stage():
-    """Prior draws and simulation noise must not share a stream."""
-    check = _make_assurance_check(2024)
-
-    assert not np.array_equal(
-        check._rng_for_stage(0).normal(size=50),
-        check._rng_for_stage(1).normal(size=50),
-    )
+    assert result.true_positive_rate == 1.0
+    assert result.false_positive_rate == 0.0
+    assert result.false_negative_rate == 0.0
+    assert result.alt_indeterminate_rate == 0.0
 
 
 # ===========================================================================
@@ -947,6 +887,98 @@ def _make_scaled_fake_experiment(
         model=SimpleNamespace(),
         post_impact=post_impact,
     )
+
+
+def test_single_usable_fold_skips_assurance_and_renders_report():
+    """An inconclusive run must not touch the expected-effect prior."""
+
+    class _GuardPrior:
+        def cdf(self, value):  # pragma: no cover - must not be called
+            del value
+            raise AssertionError("Assurance must not run without a learned null.")
+
+        def sf(self, value):  # pragma: no cover - must not be called
+            del value
+            raise AssertionError("Assurance must not run without a learned null.")
+
+        def rvs(self, n):  # pragma: no cover - must not be called
+            del n
+            raise AssertionError("Assurance must not run without a learned null.")
+
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+    experiment = _make_fake_bayesian_experiment(data, treatment_time=70)
+    check = PlaceboInTime(
+        n_folds=1,
+        intervention_length=30,
+        experiment_factory=_make_fake_bayesian_experiment,
+        expected_effect_prior=_GuardPrior(),
+        rope_half_width=1.0,
+    )
+
+    result = check.run(experiment)
+
+    assert result.passed is None
+    assert "assurance_result" not in result.metadata
+    assert "assurance" not in result.metadata
+    assert "null_samples" not in result.metadata
+    assert len(result.figures) == 1
+    assert any("No null model" in text for text in _figure_texts(result.figures[0]))
+
+    context = PipelineContext(data=data)
+    context.experiment = experiment
+    context.sensitivity_results = [result]
+    context = GenerateReport(include_effect_summary=False).run(context)
+
+    assert "INCONCLUSIVE" in context.report
+    plt.close(result.figures[0])
+
+
+def test_two_fold_fake_run_preserves_status_quo_and_exact_assurance(monkeypatch):
+    """A healthy no-MCMC run retains its status-quo object and exact assurance."""
+    data = pd.DataFrame({"y": np.zeros(120)}, index=np.arange(120))
+    experiment = _make_scaled_fake_experiment(
+        data,
+        treatment_time=90,
+        cumulative_mean=5.0,
+        cumulative_sd=1.0,
+    )
+    status_quo_idata = SimpleNamespace(
+        posterior={
+            "mu_status_quo": xr.DataArray([0.0]),
+            "tau_status_quo": xr.DataArray([1.0]),
+        }
+    )
+
+    def factory(fold_data, treatment_time):
+        return _make_scaled_fake_experiment(
+            fold_data,
+            treatment_time,
+            cumulative_mean=float(treatment_time),
+            cumulative_sd=1.0,
+            seed=treatment_time,
+        )
+
+    def fake_build(fold_means, fold_sds):
+        del fold_means, fold_sds
+        return status_quo_idata, np.array([-1.0, 1.0])
+
+    check = PlaceboInTime(
+        n_folds=2,
+        intervention_length=30,
+        experiment_factory=factory,
+        expected_effect_prior=np.array([10.0]),
+        rope_half_width=1.0,
+        make_figures=False,
+    )
+    monkeypatch.setattr(check, "_build_status_quo_model", fake_build)
+
+    result = check.run(experiment)
+
+    assert result.passed is not None
+    assert result.metadata["status_quo_idata"] is status_quo_idata
+    assert result.metadata["assurance_result"].true_positive_rate == 1.0
+    assert result.metadata["assurance_result"].null_decisions is None
+    assert result.metadata["assurance_result"].alt_decisions is None
 
 
 def test_single_fold_directly_does_not_report_supported_on_large_scale():
@@ -2123,34 +2155,72 @@ def test_random_selection_avoids_the_central_greedy_trap():
 
 
 # ===========================================================================
-# expected_effect_prior cycling warning (unit — no sampling)
+# Exact expected-effect-prior routing (unit — no sampling)
 # ===========================================================================
 
 
-def test_draw_expected_effect_samples_warns_when_shorter_than_n():
-    """Warn when numpy prior has fewer samples than requested replications."""
-    check = PlaceboInTime(
-        expected_effect_prior=np.array([1.0, 2.0, 3.0]),
-        rope_half_width=0.5,
-    )
-    with pytest.warns(UserWarning, match="cycled through"):
-        out = check._draw_expected_effect_samples(n=100)
-    # Behaviour preserved: the raw array is returned and cycling happens
-    # at the consumer in ``_compute_assurance``.
-    np.testing.assert_array_equal(out, np.array([1.0, 2.0, 3.0]))
+def test_compute_assurance_passes_array_prior_directly(monkeypatch):
+    """Arrays are consumed unchanged without cycling or draw-count effects."""
+    prior = np.array([1.0, 2.0, 3.0])
+    captured: list[object] = []
 
+    def fake_compute(*args):
+        captured.extend(args)
+        return AssuranceResult(0.5, 0.1, 0.2, 0.1, 0.7, 0.4)
 
-def test_draw_expected_effect_samples_no_warning_when_long_enough():
-    """No warning when numpy prior already has >= n samples."""
-    prior = np.ones(200)
     check = PlaceboInTime(
         expected_effect_prior=prior,
         rope_half_width=0.5,
+        n_design_replications=1,
     )
+    monkeypatch.setattr(
+        "causalpy.checks.placebo_in_time.compute_assurance_rates", fake_compute
+    )
+
     with warnings.catch_warnings():
         warnings.simplefilter("error")
-        out = check._draw_expected_effect_samples(n=50)
-    np.testing.assert_array_equal(out, prior)
+        check._compute_assurance(
+            theta_new_samples=np.array([-1.0, 1.0]),
+            fold_sds=np.array([1.0]),
+        )
+
+    assert captured[4] is prior
+
+
+def test_compute_assurance_uses_frozen_prior_without_rvs():
+    """Frozen priors follow the exact CDF/SF path and never draw samples."""
+
+    class _FrozenPrior:
+        def __init__(self):
+            self.cdf_calls = 0
+            self.sf_calls = 0
+
+        def cdf(self, value):
+            self.cdf_calls += 1
+            return np.zeros_like(value, dtype=float)
+
+        def sf(self, value):
+            self.sf_calls += 1
+            return np.ones_like(value, dtype=float)
+
+        def rvs(self, n):  # pragma: no cover - exact path must not call this
+            del n
+            raise AssertionError("Frozen priors must not be sampled.")
+
+    prior = _FrozenPrior()
+    result = PlaceboInTime(
+        expected_effect_prior=prior,
+        rope_half_width=1.0,
+        n_design_replications=1,
+    )._compute_assurance(
+        theta_new_samples=np.array([-1.0, 1.0]),
+        fold_sds=np.array([0.5]),
+    )
+
+    assert result.true_positive_rate == 1.0
+    assert result.false_negative_rate == 0.0
+    assert prior.cdf_calls > 0
+    assert prior.sf_calls > 0
 
 
 def test_draw_expected_effect_samples_rvs_no_warning():
@@ -2205,22 +2275,29 @@ def test_draw_expected_effect_samples_seeded_rvs_is_reproducible():
     assert isinstance(second_distribution.random_states[0], np.random.Generator)
 
 
-def test_draw_expected_effect_samples_scipy_prior_is_reproducible():
-    """SciPy priors receive the derived Generator through random_state."""
-    from scipy.stats import norm
+def test_compute_assurance_uses_design_count_only_for_rvs_prior():
+    """The optional design count controls only RVS-only prior draws."""
 
-    first = PlaceboInTime(
-        expected_effect_prior=norm(loc=2.0, scale=0.5),
-        rope_half_width=0.5,
-        random_seed=71,
-    )._draw_expected_effect_samples(n=13)
-    second = PlaceboInTime(
-        expected_effect_prior=norm(loc=2.0, scale=0.5),
-        rope_half_width=0.5,
-        random_seed=71,
-    )._draw_expected_effect_samples(n=13)
+    class _RVSOnlyPrior:
+        def __init__(self):
+            self.draw_counts: list[int] = []
 
-    np.testing.assert_array_equal(first, second)
+        def rvs(self, n):
+            self.draw_counts.append(n)
+            return np.full(n, 10.0)
+
+    prior = _RVSOnlyPrior()
+    result = PlaceboInTime(
+        expected_effect_prior=prior,
+        rope_half_width=1.0,
+        n_design_replications=3,
+    )._compute_assurance(
+        theta_new_samples=np.array([-1.0, 1.0]),
+        fold_sds=np.array([0.5]),
+    )
+
+    assert prior.draw_counts == [3]
+    assert result.true_positive_rate == 1.0
 
 
 def test_draw_expected_effect_samples_propagates_seeded_prior_type_error():
