@@ -377,7 +377,7 @@ class PyMCModel(pm.Model):
         coords = {} if coords is None else coords.copy()
         for data in (X, y):
             for dimension in data.dims:
-                coords.setdefault(dimension, data.get_index(dimension))
+                coords.setdefault(str(dimension), data.get_index(dimension))
         self._n_treated_units = y.sizes.get("treated_units", 1)
         return self._fit_with_validated_data(X, y, coords)
 

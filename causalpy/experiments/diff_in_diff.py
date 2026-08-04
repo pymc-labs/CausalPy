@@ -506,7 +506,9 @@ class DifferenceInDifferences(BaseExperiment):
                     showmedians=False,
                     widths=0.2,
                 )
-                for pc in parts["bodies"]:
+                # violinplot types every entry as a single Collection, but the
+                # "bodies" entry is a list of them.
+                for pc in parts["bodies"]:  # type: ignore[attr-defined]
                     pc.set_facecolor("C0")
                     pc.set_edgecolor("None")
                     pc.set_alpha(0.5)

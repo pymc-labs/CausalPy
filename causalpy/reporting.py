@@ -160,7 +160,7 @@ def _compute_rope_probability(
         Probability that effect exceeds min_effect threshold
     """
     if direction == "two-sided":
-        return _posterior_probability(np.abs(effect) > min_effect, effect)
+        return _posterior_probability(abs(effect) > min_effect, effect)
     elif direction == "increase":
         return _posterior_probability(effect > min_effect, effect)
     elif direction == "decrease":
