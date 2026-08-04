@@ -48,4 +48,3 @@ dependencies:
   - pip:
       - marimo[mcp]
       - pymc-forecast[extras]<0.3,>=0.2
-      - tidydraws==0.4.3
