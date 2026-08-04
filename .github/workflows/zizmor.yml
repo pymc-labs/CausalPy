@@ -11,7 +11,9 @@ permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Only supersede pull request builds. A push to main must finish so the commit
+  # keeps its code scanning results.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   zizmor:
@@ -29,7 +31,9 @@ jobs:
 
       - name: Run zizmor 🌈
         # Pinned: an unpinned `uvx zizmor` turns CI red on an unchanged branch
-        # whenever upstream ships a new audit.
+        # whenever upstream ships a new audit. Dependabot cannot see a version
+        # inside `run:`, so bump this by hand when adopting new audits, or the
+        # audit set silently freezes here.
         run: uvx zizmor@1.29.0 --format sarif . > results.sarif
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

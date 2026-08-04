@@ -10,7 +10,9 @@ permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Only supersede pull request builds. A push to main must finish so the commit
+  # keeps its Codecov report.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
 
@@ -71,6 +73,10 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    # Guard (issue #1117): a wedged doctest fails as `failure` in minutes instead
+    # of being `cancelled` at GitHub's 6h ceiling. Headroom over the observed
+    # ~21 min max for this job (incl. cold micromamba-cache solves).
+    timeout-minutes: 30
     permissions:
       contents: read
     defaults:
