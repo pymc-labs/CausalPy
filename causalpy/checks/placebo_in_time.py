@@ -38,13 +38,17 @@ from __future__ import annotations
 import inspect
 import logging
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
+import matplotlib as mpl
 import numpy as np
 import pandas as pd
 import pymc as pm
 import xarray as xr
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 from causalpy.checks.base import CheckResult, clone_model
 from causalpy.experiments.base import BaseExperiment
@@ -301,6 +305,11 @@ class PlaceboInTime:
         ``metadata["comparison_window"]`` and a warning is emitted when they
         disagree by more than the one-observation half-open-window artefact
         of the derived default.
+    make_figures : bool, default True
+        Whether :meth:`run` appends the calibration figure produced by
+        :meth:`plot_calibration` to ``CheckResult.figures``.  Only the
+        conclusive path produces a figure; runs that end without a null
+        model leave ``figures`` empty.
 
     Examples
     --------
@@ -340,6 +349,7 @@ class PlaceboInTime:
         n_design_replications: int | None = None,
         random_seed: int | None = None,
         intervention_length: Any | None = None,
+        make_figures: bool = True,
     ) -> None:
         if n_folds < 1:
             raise ValueError("n_folds must be >= 1")
@@ -381,6 +391,7 @@ class PlaceboInTime:
         self.n_design_replications = n_design_replications
         self.random_seed = random_seed
         self.intervention_length = intervention_length
+        self.make_figures = make_figures
 
     def validate(self, experiment: BaseExperiment) -> None:
         """Check the experiment is compatible with PlaceboInTime.
@@ -1478,6 +1489,7 @@ class PlaceboInTime:
             "fold_sds": fold_sds,
             "status_quo_idata": idata,
             "null_samples": theta_new_samples,
+            "actual_cumulative_samples": np.asarray(actual_cumulative.values).ravel(),
             "actual_cumulative_mean": actual_cumulative_mean,
             "p_effect_outside_null": p_outside,
             "rope_half_width": self.rope_half_width,
@@ -1516,12 +1528,197 @@ class PlaceboInTime:
                 f"{assurance_result.alt_indeterminate_rate:.3f}"
             )
 
-        return CheckResult(
+        result = CheckResult(
             check_name="PlaceboInTime",
             passed=passed,
             text=text,
             metadata=metadata,
         )
+        if self.make_figures:
+            result.figures.append(self.plot_calibration(result))
+        return result
+
+    @staticmethod
+    def plot_calibration(
+        check_result: CheckResult,
+        title: str = "Placebo-in-Time calibration",
+        figsize: tuple[float, float] = (7, 9),
+        axes: Sequence[Axes] | None = None,
+    ) -> Figure:
+        """Plot the three-panel calibration diagnostic for a placebo run.
+
+        Panel A shows the per-fold cumulative impact posteriors, panel B the
+        hierarchical status-quo null pooled from them, and panel C the null
+        against the actual effect.
+
+        Parameters
+        ----------
+        check_result : CheckResult
+            Result returned by :meth:`run`.  Everything the panels need is
+            read from its ``metadata``.
+        title : str, default "Placebo-in-Time calibration"
+            Figure suptitle.
+        figsize : tuple of float, default (7, 9)
+            Size of the created figure.  Ignored when ``axes`` is given.
+        axes : sequence of matplotlib Axes, optional
+            Three existing axes to draw into.  When ``None`` (default) a new
+            figure is created.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            The figure holding the panels.  When the run produced no null
+            model, a single annotated panel is returned instead and a
+            warning is emitted.
+
+        Raises
+        ------
+        ValueError
+            If ``axes`` is given but does not hold exactly three axes.
+        """
+        if axes is not None and len(axes) != 3:
+            raise ValueError(f"axes must hold exactly 3 axes, got {len(axes)}")
+
+        metadata = check_result.metadata
+        fold_results = metadata["fold_results"]
+
+        if "null_samples" not in metadata:
+            return PlaceboInTime._plot_missing_null(fold_results, title, figsize, axes)
+
+        null_samples = metadata["null_samples"]
+        actual_samples = metadata["actual_cumulative_samples"]
+
+        fig: Figure
+        if axes is None:
+            # A bare Figure, unlike plt.subplots, is not registered with
+            # pyplot, so run() building one by default neither leaks a
+            # managed figure nor makes the notebook backend display it at
+            # the end of whichever cell happened to call run().
+            fig = Figure(figsize=figsize)
+            panels: list[Axes] = list(fig.subplots(3, 1))
+        else:
+            panels = list(axes)
+            fig = cast(Figure, panels[0].get_figure())
+
+        # Panel A: fold distributions
+        ax = panels[0]
+        colors = cast(Any, mpl.rcParams["axes.prop_cycle"]).by_key()["color"]
+        for i, fold_result in enumerate(fold_results):
+            color = colors[i % len(colors)]
+            t_star = fold_result.pseudo_treatment_time
+            t_label = f"{t_star:%Y}" if hasattr(t_star, "strftime") else f"{t_star}"
+            ax.hist(
+                fold_result.cumulative_impact_samples.values.ravel(),
+                bins=40,
+                alpha=0.45,
+                color=color,
+                density=True,
+                label=f"Fold {fold_result.fold} (t*={t_label})",
+            )
+            ax.axvline(fold_result.fold_mean, color=color, ls="--", lw=1.2)
+        ax.axvline(0, color="k", ls=":", lw=0.8, alpha=0.5)
+        ax.set_xlabel("Cumulative impact")
+        ax.set_ylabel("Density")
+        ax.set_title("A. Placebo fold distributions")
+        ax.legend(fontsize=7)
+
+        # Panel B: null distribution
+        ax = panels[1]
+        ax.hist(
+            null_samples,
+            bins=50,
+            alpha=0.5,
+            color="#94a3b8",
+            density=True,
+            label="Status-quo (null)",
+        )
+        ax.axvline(0, color="k", ls=":", lw=0.8, alpha=0.5)
+        ax.axvline(
+            np.mean(null_samples),
+            color="#64748b",
+            ls="--",
+            lw=1.5,
+            label=f"Null mean = {np.mean(null_samples):.1f}",
+        )
+        ax.set_xlabel("Cumulative impact")
+        ax.set_title("B. Learned null distribution")
+        ax.legend(fontsize=8)
+
+        # Panel C: null vs actual
+        ax = panels[2]
+        ax.hist(
+            null_samples,
+            bins=50,
+            alpha=0.4,
+            color="#94a3b8",
+            density=True,
+            label="Null (status quo)",
+        )
+        ax.hist(
+            actual_samples,
+            bins=50,
+            alpha=0.4,
+            color="#E24A33",
+            density=True,
+            label="Actual effect",
+        )
+        ax.text(
+            0.97,
+            0.95,
+            f"$p_{{cal}}$ = {metadata['p_effect_outside_null']:.3f}",
+            transform=ax.transAxes,
+            fontsize=9,
+            va="top",
+            ha="right",
+            bbox={
+                "boxstyle": "round,pad=0.3",
+                "facecolor": "white",
+                "edgecolor": "#e2e8f0",
+            },
+        )
+        ax.set_xlabel("Cumulative impact")
+        ax.set_title("C. Actual effect vs null")
+        ax.legend(fontsize=8)
+
+        fig.suptitle(title, fontsize=11, fontweight="bold", y=1.02)
+        fig.tight_layout()
+        return fig
+
+    @staticmethod
+    def _plot_missing_null(
+        fold_results: list[PlaceboFoldResult],
+        title: str,
+        figsize: tuple[float, float],
+        axes: Sequence[Axes] | None,
+    ) -> Figure:
+        """Return an annotated placeholder when no null model was built."""
+        warnings.warn(
+            f"Not enough folds completed to build a null model "
+            f"({len(fold_results)} completed), so the calibration panels "
+            f"cannot be drawn.",
+            UserWarning,
+            stacklevel=3,
+        )
+        fig: Figure
+        ax: Axes
+        if axes is None:
+            fig = Figure(figsize=figsize)
+            ax = cast(Axes, fig.subplots())
+        else:
+            ax = axes[0]
+            fig = cast(Figure, ax.get_figure())
+            for spare in axes[1:]:
+                spare.set_axis_off()
+
+        lines = [f"No null model: {len(fold_results)} folds completed."]
+        lines.extend(
+            f"Fold {fr.fold}: mean={fr.fold_mean:.2f}, sd={fr.fold_sd:.2f}"
+            for fr in fold_results
+        )
+        ax.text(0.5, 0.5, "\n".join(lines), ha="center", va="center", fontsize=9)
+        ax.set_axis_off()
+        fig.suptitle(title, fontsize=11, fontweight="bold")
+        return fig
 
     def __repr__(self) -> str:
         """Return a string representation of the check."""

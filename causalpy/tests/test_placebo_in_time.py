@@ -18,11 +18,13 @@ from __future__ import annotations
 import warnings
 from types import SimpleNamespace
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pymc as pm
 import pytest
 import xarray as xr
+from matplotlib.figure import Figure
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
@@ -2397,3 +2399,206 @@ def test_pipeline_with_assurance(mock_pymc_sample):
     check_result = result.sensitivity_results[0]
     assert "assurance" in check_result.metadata
     assert isinstance(check_result.metadata["assurance_result"], AssuranceResult)
+
+
+# ===========================================================================
+# Calibration figure
+# ===========================================================================
+
+
+def _make_calibration_check_result(
+    n_folds: int = 2,
+    with_null: bool = True,
+    pseudo_treatment_times: list | None = None,
+) -> CheckResult:
+    """Build a CheckResult carrying only what plot_calibration reads."""
+    rng = np.random.default_rng(0)
+    times = pseudo_treatment_times or [100 * (i + 1) for i in range(n_folds)]
+    fold_results = [
+        PlaceboFoldResult(
+            fold=i + 1,
+            pseudo_treatment_time=times[i],
+            experiment=None,  # type: ignore[arg-type]
+            cumulative_impact_samples=xr.DataArray(rng.normal(size=50)),
+            fold_mean=float(i),
+            fold_sd=1.0,
+        )
+        for i in range(len(times))
+    ]
+    metadata: dict = {"fold_results": fold_results}
+    if with_null:
+        metadata.update(
+            null_samples=rng.normal(size=200),
+            actual_cumulative_samples=rng.normal(loc=5.0, size=200),
+            actual_cumulative_mean=5.0,
+            p_effect_outside_null=0.97,
+        )
+    return CheckResult(check_name="PlaceboInTime", passed=True, metadata=metadata)
+
+
+def test_plot_calibration_returns_three_panels():
+    """The calibration plot has one panel per diagnostic."""
+    fig = PlaceboInTime.plot_calibration(_make_calibration_check_result())
+
+    assert isinstance(fig, Figure)
+    assert len(fig.axes) == 3
+    titles = [ax.get_title() for ax in fig.axes]
+    assert titles[0].startswith("A.")
+    assert titles[1].startswith("B.")
+    assert titles[2].startswith("C.")
+    plt.close(fig)
+
+
+def test_plot_calibration_labels_datetime_folds_by_year():
+    """Datetime pseudo treatment times are formatted, not repr'd."""
+    result = _make_calibration_check_result(
+        pseudo_treatment_times=[pd.Timestamp("2015-06-01")]
+    )
+    fig = PlaceboInTime.plot_calibration(result)
+
+    legend = fig.axes[0].get_legend()
+    assert legend is not None
+    assert "t*=2015" in legend.get_texts()[0].get_text()
+    plt.close(fig)
+
+
+def test_plot_calibration_colors_more_folds_than_the_cycle():
+    """More folds than the colour cycle must not raise."""
+    result = _make_calibration_check_result(n_folds=12)
+    fig = PlaceboInTime.plot_calibration(result)
+
+    legend = fig.axes[0].get_legend()
+    assert legend is not None
+    assert len(legend.get_texts()) == 12
+    plt.close(fig)
+
+
+def test_plot_calibration_draws_into_supplied_axes():
+    """Passing axes composes the panels into an existing figure."""
+    target_fig, axes = plt.subplots(3, 1)
+    fig = PlaceboInTime.plot_calibration(_make_calibration_check_result(), axes=axes)
+
+    assert fig is target_fig
+    plt.close(target_fig)
+
+
+def test_plot_calibration_rejects_wrong_number_of_axes():
+    """The plot needs exactly three axes."""
+    target_fig, axes = plt.subplots(2, 1)
+    with pytest.raises(ValueError, match="exactly 3 axes"):
+        PlaceboInTime.plot_calibration(_make_calibration_check_result(), axes=axes)
+    plt.close(target_fig)
+
+
+def test_plot_calibration_warns_when_no_null_model():
+    """A run without a null model warns instead of printing."""
+    result = _make_calibration_check_result(with_null=False)
+
+    with pytest.warns(UserWarning, match="Not enough folds completed"):
+        fig = PlaceboInTime.plot_calibration(result)
+
+    assert isinstance(fig, Figure)
+    plt.close(fig)
+
+
+def test_plot_calibration_without_null_model_uses_supplied_axes():
+    """The placeholder blanks the spare axes it was handed."""
+    target_fig, axes = plt.subplots(3, 1)
+    result = _make_calibration_check_result(with_null=False)
+
+    with pytest.warns(UserWarning, match="Not enough folds completed"):
+        fig = PlaceboInTime.plot_calibration(result, axes=axes)
+
+    assert fig is target_fig
+    assert not axes[1].axison
+    assert not axes[2].axison
+    plt.close(target_fig)
+
+
+def test_inconclusive_run_produces_no_figure():
+    """A run that builds no null model attaches no figure."""
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+    experiment = _make_fake_bayesian_experiment(data, treatment_time=50)
+
+    def factory(fold_data, treatment_time):  # pragma: no cover - must not fit
+        del fold_data, treatment_time
+        raise AssertionError("Ineligible folds must be skipped before fitting.")
+
+    check = PlaceboInTime(n_folds=1, experiment_factory=factory)
+
+    with pytest.warns(UserWarning, match="shorter than one full intervention window"):
+        result = check.run(experiment)
+
+    assert result.passed is None
+    assert result.figures == []
+
+
+@pytest.mark.integration
+def test_run_populates_figures_by_default(mock_pymc_sample):
+    """run() attaches the calibration figure to the result."""
+    df = _make_its_data(n=2000)
+    experiment = InterruptedTimeSeries(
+        df,
+        treatment_time=1500,
+        formula="y ~ 1 + t",
+        model=_make_pymc_model(),
+    )
+    check = PlaceboInTime(
+        n_folds=2,
+        experiment_factory=_make_pymc_factory(),
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+    )
+    result = check.run(experiment)
+
+    assert len(result.figures) == 1
+    assert isinstance(result.figures[0], Figure)
+    assert len(result.figures[0].axes) == 3
+    plt.close(result.figures[0])
+
+
+@pytest.mark.integration
+def test_run_metadata_carries_actual_cumulative_samples(mock_pymc_sample):
+    """The plotter's actual-effect samples come from run(), not the caller."""
+    df = _make_its_data(n=2000)
+    experiment = InterruptedTimeSeries(
+        df,
+        treatment_time=1500,
+        formula="y ~ 1 + t",
+        model=_make_pymc_model(),
+    )
+    check = PlaceboInTime(
+        n_folds=2,
+        experiment_factory=_make_pymc_factory(),
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+        make_figures=False,
+    )
+    result = check.run(experiment)
+
+    samples = result.metadata["actual_cumulative_samples"]
+    assert samples.ndim == 1
+    assert (
+        samples.size
+        == experiment.post_impact.sizes["chain"]
+        * (experiment.post_impact.sizes["draw"])
+    )
+
+
+@pytest.mark.integration
+def test_run_without_figures_leaves_figures_empty(mock_pymc_sample):
+    """make_figures=False opts out of the figure."""
+    df = _make_its_data(n=2000)
+    experiment = InterruptedTimeSeries(
+        df,
+        treatment_time=1500,
+        formula="y ~ 1 + t",
+        model=_make_pymc_model(),
+    )
+    check = PlaceboInTime(
+        n_folds=2,
+        experiment_factory=_make_pymc_factory(),
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+        make_figures=False,
+    )
+    result = check.run(experiment)
+
+    assert result.figures == []

@@ -137,6 +137,62 @@ class TestGenerateReport:
         ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
         GenerateReport().validate(ctx)
 
+    def test_includes_check_figures(self, its_context):
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots()
+        ax.plot([0, 1], [0, 1])
+        its_context.sensitivity_results = [
+            CheckResult(check_name="FigureCheck", passed=True, figures=[fig])
+        ]
+        ctx = GenerateReport().run(its_context)
+        plt.close(fig)
+
+        # The alt text is unique to the check, so it distinguishes the check
+        # figure from the experiment plot the report already embedded.
+        assert "FigureCheck figure" in ctx.report
+        assert "data:image/png;base64," in ctx.report
+
+    def test_excludes_check_figures_when_plots_disabled(self, its_context):
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots()
+        ax.plot([0, 1], [0, 1])
+        its_context.sensitivity_results = [
+            CheckResult(check_name="FigureCheck", passed=True, figures=[fig])
+        ]
+        ctx = GenerateReport(include_plots=False).run(its_context)
+        plt.close(fig)
+
+        assert "FigureCheck" in ctx.report
+        assert "data:image/png;base64," not in ctx.report
+
+    def test_check_figures_are_not_closed(self, its_context):
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots()
+        ax.plot([0, 1], [0, 1])
+        its_context.sensitivity_results = [
+            CheckResult(check_name="FigureCheck", passed=True, figures=[fig])
+        ]
+        GenerateReport().run(its_context)
+
+        assert plt.fignum_exists(fig.number)
+        plt.close(fig)
+
+    def test_handles_check_figure_rendering_failure(self, its_context):
+        class BrokenFigure:
+            def savefig(self, *args, **kwargs):
+                raise RuntimeError("savefig failed")
+
+        its_context.sensitivity_results = [
+            CheckResult(check_name="BrokenCheck", passed=True, figures=[BrokenFigure()])
+        ]
+        step = GenerateReport(include_plots=True)
+        ctx = step.run(its_context)
+
+        assert "BrokenCheck" in ctx.report
+
     def test_handles_plot_rendering_failure(self, its_context):
         from unittest.mock import patch
 
