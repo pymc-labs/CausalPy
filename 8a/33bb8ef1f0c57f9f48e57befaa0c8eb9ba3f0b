@@ -1,0 +1,18 @@
+scripts/migration_baseline/REPORT_TEMPLATE.md
+  h_d36ca8649a0e95 10
+scripts/migration_baseline/harness.py
+  h_d36ca8649a0e95 50
+scripts/migration_baseline/README.md
+  h_d36ca8649a0e95 3,64,115
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "8a33bb8ef1f0c57f9f48e57befaa0c8eb9ba3f0b",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}
