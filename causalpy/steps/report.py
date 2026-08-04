@@ -41,7 +41,9 @@ class GenerateReport:
     Parameters
     ----------
     include_plots : bool, default True
-        Whether to include diagnostic plots in the report.
+        Whether to include diagnostic plots in the report.  Covers both the
+        experiment plot and any figures the sensitivity checks attached to
+        their results, so turning it off leaves the report imageless.
     include_effect_summary : bool, default True
         Whether to include the effect summary section.
     include_sensitivity : bool, default True

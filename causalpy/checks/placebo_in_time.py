@@ -70,9 +70,11 @@ from causalpy.pipeline import PipelineContext
 logger = logging.getLogger(__name__)
 
 MIN_FOLD_OBSERVATIONS = 3
+MAX_RANDOM_SELECTION_RETRIES = 16
 # Suptitle position, just above the figure box the panels fill.
 _SUPTITLE_Y = 1.02
-MAX_RANDOM_SELECTION_RETRIES = 16
+_DEFAULT_PLOT_TITLE = "Placebo-in-Time calibration"
+_DEFAULT_FIGSIZE = (7.0, 9.0)
 
 # The hierarchical status-quo (null) model estimates the between-fold spread
 # ``tau_status_quo`` from the completed folds.  That spread is unidentified from
@@ -320,9 +322,9 @@ class PlaceboInTime:
         of the derived default.
     make_figures : bool, default True
         Whether :meth:`run` appends the calibration figure produced by
-        :meth:`plot_calibration` to ``CheckResult.figures``.  Only the
-        conclusive path produces a figure; runs that end without a null
-        model leave ``figures`` empty.
+        :meth:`plot_calibration` to ``CheckResult.figures``.  Every run
+        produces one, so ``figures[0]`` is safe to read; a run that reaches
+        no verdict gets the annotated placeholder instead of the panels.
 
     Examples
     --------
@@ -1440,22 +1442,24 @@ class PlaceboInTime:
             summary, verdict = inconclusive
             parts = [summary, verdict]
             parts.extend(fold_summaries)
-            return CheckResult(
-                check_name="PlaceboInTime",
-                passed=None,
-                text="\n".join(parts),
-                metadata={
-                    "fold_results": fold_results,
-                    "n_folds_requested": self.n_folds,
-                    "n_folds_completed": n_completed,
-                    "skipped_folds": skipped_folds,
-                    "intervention_length": intervention_length,
-                    "comparison_window": comparison_window,
-                    "rope_half_width": self.rope_half_width,
-                    "threshold": self.threshold,
-                    "expected_effect_prior": self.expected_effect_prior,
-                    "unseeded_custom_priors": unseeded_custom_priors,
-                },
+            return self._attach_figures(
+                CheckResult(
+                    check_name="PlaceboInTime",
+                    passed=None,
+                    text="\n".join(parts),
+                    metadata={
+                        "fold_results": fold_results,
+                        "n_folds_requested": self.n_folds,
+                        "n_folds_completed": n_completed,
+                        "skipped_folds": skipped_folds,
+                        "intervention_length": intervention_length,
+                        "comparison_window": comparison_window,
+                        "rope_half_width": self.rope_half_width,
+                        "threshold": self.threshold,
+                        "expected_effect_prior": self.expected_effect_prior,
+                        "unseeded_custom_priors": unseeded_custom_priors,
+                    },
+                )
             )
 
         # Reaching here means the null model was built successfully.
@@ -1541,21 +1545,38 @@ class PlaceboInTime:
                 f"{assurance_result.alt_indeterminate_rate:.3f}"
             )
 
-        result = CheckResult(
-            check_name="PlaceboInTime",
-            passed=passed,
-            text=text,
-            metadata=metadata,
+        return self._attach_figures(
+            CheckResult(
+                check_name="PlaceboInTime",
+                passed=passed,
+                text=text,
+                metadata=metadata,
+            )
         )
+
+    def _attach_figures(self, result: CheckResult) -> CheckResult:
+        """Add the calibration figure to *result* when ``make_figures`` is on.
+
+        Every path through :meth:`run` goes through here, so a caller can
+        read ``figures[0]`` without first checking whether the run reached a
+        verdict; an inconclusive run gets the annotated placeholder.
+        """
         if self.make_figures:
-            result.figures.append(self.plot_calibration(result))
+            result.figures.append(
+                self._calibration_figure(
+                    result,
+                    _DEFAULT_PLOT_TITLE,
+                    _DEFAULT_FIGSIZE,
+                    warn_on_missing_null=False,
+                )
+            )
         return result
 
     @staticmethod
     def plot_calibration(
         check_result: CheckResult,
-        title: str = "Placebo-in-Time calibration",
-        figsize: tuple[float, float] = (7, 9),
+        title: str = _DEFAULT_PLOT_TITLE,
+        figsize: tuple[float, float] = _DEFAULT_FIGSIZE,
     ) -> Figure:
         """Plot the three-panel calibration diagnostic for a placebo run.
 
@@ -1580,11 +1601,30 @@ class PlaceboInTime:
             single annotated panel is returned instead and a warning is
             emitted.
         """
+        return PlaceboInTime._calibration_figure(
+            check_result, title, figsize, warn_on_missing_null=True
+        )
+
+    @staticmethod
+    def _calibration_figure(
+        check_result: CheckResult,
+        title: str,
+        figsize: tuple[float, float],
+        warn_on_missing_null: bool,
+    ) -> Figure:
+        """Build the calibration figure, optionally warning on a missing null.
+
+        :meth:`run` suppresses the warning because it already reports the
+        same condition through ``passed=None`` and the result text; a direct
+        call to :meth:`plot_calibration` has no such context and gets it.
+        """
         metadata = check_result.metadata
         fold_results = metadata["fold_results"]
 
         if "null_samples" not in metadata:
-            return PlaceboInTime._plot_missing_null(fold_results, title, figsize)
+            return PlaceboInTime._plot_missing_null(
+                fold_results, title, figsize, warn_on_missing_null
+            )
 
         null_samples = np.asarray(metadata["null_samples"]).ravel()
         actual_samples = np.asarray(metadata["actual_cumulative_samples"]).ravel()
@@ -1722,15 +1762,17 @@ class PlaceboInTime:
         fold_results: list[PlaceboFoldResult],
         title: str,
         figsize: tuple[float, float],
+        warn: bool,
     ) -> Figure:
         """Return an annotated placeholder when no null model was built."""
-        warnings.warn(
-            f"Not enough folds completed to build a null model "
-            f"({len(fold_results)} completed), so the calibration panels "
-            f"cannot be drawn.",
-            UserWarning,
-            stacklevel=3,
-        )
+        if warn:
+            warnings.warn(
+                f"Not enough folds completed to build a null model "
+                f"({len(fold_results)} completed), so the calibration panels "
+                f"cannot be drawn.",
+                UserWarning,
+                stacklevel=4,
+            )
         lines = [f"No null model: {len(fold_results)} folds completed."]
         lines.extend(
             f"Fold {fold_result.fold}: mean={fold_result.fold_mean:.2f}, "
@@ -1755,4 +1797,6 @@ class PlaceboInTime:
             parts.append("allow_overlap=True")
         if self.expected_effect_prior is not None:
             parts.append("assurance=True")
+        if not self.make_figures:
+            parts.append("make_figures=False")
         return f"PlaceboInTime({', '.join(parts)})"

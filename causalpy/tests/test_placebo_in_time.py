@@ -37,6 +37,7 @@ from causalpy.checks.placebo_in_time import (
 )
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.pipeline import Pipeline, PipelineContext
+from causalpy.steps.report import GenerateReport
 from causalpy.steps.sensitivity import _DEFAULT_CHECKS, SensitivityAnalysis
 
 # ---------------------------------------------------------------------------
@@ -276,6 +277,12 @@ def test_applicable_methods():
 def test_repr_basic():
     """Test repr basic."""
     assert "n_folds=3" in repr(PlaceboInTime())
+
+
+def test_repr_with_figures_disabled():
+    """A non-default make_figures shows up in the repr."""
+    assert "make_figures=False" in repr(PlaceboInTime(make_figures=False))
+    assert "make_figures" not in repr(PlaceboInTime())
 
 
 def test_repr_with_assurance():
@@ -2459,6 +2466,16 @@ def test_plot_calibration_returns_three_panels():
     plt.close(fig)
 
 
+def test_plot_calibration_honours_figsize():
+    """The caller's figure size survives plotnine's own layout pass."""
+    fig = PlaceboInTime.plot_calibration(
+        _make_calibration_check_result(), figsize=(5.0, 11.0)
+    )
+
+    assert tuple(fig.get_size_inches()) == (5.0, 11.0)
+    plt.close(fig)
+
+
 def test_plot_calibration_sets_the_suptitle():
     """The caller's title reaches the drawn figure."""
     fig = PlaceboInTime.plot_calibration(
@@ -2505,8 +2522,8 @@ def test_plot_calibration_warns_when_no_null_model():
     plt.close(fig)
 
 
-def test_inconclusive_run_produces_no_figure():
-    """A run that builds no null model attaches no figure."""
+def test_inconclusive_run_still_produces_a_figure():
+    """figures[0] is safe to read even when the run reaches no verdict."""
     data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
     experiment = _make_fake_bayesian_experiment(data, treatment_time=50)
 
@@ -2516,10 +2533,34 @@ def test_inconclusive_run_produces_no_figure():
 
     check = PlaceboInTime(n_folds=1, experiment_factory=factory)
 
-    with pytest.warns(UserWarning, match="shorter than one full intervention window"):
+    with pytest.warns(
+        UserWarning, match="shorter than one full intervention window"
+    ) as record:
         result = check.run(experiment)
 
     assert result.passed is None
+    assert len(result.figures) == 1
+    assert any("No null model" in t for t in _figure_texts(result.figures[0]))
+    # run() already says so through passed=None and the result text, so it
+    # must not also warn about the missing null model.
+    assert len(record) == 1
+    plt.close(result.figures[0])
+
+
+def test_inconclusive_run_without_figures_stays_empty():
+    """make_figures=False opts out of the placeholder too."""
+    data = pd.DataFrame({"y": np.zeros(100)}, index=np.arange(100))
+    experiment = _make_fake_bayesian_experiment(data, treatment_time=50)
+
+    def factory(fold_data, treatment_time):  # pragma: no cover - must not fit
+        del fold_data, treatment_time
+        raise AssertionError("Ineligible folds must be skipped before fitting.")
+
+    check = PlaceboInTime(n_folds=1, experiment_factory=factory, make_figures=False)
+
+    with pytest.warns(UserWarning, match="shorter than one full intervention window"):
+        result = check.run(experiment)
+
     assert result.figures == []
 
 
@@ -2543,6 +2584,60 @@ def test_run_populates_figures_by_default(mock_pymc_sample):
     assert len(result.figures) == 1
     assert isinstance(result.figures[0], Figure)
     assert len(result.figures[0].axes) == 3
+    plt.close(result.figures[0])
+
+
+@pytest.mark.integration
+def test_run_figure_is_not_registered_with_pyplot(mock_pymc_sample):
+    """The default figure must not enter pyplot's figure manager.
+
+    That is what keeps ``make_figures=True`` free of side effects: nothing to
+    close, and no auto-display at the end of the notebook cell that ran the
+    check.
+    """
+    df = _make_its_data(n=2000)
+    experiment = InterruptedTimeSeries(
+        df,
+        treatment_time=1500,
+        formula="y ~ 1 + t",
+        model=_make_pymc_model(),
+    )
+    check = PlaceboInTime(
+        n_folds=2,
+        experiment_factory=_make_pymc_factory(),
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+    )
+    plt.close("all")
+    result = check.run(experiment)
+
+    assert result.figures
+    assert plt.get_fignums() == []
+
+
+@pytest.mark.integration
+def test_check_figure_reaches_the_generated_report(mock_pymc_sample):
+    """A figure built by the check survives rendering into the report."""
+    df = _make_its_data(n=2000)
+    experiment = InterruptedTimeSeries(
+        df,
+        treatment_time=1500,
+        formula="y ~ 1 + t",
+        model=_make_pymc_model(),
+    )
+    check = PlaceboInTime(
+        n_folds=2,
+        experiment_factory=_make_pymc_factory(),
+        sample_kwargs=_FAST_HIERARCHICAL_KWARGS,
+    )
+    result = check.run(experiment)
+
+    context = PipelineContext(data=df)
+    context.experiment = experiment
+    context.sensitivity_results = [result]
+    context = GenerateReport(include_effect_summary=False).run(context)
+
+    assert "PlaceboInTime figure" in context.report
+    assert "data:image/png;base64," in context.report
     plt.close(result.figures[0])
 
 
