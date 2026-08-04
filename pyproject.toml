@@ -236,12 +236,9 @@ warn_unused_configs = true
 
 # Allowlist of modules that already fail, so the gate starts green and ratchets down (49 errors in 16 files, measured on pymc6_and_pymcmarketing1_migration at 194343ca). Each entry disables only the error codes that module actually produces, so everything else is still checked there. Removing an entry, or a single code from one, is a self-contained follow-up PR.
 [[tool.mypy.overrides]]
-module = "causalpy.experiments.inverse_propensity_weighting"
-disable_error_code = ["arg-type", "assignment", "index", "return-value"]
-
-[[tool.mypy.overrides]]
 module = [
     "causalpy.experiments.instrumental_variable",
+    "causalpy.experiments.inverse_propensity_weighting",
     "causalpy.experiments.prepostnegd",
     "causalpy.experiments.regression_discontinuity",
     "causalpy.experiments.regression_kink",

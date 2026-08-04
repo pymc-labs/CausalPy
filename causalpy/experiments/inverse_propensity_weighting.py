@@ -669,8 +669,9 @@ class InversePropensityWeighting(BaseExperiment):
         mosaic = """AAAAAA
                     BBBBCC"""
 
-        fig, axs = plt.subplot_mosaic(mosaic, figsize=(20, 13))
-        axs = [axs[k] for k in axs]
+        fig, mosaic_axes = plt.subplot_mosaic(mosaic, figsize=(20, 13))
+        # Keyed by mosaic label; the panels are used positionally from here on.
+        axs = [mosaic_axes[k] for k in mosaic_axes]
         axs[0].axvline(
             0.1, linestyle="--", label="Low Extreme Propensity Scores", color="black"
         )
