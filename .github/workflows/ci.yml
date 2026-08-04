@@ -251,6 +251,12 @@ jobs:
                   f"expected pandas {expected}, got {pd.__version__}"
               )
           PY
+      - name: Type check
+        # Runs here rather than in prek because mypy only says anything useful
+        # when the real dependencies are importable, and the pre-commit env has
+        # none of them (issue #1127). Scope and the per-module allowlist that
+        # keeps this green live in [tool.mypy] in pyproject.toml.
+        run: make typecheck
       - name: Run doctests
         # -p causalpy.tests.doctest_sampling loads the plugin that mocks
         # pm.sample for doctests (an autouse fixture in causalpy/tests/conftest.py

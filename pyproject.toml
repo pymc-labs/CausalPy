@@ -82,6 +82,10 @@ forecast = [
 ]
 dev = [
     "prek",
+    # Pinned: a type checker that floats turns an untouched branch red whenever
+    # upstream ships new checks. Bump deliberately, with the allowlist in
+    # [tool.mypy] re-measured (issue #1127).
+    "mypy==2.3.0",
     "twine",
     "codespell",
     "nbformat",
@@ -114,7 +118,7 @@ docs = [
     "PyYAML",
     "sphinxext-rediraffe",
 ]
-lint = ["prek", "ruff", "mypy"]
+lint = ["prek", "ruff", "mypy==2.3.0"]
 test = [
     "pytest",
     "pytest-cov",
@@ -223,9 +227,66 @@ exclude_lines = [
     "@(abc\\.)?abstractmethod",
 ]
 
+# Type checking (issue #1127). ``files = "causalpy"`` recurses, so the subpackages are
+# covered; the old ``causalpy/*.py`` glob did not and only reached 16 top-level modules.
+# ``make typecheck`` runs this from the project environment, where the real dependencies
+# are importable, and CI runs the same target. ``ignore_missing_imports`` drops the
+# untyped-third-party noise (pymc, patsy, arviz and friends ship no stubs).
 [tool.mypy]
-files = "causalpy/*.py"
+files = "causalpy"
 exclude = "build|dist|docs|notebooks|tests|setup.py"
+ignore_missing_imports = true
+
+# Allowlist of modules that already fail, so the gate starts green and ratchets down
+# (49 errors in 16 files at the time of writing). Each entry disables only the error
+# codes that module actually produces, so everything else is still checked there.
+# Removing an entry, or a single code from one, is a self-contained follow-up PR.
+[[tool.mypy.overrides]]
+module = "causalpy.experiments.inverse_propensity_weighting"
+disable_error_code = ["arg-type", "assignment", "index", "return-value"]
+
+[[tool.mypy.overrides]]
+module = [
+    "causalpy.experiments.instrumental_variable",
+    "causalpy.experiments.prepostnegd",
+    "causalpy.experiments.regression_discontinuity",
+    "causalpy.experiments.regression_kink",
+    "causalpy.reporting",
+]
+disable_error_code = ["arg-type"]
+
+[[tool.mypy.overrides]]
+module = [
+    "causalpy.experiments.interrupted_time_series",
+    "causalpy.experiments.staggered_did",
+    "causalpy.experiments.synthetic_control",
+    "causalpy.experiments.synthetic_difference_in_differences",
+]
+disable_error_code = ["attr-defined"]
+
+[[tool.mypy.overrides]]
+module = "causalpy.experiments.diff_in_diff"
+disable_error_code = ["arg-type", "attr-defined"]
+
+[[tool.mypy.overrides]]
+module = "causalpy.experiments.panel_regression"
+disable_error_code = ["attr-defined", "index"]
+
+[[tool.mypy.overrides]]
+module = "causalpy.checks.operating_characteristics"
+disable_error_code = ["arg-type", "assignment"]
+
+[[tool.mypy.overrides]]
+module = "causalpy.plot_utils"
+disable_error_code = ["assignment", "attr-defined"]
+
+[[tool.mypy.overrides]]
+module = "causalpy.pymc_models"
+disable_error_code = ["call-overload", "return-value"]
+
+[[tool.mypy.overrides]]
+module = "causalpy._arviz_compat"
+disable_error_code = ["type-var"]
 
 [tool.marimo.runtime]
 watcher_on_save = "autorun"
