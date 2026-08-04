@@ -177,7 +177,11 @@ jobs:
       - name: Report the PyTensor compile cache size
         # TEMPORARY (issue #657 measurement): drop before review.
         if: always()
-        run: du -sh ~/.pytensor || true
+        run: |
+          du -sh ~/.pytensor || true
+          du -sh ~/.pytensor/* || true
+          python -c "import pytensor; print('active compiledir:', pytensor.config.compiledir)" || true
+          uname -r
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:
