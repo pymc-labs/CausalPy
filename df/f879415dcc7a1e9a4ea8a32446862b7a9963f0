@@ -1,0 +1,14 @@
+docs/source/.codespell/codespell-whitelist.txt
+  h_d36ca8649a0e95 4-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "dff879415dcc7a1e9a4ea8a32446862b7a9963f0",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}
