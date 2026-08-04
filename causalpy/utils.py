@@ -90,13 +90,14 @@ def _series_has_2_levels(series: pd.Series) -> bool:
     return len(pd.Categorical(series).categories) == 2
 
 
-def round_num(n: float, round_to: int | None) -> str:
+def round_num(n: float | xr.DataArray, round_to: int | None) -> str:
     """Return a string representing a number with significant figures.
 
     Parameters
     ----------
-    n : float
-        Number to round.
+    n : float or xr.DataArray
+        Number to round. A zero-dimensional DataArray, as produced by
+        ``.mean()`` on posterior samples, formats like the scalar it wraps.
     round_to : int, optional
         Number of significant figures. If None, defaults to 2.
 
@@ -110,7 +111,7 @@ def round_num(n: float, round_to: int | None) -> str:
     return f"{n:.{sig_figs}g}"
 
 
-def _format_sig_figs(value: float, default: int | None = None) -> int:
+def _format_sig_figs(value: float | xr.DataArray, default: int | None = None) -> int:
     """Get a default number of significant figures.
 
     Gives the integer part or `default`, whichever is bigger.
