@@ -8,33 +8,19 @@ page is the curated, human-written companion to it.
 
 ## 1.0.0 (unreleased) — PyMC 6 migration
 
-This is a **major, breaking release**. It migrates CausalPy off the PyMC 5
-stack and onto PyMC 6 / PyTensor 3 / ArviZ 1.x (compatible with
-`pymc-marketing` v1.0.0). Read the breaking-change section below before
-upgrading; several public signatures and default behaviours changed.
+This is a **major, breaking release**. It migrates CausalPy off the PyMC 5 stack and onto PyMC 6 / PyTensor 3 / ArviZ 1.x; the docs-only PyMC-Marketing transition snapshot is pinned separately in `docs/requirements.txt`. Read the breaking-change section below before upgrading; several public signatures and default behaviours changed.
 
-### Supported versions and dependencies
+### Declared dependency ranges
 
-- **Python `>=3.12`** (raised from 3.11). The dependency stack currently
-  resolves on Python 3.12–3.14 (PyTensor caps Python `<3.15`). CI exercises
-  3.12 and 3.14.
-- **pymc `>=6.0.1,<7`** (previously the PyMC 5 series). The exact patch the
-  resolver selects depends on what else is installed — for example
-  `pymc-marketing` v1.0.0 caps `pymc<6.1`, so environments that include it
-  resolve to an older 6.x. Do not rely on a specific patch version.
-- **pytensor `>=3,<4`**.
-- **arviz `>=1.1,<2`** — the ArviZ 0.x → 1.x jump. `arviz.InferenceData` is no
-  longer available as a usable class — accessing it emits a `MigrationWarning`
-  (`"arviz.InferenceData is no longer available on the arviz package"`) — and
-  ArviZ now uses xarray's `DataTree` for the same role.
-- **pandas `>=2.3,<4`** — pandas 2.3 through the 3.x line are supported and are
-  exercised as separate CI legs.
-- **pymc-extras `>=0.3.0`**.
-- **numba is now effectively a hard (transitive) dependency.** It is
-  PyTensor 3's default compilation backend and is pulled in through the
-  PyTensor/PyMC dependency chain. See [Runtime characteristics](#runtime-characteristics).
+- **Python `>=3.12`** (raised from 3.11). The dependency stack currently resolves on Python 3.12–3.14 (PyTensor caps Python `<3.15`). CI exercises 3.12 and 3.14.
+- **pymc `>=6.0.1,<7`** (previously the PyMC 5 series). PyMC metadata determines its compatible PyTensor patch range. The pinned docs-only PyMC-Marketing transition snapshot narrows only a combined docs installation to `pymc>=6.0.1,<6.1`; base installs that omit `docs/requirements.txt` can select later compatible PyMC 6 minors.
+- **pytensor `>=3,<4`**. Its selected minor and patch version are paired by PyMC metadata.
+- **arviz `>=1.1,<2`** — the ArviZ 0.x → 1.x jump. `arviz.InferenceData` is no longer available as a usable class — accessing it emits a `MigrationWarning` (`"arviz.InferenceData is no longer available on the arviz package"`) — and ArviZ now uses xarray's `DataTree` for the same role.
+- **pandas `>=2.3,<4`** — pandas 2.3 through the 3.x line are supported and are exercised as separate CI legs.
+- **pymc-extras `>=0.11`**. This is the first release that declares PyMC 6 support and provides the structural state-space API used by CausalPy.
+- **numba is now effectively a hard (transitive) dependency.** It is PyTensor 3's default compilation backend and is pulled in through the PyTensor/PyMC dependency chain. See [Runtime characteristics](#runtime-characteristics).
 
-These floors are declared in `pyproject.toml`.
+These declared ranges are in `pyproject.toml`.
 
 ### Breaking changes
 
