@@ -17,9 +17,14 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
+from matplotlib.collections import PolyCollection
+from matplotlib.colors import to_hex
+from matplotlib.figure import Figure
+from matplotlib.text import Text
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
@@ -27,7 +32,12 @@ from causalpy.checks.bandwidth import BandwidthSensitivity
 from causalpy.checks.base import Check, CheckResult
 from causalpy.checks.leave_one_out import LeaveOneOut
 from causalpy.checks.mccrary import McCraryDensityTest
-from causalpy.checks.placebo_in_space import PlaceboInSpace
+from causalpy.checks.placebo_in_space import (
+    _PLACEBO_COLOUR,
+    _TREATED_COLOUR,
+    PlaceboInSpace,
+    _permutation_pvalue,
+)
 from causalpy.experiments.regression_discontinuity import RegressionDiscontinuity
 from causalpy.experiments.synthetic_control import SyntheticControl
 from causalpy.pipeline import PipelineContext
@@ -514,3 +524,247 @@ class TestPlaceboInSpaceEdgeCases:
         }
         result = PlaceboInSpace().run(sc, ctx)
         assert isinstance(result, CheckResult)
+
+    def test_run_skips_baseline_for_unfitted_treated_unit(self):
+        """A treated unit the experiment never fitted gets no baseline RMSPE."""
+        df = cp.load_data("sc")
+        model = cp.create_causalpy_compatible_class(LinearRegression())
+        sc = SyntheticControl(
+            df,
+            treatment_time=70,
+            control_units=["a", "b"],
+            treated_units=["actual"],
+            model=model,
+        )
+        ctx = PipelineContext(data=df)
+        ctx.experiment = sc
+        ctx.experiment_config = {
+            "method": SyntheticControl,
+            "treatment_time": 70,
+            "control_units": ["a", "b"],
+            "treated_units": ["a", "actual"],
+            "model": model,
+        }
+        result = PlaceboInSpace().run(sc, ctx)
+        # "a" is named treated in the config but absent from the fitted
+        # experiment, so selecting it would raise rather than yield a baseline.
+        assert set(result.metadata["baseline_rmspe"]) == {"actual"}
+
+
+# ---------------------------------------------------------------------------
+# PlaceboInSpace RMSPE-ratio tests
+# ---------------------------------------------------------------------------
+
+
+def _run_placebo_in_space():
+    """Run the check on the bundled synthetic-control data."""
+    df = cp.load_data("sc")
+    controls = ["a", "b", "c"]
+    sc = SyntheticControl(
+        df,
+        treatment_time=70,
+        control_units=controls,
+        treated_units=["actual"],
+        model=cp.create_causalpy_compatible_class(LinearRegression()),
+    )
+    ctx = PipelineContext(data=df)
+    ctx.experiment = sc
+    ctx.experiment_config = {
+        "method": SyntheticControl,
+        "treatment_time": 70,
+        "control_units": controls,
+        "treated_units": ["actual"],
+        "model": cp.create_causalpy_compatible_class(LinearRegression()),
+    }
+    return PlaceboInSpace().run(sc, ctx)
+
+
+def _make_rmspe_check_result(
+    ratios=(1.0, 2.0, 3.0),
+    baseline_ratio=5.0,
+    units=("a", "b", "c"),
+):
+    """Build a CheckResult with hand-set ratios, skipping the model fits."""
+    metadata = {}
+    if baseline_ratio is not None:
+        metadata["baseline_rmspe"] = {
+            "actual": {
+                "pre_rmspe": 1.0,
+                "post_rmspe": baseline_ratio,
+                "rmspe_ratio": baseline_ratio,
+            }
+        }
+    return CheckResult(
+        check_name="PlaceboInSpace",
+        table=pd.DataFrame(
+            {
+                "placebo_treated": list(units),
+                "pre_rmspe": [1.0] * len(units),
+                "post_rmspe": list(ratios),
+                "rmspe_ratio": list(ratios),
+            }
+        ),
+        metadata=metadata,
+    )
+
+
+def _figure_texts(fig):
+    """Collect every rendered string in a figure.
+
+    plotnine draws the subtitle and legend labels as free text artists rather
+    than through ``Axes.set_title``, so assertions read them from here.
+    """
+    return [text.get_text() for text in fig.findobj(Text)]
+
+
+def _bar_colours(fig):
+    """Face colours of the drawn bars, in plotted order."""
+    poly = next(c for c in fig.axes[0].collections if isinstance(c, PolyCollection))
+    return [to_hex(colour) for colour in poly.get_facecolor()]
+
+
+class TestPlaceboInSpaceRmspeRatio:
+    """Tests for the RMSPE columns and the ratio plot."""
+
+    def test_run_reports_rmspe_columns(self):
+        """Every successful placebo fit carries its pre, post and ratio."""
+        result = _run_placebo_in_space()
+
+        for column in ("pre_rmspe", "post_rmspe", "rmspe_ratio"):
+            assert column in result.table.columns
+        assert np.isfinite(result.table["rmspe_ratio"]).all()
+        np.testing.assert_allclose(
+            result.table["rmspe_ratio"],
+            result.table["post_rmspe"] / result.table["pre_rmspe"],
+        )
+
+    def test_run_reports_baseline_rmspe(self):
+        """The actual treated unit's RMSPEs land in metadata."""
+        result = _run_placebo_in_space()
+
+        baseline = result.metadata["baseline_rmspe"]["actual"]
+        assert set(baseline) == {"pre_rmspe", "post_rmspe", "rmspe_ratio"}
+        assert baseline["rmspe_ratio"] == pytest.approx(
+            baseline["post_rmspe"] / baseline["pre_rmspe"]
+        )
+
+    def test_plot_returns_a_figure(self):
+        """The plot draws one bar per unit, treated included."""
+        fig = PlaceboInSpace.plot_rmspe_ratio(_make_rmspe_check_result())
+
+        assert isinstance(fig, Figure)
+        assert [t.get_text() for t in fig.axes[0].get_yticklabels()] == [
+            "a",
+            "b",
+            "c",
+            "actual",
+        ]
+        plt.close(fig)
+
+    def test_plot_honours_title_and_figsize(self):
+        """The caller's title and size survive plotnine's layout pass."""
+        fig = PlaceboInSpace.plot_rmspe_ratio(
+            _make_rmspe_check_result(), title="California", figsize=(5.0, 4.0)
+        )
+
+        assert tuple(fig.get_size_inches()) == (5.0, 4.0)
+        assert "California" in _figure_texts(fig)
+        plt.close(fig)
+
+    def test_plot_highlights_the_treated_unit(self):
+        """The treated bar is drawn in the highlight colour, donors are not."""
+        fig = PlaceboInSpace.plot_rmspe_ratio(_make_rmspe_check_result())
+
+        colours = _bar_colours(fig)
+        # Bars follow the ratio ordering, so the treated unit (5.0) is last.
+        assert colours[-1] == _TREATED_COLOUR.lower()
+        assert set(colours[:-1]) == {_PLACEBO_COLOUR.lower()}
+        plt.close(fig)
+
+    def test_plot_orders_units_by_ratio(self):
+        """A treated unit in the middle of the pack is drawn there."""
+        fig = PlaceboInSpace.plot_rmspe_ratio(
+            _make_rmspe_check_result(ratios=(1.0, 4.0, 6.0), baseline_ratio=5.0)
+        )
+
+        assert [t.get_text() for t in fig.axes[0].get_yticklabels()] == [
+            "a",
+            "b",
+            "actual",
+            "c",
+        ]
+        plt.close(fig)
+
+    def test_plot_reports_the_permutation_pvalue(self):
+        """The treated unit ranking first over 3 donors gives p = 1/4."""
+        fig = PlaceboInSpace.plot_rmspe_ratio(_make_rmspe_check_result())
+
+        assert any("actual: p = 0.250" in text for text in _figure_texts(fig))
+        plt.close(fig)
+
+    def test_plot_can_suppress_the_pvalue(self):
+        """``show_pvalue=False`` drops the annotation."""
+        fig = PlaceboInSpace.plot_rmspe_ratio(
+            _make_rmspe_check_result(), show_pvalue=False
+        )
+
+        assert not any("p = " in text for text in _figure_texts(fig))
+        plt.close(fig)
+
+    def test_plot_omits_the_pvalue_without_a_baseline(self):
+        """With no treated baseline the donors still plot, without inference."""
+        fig = PlaceboInSpace.plot_rmspe_ratio(
+            _make_rmspe_check_result(baseline_ratio=None)
+        )
+
+        assert [t.get_text() for t in fig.axes[0].get_yticklabels()] == ["a", "b", "c"]
+        assert not any("p = " in text for text in _figure_texts(fig))
+        plt.close(fig)
+
+    def test_plot_warns_and_drops_non_finite_ratios(self):
+        """A donor with a zero pre-period RMSPE is dropped, loudly."""
+        result = _make_rmspe_check_result(ratios=(1.0, np.inf, 3.0))
+
+        with pytest.warns(UserWarning, match="non-finite"):
+            fig = PlaceboInSpace.plot_rmspe_ratio(result)
+
+        assert [t.get_text() for t in fig.axes[0].get_yticklabels()] == [
+            "a",
+            "c",
+            "actual",
+        ]
+        plt.close(fig)
+
+    def test_plot_raises_without_rmspe_columns(self):
+        """A result predating RMSPE reporting cannot be plotted."""
+        result = CheckResult(
+            check_name="PlaceboInSpace",
+            table=pd.DataFrame({"placebo_treated": ["a"], "mean": [1.0]}),
+        )
+
+        with pytest.raises(ValueError, match="rmspe_ratio"):
+            PlaceboInSpace.plot_rmspe_ratio(result)
+
+    def test_plot_raises_when_the_run_produced_no_table(self):
+        """A check that bailed out early has nothing to plot."""
+        with pytest.raises(ValueError, match="rmspe_ratio"):
+            PlaceboInSpace.plot_rmspe_ratio(CheckResult(check_name="PlaceboInSpace"))
+
+    def test_plot_raises_when_every_ratio_is_non_finite(self):
+        """Dropping every unit leaves an empty figure, so raise instead."""
+        result = _make_rmspe_check_result(
+            ratios=(np.inf, np.inf), baseline_ratio=None, units=("a", "b")
+        )
+
+        with (
+            pytest.warns(UserWarning, match="non-finite"),
+            pytest.raises(ValueError, match="finite RMSPE ratio"),
+        ):
+            PlaceboInSpace.plot_rmspe_ratio(result)
+
+    def test_permutation_pvalue_counts_ties(self):
+        """Units tied with the treated unit count against it."""
+        ratios = np.array([1.0, 2.0, 2.0, 4.0])
+
+        assert _permutation_pvalue(ratios, 2.0) == pytest.approx(0.75)
+        assert _permutation_pvalue(ratios, 4.0) == pytest.approx(0.25)
