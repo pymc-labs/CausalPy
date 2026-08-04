@@ -130,6 +130,8 @@ This is the broadest check in the current API, but it is only available for PyMC
 
 `PlaceboInSpace` re-labels each control unit as though it were treated and compares those placebo effects to the observed treated effect. If many placebo units show effects as large as the treated unit, the original estimate looks less distinctive {cite:p}`abadie2010synthetic`.
 
+Raw effect sizes are hard to compare across units the synthetic control fits with differing accuracy, so the check also reports each unit's post/pre root mean squared prediction error in the `pre_rmspe`, `post_rmspe` and `rmspe_ratio` columns, with the treated unit's own figures in `metadata["baseline_rmspe"]`. This ratio is the statistic recommended in section 5.2 of {cite:t}`abadie2010synthetic`: a large value means a unit tracks its synthetic control closely before the intervention and diverges after it. `PlaceboInSpace.plot_rmspe_ratio(result)` draws every unit's ratio in rank order with the treated unit highlighted, and reports the permutation p-value, which is the treated unit's rank within the donor distribution.
+
 ### {doc}`BandwidthSensitivity <../api/generated/causalpy.checks.bandwidth.BandwidthSensitivity>`
 
 `BandwidthSensitivity` re-fits RD or RKink models across a sequence of bandwidths. Because bandwidth choice drives the bias-variance trade-off in local designs, a result that flips across plausible bandwidths should be treated cautiously {cite:p}`imbens2008regression,lee2010regression`.
