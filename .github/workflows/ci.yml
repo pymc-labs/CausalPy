@@ -117,6 +117,102 @@ jobs:
         # --no-deps so pip does not pull pip-built pymc/pytensor on top of the
         # conda-forge ones. Runtime deps come from environment.yml.
         run: pip install --no-deps -e .
+      - name: Fingerprint the resolved PyTensor C-cache runtime
+        id: pytensor-c-cache-fingerprint
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import platform
+          import shutil
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          import numpy as np
+          import pandas as pd
+          import pymc
+          import pytensor
+          from pytensor.link.c.cmodule import GCC_compiler
+
+          cxx = pytensor.config.cxx
+          if not cxx:
+              raise RuntimeError("PyTensor C cache requires a configured C++ compiler")
+          compiler = Path(shutil.which(cxx) or cxx).resolve(strict=True)
+          compiler_version = subprocess.run(
+              [compiler, "--version"],
+              check=True,
+              capture_output=True,
+              text=True,
+          ).stdout
+          with compiler.open("rb") as source:
+              compiler_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
+          packages = json.loads(
+              subprocess.run(
+                  ["micromamba", "list", "--json"],
+                  check=True,
+                  capture_output=True,
+                  text=True,
+              ).stdout
+          )
+          runtime = {
+              "compiler": {
+                  "path": str(compiler),
+                  "sha256": compiler_sha256,
+                  "version": compiler_version,
+              },
+              "environment_flags": {
+                  name: os.environ.get(name, "")
+                  for name in ("CPPFLAGS", "CXXFLAGS", "LDFLAGS")
+              },
+              "packages": sorted(
+                  (
+                      {
+                          "build": package.get(
+                              "build_string", package.get("build", "")
+                          ),
+                          "channel": package.get("channel", ""),
+                          "name": package["name"],
+                          "version": package["version"],
+                      }
+                      for package in packages
+                  ),
+                  key=lambda package: (
+                      package["name"],
+                      package["version"],
+                      package["build"],
+                      package["channel"],
+                  ),
+              ),
+              "platform": {
+                  "machine": platform.machine(),
+                  "platform": platform.platform(),
+                  "python_cache_tag": sys.implementation.cache_tag,
+                  "python_version": sys.version,
+              },
+              "pytensor": {
+                  "blas_ldflags": pytensor.config.blas__ldflags,
+                  "cxx": cxx,
+                  "cxxflags": pytensor.config.gcc__cxxflags,
+                  "effective_compile_args": GCC_compiler.compile_args(),
+                  "gcc_version": pytensor.config.gcc_version_str,
+                  "config_hash": pytensor.config.get_config_hash(),
+                  "version": pytensor.__version__,
+              },
+              "versions": {
+                  "numpy": np.__version__,
+                  "pandas": pd.__version__,
+                  "pymc": pymc.__version__,
+              },
+          }
+          canonical = json.dumps(runtime, sort_keys=True, separators=(",", ":"))
+          print(json.dumps(runtime, indent=2, sort_keys=True))
+          with Path(os.environ["GITHUB_OUTPUT"]).open("a") as output:
+              output.write(
+                  f"digest={hashlib.sha256(canonical.encode()).hexdigest()}\n"
+              )
+          PY
       - name: Show environment
         run: |
           micromamba list
@@ -154,9 +250,31 @@ jobs:
       - name: Run extra tests
         run: pytest docs/source/.codespell/test_notebook_to_markdown.py --no-cov
       - name: Run statistical correctness tests
-        run: pytest -o addopts='' -m correctness --cov=causalpy --cov-report= --cov-fail-under=0 --no-cov-on-fail
+        # CI restores a warm C cache only after these exact reproducibility tests; the manual migration baseline keeps a cold compiledir per capture for its exact raw-draw gate.
+        env:
+          PYTENSOR_FLAGS: base_compiledir=${{ runner.temp }}/pytensor-correctness
+        run: |
+          python -c "import pytensor; print('base_compiledir=', pytensor.config.base_compiledir); print('compiledir=', pytensor.config.compiledir)"
+          pytest -o addopts='' -m correctness --cov=causalpy --cov-report= --cov-fail-under=0 --no-cov-on-fail
+      - name: Restore the PyTensor C-module cache
+        id: pytensor-cmodules-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.pytensor/compiledir_*
+          key: >-
+            pytensor-cmodules-v1-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python-version }}-pandas${{ matrix.pandas-version }}-env${{ hashFiles('environment.yml') }}-src${{ hashFiles('causalpy/**/*.py', 'pyproject.toml') }}-runtime${{ steps.pytensor-c-cache-fingerprint.outputs.digest }}
+      - name: Discard a non-exact PyTensor C-module cache restore
+        if: steps.pytensor-cmodules-cache.outputs.cache-hit != 'true'
+        run: rm -rf ~/.pytensor/compiledir_*
       - name: Run tests
         run: pytest --cov-append --cov-report=xml --no-cov-on-fail
+      - name: Save the PyTensor C-module cache
+        if: steps.pytensor-cmodules-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.pytensor/compiledir_*
+          key: >-
+            pytensor-cmodules-v1-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python-version }}-pandas${{ matrix.pandas-version }}-env${{ hashFiles('environment.yml') }}-src${{ hashFiles('causalpy/**/*.py', 'pyproject.toml') }}-runtime${{ steps.pytensor-c-cache-fingerprint.outputs.digest }}
       - name: Check codespell for notebooks
         run: |
           python ./docs/source/.codespell/notebook_to_markdown.py --tempdir tmp_markdown
