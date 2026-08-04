@@ -648,6 +648,57 @@ class TestPlaceboInSpaceRmspeRatio:
             baseline["post_rmspe"] / baseline["pre_rmspe"]
         )
 
+    def test_plot_accepts_the_result_of_a_real_run(self):
+        """run() and the plot agree on the contract, without a hand-built result.
+
+        Every other plot test builds its ``CheckResult`` directly, so this is
+        the only one that would catch the two drifting apart.
+        """
+        result = _run_placebo_in_space()
+
+        fig = PlaceboInSpace.plot_rmspe_ratio(result)
+
+        labels = [t.get_text() for t in fig.axes[0].get_yticklabels()]
+        assert set(labels) == {"a", "b", "c", "actual"}
+        treated_position = labels.index("actual")
+        assert _bar_colours(fig)[treated_position] == _TREATED_COLOUR.lower()
+        plt.close(fig)
+
+    def test_plot_drops_a_unit_whose_placebo_fit_failed(self):
+        """A failed fit leaves a NaN ratio, which the plot drops with a warning.
+
+        The non-finite path has two origins and they reach it differently: a
+        zero pre-period RMSPE yields an infinity from ``_rmspe_stats``, while a
+        failed fit never gets there and leaves the column NaN.
+        """
+        real_init = SyntheticControl.__init__
+        attempts = []
+
+        def fail_once(self, *args, **kwargs):
+            # The first call builds the experiment itself; the placebo re-fits
+            # follow, so failing on the second breaks exactly one donor.
+            attempts.append(None)
+            if len(attempts) == 2:
+                raise RuntimeError("simulated failure")
+            return real_init(self, *args, **kwargs)
+
+        with patch.object(SyntheticControl, "__init__", fail_once):
+            result = _run_placebo_in_space()
+
+        assert "error" in result.table.columns
+        failed = result.table.loc[
+            result.table["error"].notna(), "placebo_treated"
+        ].tolist()
+        assert len(failed) == 1
+        assert result.table["rmspe_ratio"].isna().sum() == 1
+
+        with pytest.warns(UserWarning, match="failed placebo fit"):
+            fig = PlaceboInSpace.plot_rmspe_ratio(result)
+
+        labels = [t.get_text() for t in fig.axes[0].get_yticklabels()]
+        assert failed[0] not in labels
+        plt.close(fig)
+
     def test_plot_returns_a_figure(self):
         """The plot draws one bar per unit, treated included."""
         fig = PlaceboInSpace.plot_rmspe_ratio(_make_rmspe_check_result())

@@ -335,7 +335,10 @@ class PlaceboInSpace:
                 if np.isfinite(stats["rmspe_ratio"])
             ]
             if annotations:
-                subtitle = "Permutation p-value.  " + ",  ".join(annotations)
+                # Named for Abadie because the effect-summary columns already
+                # carry an unrelated `p_value`, and the two sit side by side in
+                # the same CheckResult.
+                subtitle = "Abadie permutation p-value.  " + ",  ".join(annotations)
 
         plot = (
             ggplot(frame, aes("unit", "rmspe_ratio", fill="role"))
