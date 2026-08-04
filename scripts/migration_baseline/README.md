@@ -58,7 +58,8 @@ The protocol is not runnable on a small shared CI container or agent sandbox; it
 - **Memory:** at least 8 GB of RAM available to the run. The serialized fixtures are tiny — 24 and 20 rows — so the posteriors themselves are megabytes; the requirement is set by solving and building two full scientific stacks and by PyTensor's C/numba compilation, not by the draws.
 - **CPU:** at least 4 cores. Sampling does not use them: `cores=1` is a registered protocol constant (see the runtime protocol above), so the four chains of each model run serially and more cores do not shorten a capture. They are for provisioning the two prefixes and compiling, and for headroom. Do not run the captures concurrently — each is an independent process and the two stacks must not contend for memory.
 - **Wall time:** budget hours end to end and schedule it as one uninterrupted job. Sampling itself is the smaller part: 32 serial chain runs (4 captures × 2 models × 4 chains of 1,000 tune + 1,000 draws at `target_accept=0.95`) over small fixtures. The bulk of the wall time is creating the two prefixes and cold-compiling each stack.
-- **Isolation:** a clean host with no other memory-hungry work, and **one PyTensor compile cache per capture**. The command block below points `PYTENSOR_FLAGS=compiledir=...` at a directory unique to each of the four captures. Give every capture its own, not one per prefix and never one shared by all four: two captures of the same stack that share a compiledir compile the first graph cold and link the second from cache, and on the Synthetic Control graph that reproducibly changes the result at floating-point ulps, which fails the within-stack repeatability gate even though the protocol, seed, fixtures and runtime are identical. This is a property of compiled-cache reuse, not of CausalPy: the same cold-versus-warm difference reproduces in raw PyMC with a Dirichlet plus HalfNormal graph and no CausalPy import (`beta` max delta about 5e-13), it is unaffected by `PYTHONHASHSEED`, and independent fresh compiledirs are byte-identical across hash seeds. The harness neither records nor validates `compiledir`, so this one is on the coordinator.
+- **Isolation:** a clean host with no other memory-hungry work, and **one PyTensor cache root per capture**. The command block below points `PYTENSOR_FLAGS=base_compiledir=...` at a directory unique to each of the four captures, isolating both C modules and the Numba cache. Give every capture its own, not one per prefix and never one shared by all four: two captures of the same stack that share a compiledir compile the first graph cold and link the second from cache, and on the Synthetic Control graph that reproducibly changes the result at floating-point ulps, which fails the within-stack repeatability gate even though the protocol, seed, fixtures and runtime are identical. This is a property of compiled-cache reuse, not of CausalPy: the same cold-versus-warm difference reproduces in raw PyMC with a Dirichlet plus HalfNormal graph and no CausalPy import (`beta` max delta about 5e-13), it is unaffected by `PYTHONHASHSEED`, and independent fresh compiledirs are byte-identical across hash seeds. The harness neither records nor validates `compiledir`, so this one is on the coordinator.
+- **CI distinction:** CI reuses a warm, scoped PyTensor C-module cache only after its exact correctness lane; it never supplies a cache to this manual protocol, whose four captures deliberately use isolated cache roots to validate exact raw-draw repeatability.
 
 The coordinator must provision `PYMC6_ROOT` as a separate clean detached worktree at `ed425ae2e6c884256f7e3f12beba54d9184d021d` and install it into its own editable-install prefix. Do not use the harness checkout (`MIGRATION_ROOT`) as `PYMC6_ROOT`: its `HEAD` intentionally differs from the migration candidate, so `capture` would reject it.
 
@@ -84,19 +85,19 @@ HARNESS="$MIGRATION_ROOT/scripts/migration_baseline/harness.py"
 mkdir "$EVIDENCE_ROOT"
 mkdir -p "$CACHE_ROOT"/ref1 "$CACHE_ROOT"/ref2 "$CACHE_ROOT"/cand1 "$CACHE_ROOT"/cand2
 
-PYTENSOR_FLAGS="compiledir=$CACHE_ROOT/ref1" "$MAMBA" run -p "$PYMC5_PREFIX" python "$HARNESS" capture \
+PYTENSOR_FLAGS="base_compiledir=$CACHE_ROOT/ref1" "$MAMBA" run -p "$PYMC5_PREFIX" python "$HARNESS" capture \
   --stack pymc5 --capture-role reference_first --batch-id "$BATCH_ID" \
   --repo-root "$PYMC5_ROOT" --output "$EVIDENCE_ROOT/pymc5-run-1.json"
-PYTENSOR_FLAGS="compiledir=$CACHE_ROOT/ref2" "$MAMBA" run -p "$PYMC5_PREFIX" python "$HARNESS" capture \
+PYTENSOR_FLAGS="base_compiledir=$CACHE_ROOT/ref2" "$MAMBA" run -p "$PYMC5_PREFIX" python "$HARNESS" capture \
   --stack pymc5 --capture-role reference_second --batch-id "$BATCH_ID" \
   --repo-root "$PYMC5_ROOT" --output "$EVIDENCE_ROOT/pymc5-run-2.json"
-PYTENSOR_FLAGS="compiledir=$CACHE_ROOT/cand1" "$MAMBA" run -p "$PYMC6_PREFIX" python "$HARNESS" capture \
+PYTENSOR_FLAGS="base_compiledir=$CACHE_ROOT/cand1" "$MAMBA" run -p "$PYMC6_PREFIX" python "$HARNESS" capture \
   --stack pymc6 --capture-role candidate_first --batch-id "$BATCH_ID" \
   --repo-root "$PYMC6_ROOT" --output "$EVIDENCE_ROOT/pymc6-run-1.json"
-PYTENSOR_FLAGS="compiledir=$CACHE_ROOT/cand2" "$MAMBA" run -p "$PYMC6_PREFIX" python "$HARNESS" capture \
+PYTENSOR_FLAGS="base_compiledir=$CACHE_ROOT/cand2" "$MAMBA" run -p "$PYMC6_PREFIX" python "$HARNESS" capture \
   --stack pymc6 --capture-role candidate_second --batch-id "$BATCH_ID" \
   --repo-root "$PYMC6_ROOT" --output "$EVIDENCE_ROOT/pymc6-run-2.json"
-PYTENSOR_FLAGS="compiledir=$CACHE_ROOT/cand1" "$MAMBA" run -p "$PYMC6_PREFIX" python "$HARNESS" compare \
+PYTENSOR_FLAGS="base_compiledir=$CACHE_ROOT/cand1" "$MAMBA" run -p "$PYMC6_PREFIX" python "$HARNESS" compare \
   --reference-first "$EVIDENCE_ROOT/pymc5-run-1.json" \
   --reference-second "$EVIDENCE_ROOT/pymc5-run-2.json" \
   --candidate-first "$EVIDENCE_ROOT/pymc6-run-1.json" \
