@@ -2415,6 +2415,12 @@ class StateSpaceTimeSeries(PyMCModel):
     """
     State-space time series model using :class:`pymc-extras.statespace.structural`.
 
+    The model combines a local level/trend component with frequency-domain
+    seasonality. When `X` is passed to `fit`, its columns (except the patsy
+    `Intercept`, which the level absorbs) enter as exogenous regressors
+    through a static-coefficient `Regression` component, and out-of-sample
+    predictions use the post-period `X` as the forecast scenario.
+
     Parameters
     ----------
     level_order : int, optional
@@ -2422,9 +2428,13 @@ class StateSpaceTimeSeries(PyMCModel):
     seasonal_length : int, optional
         Seasonal period (e.g., 12 for monthly data with annual seasonality). Defaults to 12.
     trend_component : optional
-        Custom state-space trend component.
+        Custom state-space trend component. Must be a pymc-extras structural
+        component (e.g. `pymc_extras.statespace.structural.LevelTrend`).
+        Components with non-default names introduce their own parameter
+        names; pass matching entries in `priors`.
     seasonality_component : optional
-        Custom state-space seasonal component.
+        Custom state-space seasonal component. Same requirements as
+        `trend_component`.
     sample_kwargs : dict, optional
         Kwargs passed to `pm.sample`.
     mode : str, optional
@@ -2444,6 +2454,7 @@ class StateSpaceTimeSeries(PyMCModel):
         "params_freq": Prior("Normal", mu=0, sigma=80),
         "sigma_level_trend": Prior("Gamma", alpha=2, beta=5),
         "sigma_freq": Prior("Gamma", alpha=2, beta=1),
+        "beta_exog": Prior("Normal", mu=0, sigma=50),
     }
 
     def __init__(
@@ -2473,6 +2484,7 @@ class StateSpaceTimeSeries(PyMCModel):
         self.mode = mode
         self._treated_units = ["unit_0"]
         self.ss_mod: Any = None
+        self._exog_names: list[str] = []
         self._validate_and_initialize_components()
 
     def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
@@ -2496,22 +2508,29 @@ class StateSpaceTimeSeries(PyMCModel):
         Validate custom components only. Optional dependencies are imported lazily
         when default components are actually needed.
         """
-        # Validate custom components have required methods
-        if self._custom_trend_component is not None and not hasattr(
-            self._custom_trend_component, "apply"
-        ):
-            raise ValueError(
-                "Custom trend_component must have an 'apply' method that accepts time data "
-                "and returns a PyMC tensor."
-            )
+        # Validate custom components. The base class is only needed when the
+        # user supplies one, so the import stays out of the default path.
+        custom_components = [
+            ("trend_component", self._custom_trend_component),
+            ("seasonality_component", self._custom_seasonality_component),
+        ]
+        if any(component is not None for _, component in custom_components):
+            try:
+                from pymc_extras.statespace.models.structural.core import Component
+            except ImportError as err:
+                raise ImportError(
+                    "Custom components are checked against "
+                    "pymc_extras.statespace.models.structural.core.Component, and "
+                    "this pymc-extras version does not expose it at that path."
+                ) from err
 
-        if self._custom_seasonality_component is not None and not hasattr(
-            self._custom_seasonality_component, "apply"
-        ):
-            raise ValueError(
-                "Custom seasonality_component must have an 'apply' method that accepts time data "
-                "and returns a PyMC tensor."
-            )
+            for label, component in custom_components:
+                if component is not None and not isinstance(component, Component):
+                    raise ValueError(
+                        f"Custom {label} must be a pymc-extras structural state-space "
+                        "component (e.g. pymc_extras.statespace.structural.LevelTrend), "
+                        f"got {type(component).__name__}."
+                    )
 
         # Initialize components
         self._trend_component = None
@@ -2553,6 +2572,27 @@ class StateSpaceTimeSeries(PyMCModel):
             )
         return self._seasonality_component
 
+    def _extract_exog_names(self, X: xr.DataArray | None) -> list[str]:
+        """Exogenous regressor names from X, excluding the patsy intercept.
+
+        The state-space level absorbs the intercept, so a constant regressor
+        would be unidentified.
+        """
+        if X is None or "coeffs" not in X.coords:
+            return []
+        names = [str(name) for name in X.coords["coeffs"].values]
+        if "Intercept" in names:
+            names.remove("Intercept")
+            if names:
+                warnings.warn(
+                    "Dropping the 'Intercept' column from the regressors: the "
+                    "state-space level already absorbs it. Use a formula like "
+                    "'y ~ 0 + x1' to silence this warning.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+        return names
+
     def build_model(
         self,
         X: xr.DataArray | None = None,
@@ -2565,8 +2605,9 @@ class StateSpaceTimeSeries(PyMCModel):
         Parameters
         ----------
         X : xr.DataArray, optional
-            Input features with dims ["obs_ind", "coeffs"]. Not used by state-space
-            models, but kept for API compatibility.
+            Input features with dims ["obs_ind", "coeffs"]. Columns other than
+            the patsy "Intercept" become exogenous regressors. If None or
+            empty, the model has trend and seasonality only.
         y : xr.DataArray
             Target variable with dims ["obs_ind", "treated_units"]. Must have datetime
             coordinates on obs_ind.
@@ -2630,6 +2671,13 @@ class StateSpaceTimeSeries(PyMCModel):
         trend = self._get_trend_component()
         season = self._get_seasonality_component()
         combined = trend + season
+        self._exog_names = self._extract_exog_names(X)
+        if self._exog_names:
+            from pymc_extras.statespace import structural as st
+
+            combined += st.Regression(
+                name="exog", state_names=self._exog_names, innovations=False
+            )
         # `mode` belongs on the state-space model itself; passing it to
         # `build_statespace_graph` is deprecated in pymc-extras.
         self.ss_mod = combined.build(mode=self.mode)
@@ -2689,6 +2737,9 @@ class StateSpaceTimeSeries(PyMCModel):
                 else y.values
             )
             df = pd.DataFrame({"y": y_values.flatten()}, index=datetime_index)
+            if self._exog_names and X is not None:
+                # The state-space graph looks this variable up by name
+                pm.Data("data_exog", X.sel(coeffs=self._exog_names).values)
             self.ss_mod.build_statespace_graph(df[["y"]])
 
     def fit(
@@ -2703,8 +2754,8 @@ class StateSpaceTimeSeries(PyMCModel):
         Parameters
         ----------
         X : xr.DataArray, optional
-            Input features with dims ["obs_ind", "coeffs"]. Not used by state-space
-            models, but kept for API compatibility.
+            Input features with dims ["obs_ind", "coeffs"]. Columns other than
+            the patsy "Intercept" become exogenous regressors.
         y : xr.DataArray
             Target variable with dims ["obs_ind", "treated_units"]. Must have datetime
             coordinates on obs_ind.
@@ -2775,17 +2826,26 @@ class StateSpaceTimeSeries(PyMCModel):
             else conditional_idata
         )
 
-    def _forecast(self, start: pd.Timestamp, periods: int) -> xr.Dataset:
+    def _forecast(
+        self,
+        start: pd.Timestamp,
+        periods: int,
+        scenario: np.ndarray | None = None,
+    ) -> xr.Dataset:
         """
         Forecast future values.
         `start` is the timestamp of the last observed point, and `periods` is the number of steps ahead.
+        `scenario` carries the exogenous regressor values for the forecast
+        period when the model was fit with covariates.
         Returns an xarray Dataset with 'forecast_observed'.
         """
         if self.idata is None:
             raise RuntimeError("Model must be fit before forecasting.")
         if self.ss_mod is None:
             raise RuntimeError("State space model not initialized")
-        forecast = self.ss_mod.forecast(self.idata, start=start, periods=periods)
+        forecast = self.ss_mod.forecast(
+            self.idata, start=start, periods=periods, scenario=scenario
+        )
         return forecast.to_dataset() if isinstance(forecast, xr.DataTree) else forecast
 
     def predict(
@@ -2801,8 +2861,10 @@ class StateSpaceTimeSeries(PyMCModel):
         ----------
         X : xr.DataArray, optional
             Input features with dims ["obs_ind", "coeffs"]. Must have datetime
-            coordinates on obs_ind for out-of-sample predictions. Not required for
-            in-sample predictions.
+            coordinates on obs_ind for out-of-sample predictions, and must
+            contain the covariate columns used at fit time when the model was
+            fit with exogenous regressors. Not required for in-sample
+            predictions.
         coords : dict, optional
             Not used directly, datetime extracted from X coordinates.
         out_of_sample : bool, optional
@@ -2833,8 +2895,23 @@ class StateSpaceTimeSeries(PyMCModel):
                 raise ValueError("X 'obs_ind' coordinate must contain datetime values")
 
             idx = pd.DatetimeIndex(obs_ind_vals)
+            scenario = None
+            if self._exog_names:
+                x_names = (
+                    [str(name) for name in X.coords["coeffs"].values]
+                    if "coeffs" in X.coords
+                    else []
+                )
+                missing = [n for n in self._exog_names if n not in x_names]
+                if missing:
+                    raise ValueError(
+                        f"X is missing exogenous columns used at fit time: {missing}."
+                    )
+                scenario = X.sel(coeffs=self._exog_names).values
             last = self._train_index[-1]  # start forecasting after the last observed
-            forecast_data = self._forecast(start=last, periods=len(idx))
+            forecast_data = self._forecast(
+                start=last, periods=len(idx), scenario=scenario
+            )
             forecast_copy = forecast_data.copy()
 
             # Rename 'time' to 'obs_ind' to match CausalPy conventions
@@ -2873,7 +2950,8 @@ class StateSpaceTimeSeries(PyMCModel):
         Parameters
         ----------
         X : xr.DataArray, optional
-            Input features. Not used by state-space models, but kept for API compatibility.
+            Input features. In-sample predictions come from the Kalman
+            smoother, so X is not used here.
         y : xr.DataArray
             Target variable with dims ["obs_ind", "treated_units"].
         coords : dict, optional

@@ -306,25 +306,57 @@ class TestStateSpaceTimeSeriesCoverage:
         )
         return y_da
 
-    def test_custom_trend_component_without_apply_method(self):
-        """Test validation error when custom trend component lacks apply method."""
+    def test_custom_trend_component_wrong_type(self):
+        """Test validation error when custom trend component is not a
+        statespace component."""
         with pytest.raises(
             ValueError,
-            match="Custom trend_component must have an 'apply' method",
+            match="Custom trend_component must be a pymc-extras structural",
         ):
             cp.pymc_models.StateSpaceTimeSeries(
                 trend_component=MockComponentNoApply(),
                 sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
             )
 
-    def test_custom_seasonality_component_without_apply_method(self):
-        """Test validation error when custom seasonality component lacks apply method."""
+    def test_custom_seasonality_component_wrong_type(self):
+        """Test validation error when custom seasonality component is not a
+        statespace component."""
         with pytest.raises(
             ValueError,
-            match="Custom seasonality_component must have an 'apply' method",
+            match="Custom seasonality_component must be a pymc-extras structural",
         ):
             cp.pymc_models.StateSpaceTimeSeries(
                 seasonality_component=MockComponentNoApply(),
+                sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            )
+
+    def test_custom_statespace_components_accepted(self, sample_data):
+        """Real pymc-extras structural components are valid custom components."""
+        from pymc_extras.statespace import structural as st
+
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            trend_component=st.LevelTrend(order=1),
+            seasonality_component=st.FrequencySeasonality(season_length=7, name="freq"),
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        model.build_model(y=sample_data)
+
+        assert "initial_level_trend" in (rv.name for rv in model.free_RVs)
+
+    def test_component_base_class_moved_upstream(self, monkeypatch):
+        """A moved upstream base class gives an actionable error."""
+        import sys
+
+        from pymc_extras.statespace import structural as st
+
+        component = st.LevelTrend(order=1)
+        monkeypatch.setitem(
+            sys.modules, "pymc_extras.statespace.models.structural.core", None
+        )
+
+        with pytest.raises(ImportError, match="does not expose it at that path"):
+            cp.pymc_models.StateSpaceTimeSeries(
+                trend_component=component,
                 sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
             )
 
@@ -643,6 +675,69 @@ class TestStateSpaceTimeSeriesCoverage:
         assert model["sigma_freq"].owner.op.name == "halfnormal"
         # Untouched defaults still apply
         assert model["sigma_level_trend"].owner.op.name == "gamma"
+
+    def test_extract_exog_names(self):
+        """Intercept handling: dropped silently when alone, with a warning
+        when other covariates remain."""
+        import warnings
+
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False}
+        )
+
+        def make_X(names):
+            return xr.DataArray(
+                np.zeros((5, len(names))),
+                dims=["obs_ind", "coeffs"],
+                coords={"obs_ind": np.arange(5), "coeffs": names},
+            )
+
+        assert model._extract_exog_names(None) == []
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # intercept-only must not warn
+            assert model._extract_exog_names(make_X(["Intercept"])) == []
+            assert model._extract_exog_names(make_X(["x1", "x2"])) == ["x1", "x2"]
+
+        with pytest.warns(UserWarning, match="Dropping the 'Intercept' column"):
+            assert model._extract_exog_names(make_X(["Intercept", "x1"])) == ["x1"]
+
+    def test_predict_missing_exog_columns(self, sample_data):
+        """Predicting out of sample without the fit-time covariates raises."""
+        y_da = sample_data
+        n = len(y_da)
+        X = xr.DataArray(
+            np.random.randn(n, 1),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": y_da.coords["obs_ind"], "coeffs": ["x1"]},
+        )
+
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+            },
+        )
+        model.fit(X=X, y=y_da)
+
+        future = pd.date_range(
+            start=pd.Timestamp(y_da.coords["obs_ind"].values[-1])
+            + pd.Timedelta(days=1),
+            periods=5,
+            freq="D",
+        )
+        X_bad = xr.DataArray(
+            np.random.randn(5, 1),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": future, "coeffs": ["other"]},
+        )
+
+        with pytest.raises(ValueError, match="missing exogenous columns"):
+            model.predict(X=X_bad, out_of_sample=True)
 
     def test_clone_preserves_config(self):
         """Test that _clone carries over the full model configuration."""

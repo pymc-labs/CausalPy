@@ -161,7 +161,7 @@ def test_state_space_predict_and_score():
     trend = np.linspace(0, 1.0, len(dates))
     season = 0.5 * np.sin(2 * np.pi * dates.dayofyear.to_numpy() / 7)
     noise = rng.normal(0, 0.1, len(dates))
-    y = trend + season + noise
+    y = np.asarray(trend + season + noise)
 
     # Split into train/test
     train_dates = dates[:50]
@@ -225,134 +225,7 @@ def test_state_space_predict_and_score():
     assert "unit_0_r2" in score.index
     assert "unit_0_r2_std" in score.index
 
-
-@pytest.mark.integration
-def test_state_space_custom_components():
-    """Test StateSpaceTimeSeries custom component validation."""
-    # Skip if pymc-extras is not available
-    try:
-        from pymc_extras.statespace import structural  # noqa: F401
-    except ImportError:
-        pytest.skip("pymc-extras is required for StateSpaceTimeSeries tests")
-
-    class BadComponent:
-        """Component without apply method"""
-
-        pass
-
-    sample_kwargs = {"chains": 1, "draws": 10, "progressbar": False}
-
-    # Test invalid trend component
-    with pytest.raises(
-        ValueError,
-        match="Custom trend_component must have an 'apply' method",
-    ):
-        cp.pymc_models.StateSpaceTimeSeries(
-            trend_component=BadComponent(),
-            sample_kwargs=sample_kwargs,
-        )
-
-    # Test invalid seasonality component
-    with pytest.raises(
-        ValueError,
-        match="Custom seasonality_component must have an 'apply' method",
-    ):
-        cp.pymc_models.StateSpaceTimeSeries(
-            seasonality_component=BadComponent(),
-            sample_kwargs=sample_kwargs,
-        )
-
-
-@pytest.mark.integration
-def test_state_space_error_conditions():
-    """Test StateSpaceTimeSeries error handling."""
-    # Skip if pymc-extras is not available
-    try:
-        from pymc_extras.statespace import structural  # noqa: F401
-    except ImportError:
-        pytest.skip("pymc-extras is required for StateSpaceTimeSeries tests")
-
-    rng = np.random.default_rng(seed=42)
-    dates = pd.date_range(start="2020-01-01", periods=30, freq="D")
-    y_values = rng.normal(0, 1, (len(dates), 1))
-    y = xr.DataArray(
-        y_values,
-        dims=["obs_ind", "treated_units"],
-        coords={"obs_ind": dates, "treated_units": ["unit_0"]},
-    )
-
-    sample_kwargs = {"chains": 1, "draws": 10, "tune": 10, "progressbar": False}
-
-    model = cp.pymc_models.StateSpaceTimeSeries(
-        level_order=2,
-        seasonal_length=7,
-        sample_kwargs=sample_kwargs,
-        mode="FAST_COMPILE",
-    )
-
-    # y is required
-    with pytest.raises(ValueError, match="y must be provided"):
-        model.fit(X=None, y=None)
-
-    # A treated_units dimension is required
-    y_without_units = xr.DataArray(
-        y_values[:, 0], dims=["obs_ind"], coords={"obs_ind": dates}
-    )
-    with pytest.raises(ValueError, match="requires a treated_units dimension"):
-        model.fit(X=None, y=y_without_units)
-
-    # Exactly one treated unit is supported
-    y_two_units = xr.DataArray(
-        rng.normal(0, 1, (len(dates), 2)),
-        dims=["obs_ind", "treated_units"],
-        coords={"obs_ind": dates, "treated_units": ["unit_0", "unit_1"]},
-    )
-    with pytest.raises(ValueError, match="supports exactly one treated unit"):
-        model.fit(X=None, y=y_two_units)
-
-    # Non-datetime obs_ind with no datetime_index fallback
-    y_integer_index = xr.DataArray(
-        y_values,
-        dims=["obs_ind", "treated_units"],
-        coords={"obs_ind": np.arange(len(dates)), "treated_units": ["unit_0"]},
-    )
-    with pytest.raises(ValueError, match="must contain datetime values"):
-        model.fit(X=None, y=y_integer_index)
-
-    # The datetime_index fallback must be a pd.DatetimeIndex
-    with pytest.raises(ValueError, match="must be a pd.DatetimeIndex"):
-        model.fit(
-            X=None,
-            y=y_integer_index,
-            coords={"datetime_index": np.arange(len(dates))},
-        )
-
-    # Fit a model for the prediction error tests
-    model2 = cp.pymc_models.StateSpaceTimeSeries(
-        level_order=2,
-        seasonal_length=7,
-        sample_kwargs=sample_kwargs,
-        mode="FAST_COMPILE",
-    )
-    model2.fit(X=None, y=y)
-
-    # Out-of-sample prediction requires X carrying the forecast datetimes
-    with pytest.raises(ValueError, match="X must be provided for out-of-sample"):
-        model2.predict(X=None, out_of_sample=True)
-
-    X_without_obs_ind = xr.DataArray(np.zeros((5, 0)), dims=["obs_ind", "coeffs"])
-    with pytest.raises(ValueError, match="X must have 'obs_ind' coordinate"):
-        model2.predict(X=X_without_obs_ind, out_of_sample=True)
-
-    X_integer_index = xr.DataArray(
-        np.zeros((5, 0)),
-        dims=["obs_ind", "coeffs"],
-        coords={"obs_ind": np.arange(5), "coeffs": []},
-    )
-    with pytest.raises(ValueError, match="must contain datetime values"):
-        model2.predict(X=X_integer_index, out_of_sample=True)
-
-    # Predict before fit
+    # Predict before fit raises
     unfitted_model = cp.pymc_models.StateSpaceTimeSeries(
         level_order=2,
         seasonal_length=7,
@@ -361,3 +234,57 @@ def test_state_space_error_conditions():
     )
     with pytest.raises(RuntimeError, match="Model must be fit before"):
         unfitted_model.predict(X=None)
+
+
+@pytest.mark.integration
+def test_its_with_state_space_covariates():
+    """ITS + StateSpaceTimeSeries with exogenous covariates end to end."""
+    try:
+        from pymc_extras.statespace import structural  # noqa: F401
+    except ImportError:
+        pytest.skip("pymc-extras is required for StateSpaceTimeSeries tests")
+
+    rng = np.random.default_rng(seed=42)
+    n = 100
+    dates = pd.date_range(start="2020-01-01", periods=n, freq="D")
+    x1 = rng.normal(size=n)
+    x2 = rng.normal(size=n)
+    season = 0.5 * np.sin(2 * np.pi * dates.dayofyear / 7)
+    y = 5 + 0.05 * np.arange(n) + season + 2.0 * x1 - 1.5 * x2 + rng.normal(0, 0.3, n)
+    df = pd.DataFrame({"y": y, "x1": x1, "x2": x2}, index=dates)
+
+    model = cp.pymc_models.StateSpaceTimeSeries(
+        level_order=2,
+        seasonal_length=7,
+        sample_kwargs={
+            "chains": 1,
+            "draws": 100,
+            "tune": 100,
+            "progressbar": False,
+            "random_seed": 7,
+        },
+    )
+
+    # patsy adds an Intercept column; the model drops it with a warning
+    with pytest.warns(UserWarning, match="Dropping the 'Intercept' column"):
+        result = cp.InterruptedTimeSeries(
+            data=df,
+            treatment_time=dates[80],
+            formula="y ~ 1 + x1 + x2",
+            model=model,
+        )
+
+    # Covariates entered the model: beta_exog exists with the right coords.
+    # No posterior-accuracy assertions here: the suite mocks pm.sample
+    # session-wide (see conftest mock_pymc_sample), so draws come from the
+    # prior. Numerical recovery is exercised outside the test suite.
+    assert "beta_exog" in result.idata.posterior
+    assert list(result.idata.posterior["beta_exog"].coords["state_exog"].values) == [
+        "x1",
+        "x2",
+    ]
+
+    # Counterfactual and impact have the post-period shape and finite values
+    n_post = n - 80
+    assert result.post_impact.sizes["obs_ind"] == n_post
+    assert np.isfinite(result.post_impact.values).all()

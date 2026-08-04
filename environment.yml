@@ -32,7 +32,7 @@ dependencies:
   - prek
   - pyarrow
   - pymc-bart
-  - pymc-extras>=0.3.0
+  - pymc-extras>=0.8.0
   - pymc<7,>=6.0.1
   - pytensor<4,>=3
   - pytest
