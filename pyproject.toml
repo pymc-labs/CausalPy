@@ -236,11 +236,15 @@ exclude_lines = [
 files = "causalpy"
 exclude = "build|dist|docs|notebooks|tests|setup.py"
 ignore_missing_imports = true
+# Fail if an override below stops matching a real module, so a rename or a deletion
+# cannot leave a stale allowlist entry behind.
+warn_unused_configs = true
 
 # Allowlist of modules that already fail, so the gate starts green and ratchets down
-# (49 errors in 16 files at the time of writing). Each entry disables only the error
-# codes that module actually produces, so everything else is still checked there.
-# Removing an entry, or a single code from one, is a self-contained follow-up PR.
+# (49 errors in 16 files, measured on pymc6_and_pymcmarketing1_migration at 194343ca).
+# Each entry disables only the error codes that module actually produces, so everything
+# else is still checked there. Removing an entry, or a single code from one, is a
+# self-contained follow-up PR.
 [[tool.mypy.overrides]]
 module = "causalpy.experiments.inverse_propensity_weighting"
 disable_error_code = ["arg-type", "assignment", "index", "return-value"]

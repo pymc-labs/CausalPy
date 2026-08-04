@@ -283,6 +283,14 @@ When adding a new example notebook to the documentation gallery:
   make lint
   ```
 
+- Your code passes type checking. This is deliberately not a pre-commit hook: mypy only says anything useful when the project dependencies are importable, so run it from the project environment.
+
+  ```bash
+  make typecheck
+  ```
+
+  Modules that already fail are listed as `[[tool.mypy.overrides]]` entries in `pyproject.toml`, each disabling only the error codes that module currently produces. New code should not need a new entry. Removing an existing one is a welcome contribution.
+
 ## Building the documentation locally
 
 To build the documentation, run from the **project root**:
