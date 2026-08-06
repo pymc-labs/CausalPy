@@ -200,7 +200,19 @@ def _get_maketables_hdi_prob(experiment: Any) -> float:
 
 
 def _resolve_pymc_coef_draws(experiment: Any) -> xr.DataArray:
-    """Resolve posterior coefficient draws across supported PyMC model families."""
+    """Resolve posterior coefficient draws across supported PyMC model families.
+
+    Experiments whose posterior has no conventional ``beta``-like coefficient
+    vector (the ETWFE staggered DiD fit is one: with no covariates it has no
+    ``beta`` at all) can opt out by exposing ``__maketables_coef_draws__``, an
+    :class:`xarray.DataArray` carrying a ``coeffs`` dimension whose coordinate
+    matches ``experiment.labels``. Returning ``None`` from that hook falls back to
+    the standard resolution below.
+    """
+    custom = getattr(experiment, "__maketables_coef_draws__", None)
+    if custom is not None:
+        return custom
+
     posterior = experiment._model_backend.require_idata().posterior
     labels = list(getattr(experiment, "labels", []))
 

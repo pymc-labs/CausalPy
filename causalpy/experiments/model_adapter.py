@@ -144,6 +144,7 @@ class ModelAdapter(ABC):
         y: Any,
         *,
         coords: dict[str, Any] | None = None,
+        **fit_kwargs: Any,
     ) -> Any:
         """Fit the model with backend-appropriate conventions.
 
@@ -155,6 +156,14 @@ class ModelAdapter(ABC):
             Outcome vector or matrix.
         coords : dict, optional
             Coordinate metadata for PyMC models. Ignored by sklearn backends.
+        **fit_kwargs
+            Backend-specific keyword arguments forwarded to the underlying
+            model's ``fit``. Models whose ``fit`` needs more than ``X`` and
+            ``y`` -- for example the panel index arrays of
+            :class:`~causalpy.pymc_models.ETWFERegression` -- pass them here,
+            so experiments can still call the adapter unconditionally instead
+            of reaching past it to ``self.model``. A backend that cannot use a
+            given keyword raises ``TypeError`` from the underlying call.
         """
 
     @abstractmethod
@@ -265,6 +274,7 @@ class PyMCModelAdapter(ModelAdapter):
         y: Any,
         *,
         coords: dict[str, Any] | None = None,
+        **fit_kwargs: Any,
     ) -> az.InferenceData:
         """Fit the PyMC model.
 
@@ -276,8 +286,10 @@ class PyMCModelAdapter(ModelAdapter):
             Outcome vector or matrix.
         coords : dict, optional
             Coordinate metadata for the PyMC model.
+        **fit_kwargs
+            Extra keyword arguments forwarded to the model's ``fit``.
         """
-        return self._model.fit(X=X, y=y, coords=coords)
+        return self._model.fit(X=X, y=y, coords=coords, **fit_kwargs)
 
     def predict(
         self,
@@ -374,6 +386,7 @@ class SklearnModelAdapter(ModelAdapter):
         y: Any,
         *,
         coords: dict[str, Any] | None = None,
+        **fit_kwargs: Any,
     ) -> Any:
         """Fit the sklearn model.
 
@@ -385,12 +398,14 @@ class SklearnModelAdapter(ModelAdapter):
             Outcome vector or matrix.
         coords : dict, optional
             Ignored for sklearn backends.
+        **fit_kwargs
+            Extra keyword arguments forwarded to the sklearn model's ``fit``.
         """
         if isinstance(y, xr.DataArray) and "treated_units" in y.coords:
             self._treated_units = np.asarray(y.coords["treated_units"])
         else:
             self._treated_units = None
-        return self._model.fit(X=_sklearn_array(X), y=_sklearn_y(y))
+        return self._model.fit(X=_sklearn_array(X), y=_sklearn_y(y), **fit_kwargs)
 
     def predict(
         self,
@@ -548,6 +563,7 @@ class PyMCForecastAdapter(ModelAdapter):
         y: Any,
         *,
         coords: dict[str, Any] | None = None,
+        **fit_kwargs: Any,
     ) -> az.InferenceData:
         """Fit the forecasting model on the pre-period.
 
@@ -560,8 +576,10 @@ class PyMCForecastAdapter(ModelAdapter):
         coords : dict, optional
             Coordinate metadata; ignored (real coordinates are read from
             ``X`` and ``y``).
+        **fit_kwargs
+            Extra keyword arguments forwarded to the model's ``fit``.
         """
-        return self._model.fit(X=X, y=y, coords=coords)
+        return self._model.fit(X=X, y=y, coords=coords, **fit_kwargs)
 
     def predict(
         self,

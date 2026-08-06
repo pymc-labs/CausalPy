@@ -347,6 +347,47 @@ def _effect_summary_did(
     return EffectSummary(table=table, text=text)
 
 
+def _treated_weighted_mean(table: pd.DataFrame, column: str) -> float:
+    """Average an event-time column, weighting each row by its treated-cell count.
+
+    Event-time rows are not exchangeable under staggered adoption. Only the
+    earliest-adopting cohorts reach the largest event times, so late rows rest
+    on far fewer treated observations than early ones. Averaging the rows
+    equally therefore does not estimate the average effect on the treated: when
+    the effect grows with event time, the thin late rows are also the large
+    ones and the unweighted mean is biased upward.
+
+    Weighting by ``n_obs`` gives the "average over the treated" estimand used by
+    Callaway & Sant'Anna (2021) and Wooldridge (2021), which is what the ETWFE
+    estimator computes in-model as the inner product of the weight matrix with
+    the cohort by event-time effect surface.
+
+    Parameters
+    ----------
+    table : pd.DataFrame
+        Event-time table, typically a subset of ``att_event_time_``. Uses the
+        ``n_obs`` column as weights when present.
+    column : str
+        Name of the column to average.
+
+    Returns
+    -------
+    float
+        The weighted mean, or the unweighted mean when ``n_obs`` is absent or
+        the weights sum to zero.
+    """
+    values = np.asarray(table[column], dtype=float)
+    if "n_obs" not in table.columns:
+        return float(values.mean())
+
+    weights = np.asarray(table["n_obs"], dtype=float)
+    total = weights.sum()
+    if not np.isfinite(total) or total <= 0:
+        return float(values.mean())
+
+    return float(np.average(values, weights=weights))
+
+
 def _effect_summary_staggered_did(
     result,
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
@@ -393,31 +434,72 @@ def _effect_summary_staggered_did(
     # Generate prose summary
     prose_parts = []
 
-    # Overall ATT (average across all post-treatment periods)
+    # ETWFE only: the aggregated ATT is estimated *inside* the model as a proper
+    # treated-cell-weighted combination of the (cohort, event-time) surface. That
+    # is a strictly better headline than the unweighted mean of post-treatment
+    # event-time ATTs assembled below, so it leads the prose.
+    #
+    # NOTE: ``att_`` is declared as a class attribute defaulting to None so that
+    # the two estimator paths (which assign ``float`` and ``xr.DataArray``)
+    # type-check. ``hasattr(result, "att_")`` is therefore True even for
+    # imputation results -- always gate on the *value*.
+    att_overall = getattr(result, "att_", None)
+    if att_overall is not None:
+        att_se = getattr(result, "att_se_", None)
+        if att_se is not None:
+            # OLS path: a point estimate with a linear-combination standard error.
+            prose_parts.append(
+                f"Average effect on the treated (in-model, treated-cell weighted): "
+                f"{float(att_overall):.2f} (SE {float(att_se):.2f})."
+            )
+        else:
+            # PyMC path: the posterior of the in-model ``att`` deterministic.
+            att_hdi_prob = getattr(result, "hdi_prob_", 1 - alpha)
+            att_hdi_pct = int(att_hdi_prob * 100)
+            att_lower, att_upper = _extract_hdi_bounds(
+                az.hdi(att_overall, hdi_prob=att_hdi_prob)
+            )
+            prose_parts.append(
+                f"Average effect on the treated (in-model, treated-cell weighted): "
+                f"{float(np.asarray(att_overall).mean()):.2f} "
+                f"({att_hdi_pct}% HDI [{att_lower:.2f}, {att_upper:.2f}])."
+            )
+
+    # Overall ATT: a treated-observation-weighted average over event times.
+    #
+    # An UNWEIGHTED mean over event-time rows is not the ATT. Under staggered
+    # adoption the panel is unbalanced in event time -- only the earliest
+    # cohorts reach the largest event times -- so late rows rest on far fewer
+    # treated observations. When the effect grows with event time those thin
+    # late cells are also the large ones, and weighting them equally with the
+    # dense early cells biases the summary upward. Weighting by ``n_obs``
+    # recovers the "average over the treated" estimand of Callaway &
+    # Sant'Anna (2021) and Wooldridge (2021); on noise-free data it is exact
+    # where the unweighted mean is not.
     if len(post_treatment) > 0:
-        avg_post_att = post_treatment["att"].mean()
+        avg_post_att = _treated_weighted_mean(post_treatment, "att")
         if "att_lower" in post_treatment.columns:
             # Bayesian model - use stored hdi_prob from experiment
-            avg_lower = post_treatment["att_lower"].mean()
-            avg_upper = post_treatment["att_upper"].mean()
+            avg_lower = _treated_weighted_mean(post_treatment, "att_lower")
+            avg_upper = _treated_weighted_mean(post_treatment, "att_upper")
             # Use the HDI probability that was actually used to compute the intervals
             hdi_prob = getattr(result, "hdi_prob_", 1 - alpha)
             hdi_pct = int(hdi_prob * 100)
             prose_parts.append(
                 f"Staggered DiD analysis: The average post-treatment effect "
-                f"across event-times was {avg_post_att:.2f} "
+                f"over treated observations was {avg_post_att:.2f} "
                 f"(average {hdi_pct}% HDI [{avg_lower:.2f}, {avg_upper:.2f}])."
             )
         else:
             # OLS model
             prose_parts.append(
                 f"Staggered DiD analysis: The average post-treatment effect "
-                f"across event-times was {avg_post_att:.2f}."
+                f"over treated observations was {avg_post_att:.2f}."
             )
 
     # Pre-treatment placebo check
     if len(pre_treatment) > 0:
-        avg_pre_att = pre_treatment["att"].mean()
+        avg_pre_att = _treated_weighted_mean(pre_treatment, "att")
         # When post-treatment effects exist and are non-zero, use a relative threshold.
         # When the average post-treatment effect is (near) zero, fall back to a small
         # absolute threshold for the placebo to avoid spuriously flagging violations.

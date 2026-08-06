@@ -70,6 +70,33 @@ def _call_seasonality_component_apply(
     return _call_time_component_apply(seasonality_component, dayofperiod)
 
 
+def _print_coefficient_row(
+    max_label_length: int,
+    name: str,
+    coeff_samples: xr.DataArray,
+    round_to: int,
+) -> None:
+    """Print one row of a coefficient summary table.
+
+    Shared by :meth:`PyMCModel.print_coefficients` and
+    :meth:`ETWFERegression.print_coefficients` so both render identically.
+
+    Parameters
+    ----------
+    max_label_length : int
+        Width to pad the label to, so that values line up in a column.
+    name : str
+        Label for this row.
+    coeff_samples : xarray.DataArray
+        Posterior samples for the quantity being summarised.
+    round_to : int
+        Number of significant figures to round to.
+    """
+    formatted_name = f"  {name: <{max_label_length}}"
+    formatted_val = f"{round_num(coeff_samples.mean().data, round_to)}, {HDI_PROB * 100:.0f}% HDI [{round_num(coeff_samples.quantile((1 - HDI_PROB) / 2).data, round_to)}, {round_num(coeff_samples.quantile(1 - (1 - HDI_PROB) / 2).data, round_to)}]"  # noqa: E501
+    print(f"  {formatted_name}  {formatted_val}")
+
+
 class PyMCModel(pm.Model):
     """A wrapper class for PyMC models. This provides a scikit-learn like interface with
     methods like `fit`, `predict`, and `score`. It also provides other methods which are
@@ -473,14 +500,10 @@ class PyMCModel(pm.Model):
         if self.idata is None:
             raise RuntimeError("Model has not been fit")
 
-        def _print_row(
-            max_label_length: int, name: str, coeff_samples: xr.DataArray, round_to: int
-        ) -> None:
-            """Print one row of the coefficient table."""
-            formatted_name = f"  {name: <{max_label_length}}"
-            formatted_val = f"{round_num(coeff_samples.mean().data, round_to)}, {HDI_PROB * 100:.0f}% HDI [{round_num(coeff_samples.quantile((1 - HDI_PROB) / 2).data, round_to)}, {round_num(coeff_samples.quantile(1 - (1 - HDI_PROB) / 2).data, round_to)}]"  # noqa: E501
-            print(f"  {formatted_name}  {formatted_val}")
-
+        # NOTE: the row formatter lives at module level as
+        # ``_print_coefficient_row`` rather than nested here, so that
+        # ``ETWFERegression.print_coefficients`` -- which reports ``att`` and the
+        # ``tau_bar`` profile instead of a ``beta`` vector -- formats identically.
         def _print_coefficients_for_unit(
             unit_coeffs: xr.DataArray,
             unit_sigma: xr.DataArray,
@@ -493,10 +516,12 @@ class PyMCModel(pm.Model):
 
             for name in labels:
                 coeff_samples = unit_coeffs.sel(coeffs=name)
-                _print_row(max_label_length, name, coeff_samples, round_to)
+                _print_coefficient_row(max_label_length, name, coeff_samples, round_to)
 
             # Add coefficient for measurement std
-            _print_row(max_label_length, "y_hat_sigma", unit_sigma, round_to)
+            _print_coefficient_row(
+                max_label_length, "y_hat_sigma", unit_sigma, round_to
+            )
 
         print("Model coefficients:")
         coeffs = az.extract(self.idata.posterior, var_names="beta")
@@ -2578,3 +2603,631 @@ class StateSpaceTimeSeries(PyMCModel):
         """
         # Use base class implementation - X is accepted but not used by predict()
         return super().score(X, y, coords, **kwargs)
+
+
+def _validate_att_weights(
+    att_weights: np.ndarray,
+    effect_indicator: np.ndarray,
+    cohort_idx: np.ndarray,
+    ev_idx: np.ndarray,
+) -> None:
+    """Check the ATT weight matrix before it is baked into the model graph.
+
+    The in-model ``att`` deterministic sums ``tau * att_weights`` over the
+    *entire* ``(cohorts, ev)`` surface, including cells that carry no treated
+    observations. Those cells still have a ``tau`` value -- drawn from the
+    shared event-time profile rather than informed by data -- so the headline
+    ATT is only meaningful because the weights are exactly zero there.
+
+    That invariant holds by construction today (the weights are treated-cell
+    counts), but it is the single assumption the headline estimand rests on,
+    and nothing else in the model would notice if a future change broke it.
+    These checks are cheap and run once per fit.
+
+    Parameters
+    ----------
+    att_weights : numpy.ndarray
+        ``(n_cohorts, n_ev)`` weight matrix.
+    effect_indicator : numpy.ndarray
+        0/1 array marking cells that carry an effect parameter.
+    cohort_idx, ev_idx : numpy.ndarray
+        Observation-aligned position arrays into ``att_weights``.
+
+    Raises
+    ------
+    ValueError
+        If the weights are negative, do not sum to one, or place mass on a
+        cell with no in-scope observation behind it.
+    """
+    weights = np.asarray(att_weights, dtype=float)
+    if np.any(weights < 0) or not np.all(np.isfinite(weights)):
+        raise ValueError(
+            "att_weights must be finite and non-negative; got "
+            f"min={np.nanmin(weights)}."
+        )
+    total = weights.sum()
+    if not np.isclose(total, 1.0):
+        raise ValueError(f"att_weights must sum to 1.0, got {total!r}.")
+
+    # Every cell carrying weight must have at least one in-scope observation,
+    # otherwise the ATT would be reading a prior-only tau.
+    occupied = np.zeros_like(weights, dtype=bool)
+    in_scope = np.asarray(effect_indicator) == 1
+    occupied[np.asarray(cohort_idx)[in_scope], np.asarray(ev_idx)[in_scope]] = True
+    leaking = np.argwhere((weights > 0) & ~occupied)
+    if leaking.size:
+        cells = ", ".join(f"(cohort={g}, ev={k})" for g, k in leaking[:5])
+        raise ValueError(
+            f"att_weights place mass on {len(leaking)} (cohort, event time) "
+            f"cell(s) with no in-scope observation: {cells}. The in-model ATT "
+            "would read a prior-only tau there."
+        )
+
+
+class ETWFERegression(PyMCModel):
+    r"""Extended two-way fixed effects (ETWFE) regression for staggered adoption.
+
+    This is the Wooldridge (2021) / Mundlak (1978) *structural* phrasing of the
+    staggered difference-in-differences estimand: a saturated regression with one
+    treatment effect per (adoption cohort, event time) cell.
+
+    .. math::
+
+        \mu_{it} &= \alpha_i + \beta_t
+            + E_{it}\,\tau_{g(i),\,k(i,t)}
+            \;(+\; \gamma_u \bar{D}_i + \gamma_t \bar{D}_t)
+            \;(+\; X_{it}\beta) \\
+        \bar{\tau}_k &\sim \mathrm{Normal}(0, \cdot) \\
+        \sigma_{dev} &\sim \mathrm{HalfNormal}(\cdot) \\
+        d_{gk} &\sim \mathrm{Normal}(0, 1) \\
+        \tau_{gk} &= \bar{\tau}_k + \sigma_{dev}\, d_{gk} \\
+        \mathrm{ATT} &= \sum_{g,k} w_{gk}\, \tau_{gk} \\
+        y_{it} &\sim \mathrm{Normal}(\mu_{it}, \sigma)
+
+    The aggregated ATT is a :func:`pymc.Deterministic` **inside** the model, so it
+    arrives with its own posterior rather than being reconstructed from differenced
+    posterior predictive draws after the fact. That is the point of this estimator.
+
+    The cohort effects :math:`\tau_{gk}` are partially pooled towards a common
+    event-time profile :math:`\bar{\tau}_k` via a non-centred parameterisation.
+
+    Notes
+    -----
+    The constructor is inherited unchanged from :class:`PyMCModel`, taking
+    ``sample_kwargs`` (forwarded to :func:`pymc.sample`) and ``priors``, a
+    dictionary of :class:`pymc_extras.prior.Prior` objects. Recognised prior
+    keys are ``alpha_dummy``, ``beta_t_dummy``, ``mu_a``, ``sd_a``, ``a_z``,
+    ``sd_bt``, ``beta_t_mundlak``, ``g_u``, ``g_t``, ``tau_bar``, ``sd_dev``,
+    ``dev``, ``beta`` and ``y_hat``.
+
+    **All panel structure is supplied to** :meth:`fit`, not to ``__init__``. This
+    keeps the constructor signature identical to :class:`PyMCModel`, so
+    :meth:`PyMCModel._clone` (and hence
+    :class:`causalpy.checks.prior_sensitivity.PriorSensitivity`) works unchanged.
+
+    **Conditioning variants.** ``conditioning="dummy"`` gives every unit a free
+    intercept and gives ``beta_t`` a fixed-scale ``ZeroSumNormal``.
+    ``conditioning="mundlak"`` replaces the free intercepts with a non-centred
+    hierarchical intercept (``mu_a``, ``sd_a``, ``a_z``), learns the scale of
+    ``beta_t`` (``sd_bt``), and adds the Mundlak treatment means ``dbar_unit`` and
+    ``dbar_time`` with coefficients ``g_u`` and ``g_t``.
+
+    **``g_t`` must not be interpreted.** ``dbar_time`` is a deterministic function
+    of :math:`t` alone, so it lies exactly in the span of the time effects
+    ``beta_t``. ``g_t`` is therefore identified only by its prior; its posterior
+    carries no information about the data. This is a property of the Mundlak
+    device, not a bug. **The ATT is unaffected**: ``tau`` is identified off
+    within-cell variation, which is orthogonal to any function of :math:`t` alone.
+    ``g_u`` is better behaved (the unit intercepts are only partially pooled, so
+    shrinkage identifies it), but it is a nuisance parameter and shares a funnel
+    with ``mu_a``/``sd_a``.
+
+    **Pass centred** ``dbar_unit`` **and** ``dbar_time``. Subtracting their means
+    orthogonalises ``g_u`` against ``mu_a`` and improves geometry. It does not
+    change the estimand.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> import xarray as xr
+    >>> from causalpy.pymc_models import ETWFERegression
+    >>> n_units, n_periods = 6, 4
+    >>> n = n_units * n_periods
+    >>> unit_idx = np.repeat(np.arange(n_units), n_periods)
+    >>> time_idx = np.tile(np.arange(n_periods), n_units)
+    >>> # units 0-2 adopt at t=2, units 3-5 never adopt: a single cohort, so
+    >>> # every row maps to cohort column 0
+    >>> cohort_idx = np.zeros(n, dtype=int)
+    >>> effect_indicator = ((unit_idx < 3) & (time_idx >= 2)).astype(float)
+    >>> ev_idx = np.where(effect_indicator > 0, time_idx - 2, 0)
+    >>> att_weights = np.array([[0.5, 0.5]])
+    >>> rng = np.random.default_rng(42)
+    >>> y = xr.DataArray(
+    ...     rng.normal(size=(n, 1)),
+    ...     dims=["obs_ind", "treated_units"],
+    ...     coords={"obs_ind": np.arange(n), "treated_units": ["unit_0"]},
+    ... )
+    >>> X = xr.DataArray(
+    ...     np.empty((n, 0)),
+    ...     dims=["obs_ind", "coeffs"],
+    ...     coords={"obs_ind": np.arange(n), "coeffs": []},
+    ... )
+    >>> coords = {
+    ...     "obs_ind": np.arange(n),
+    ...     "treated_units": ["unit_0"],
+    ...     "units": np.arange(n_units),
+    ...     "periods": np.arange(n_periods),
+    ...     "cohorts": [2],
+    ...     "ev": [0, 1],
+    ... }
+    >>> model = ETWFERegression(sample_kwargs={"progressbar": False})
+    >>> model.fit(
+    ...     X,
+    ...     y,
+    ...     coords,
+    ...     unit_idx=unit_idx,
+    ...     time_idx=time_idx,
+    ...     cohort_idx=cohort_idx,
+    ...     ev_idx=ev_idx,
+    ...     effect_indicator=effect_indicator,
+    ...     att_weights=att_weights,
+    ...     conditioning="dummy",
+    ... )  # doctest: +SKIP
+    Inference data...
+    """
+
+    # NOTE ON PRIORS -- read before editing.
+    #
+    # ``PyMCModel.fit`` does ``self.priors = {**self.priors_from_data(X, y), **self.priors}``
+    # (see the "Merge priors with precedence" block in ``PyMCModel.fit``), and
+    # ``self.priors`` already contains ``default_priors`` from ``__init__``. So anything
+    # listed in ``default_priors`` *overrides* the data-driven prior -- the reverse of
+    # what the ``priors_from_data`` docstring claims.
+    #
+    # Consequently every scale-adaptive prior lives in ``priors_from_data`` and is
+    # deliberately ABSENT here. Only genuinely scale-free priors belong in
+    # ``default_priors``. User-supplied ``priors=`` still wins in all cases, because
+    # ``__init__`` merges them on top of ``default_priors``.
+    default_priors: dict[str, Prior] = {
+        # Non-centred standard normals: unit scale by construction.
+        "a_z": Prior("Normal", mu=0, sigma=1, dims="units"),
+        "dev": Prior("Normal", mu=0, sigma=1, dims=("cohorts", "ev")),
+        # Scale comes from ``sd_bt``, injected in ``build_model``.
+        "beta_t_mundlak": Prior("ZeroSumNormal", dims="periods"),
+    }
+
+    def priors_from_data(self, X, y) -> dict[str, Any]:
+        """Build scale-adaptive priors from the outcome's location and spread.
+
+        All scale-dependent priors are produced here rather than in
+        ``default_priors``; see the note on the class body for why.
+
+        .. note::
+           Priors adapt to the scale of ``y`` only -- the covariate matrix
+           ``X`` is not inspected. The ``beta`` prior is therefore
+           ``Normal(0, 2 * sd_y)``, which is weakly informative when covariates
+           are roughly unit-scale and becomes tight (relative to the plausible
+           coefficient magnitude) when they are not. Standardise covariates
+           before passing them, or override the ``beta`` prior explicitly, if
+           they span very different scales.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Covariates with dims ``["obs_ind", "coeffs"]``. May have zero columns.
+        y : xarray.DataArray
+            Outcome with dims ``["obs_ind", "treated_units"]``.
+
+        Returns
+        -------
+        dict
+            Mapping of prior name to :class:`pymc_extras.prior.Prior`.
+        """
+        y_values = np.asarray(y, dtype=float)
+        sd_y = float(np.std(y_values))
+        mean_y = float(np.mean(y_values))
+        if not np.isfinite(sd_y) or sd_y <= 0.0:
+            # Degenerate outcome (constant, or a single observation). Fall back to a
+            # unit scale so the model still builds.
+            sd_y = 1.0
+        if not np.isfinite(mean_y):  # pragma: no cover - defensive
+            mean_y = 0.0
+
+        return {
+            # --- conditioning="dummy" -------------------------------------------
+            "alpha_dummy": Prior("Normal", mu=mean_y, sigma=2 * sd_y, dims="units"),
+            "beta_t_dummy": Prior("ZeroSumNormal", sigma=sd_y, dims="periods"),
+            # --- conditioning="mundlak" -----------------------------------------
+            "mu_a": Prior("Normal", mu=mean_y, sigma=2 * sd_y),
+            "sd_a": Prior("HalfNormal", sigma=sd_y),
+            "sd_bt": Prior("HalfNormal", sigma=sd_y),
+            "g_u": Prior("Normal", mu=0, sigma=sd_y),
+            "g_t": Prior("Normal", mu=0, sigma=sd_y),
+            # --- treatment effect surface ---------------------------------------
+            "tau_bar": Prior("Normal", mu=0, sigma=sd_y, dims="ev"),
+            "sd_dev": Prior("HalfNormal", sigma=0.5 * sd_y),
+            # --- covariates and likelihood ---------------------------------------
+            "beta": Prior(
+                "Normal", mu=0, sigma=2 * sd_y, dims=("treated_units", "coeffs")
+            ),
+            "y_hat": Prior(
+                "Normal",
+                sigma=Prior("HalfNormal", sigma=sd_y, dims="treated_units"),
+                dims=("obs_ind", "treated_units"),
+            ),
+        }
+
+    def _resolved_priors(self, X, y) -> dict[str, Any]:
+        """Merge data-driven priors under the already-merged ``self.priors``.
+
+        ``fit`` performs this merge onto ``self.priors`` itself (mirroring
+        :meth:`PyMCModel.fit`). Repeating it locally here is idempotent and lets
+        :meth:`build_model` be called directly -- which is what the model-structure
+        tests do, so that they need no MCMC at all.
+        """
+        return {**self.priors_from_data(X, y), **self.priors}
+
+    def build_model(  # type: ignore[override]
+        self,
+        X: xr.DataArray,
+        y: xr.DataArray,
+        coords: dict[str, Any],
+        *,
+        unit_idx: np.ndarray,
+        time_idx: np.ndarray,
+        cohort_idx: np.ndarray,
+        ev_idx: np.ndarray,
+        effect_indicator: np.ndarray,
+        att_weights: np.ndarray,
+        dbar_unit: np.ndarray | None = None,
+        dbar_time: np.ndarray | None = None,
+        conditioning: Literal["dummy", "mundlak"] = "mundlak",
+    ) -> None:
+        """Define the ETWFE PyMC model.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Covariates with dims ``["obs_ind", "coeffs"]``. May have zero columns,
+            in which case no ``X`` data node and no ``beta`` variable are created.
+        y : xarray.DataArray
+            Outcome with dims ``["obs_ind", "treated_units"]``.
+        coords : dict
+            Must supply ``obs_ind``, ``treated_units``, ``units``, ``periods``,
+            ``cohorts`` and ``ev``; plus ``coeffs`` when ``X`` has columns.
+        unit_idx, time_idx, cohort_idx, ev_idx : numpy.ndarray
+            Integer position arrays of length ``n_obs``, indexing into the
+            ``units``, ``periods``, ``cohorts`` and ``ev`` coordinates
+            respectively. All must be non-negative.
+        effect_indicator : numpy.ndarray
+            Float array of length ``n_obs``, 1.0 where the ``(cohort, event time)``
+            effect applies to that observation and 0.0 otherwise.
+        att_weights : numpy.ndarray
+            Weight matrix of shape ``(n_cohorts, n_ev)`` summing to one over
+            treated cells, used to aggregate ``tau`` into ``att``.
+        dbar_unit, dbar_time : numpy.ndarray, optional
+            Mundlak treatment means of length ``n_obs``. Required when
+            ``conditioning="mundlak"``. Should be centred by the caller.
+        conditioning : {"dummy", "mundlak"}
+            Which conditioning strategy to use for the two-way effects.
+        """
+        if conditioning not in ("dummy", "mundlak"):
+            raise ValueError(
+                f"conditioning must be 'dummy' or 'mundlak', got {conditioning!r}"
+            )
+        if conditioning == "mundlak" and (dbar_unit is None or dbar_time is None):
+            raise ValueError(
+                "conditioning='mundlak' requires both dbar_unit and dbar_time."
+            )
+        _validate_att_weights(att_weights, effect_indicator, cohort_idx, ev_idx)
+
+        priors = self._resolved_priors(X, y)
+
+        n_covariates = int(X.shape[1]) if getattr(X, "ndim", 1) > 1 else 0
+
+        with self:
+            self.add_coords(coords)
+
+            y_ = pm.Data("y", y, dims=["obs_ind", "treated_units"])
+            unit_idx_ = pm.Data(
+                "unit_idx", np.asarray(unit_idx).astype("int32"), dims="obs_ind"
+            )
+            time_idx_ = pm.Data(
+                "time_idx", np.asarray(time_idx).astype("int32"), dims="obs_ind"
+            )
+            cohort_idx_ = pm.Data(
+                "cohort_idx", np.asarray(cohort_idx).astype("int32"), dims="obs_ind"
+            )
+            ev_idx_ = pm.Data(
+                "ev_idx", np.asarray(ev_idx).astype("int32"), dims="obs_ind"
+            )
+            effect_indicator_ = pm.Data(
+                "effect_indicator",
+                np.asarray(effect_indicator, dtype=float),
+                dims="obs_ind",
+            )
+            att_weights_ = pm.Data(
+                "att_weights",
+                np.asarray(att_weights, dtype=float),
+                dims=("cohorts", "ev"),
+            )
+
+            # --- two-way effects ------------------------------------------------
+            if conditioning == "dummy":
+                alpha = priors["alpha_dummy"].create_variable("alpha")
+                beta_t = priors["beta_t_dummy"].create_variable("beta_t")
+            else:
+                mu_a = priors["mu_a"].create_variable("mu_a")
+                sd_a = priors["sd_a"].create_variable("sd_a")
+                a_z = priors["a_z"].create_variable("a_z")
+                alpha = pm.Deterministic("alpha", mu_a + sd_a * a_z, dims="units")
+                beta_t = self._create_beta_t_mundlak(priors)
+
+            mu_lin = alpha[unit_idx_] + beta_t[time_idx_]
+
+            # --- Mundlak treatment means -----------------------------------------
+            if conditioning == "mundlak":
+                dbar_unit_ = pm.Data(
+                    "dbar_unit", np.asarray(dbar_unit, dtype=float), dims="obs_ind"
+                )
+                dbar_time_ = pm.Data(
+                    "dbar_time", np.asarray(dbar_time, dtype=float), dims="obs_ind"
+                )
+                g_u = priors["g_u"].create_variable("g_u")
+                g_t = priors["g_t"].create_variable("g_t")
+                mu_lin = mu_lin + g_u * dbar_unit_ + g_t * dbar_time_
+
+            # --- treatment effect surface -----------------------------------------
+            tau_bar = priors["tau_bar"].create_variable("tau_bar")
+            sd_dev = priors["sd_dev"].create_variable("sd_dev")
+            dev = priors["dev"].create_variable("dev")
+            tau = pm.Deterministic(
+                "tau", tau_bar + sd_dev * dev, dims=("cohorts", "ev")
+            )
+            # The in-model ATT: a parameter with its own posterior, not a post-hoc
+            # residual assembled by differencing posterior predictive draws.
+            pm.Deterministic("att", (tau * att_weights_).sum())
+
+            mu_lin = mu_lin + effect_indicator_ * tau[cohort_idx_, ev_idx_]
+
+            # --- covariates --------------------------------------------------------
+            if n_covariates > 0:
+                X_ = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+                # ``beta`` keeps the codebase-wide ``(treated_units, coeffs)``
+                # dims so that ``print_coefficients`` and the maketables
+                # adapters can read it like any other coefficient vector. ETWFE
+                # is a single-outcome estimator, so ``treated_units`` is always
+                # length 1 and only ``beta[0]`` is ever used.
+                beta = priors["beta"].create_variable("beta")
+                mu_lin = mu_lin + pt.dot(X_, beta[0])
+
+            # The [:, None] broadcast satisfies the codebase-wide 2-D
+            # (obs_ind, treated_units) convention that predict/score and the
+            # downstream impact machinery rely on.
+            # See BayesianBasisExpansionTimeSeries.build_model.
+            mu = pm.Deterministic(
+                "mu", mu_lin[:, None], dims=["obs_ind", "treated_units"]
+            )
+            priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y_)
+
+    @staticmethod
+    def _create_beta_t_mundlak(priors: dict[str, Any]) -> Any:
+        """Create ``beta_t`` for the Mundlak variant, with a learned scale.
+
+        When the ``beta_t_mundlak`` prior does not specify its own ``sigma`` (the
+        default), a separate ``sd_bt`` variable is created from the ``sd_bt`` prior
+        and injected as the scale. A user who overrides ``beta_t_mundlak`` with an
+        explicit ``sigma`` takes full control and no ``sd_bt`` variable is made.
+        """
+        beta_t_prior = priors["beta_t_mundlak"]
+        if "sigma" in beta_t_prior.parameters:
+            return beta_t_prior.create_variable("beta_t")
+        sd_bt = priors["sd_bt"].create_variable("sd_bt")
+        return Prior(
+            beta_t_prior.distribution,
+            dims=beta_t_prior.dims,
+            **{**beta_t_prior.parameters, "sigma": sd_bt},
+        ).create_variable("beta_t")
+
+    def fit(  # type: ignore[override]
+        self,
+        X: xr.DataArray,
+        y: xr.DataArray,
+        coords: dict[str, Any],
+        *,
+        unit_idx: np.ndarray,
+        time_idx: np.ndarray,
+        cohort_idx: np.ndarray,
+        ev_idx: np.ndarray,
+        effect_indicator: np.ndarray,
+        att_weights: np.ndarray,
+        dbar_unit: np.ndarray | None = None,
+        dbar_time: np.ndarray | None = None,
+        conditioning: Literal["dummy", "mundlak"] = "mundlak",
+    ) -> az.InferenceData:
+        """Draw posterior, prior predictive and posterior predictive samples.
+
+        The signature is widened relative to :meth:`PyMCModel.fit` to carry the
+        panel structure; :meth:`InstrumentalVariableRegression.fit` is the
+        precedent for this in the codebase.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Covariate matrix with dims ``["obs_ind", "coeffs"]``. May have zero
+            columns, in which case no ``beta`` is created.
+        y : xarray.DataArray
+            Outcome with dims ``["obs_ind", "treated_units"]``.
+        coords : dict
+            Coordinate metadata; must supply ``units``, ``periods``, ``cohorts``
+            and ``ev`` alongside the usual ``obs_ind`` / ``treated_units``.
+        unit_idx, time_idx, cohort_idx, ev_idx : numpy.ndarray
+            Integer position arrays of length ``n_obs``.
+        effect_indicator : numpy.ndarray
+            0/1 float array of length ``n_obs``.
+        att_weights : numpy.ndarray
+            ``(n_cohorts, n_ev)`` weights summing to one.
+        dbar_unit, dbar_time : numpy.ndarray, optional
+            Centred Mundlak treatment means; required for ``conditioning="mundlak"``.
+        conditioning : {"dummy", "mundlak"}
+            Conditioning strategy for the two-way effects.
+
+        Returns
+        -------
+        arviz.InferenceData
+            Inference data with ``posterior``, ``prior_predictive`` and
+            ``posterior_predictive`` groups. The posterior predictive group
+            contains both ``y_hat`` and ``mu``.
+        """
+        random_seed = self.sample_kwargs.get("random_seed", None)
+
+        # Merge priors with precedence: user-specified > data-driven > defaults.
+        # Mirrors the merge in ``PyMCModel.fit``. See the note on the class body:
+        # ``default_priors`` beats ``priors_from_data``, so scale-adaptive priors
+        # must NOT appear in ``default_priors``.
+        self.priors = {**self.priors_from_data(X, y), **self.priors}
+
+        self.build_model(
+            X,
+            y,
+            coords,
+            unit_idx=unit_idx,
+            time_idx=time_idx,
+            cohort_idx=cohort_idx,
+            ev_idx=ev_idx,
+            effect_indicator=effect_indicator,
+            att_weights=att_weights,
+            dbar_unit=dbar_unit,
+            dbar_time=dbar_time,
+            conditioning=conditioning,
+        )
+        with self:
+            self.idata = pm.sample(**self.sample_kwargs)
+            if self.idata is None:  # pragma: no cover - defensive
+                raise RuntimeError("pm.sample() returned None")
+            self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
+            # ``var_names`` is explicit here because ETWFE has no working
+            # ``predict()`` that could produce ``mu`` later on.
+            self.idata.extend(
+                pm.sample_posterior_predictive(
+                    self.idata,
+                    var_names=["y_hat", "mu"],
+                    progressbar=False,
+                    random_seed=random_seed,
+                )
+            )
+        return self.idata
+
+    def _data_setter(self, X: xr.DataArray) -> None:
+        """Not supported: the design is bound to the panel used at fit time.
+
+        Raises
+        ------
+        NotImplementedError
+            Always. ``unit_idx``, ``time_idx``, ``cohort_idx``, ``ev_idx``,
+            ``effect_indicator``, ``dbar_unit`` and ``dbar_time`` are all bound to
+            the specific panel supplied to :meth:`fit`, and none of them can be
+            derived from a bare ``X``.
+        """
+        raise NotImplementedError(
+            "ETWFERegression does not support out-of-sample prediction. Every index "
+            "array (unit_idx, time_idx, cohort_idx, ev_idx, effect_indicator, "
+            "dbar_unit, dbar_time) is bound to the panel passed to fit(), and cannot "
+            "be reconstructed from X alone. Use predict() to retrieve the in-sample "
+            "posterior predictive computed during fit()."
+        )
+
+    def predict(
+        self,
+        X: xr.DataArray | None = None,
+        coords: dict[str, Any] | None = None,
+        out_of_sample: bool | None = False,
+        **kwargs: Any,
+    ) -> az.InferenceData:
+        """Return the in-sample posterior predictive computed during :meth:`fit`.
+
+        ETWFE is an in-sample estimator: the saturated design is defined only over
+        the observed panel cells. Rather than re-running
+        :func:`pymc.sample_posterior_predictive` against a new design, this returns
+        the draws already generated by :meth:`fit`. Because ``mu`` carries dims
+        ``["obs_ind", "treated_units"]``, :meth:`PyMCModel.score` and the
+        downstream impact machinery work unchanged.
+
+        Parameters
+        ----------
+        X : xarray.DataArray, optional
+            Ignored; accepted for API compatibility.
+        coords : dict, optional
+            Ignored; accepted for API compatibility.
+        out_of_sample : bool, optional
+            Ignored; accepted for API compatibility.
+        **kwargs
+            Ignored; accepted for API compatibility with
+            :meth:`PyMCModel.predict`.
+
+        Returns
+        -------
+        arviz.InferenceData
+            InferenceData with only a ``posterior_predictive`` group.
+
+        Raises
+        ------
+        RuntimeError
+            If the model has not been fit.
+        """
+        if self.idata is None or "posterior_predictive" not in self.idata:
+            raise RuntimeError("Model has not been fit. Call fit() before predict().")
+        return az.InferenceData(posterior_predictive=self.idata.posterior_predictive)
+
+    def print_coefficients(
+        self, labels: list[str], round_to: int | None = None
+    ) -> None:
+        """Print a summary of the ETWFE parameters.
+
+        The base implementation is hardwired to a ``beta`` variable indexed by
+        ``coeffs`` and ``treated_units``, which a covariate-free ETWFE fit does not
+        have. This prints the quantities that actually matter for this estimator:
+        the in-model ``att``, the common event-time profile ``tau_bar``, the
+        cohort-deviation scale ``sd_dev``, the Mundlak coefficients ``g_u`` and
+        ``g_t`` when present, any covariate coefficients, and ``y_hat_sigma``.
+
+        Parameters
+        ----------
+        labels : list of str
+            Covariate names to print from ``beta``. Pass ``[]`` when the model was
+            fit without covariates.
+        round_to : int, optional
+            Number of significant figures to round to. Defaults to 2.
+        """
+        if self.idata is None:
+            raise RuntimeError("Model has not been fit")
+
+        round_to = round_to or 2
+        posterior = self.idata.posterior
+
+        rows: list[tuple[str, xr.DataArray]] = []
+        rows.append(("att", az.extract(posterior, var_names="att")))
+
+        tau_bar = az.extract(posterior, var_names="tau_bar")
+        for ev_value in tau_bar.coords["ev"].values:
+            rows.append((f"tau_bar[{ev_value}]", tau_bar.sel(ev=ev_value)))
+
+        rows.append(("sd_dev", az.extract(posterior, var_names="sd_dev")))
+
+        for name in ("g_u", "g_t"):
+            if name in posterior:
+                rows.append((name, az.extract(posterior, var_names=name)))
+
+        if labels and "beta" in posterior:
+            beta = az.extract(posterior, var_names="beta")
+            if "treated_units" in beta.dims:
+                beta = beta.isel(treated_units=0)
+            for name in labels:
+                rows.append((name, beta.sel(coeffs=name)))
+
+        rows.append(("y_hat_sigma", az.extract(posterior, var_names="y_hat_sigma")))
+
+        print("Model coefficients:")
+        max_label_length = max(len(name) for name, _ in rows)
+        for name, samples in rows:
+            _print_coefficient_row(max_label_length, name, samples, round_to)
