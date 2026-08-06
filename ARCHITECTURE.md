@@ -53,6 +53,7 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 | Class | Method | Backends | Notable quirk |
 |-------|--------|----------|---------------|
 | `InterruptedTimeSeries` | ITS | OLS + Bayes | 3-period design via `treatment_end_time` |
+| `HierarchicalInterruptedTimeSeries` | Hierarchical ITS | Bayes only | Multi-unit panel, per-unit launch times; `effect_type` instant/event_study/placebo/saturation |
 | `PiecewiseITS` | Segmented ITS | OLS + Bayes | Fits full series; `step()`/`ramp()` transforms |
 | `DifferenceInDifferences` | DiD | OLS + Bayes | Effect from interaction coefficient |
 | `StaggeredDifferenceInDifferences` | Staggered DiD | OLS + Bayes | Fits untreated obs only |

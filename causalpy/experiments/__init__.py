@@ -14,6 +14,7 @@
 """CausalPy experiment module."""
 
 from .diff_in_diff import DifferenceInDifferences
+from .hierarchical_interrupted_time_series import HierarchicalInterruptedTimeSeries
 from .instrumental_variable import InstrumentalVariable
 from .interrupted_time_series import InterruptedTimeSeries
 from .inverse_propensity_weighting import InversePropensityWeighting
@@ -28,6 +29,7 @@ from .synthetic_difference_in_differences import SyntheticDifferenceInDifference
 
 __all__ = [
     "DifferenceInDifferences",
+    "HierarchicalInterruptedTimeSeries",
     "InstrumentalVariable",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
