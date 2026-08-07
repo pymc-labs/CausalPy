@@ -414,6 +414,90 @@ def test_effect_summary_ols_did_residuals_are_per_observation(did_data):
 
 
 @pytest.mark.integration
+def test_effect_summary_ols_did_order_independent(did_data):
+    """``effect_summary()`` must not depend on which variable is written
+    first in the DiD interaction term.
+
+    ``_compute_statistics_did_ols`` looked up the interaction coefficient via
+    a single concatenated substring (``"group:post_treatment"``), which only
+    matches patsy's column naming when the formula writes the group variable
+    first. Writing the formula the other way round (``post_treatment*group``)
+    fits an identical model (``causal_impact`` was already order-independent,
+    fixed by #994 in ``DifferenceInDifferences.algorithm()``) but this
+    separate, still order-dependent lookup raised
+    ``ValueError: Could not find interaction term ...`` instead of returning
+    a result.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    df = did_data
+
+    result_group_first = cp.DifferenceInDifferences(
+        df.copy(),
+        formula="y ~ 1 + group * post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+    result_post_first = cp.DifferenceInDifferences(
+        df.copy(),
+        formula="y ~ 1 + post_treatment * group",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+
+    stats_group_first = result_group_first.effect_summary().table.loc[
+        "treatment_effect"
+    ]
+    stats_post_first = result_post_first.effect_summary().table.loc["treatment_effect"]
+
+    for col in ("mean", "ci_lower", "ci_upper", "p_value"):
+        assert stats_group_first[col] == pytest.approx(stats_post_first[col])
+
+
+@pytest.mark.integration
+def test_effect_summary_ols_did_categorical_group_spelling(did_data):
+    """``effect_summary()`` must accept the ``C(group)`` categorical spelling
+    of the DiD interaction.
+
+    patsy names the interaction column
+    ``"C(group)[T.1]:post_treatment[T.True]"`` for a formula written as
+    ``C(group) * post_treatment``; the concatenated substring lookup
+    (``"group:post_treatment"``) failed on it just as it did for reversed
+    formula order. The design matrix is numerically identical to the plain
+    ``group * post_treatment`` spelling (``group`` is already dummy coded),
+    so the reported statistics must match too.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    df = did_data
+
+    result_plain = cp.DifferenceInDifferences(
+        df.copy(),
+        formula="y ~ 1 + group * post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+    result_categorical = cp.DifferenceInDifferences(
+        df.copy(),
+        formula="y ~ 1 + C(group) * post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+
+    stats_plain = result_plain.effect_summary().table.loc["treatment_effect"]
+    stats_categorical = result_categorical.effect_summary().table.loc[
+        "treatment_effect"
+    ]
+
+    for col in ("mean", "ci_lower", "ci_upper", "p_value"):
+        assert stats_plain[col] == pytest.approx(stats_categorical[col])
+
+
+@pytest.mark.integration
 def test_effect_summary_ols_sc(mock_pymc_sample, sc_data):
     """Test effect_summary with OLS model for Synthetic Control."""
     from sklearn.linear_model import LinearRegression
