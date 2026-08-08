@@ -14,7 +14,7 @@
 """Panel Regression with Fixed Effects."""
 
 import re
-from typing import Any, Literal, NoReturn
+from typing import Any, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -32,7 +32,7 @@ from causalpy.formula_utils import build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.plot_utils import _plot_interval_band
 from causalpy.pymc_models import PyMCModel
-from causalpy.utils import round_num
+from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
 
@@ -447,38 +447,61 @@ class PanelRegression(BaseExperiment):
             )
 
         print("\nModel Coefficients:")
-        # Backend-identity branch is justified: coefficient access is
-        # backend-native (PanelRegression stores no canonical container).
-        if self._model_backend.is_bayesian:
-            # PyMC print_coefficients uses coordinate-based lookup so a
-            # filtered label list works correctly.
-            self.model.print_coefficients(coeff_labels, round_to)
-        else:
-            # For OLS models the base print_coefficients uses positional zip
-            # which would pair filtered labels with the wrong coefficient
-            # values.  We do our own index-based lookup instead.
-            coefs = self.model.get_coeffs()  # type: ignore[union-attr]
-            max_label_length = max(len(name) for name in coeff_labels)
-            rd = round_to if round_to is not None else 2
-            print("Model coefficients:")
-            for name in coeff_labels:
-                idx = self.labels.index(name)
-                formatted_name = f"{name:<{max_label_length}}"
-                formatted_val = f"{round_num(coefs[idx], rd):>10}"
-                print(f"  {formatted_name}\t{formatted_val}")
+        self._model_backend.print_coefficients(coeff_labels, round_to)
 
-    def effect_summary(self) -> NoReturn:
-        """Raise because panel regression has no unified effect summary.
+    def effect_summary(
+        self,
+        *,
+        window: Literal["post"] | tuple | slice = "post",
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        cumulative: bool = True,
+        relative: bool = True,
+        min_effect: float | None = None,
+        treated_unit: str | None = None,
+        period: Literal["intervention", "post", "comparison"] | None = None,
+        prefix: str = "Post-period",
+        **kwargs: Any,
+    ) -> EffectSummary:
+        """Generate a decision-ready summary of causal effects.
+
+        .. note::
+            ``effect_summary()`` is not yet implemented for
+            ``PanelRegression``.  Panel fixed-effects models estimate
+            regression coefficients rather than time-varying causal impacts,
+            so the standard ITS/SC-style effect summary does not directly
+            apply.  Use :meth:`summary` for coefficient-level inference.
+
+        Parameters
+        ----------
+        window : str, tuple, or slice, default "post"
+            Time window for analysis (placeholder; not consumed).
+        direction : {"increase", "decrease", "two-sided"}, default "increase"
+            Direction for tail probability calculation.
+        alpha : float, default 0.05
+            Significance level for HDI/CI intervals.
+        cumulative : bool, default True
+            Whether to include cumulative effect statistics.
+        relative : bool, default True
+            Whether to include relative effect statistics.
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold.
+        treated_unit : str, optional
+            Treated unit selector for multi-unit experiments.
+        period : {"intervention", "post", "comparison"}, optional
+            Period selector for three-period designs.
+        prefix : str, default "Post-period"
+            Prefix for prose generation.
+        **kwargs
+            Reserved for forward-compatibility.
 
         Raises
         ------
         NotImplementedError
-            Panel fixed-effects models estimate coefficients rather than
-            time-varying causal impacts. Use :meth:`summary` for
-            coefficient-level inference.
+            Always raised; this method is a placeholder for future work.
         """
         raise NotImplementedError(
-            "effect_summary() is not implemented for PanelRegression. "
+            "effect_summary() is not yet implemented for PanelRegression. "
             "Panel fixed-effects models estimate regression coefficients rather "
             "than time-varying causal impacts. Use summary() for coefficient-level "
             "inference."
@@ -572,20 +595,15 @@ class PanelRegression(BaseExperiment):
         if not coeff_names:
             raise ValueError("var_names must contain at least one coefficient")
 
-        # Backend-identity branch is justified: coefficient posteriors live in
-        # backend-native storage (idata vs get_coeffs); no canonical container.
-        if self._model_backend.is_bayesian:
-            coefficients = (
-                self._model_backend.require_idata()
-                .posterior["beta"]
-                .sel(coeffs=coeff_names)
-            )
-            if "treated_units" in coefficients.dims:
-                if coefficients.sizes["treated_units"] != 1:
-                    raise ValueError(
-                        "Bayesian coefficient plotting requires one treated unit"
-                    )
-                coefficients = coefficients.squeeze("treated_units", drop=True)
+        coefficients = self._model_backend.coefficients().sel(coeffs=coeff_names)
+        if "treated_units" in coefficients.dims:
+            if coefficients.sizes["treated_units"] != 1:
+                raise ValueError(
+                    "Panel coefficient plots require exactly one outcome unit."
+                )
+            coefficients = coefficients.isel(treated_units=0, drop=True)
+        with_uncertainty = coefficients.sizes["chain"] * coefficients.sizes["draw"] > 1
+        if with_uncertainty:
             means = np.asarray(
                 coefficients.mean(dim=["chain", "draw"]).values,
                 dtype=float,
@@ -605,10 +623,8 @@ class PanelRegression(BaseExperiment):
             ax.set_xlabel("Coefficient Value")
             ax.set_title(f"Model Coefficients with {hdi_prob:.0%} HDI")
         else:
-            # OLS: point estimates
+            coefs = coefficients.mean(("chain", "draw")).values
             fig, ax = plt.subplots(figsize=(10, max(4, len(coeff_names) * 0.5)))
-            coef_indices = [self.labels.index(c) for c in coeff_names]
-            coefs = self.model.get_coeffs()[coef_indices]  # type: ignore[union-attr]
             y_pos = np.arange(len(coeff_names))
             ax.barh(y_pos, coefs)
             ax.set_yticks(y_pos)
@@ -729,37 +745,19 @@ class PanelRegression(BaseExperiment):
 
         fig, ax = plt.subplots(figsize=(10, 6))
 
-        # Backend-identity branch is justified: coefficient posteriors live in
-        # backend-native storage (idata vs get_coeffs); no canonical container.
-        if self._model_backend.is_bayesian:
-            # Bayesian: get posterior means
-            beta = self._model_backend.require_idata().posterior["beta"]
-            unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
-
-            # Get mean and std for each unit FE
-            fe_means = []
-            for idx in unit_fe_indices:
-                fe_means.append(
-                    beta.sel(coeffs=self.labels[idx])
-                    .mean(dim=["chain", "draw"])
-                    .squeeze("treated_units", drop=True)
-                    .item()
+        coefficients = self._model_backend.coefficients().sel(coeffs=unit_fe_names)
+        with_uncertainty = coefficients.sizes["chain"] * coefficients.sizes["draw"] > 1
+        if "treated_units" in coefficients.dims:
+            if coefficients.sizes["treated_units"] != 1:
+                raise ValueError(
+                    "Panel unit-effect plots require exactly one outcome unit."
                 )
-
-            ax.hist(
-                fe_means, bins=min(30, max(1, len(fe_means) // 2)), edgecolor="black"
-            )
+            coefficients = coefficients.isel(treated_units=0, drop=True)
+        fe_means = coefficients.mean(("chain", "draw")).values
+        ax.hist(fe_means, bins=min(30, max(1, len(fe_means) // 2)), edgecolor="black")
+        if with_uncertainty:
             ax.set_xlabel("Unit Fixed Effect (Posterior Mean)")
-
         else:
-            # OLS: get point estimates
-            unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
-            coefs = self.model.get_coeffs()  # type: ignore[union-attr]
-            fe_values = [coefs[idx] for idx in unit_fe_indices]
-
-            ax.hist(
-                fe_values, bins=min(30, max(1, len(fe_values) // 2)), edgecolor="black"
-            )
             ax.set_xlabel("Unit Fixed Effect")
 
         ax.set_ylabel("Count")

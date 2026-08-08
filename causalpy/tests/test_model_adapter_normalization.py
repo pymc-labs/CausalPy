@@ -90,7 +90,10 @@ def test_sklearn_adapter_xarray_inputs_match_numpy():
     adapter_np.fit(X_np, y_np)
     adapter_xr.fit(X_xr, y_xr)
 
-    assert np.allclose(adapter_np.coefficients(), adapter_xr.coefficients())
+    assert np.allclose(
+        adapter_np.coefficients().squeeze(),
+        adapter_xr.coefficients().squeeze(),
+    )
     assert adapter_np.score(X_np, y_np).equals(adapter_xr.score(X_xr, y_xr))
     assert np.allclose(adapter_np.predict(X_np).values, adapter_xr.predict(X_xr).values)
     mu = adapter_xr.predict(X_xr)
