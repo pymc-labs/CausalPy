@@ -214,10 +214,16 @@ def test_shared_print_coefficients_dispatches_on_draw_count(capsys):
     assert "94% HDI" in posterior_output
 
 
-def test_pymc_forecast_coefficients_and_printing_are_unsupported():
-    adapter = PyMCForecastAdapter(PyMCForecastModel.__new__(PyMCForecastModel))
+def test_pymc_forecast_coefficients_are_unsupported():
+    pymc_forecast = pytest.importorskip("pymc_forecast")
+
+    class TrivialModel(pymc_forecast.ForecastingModel):  # type: ignore[name-defined]
+        def model(self, h, covariates):
+            pass
+
+    adapter = PyMCForecastAdapter(PyMCForecastModel(TrivialModel()))
 
     with pytest.raises(NotImplementedError, match="do not expose"):
         adapter.coefficients()
-    with pytest.raises(NotImplementedError, match="do not expose"):
+    with pytest.raises(RuntimeError, match="has not been fit"):
         adapter.print_coefficients(["a"])
