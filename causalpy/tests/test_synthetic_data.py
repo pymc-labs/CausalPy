@@ -86,31 +86,6 @@ def test_generate_synthetic_control_data():
 # ==============================================================================
 
 
-def test_generate_time_series_data():
-    """Test the generate_time_series_data function."""
-    from causalpy.data.simulate_data import generate_time_series_data
-
-    # Test with default parameters
-    df = generate_time_series_data()
-    assert isinstance(df, pd.DataFrame)
-    assert len(df) == 100  # default N value
-    assert "temperature" in df.columns
-    assert "linear" in df.columns
-    assert "causal effect" in df.columns
-    assert "deaths_counterfactual" in df.columns
-    assert "deaths_actual" in df.columns
-    assert "intercept" in df.columns
-
-    # Verify intercept is all ones
-    assert np.all(df["intercept"] == 1.0)
-
-    # Test with custom parameters
-    df_custom = generate_time_series_data(
-        N=50, treatment_time=30, beta_temp=-2, beta_linear=1.0, beta_intercept=5
-    )
-    assert len(df_custom) == 50
-
-
 def test_generate_time_series_data_seasonal():
     """Test the generate_time_series_data_seasonal function."""
     from causalpy.data.simulate_data import generate_time_series_data_seasonal
@@ -359,15 +334,15 @@ def test_generate_seasonality():
 
 
 def test_periodic_kernel():
-    """Test the periodic_kernel function."""
-    from causalpy.data.simulate_data import periodic_kernel
+    """Test the _periodic_kernel helper."""
+    from causalpy.data.simulate_data import _periodic_kernel
 
     # Create test inputs
     x = np.linspace(0, 1, 10)
     x1, x2 = np.meshgrid(x, x)
 
     # Test with default parameters
-    kernel = periodic_kernel(x1, x2)
+    kernel = _periodic_kernel(x1, x2)
     assert isinstance(kernel, np.ndarray)
     assert kernel.shape == (10, 10)
 
@@ -378,39 +353,44 @@ def test_periodic_kernel():
     assert np.allclose(np.diag(kernel), 1.0)
 
     # Test with custom parameters
-    kernel_custom = periodic_kernel(x1, x2, period=2, length_scale=0.5, amplitude=2)
+    kernel_custom = _periodic_kernel(x1, x2, period=2, length_scale=0.5, amplitude=2)
     assert kernel_custom.shape == (10, 10)
     # Diagonal should be amplitude^2 = 4
     assert np.allclose(np.diag(kernel_custom), 4.0)
 
 
 def test_create_series():
-    """Test the create_series function."""
-    from causalpy.data.simulate_data import create_series
+    """Test the _create_series helper."""
+    from causalpy.data.simulate_data import _create_series
 
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
 
-    # Test with default parameters
-    series = create_series()
+    # Test with default-like parameters
+    series = _create_series(
+        n=52, amplitude=1, length_scale=1, n_years=4, intercept=0, rng=rng
+    )
     assert isinstance(series, np.ndarray)
-    assert len(series) == 52 * 4  # n * n_years = 52 * 4 = 208
+    assert len(series) == 52 * 4
 
     # Test with custom parameters
-    series_custom = create_series(n=12, n_years=2, intercept=5)
-    assert len(series_custom) == 12 * 2  # 24
+    series_custom = _create_series(
+        n=12, amplitude=1, length_scale=1, n_years=2, intercept=5, rng=rng
+    )
+    assert len(series_custom) == 12 * 2
 
 
 def test_smoothed_gaussian_random_walk():
     """Test the _smoothed_gaussian_random_walk internal function."""
     from causalpy.data.simulate_data import _smoothed_gaussian_random_walk
 
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
 
     x, y = _smoothed_gaussian_random_walk(
         gaussian_random_walk_mu=0.0,
         gaussian_random_walk_sigma=1.0,
         N=50,
         lowess_kwargs={"frac": 0.2, "it": 0},
+        rng=rng,
     )
 
     assert isinstance(x, np.ndarray)
