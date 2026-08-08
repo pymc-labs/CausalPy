@@ -1600,18 +1600,25 @@ def _compute_statistics_did_ols(
     # with the degrees of freedom used below for the t-distribution.
     mse = np.sum(residuals**2) / df
 
-    # Find the interaction term coefficient index
-    interaction_term = (
-        f"{result.group_variable_name}:{result.post_treatment_variable_name}"
+    # Find the interaction term coefficient index. patsy names interaction
+    # columns by formula order (e.g. "post_treatment[T.True]:group" for a
+    # formula written as "post_treatment*group"), so match structurally via
+    # the same helper algorithm() uses to locate the causal_impact
+    # coefficient, rather than a concatenated "group:post_treatment" string.
+    coeff_idx = next(
+        (
+            i
+            for i, label in enumerate(result.labels)
+            if result._is_treatment_interaction(label)
+        ),
+        None,
     )
-    coeff_idx = None
-    for i, label in enumerate(result.labels):
-        if interaction_term in label:
-            coeff_idx = i
-            break
 
     if coeff_idx is None:
-        raise ValueError(f"Could not find interaction term {interaction_term} in model")
+        raise ValueError(
+            f"Could not find interaction term between '{result.group_variable_name}' "
+            f"and '{result.post_treatment_variable_name}' in model"
+        )
 
     X = X_da
     try:
