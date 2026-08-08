@@ -735,6 +735,20 @@ class PyMCForecastAdapter(ModelAdapter):
             "inspect the fitted posterior via `.idata` instead."
         )
 
+    def print_coefficients(
+        self, labels: list[str], round_to: int | None = None
+    ) -> None:
+        """Print posterior summaries of the model's scalar parameters.
+
+        Parameters
+        ----------
+        labels : list of str
+            Design-matrix labels; ignored by forecasting models.
+        round_to : int, optional
+            Number of significant figures to round to.
+        """
+        self._model.print_coefficients(labels, round_to)
+
 
 def _prepare_sklearn_model(model: RegressorMixin) -> RegressorMixin:
     """Clone, augment, and validate a sklearn estimator for CausalPy."""
