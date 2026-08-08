@@ -12,60 +12,74 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 
-"""
-Regression kink design
-"""
+"""Regression kink design."""
 
-import warnings  # noqa: I001
+import re  # noqa: I001
+import warnings
 
 
 from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from patsy import build_design_matrices, dmatrices
+from patsy import ModelDesc, build_design_matrices
 import xarray as xr
-from causalpy.plot_utils import plot_xY
+from causalpy.formula_utils import build_formula_matrices
+from causalpy.experiments.model_adapter import build_coords
+from causalpy.plot_utils import (
+    _PosteriorPlotStyle,
+    format_r2_score,
+    plot_posterior_over_x,
+)
 
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rkink
 
+from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
+
 from .base import BaseExperiment
 from typing import Any, Literal
-from causalpy.utils import round_num
+from causalpy.utils import _is_variable_dummy_coded, round_num
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
-from causalpy.utils import _is_variable_dummy_coded
-
-
-LEGEND_FONT_SIZE = 12
 
 
 class RegressionKink(BaseExperiment):
     """A class to analyse regression kink designs.
 
-    :param data:
-        A pandas dataframe
-    :param formula:
-        A statistical model formula
-    :param kink_point:
-        A scalar value at which the kink occurs
-    :param model:
-        A PyMC model. Defaults to LinearRegression.
-    :param running_variable_name:
-        The name of the running variable column
-    :param epsilon:
-        A small scalar for evaluating the causal impact above/below the kink
-    :param bandwidth:
-        Data outside of the bandwidth (relative to the kink) is not used to fit
-        the model.
+    Parameters
+    ----------
+    data : pd.DataFrame
+        A pandas dataframe.
+    formula : str
+        A statistical model formula.
+    kink_point : float
+        A scalar value at which the kink occurs.
+    model : PyMCModel, optional
+        A PyMC model. Defaults to :class:`LinearRegression`.
+    running_variable_name : str, default "x"
+        The name of the running variable column.
+    epsilon : float, default 0.001
+        A small scalar for evaluating the causal impact above/below the kink.
+    bandwidth : float, default np.inf
+        Data outside of the bandwidth (relative to the kink) is not used to
+        fit the model.
+    **kwargs
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
+
+    Notes
+    -----
+    **Estimate extraction**
+
+    The class predicts the conditional expectation at ``kink_point - epsilon``, ``kink_point``, and ``kink_point + epsilon``. It forms finite-difference slopes on the left and right and stores their difference as ``gradient_change``. This is a local prediction contrast on derivatives, not a population-standardized effect.
     """
 
     supports_ols = False
     supports_bayes = True
     _default_model_class = LinearRegression
+    _deprecated_design_aliases = {"X": ("design", "X"), "y": ("design", "y")}
 
     def __init__(
         self,
@@ -76,7 +90,7 @@ class RegressionKink(BaseExperiment):
         running_variable_name: str = "x",
         epsilon: float = 0.001,
         bandwidth: float = np.inf,
-        **kwargs: dict,
+        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Regression Kink"
@@ -103,46 +117,43 @@ class RegressionKink(BaseExperiment):
                     UserWarning,
                     stacklevel=2,
                 )
-            y, X = dmatrices(self.formula, filtered_data, return_type="dataframe")
+            y, X = build_formula_matrices(
+                self.formula, filtered_data, return_type="dataframe"
+            )
             filtered_data = filtered_data.loc[X.index]
             self.data = filtered_data
         else:
-            y, X = dmatrices(self.formula, self.data, return_type="dataframe")
+            y, X = build_formula_matrices(
+                self.formula, self.data, return_type="dataframe"
+            )
             self.data = self.data.loc[X.index]
 
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
+        self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
     def _prepare_data(self) -> None:
-        """Convert design matrices to xarray DataArrays."""
-        self.X = xr.DataArray(
-            self.X,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": np.arange(self.X.shape[0]),
-                "coeffs": self.labels,
-            },
+        """Bundle design matrices into an ``xr.Dataset``."""
+        n = self._X_raw.shape[0]
+        self.design = self._build_design_dataset(
+            self._X_raw,
+            self._y_raw,
+            obs_ind=np.arange(n),
+            coeffs=self.labels,
         )
-        self.y = xr.DataArray(
-            self.y,
-            dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
-        )
+        del self._X_raw, self._y_raw
 
     def algorithm(self) -> None:
         """Run the experiment algorithm: fit model, predict, and evaluate gradient change."""
-        COORDS = {
-            "coeffs": self.labels,
-            "obs_ind": np.arange(self.X.shape[0]),
-            "treated_units": ["unit_0"],
-        }
-        self.model.fit(X=self.X, y=self.y, coords=COORDS)
+        X = self.design["X"]
+        y = self.design["y"]
 
-        # score the goodness of fit to all data
-        self.score = self.model.score(X=self.X, y=self.y)
+        COORDS = build_coords(self.labels, X.shape[0])
+        self._model_backend.fit(X=X, y=y, coords=COORDS)
+
+        self.score = self._model_backend.score(X=X, y=y)
 
         # get the model predictions of the observed data
         if self.bandwidth is not np.inf:
@@ -159,7 +170,7 @@ class RegressionKink(BaseExperiment):
             {self.running_variable_name: xi, "treated": self._is_treated(xi)}
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
-        self.pred = self.model.predict(X=np.asarray(new_x))
+        self.pred = self._model_backend.predict(X=np.asarray(new_x))
 
         # evaluate gradient change around kink point
         mu_kink_left, mu_kink, mu_kink_right = self._probe_kink_point()
@@ -168,13 +179,22 @@ class RegressionKink(BaseExperiment):
         )
 
     def input_validation(self) -> None:
-        """Validate the input data and model formula for correctness"""
-        if "treated" not in self.formula:
+        """Validate the input data and model formula for correctness."""
+        if not any(
+            re.search(r"\btreated\b", factor.name())
+            for term in ModelDesc.from_formula(self.formula).rhs_termlist
+            for factor in term.factors
+        ):
             raise FormulaException(
-                "A predictor called `treated` should be in the formula"
+                "A predictor called `treated` should be in the formula RHS"
             )
 
-        if _is_variable_dummy_coded(self.data["treated"]) is False:
+        if "treated" not in self.data.columns:
+            raise DataException(
+                "A dummy-coded `treated` column should be present in the data"
+            )
+
+        if not _is_variable_dummy_coded(self.data["treated"]):
             raise DataException(
                 """The treated variable should be dummy coded. Consisting of 0's and 1's only."""  # noqa: E501
             )
@@ -220,11 +240,10 @@ class RegressionKink(BaseExperiment):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], x_predict)
-        predicted = self.model.predict(X=np.asarray(new_x))
-        # extract predicted mu values
-        mu_kink_left = predicted["posterior_predictive"].sel(obs_ind=0)["mu"]
-        mu_kink = predicted["posterior_predictive"].sel(obs_ind=1)["mu"]
-        mu_kink_right = predicted["posterior_predictive"].sel(obs_ind=2)["mu"]
+        predicted = self._model_backend.predict(X=np.asarray(new_x))
+        mu_kink_left = predicted.sel(obs_ind=0)
+        mu_kink = predicted.sel(obs_ind=1)
+        mu_kink_right = predicted.sel(obs_ind=2)
         return mu_kink_left, mu_kink, mu_kink_right
 
     def _is_treated(self, x: np.ndarray | pd.Series) -> np.ndarray:
@@ -234,8 +253,11 @@ class RegressionKink(BaseExperiment):
     def summary(self, round_to: int | None = 2) -> None:
         """Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
         print(
             f"""
@@ -250,11 +272,121 @@ class RegressionKink(BaseExperiment):
         )
         self.print_coefficients(round_to)
 
-    def _bayesian_plot(
-        self, round_to: int | None = 2, **kwargs: dict
+    def plot(
+        self,
+        *,
+        round_to: int | None = 2,
+        ci_prob: float = HDI_PROB,
+        hdi_prob: float | None = None,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
+        figsize: tuple[float, float] | None = None,
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Generate plot for regression kink designs."""
-        fig, ax = plt.subplots()
+        """Plot the regression kink results.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round numerical results in the figure
+            title (e.g. the Bayesian :math:`R^2`). Defaults to 2. Use
+            ``None`` to render raw numbers.
+        ci_prob : float
+            Probability mass of the highest density interval drawn around the
+            posterior predictive band, and the central credible interval
+            reported in the figure title for the change in gradient at the
+            kink point. Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        hdi_prob : float, optional
+            Deprecated. Use ``ci_prob`` instead.
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered via
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to
+            ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults
+            to 50. Ignored for other kinds.
+
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
+            matplotlib's default).
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : matplotlib.axes.Axes
+            The axes object containing the plot.
+        """
+        if hdi_prob is not None:
+            warnings.warn(
+                "hdi_prob is deprecated and will be removed in a future release. "
+                "Use ci_prob instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
+            ci_prob = hdi_prob
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            round_to=round_to,
+            ci_prob=ci_prob,
+            kind=kind,
+            ci_kind=ci_kind,
+            num_samples=num_samples,
+            figsize=figsize,
+        )
+
+    def _plot(
+        self,
+        round_to: int | None = 2,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
+        figsize: tuple[float, float] | None = None,
+        **kwargs: Any,
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Generate plot for regression kink designs.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use ``None``
+            to return raw numbers.
+        hdi_prob : float, optional
+            Probability mass of the highest density interval drawn around the
+            posterior predictive band, and the central credible interval
+            reported in the figure title for the change in gradient at the
+            kink point. Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``None``
+            (use matplotlib's default).
+        """
+        style: _PosteriorPlotStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
+        fig, ax = plt.subplots(figsize=figsize)
         # Plot raw data
         sns.scatterplot(
             self.data,
@@ -265,21 +397,23 @@ class RegressionKink(BaseExperiment):
         )
 
         # Plot model fit to data
-        h_line, h_patch = plot_xY(
+        h_line, h_patch = plot_posterior_over_x(
             self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].mu.isel(treated_units=0),
+            self.pred.isel(treated_units=0),
             ax=ax,
+            **style,
             plot_hdi_kwargs={"color": "C1"},
         )
         handles = [(h_line, h_patch)]
         labels = ["Posterior mean"]
 
         # create strings to compose title
-        title_info = f"{round_num(self.score['unit_0_r2'], round_to if round_to is not None else 2)} (std = {round_num(self.score['unit_0_r2_std'], round_to if round_to is not None else 2)})"
-        r2 = f"Bayesian $R^2$ on all data = {title_info}"
-        percentiles = self.gradient_change.quantile([0.03, 1 - 0.03]).values
+        r2 = format_r2_score(self.score, round_to=round_to, context="on all data")
+        percentiles = self.gradient_change.quantile(
+            [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
+        ).values
         ci = (
-            r"$CI_{94\%}$"
+            rf"$CI_{{{ci_prob * 100:.0f}\%}}$"
             + f"[{round_num(percentiles[0], round_to if round_to is not None else 2)}, {round_num(percentiles[1], round_to if round_to is not None else 2)}]"
         )
         grad_change = f"""
@@ -320,6 +454,9 @@ class RegressionKink(BaseExperiment):
             Significance level for HDI/CI intervals (1-alpha confidence level).
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+        **kwargs
+            Reserved for forward-compatibility; not consumed by this
+            implementation.
 
         Returns
         -------

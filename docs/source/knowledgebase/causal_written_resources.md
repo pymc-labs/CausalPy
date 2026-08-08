@@ -11,6 +11,7 @@ Below is a list of written resources (books, blog posts, etc.) that are useful f
 * Reichardt, C. S. (2019). Quasi-experimentation: A guide to design and analysis. Guilford Publications.
 
 ## Bayesian causal inference resources
+
 * The official [PyMC examples gallery](https://www.pymc.io/projects/examples/en/latest/gallery.html) has a set of examples specifically relating to causal inference.
 
 ## General causal inference resources

@@ -9,27 +9,37 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # Only supersede pull request builds. A push to main must finish so the commit
+  # keeps its code scanning results.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   zizmor:
-    name: zizmor latest via PyPI
+    name: zizmor via PyPI
     runs-on: ubuntu-latest
     permissions:
       security-events: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: hynek/setup-cached-uv@757bedc3f972eb7227a1aa657651f15a8527c817 # v2.3.0
+      - uses: hynek/setup-cached-uv@34e35d30f1ebc7421a5cc733bca38dcc62603960 # v2.6.0
 
       - name: Run zizmor 🌈
-        run: uvx zizmor --format sarif . > results.sarif
+        # Pinned: an unpinned `uvx zizmor` turns CI red on an unchanged branch
+        # whenever upstream ships a new audit. Dependabot cannot see a version
+        # inside `run:`, so bump this by hand when adopting new audits, or the
+        # audit set silently freezes here.
+        run: uvx zizmor@1.29.0 --format sarif . > results.sarif
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@89a39a4e59826350b863aa6b6252a07ad50cf83e # v4.32.4
+        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
         with:
           # Path to SARIF file relative to the root of the repository
           sarif_file: results.sarif

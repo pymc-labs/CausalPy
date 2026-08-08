@@ -60,7 +60,13 @@ class BandwidthSensitivity:
         self.bandwidths = bandwidths or [0.25, 0.5, 1.0, 2.0, np.inf]
 
     def validate(self, experiment: BaseExperiment) -> None:
-        """Verify the experiment is an RD or RKink instance."""
+        """Verify the experiment is an RD or RKink instance.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            Candidate experiment to validate.
+        """
         if not isinstance(experiment, (RegressionDiscontinuity, RegressionKink)):
             raise TypeError(
                 "BandwidthSensitivity requires a RegressionDiscontinuity "
@@ -72,7 +78,15 @@ class BandwidthSensitivity:
         experiment: BaseExperiment,
         context: PipelineContext,
     ) -> CheckResult:
-        """Re-fit the experiment at multiple bandwidths and compare estimates."""
+        """Re-fit the experiment at multiple bandwidths and compare estimates.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            The fitted RD or RKink experiment.
+        context : PipelineContext
+            Pipeline context providing ``experiment_config`` for re-fits.
+        """
         if context.experiment_config is None:
             raise RuntimeError(
                 "No experiment_config in context. Use EstimateEffect "

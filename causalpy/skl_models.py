@@ -11,7 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Custom scikit-learn models for causal inference"""
+"""Custom scikit-learn models for causal inference."""
 
 from functools import partial
 
@@ -27,14 +27,6 @@ class ScikitLearnAdaptor:
     """Base class for scikit-learn models that can be used for causal inference."""
 
     coef_: np.ndarray
-
-    def calculate_impact(self, y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
-        """Calculate the causal impact of the intervention."""
-        return y_true - y_pred
-
-    def calculate_cumulative_impact(self, impact: np.ndarray) -> np.ndarray:
-        """Calculate the cumulative impact intervention."""
-        return np.cumsum(impact)
 
     def print_coefficients(
         self, labels: list[str], round_to: int | None = None
@@ -69,15 +61,35 @@ class ScikitLearnAdaptor:
 
 
 class WeightedProportion(ScikitLearnAdaptor, LinearModel, RegressorMixin):
-    """Weighted proportion model for causal inference. Used for synthetic control
-    methods for example"""
+    """Weighted proportion model for causal inference.
+
+    Used for synthetic control methods, for example.
+    """
 
     def loss(self, W: np.ndarray, X: np.ndarray, y: np.ndarray) -> float:
-        """Compute root mean squared loss with data X, weights W, and predictor y"""
+        """Compute root mean squared loss with data X, weights W, and predictor y.
+
+        Parameters
+        ----------
+        W : np.ndarray
+            Convex combination weights.
+        X : np.ndarray
+            Donor matrix.
+        y : np.ndarray
+            Treated unit outcomes in the pre-treatment period.
+        """
         return np.sqrt(np.mean((y - np.dot(X, W.T)) ** 2))
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> "WeightedProportion":
-        """Fit model on data X with predictor y"""
+        """Fit model on data X with predictor y.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Donor matrix.
+        y : np.ndarray
+            Treated unit outcomes in the pre-treatment period.
+        """
         w_start = [1 / X.shape[1]] * X.shape[1]
         coef_ = fmin_slsqp(
             partial(self.loss, X=X, y=y),
@@ -91,7 +103,13 @@ class WeightedProportion(ScikitLearnAdaptor, LinearModel, RegressorMixin):
         return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Predict results for data X"""
+        """Predict results for data X.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Donor matrix to predict from.
+        """
         return np.dot(X, self.coef_.T)
 
 
@@ -99,7 +117,13 @@ def create_causalpy_compatible_class(
     estimator: type[RegressorMixin],
 ) -> type[RegressorMixin]:
     """This function takes a scikit-learn estimator and returns a new class that is
-    compatible with CausalPy."""
+    compatible with CausalPy.
+
+    Parameters
+    ----------
+    estimator : type[RegressorMixin]
+        A scikit-learn estimator class to augment.
+    """
     _add_mixin_methods(estimator, ScikitLearnAdaptor)
     return estimator
 

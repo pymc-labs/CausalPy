@@ -40,7 +40,6 @@ from causalpy.experiments.regression_kink import RegressionKink
 from causalpy.experiments.staggered_did import StaggeredDifferenceInDifferences
 from causalpy.experiments.synthetic_control import SyntheticControl
 from causalpy.pipeline import PipelineContext
-from causalpy.pymc_models import PyMCModel
 
 logger = logging.getLogger(__name__)
 
@@ -93,10 +92,16 @@ class PriorSensitivity:
         self.alternatives = alternatives
 
     def validate(self, experiment: BaseExperiment) -> None:
-        """Verify the experiment uses a Bayesian (PyMC) model."""
-        if not isinstance(experiment.model, PyMCModel):
+        """Verify the experiment uses a Bayesian (PyMC) model.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            Candidate experiment to validate.
+        """
+        if not experiment._model_backend.supports_idata:
             raise TypeError(
-                "PriorSensitivity requires a Bayesian (PyMC) model. "
+                "PriorSensitivity requires a Bayesian backend with InferenceData. "
                 f"Got {type(experiment.model).__name__}."
             )
 
@@ -105,7 +110,15 @@ class PriorSensitivity:
         experiment: BaseExperiment,
         context: PipelineContext,
     ) -> CheckResult:
-        """Re-fit with each alternative model and compare effect estimates."""
+        """Re-fit with each alternative model and compare effect estimates.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            The fitted Bayesian experiment.
+        context : PipelineContext
+            Pipeline context providing ``experiment_config`` for re-fits.
+        """
         if context.experiment_config is None:
             raise RuntimeError(
                 "No experiment_config in context. Use EstimateEffect "

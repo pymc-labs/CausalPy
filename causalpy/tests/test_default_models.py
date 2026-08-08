@@ -216,16 +216,10 @@ def test_missing_default_model_class_raises_valueerror():
         supports_bayes = True
         supports_ols = True
 
-        def _bayesian_plot(self):
+        def _plot(self):
             pass
 
-        def _ols_plot(self):
-            pass
-
-        def get_plot_data_bayesian(self):
-            pass
-
-        def get_plot_data_ols(self):
+        def get_plot_data(self):
             pass
 
         def effect_summary(self):
@@ -236,9 +230,11 @@ def test_missing_default_model_class_raises_valueerror():
 
 
 @pytest.mark.integration
-def test_explicit_model_takes_precedence_over_default(mock_pymc_sample, sample_kwargs):
+def test_explicit_model_takes_precedence_over_default(
+    mock_pymc_sample, sample_kwargs, did_data
+):
     """Explicitly passed model is used instead of default."""
-    df = cp.load_data("did")
+    df = did_data
     explicit_model = cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs)
 
     result = cp.DifferenceInDifferences(

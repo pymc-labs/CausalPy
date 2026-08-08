@@ -11,7 +11,6 @@
 ![Build Status](https://github.com/pymc-labs/CausalPy/actions/workflows/ci.yml/badge.svg?branch=main)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
-![Interrogate](https://raw.githubusercontent.com/pymc-labs/CausalPy/interrogate-badges/interrogate_badge.svg)
 [![codecov](https://codecov.io/gh/pymc-labs/CausalPy/branch/main/graph/badge.svg?token=FDKNAY5CZ9)](https://codecov.io/gh/pymc-labs/CausalPy)
 
 ![GitHub Repo stars](https://img.shields.io/github/stars/pymc-labs/causalpy?style=flat)
@@ -31,7 +30,15 @@ CausalPy helps you estimate causal effects with transparent assumptions, uncerta
 - **Bayesian-first estimation** via [PyMC](https://www.pymc.io/) with full uncertainty quantification, plus traditional OLS via [scikit-learn](https://scikit-learn.org)
 - **Decision-ready outputs:** Effect summaries with credible intervals (HDI), practical significance (ROPE), and publication-quality plots
 
-**Non-goals:** CausalPy focuses on research-grade causal analysis. It does not include production workflow tooling such as scheduled runs, pipeline orchestration, access controls, or experiment/model registries.
+## 📞 [**Book a consulting call**](https://calendly.com/benjamin-vincent/causalpy)
+
+CausalPy is built and maintained by [PyMC Labs](https://www.pymc-labs.com). If your team is exploring a consulting engagement for lift testing, complex or high-stakes causal work, you can book an introductory call. _These calls are for consulting inquiries only. For technical usage questions and free community support, please use GitHub Discussions and the documentation below._
+
+## Help and documentation
+
+- Ask usage questions in [GitHub Discussions Q&A](https://github.com/pymc-labs/CausalPy/discussions/categories/q-a) so the issue tracker stays focused on bugs and enhancements.
+- Report bugs and feature requests in [Issues](https://github.com/pymc-labs/CausalPy/issues)
+- Browse detailed guides in the [documentation](https://causalpy.readthedocs.io)
 
 ## Installation
 
@@ -52,6 +59,10 @@ Alternatively, if you want the very latest version of the package you can instal
 ```bash
 pip install git+https://github.com/pymc-labs/CausalPy.git
 ```
+
+## AI Agent Skills
+
+CausalPy includes agent skills that teach AI coding assistants how to use the library for causal inference. Skills are available via [Decision AI Hub](https://hub.decision.ai) and live in `causalpy/skills/` in the source tree.
 
 ## Quickstart
 
@@ -143,7 +154,7 @@ CausalPy emphasizes transparent, uncertainty-aware outputs for rigorous causal a
 
 If you use CausalPy in your research, please cite it. A Zenodo DOI for stable releases is planned. In the meantime, you can cite the repository:
 
-```
+```bibtex
 @software{causalpy,
   author = {{PyMC Labs}},
   title = {CausalPy: Causal inference for quasi-experiments in Python},
@@ -158,24 +169,12 @@ Plans for the repository can be seen in the [Issues](https://github.com/pymc-lab
 
 ## License
 
-[Apache License 2.0](LICENSE)
+[Apache License 2.0](https://github.com/pymc-labs/CausalPy/blob/main/LICENSE)
 
----
+## Thanks to our contributors
 
-## Get Help
+<a href="https://github.com/pymc-labs/CausalPy/graphs/contributors">
+  <img src="https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/contributors.svg" alt="CausalPy contributors" />
+</a>
 
-### Community and Documentation
-
-- Ask usage questions in [GitHub Discussions Q&A](https://github.com/pymc-labs/CausalPy/discussions/categories/q-a)
-- Report bugs and feature requests in [Issues](https://github.com/pymc-labs/CausalPy/issues)
-- Browse detailed guides in the [documentation](https://causalpy.readthedocs.io)
-
-Please use GitHub Discussions for general questions so the issue tracker stays focused on bugs and enhancements.
-
-### Expert Consulting
-
-CausalPy is built and maintained by [PyMC Labs](https://www.pymc-labs.com). If your team is exploring a consulting engagement for lift testing, complex or high-stakes causal work, you can book an introductory call.
-
-### 📅 [**Book a consulting call**](https://calendly.com/benjamin-vincent/causalpy)
-
-_These calls are for consulting inquiries only. For technical usage questions and free community support, please use GitHub Discussions and the documentation listed above._
+The contributor image is regenerated weekly by a GitHub Actions workflow (`.github/workflows/contributors.yml`) that opens a PR when the contributor list changes.

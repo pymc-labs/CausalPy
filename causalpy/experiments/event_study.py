@@ -12,7 +12,7 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 """
-Event Study / Dynamic Difference-in-Differences
+Event Study / Dynamic Difference-in-Differences.
 """
 
 import warnings
@@ -23,11 +23,12 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import dmatrices
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException, FormulaException
-from causalpy.pymc_models import PyMCModel
+from causalpy.formula_utils import build_formula_matrices
+from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 from causalpy.utils import round_num
 
@@ -53,6 +54,7 @@ class EventStudy(BaseExperiment):
         Y_{it} = \\alpha_i + \\lambda_t + \\sum_{k \\neq k_0} \\beta_k \\cdot \\mathbf{1}\\{E_{it} = k\\} + \\varepsilon_{it}
 
     where:
+
     - :math:`\\alpha_i` are unit fixed effects
     - :math:`\\lambda_t` are time fixed effects
     - :math:`E_{it} = t - G_i` is event time (time relative to treatment)
@@ -103,8 +105,10 @@ class EventStudy(BaseExperiment):
         Default is -1 (one period before treatment).
     model : PyMCModel or RegressorMixin, optional
         Model for estimation. Defaults to None.
+    **kwargs : dict
+        Additional keyword arguments forwarded to :class:`BaseExperiment`.
 
-    Example
+    Examples
     --------
     >>> import causalpy as cp
     >>> from causalpy.data.simulate_data import generate_event_study_data
@@ -133,6 +137,7 @@ class EventStudy(BaseExperiment):
 
     supports_ols = True
     supports_bayes = True
+    _default_model_class = LinearRegression
 
     def __init__(
         self,
@@ -278,7 +283,7 @@ class EventStudy(BaseExperiment):
         original_size = len(self.data)
 
         # Parse formula with patsy to get y and X (including FEs and covariates)
-        y, X = dmatrices(self.formula, self.data, return_type="dataframe")
+        y, X = build_formula_matrices(self.formula, self.data, return_type="dataframe")
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
 
@@ -516,6 +521,66 @@ class EventStudy(BaseExperiment):
 
         return pd.DataFrame(rows)
 
+    def plot(
+        self,
+        *,
+        round_to: int | None = 2,
+        hdi_prob: float = HDI_PROB,
+        figsize: tuple[float, float] = (10, 6),
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Plot event-study dynamic treatment effects.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals for rounding coefficient labels. Defaults to 2.
+        hdi_prob : float
+            Probability mass of the highest density interval for Bayesian
+            error bars. Ignored for OLS models. Defaults to
+            :data:`~causalpy.constants.HDI_PROB`.
+        figsize : tuple of (float, float)
+            Width and height of the figure in inches. Defaults to ``(10, 6)``.
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title``.
+
+        Returns
+        -------
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : matplotlib.axes.Axes
+            The axes object containing the plot.
+        """
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            round_to=round_to,
+            hdi_prob=hdi_prob,
+            figsize=figsize,
+        )
+
+    def _plot(
+        self,
+        round_to: int | None = 2,
+        hdi_prob: float = HDI_PROB,
+        figsize: tuple[float, float] = (10, 6),
+        **kwargs: Any,
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Backend-agnostic event-study plot dispatcher."""
+        if isinstance(self.model, PyMCModel):
+            return self._bayesian_plot(
+                round_to=round_to,
+                figsize=figsize,
+                hdi_prob=hdi_prob,
+                **kwargs,
+            )
+        return self._ols_plot(round_to=round_to, figsize=figsize, **kwargs)
+
     def _bayesian_plot(
         self,
         round_to: int | None = 2,
@@ -708,11 +773,25 @@ class EventStudy(BaseExperiment):
     def get_plot_data_bayesian(
         self, hdi_prob: float = 0.94, **kwargs: dict
     ) -> pd.DataFrame:
-        """Get plot data for Bayesian model."""
+        """Get plot data for Bayesian model.
+
+        Parameters
+        ----------
+        hdi_prob : float, default=0.94
+            HDI probability for summarizing posterior draws.
+        **kwargs : dict
+            Unused; accepted for API consistency with other experiments.
+        """
         return self.get_event_time_summary(hdi_prob=hdi_prob)
 
     def get_plot_data_ols(self, **kwargs: dict) -> pd.DataFrame:
-        """Get plot data for OLS model."""
+        """Get plot data for OLS model.
+
+        Parameters
+        ----------
+        **kwargs : dict
+            Unused; accepted for API consistency with other experiments.
+        """
         return self.get_event_time_summary(hdi_prob=0.94)
 
     def effect_summary(

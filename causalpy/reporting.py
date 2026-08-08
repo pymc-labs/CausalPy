@@ -32,6 +32,9 @@ import pandas as pd
 import xarray as xr
 from scipy.stats import t
 
+from causalpy.constants import HDI_PROB
+from causalpy.utils import _as_scalar, has_posterior_draws
+
 
 @dataclass
 class EffectSummary:
@@ -77,11 +80,11 @@ def _extract_hdi_bounds(
     """
     if isinstance(hdi_result, xr.Dataset):
         hdi_data = list(hdi_result.data_vars.values())[0]
-        lower = float(hdi_data.sel(hdi="lower").values)
-        upper = float(hdi_data.sel(hdi="higher").values)
+        lower = _as_scalar(hdi_data.sel(hdi="lower"))
+        upper = _as_scalar(hdi_data.sel(hdi="higher"))
     else:
-        lower = float(hdi_result.sel(hdi="lower").values)
-        upper = float(hdi_result.sel(hdi="higher").values)
+        lower = _as_scalar(hdi_result.sel(hdi="lower"))
+        upper = _as_scalar(hdi_result.sel(hdi="higher"))
     return lower, upper
 
 
@@ -103,12 +106,12 @@ def _compute_tail_probabilities(
         Dictionary with keys: 'p_gt_0', 'p_lt_0', or 'p_two_sided'+'prob_of_effect'
     """
     if direction == "increase":
-        return {"p_gt_0": float((effect > 0).mean().values)}
+        return {"p_gt_0": _as_scalar((effect > 0).mean())}
     elif direction == "decrease":
-        return {"p_lt_0": float((effect < 0).mean().values)}
+        return {"p_lt_0": _as_scalar((effect < 0).mean())}
     else:  # two-sided
-        p_gt = float((effect > 0).mean().values)
-        p_lt = float((effect < 0).mean().values)
+        p_gt = _as_scalar((effect > 0).mean())
+        p_lt = _as_scalar((effect < 0).mean())
         p_two_sided = 2 * min(p_gt, p_lt)
         return {"p_two_sided": p_two_sided, "prob_of_effect": 1 - p_two_sided}
 
@@ -135,11 +138,11 @@ def _compute_rope_probability(
         Probability that effect exceeds min_effect threshold
     """
     if direction == "two-sided":
-        return float((np.abs(effect) > min_effect).mean().values)
+        return _as_scalar((np.abs(effect) > min_effect).mean())
     elif direction == "increase":
-        return float((effect > min_effect).mean().values)
+        return _as_scalar((effect > min_effect).mean())
     elif direction == "decrease":
-        return float((effect < -min_effect).mean().values)
+        return _as_scalar((effect < -min_effect).mean())
 
 
 def _format_number(x: float, decimals: int = 2) -> str:
@@ -192,8 +195,8 @@ def _compute_statistics_scalar(
         Dictionary containing mean, median, HDI bounds, tail probabilities, and optionally ROPE
     """
     stats = {
-        "mean": float(effect.mean(dim=["chain", "draw"]).values),
-        "median": float(effect.median(dim=["chain", "draw"]).values),
+        "mean": _as_scalar(effect.mean(dim=["chain", "draw"])),
+        "median": _as_scalar(effect.median(dim=["chain", "draw"])),
     }
 
     # HDI using helper
@@ -512,6 +515,10 @@ def _effect_summary_staggered_did(
     # Separate pre-treatment (placebo) and post-treatment effects
     pre_treatment = att_et[att_et["event_time"] < 0]
     post_treatment = att_et[att_et["event_time"] >= 0]
+    if "identified" in post_treatment.columns:
+        post_treatment = post_treatment[post_treatment["identified"]]
+    if "identified" in pre_treatment.columns:
+        pre_treatment = pre_treatment[pre_treatment["identified"]]
 
     # Build summary table with all event-time effects
     table = att_et.copy()
@@ -586,11 +593,8 @@ def _effect_summary_rd(
     """Generate effect summary for Regression Discontinuity experiments."""
     discontinuity = result.discontinuity_at_threshold
 
-    # Check if PyMC (xarray) or OLS (scalar)
-    is_pymc = isinstance(discontinuity, xr.DataArray)
-
-    if is_pymc:
-        # PyMC model: use unified scalar functions
+    if has_posterior_draws(discontinuity):
+        # Posterior draws present: use unified scalar functions
         hdi_prob = 1 - alpha
         stats = _compute_statistics_scalar(
             discontinuity, hdi_prob=hdi_prob, direction=direction, min_effect=min_effect
@@ -642,36 +646,12 @@ def _select_treated_unit(data: xr.DataArray, treated_unit: str | None) -> xr.Dat
         return data.isel(treated_units=0)
 
 
-def _select_treated_unit_numpy(
-    data: np.ndarray, result, treated_unit: str | None
-) -> np.ndarray:
-    """Select a specific treated unit from multi-dimensional numpy array.
-
-    Parameters
-    ----------
-    data : np.ndarray
-        Multi-dimensional array where second dimension is treated units
-    result
-        Experiment result object with treated_units attribute
-    treated_unit : str or None
-        Name of treated unit to select. If None, selects first unit.
-
-    Returns
-    -------
-    np.ndarray
-        Data for the selected treated unit (1D)
-    """
-    if treated_unit is not None and hasattr(result, "treated_units"):
-        unit_idx = result.treated_units.index(treated_unit)
-        return data[:, unit_idx]
-    else:
-        return data[:, 0]
-
-
 def _extract_window(result, window, treated_unit=None):
     """Extract windowed impact data based on window specification.
 
-    Assumes result.post_impact is properly shaped xarray or numpy array.
+    Assumes ``result.post_impact`` is an :class:`xarray.DataArray` with
+    canonical prediction dimensions (singleton ``chain``/``draw`` for OLS
+    backends).
 
     Parameters
     ----------
@@ -690,28 +670,8 @@ def _extract_window(result, window, treated_unit=None):
     """
     post_impact = result.post_impact
 
-    # Check if PyMC (xarray with chain/draw dims) or OLS
-    is_pymc = isinstance(post_impact, xr.DataArray) and (
-        "chain" in post_impact.dims or "draw" in post_impact.dims
-    )
-
-    # Handle treated_unit selection using helper functions
-    if isinstance(post_impact, xr.DataArray) and "treated_units" in post_impact.dims:
+    if "treated_units" in post_impact.dims:
         post_impact = _select_treated_unit(post_impact, treated_unit)
-    elif (
-        not isinstance(post_impact, xr.DataArray)
-        and hasattr(post_impact, "ndim")
-        and post_impact.ndim > 1
-    ):
-        post_impact = _select_treated_unit_numpy(post_impact, result, treated_unit)
-
-    # Convert OLS xarray to numpy for consistent handling
-    if not is_pymc and isinstance(post_impact, xr.DataArray):
-        post_impact = np.squeeze(post_impact.values)
-
-    # Ensure OLS data is numpy array
-    if not is_pymc and not isinstance(post_impact, np.ndarray):
-        post_impact = np.asarray(post_impact)
 
     # Extract window coordinates based on window specification
     if window == "post":
@@ -769,13 +729,8 @@ def _extract_window(result, window, treated_unit=None):
     if window == "post":
         # No filtering needed - use all data
         windowed_impact = post_impact
-    elif is_pymc:
-        # PyMC: use xarray's named dimension selection
-        windowed_impact = post_impact.sel(obs_ind=window_coords)
     else:
-        # OLS: convert window_coords to integer indices and select from numpy array
-        indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
-        windowed_impact = post_impact[indices]
+        windowed_impact = post_impact.sel(obs_ind=window_coords)
 
     # Validate window is not empty
     if len(window_coords) == 0:
@@ -787,7 +742,9 @@ def _extract_window(result, window, treated_unit=None):
 def _extract_counterfactual(result, window_coords, treated_unit=None):
     """Extract counterfactual predictions for the window.
 
-    Reuses logic from _extract_window for consistency.
+    Assumes ``result.post_pred`` is an :class:`xarray.DataArray` with
+    canonical prediction dimensions (singleton ``chain``/``draw`` for OLS
+    backends).
 
     Parameters
     ----------
@@ -800,80 +757,158 @@ def _extract_counterfactual(result, window_coords, treated_unit=None):
 
     Returns
     -------
-    xr.DataArray or np.ndarray
+    xr.DataArray
         Counterfactual predictions for the window
     """
     post_pred = result.post_pred
+    if "treated_units" in post_pred.dims:
+        post_pred = _select_treated_unit(post_pred, treated_unit)
+    return post_pred.sel(obs_ind=window_coords)
 
-    # PyMC: Extract from InferenceData
-    if hasattr(post_pred, "posterior_predictive"):
-        # PyMC model - InferenceData object
-        counterfactual = post_pred.posterior_predictive["mu"]
 
-        # Handle treated_unit selection using helper
-        if "treated_units" in counterfactual.dims:
-            counterfactual = _select_treated_unit(counterfactual, treated_unit)
+def _effect_summary_timeseries(
+    windowed_impact: xr.DataArray,
+    counterfactual: xr.DataArray,
+    window_coords,
+    *,
+    direction: Literal["increase", "decrease", "two-sided"] = "increase",
+    alpha: float = 0.05,
+    cumulative: bool = True,
+    relative: bool = True,
+    min_effect: float | None = None,
+    prefix: str = "Post-period",
+    experiment_type: str | None = None,
+) -> EffectSummary:
+    """Build an :class:`EffectSummary` for time-series experiments (ITS, SC,
+    Piecewise ITS) from canonical impact/counterfactual containers.
 
-        # Select window using named dimension
-        counterfactual = counterfactual.sel(obs_ind=window_coords)
-        return counterfactual
+    The single irreducible statistical branch lives here, keyed on the
+    container itself: predictions carrying posterior draws are summarized
+    with HDIs, tail probabilities, and ROPE, while single-draw (point
+    estimate) predictions report frequentist t-based intervals — an HDI
+    computed from a singleton draw would be silently meaningless.
 
-    elif isinstance(post_pred, dict) and "posterior_predictive" in post_pred:
-        # PyMC model - dict format (fallback)
-        counterfactual = post_pred["posterior_predictive"]["mu"]
+    Parameters
+    ----------
+    windowed_impact : xr.DataArray
+        Causal impact in the analysis window with canonical prediction
+        dimensions.
+    counterfactual : xr.DataArray
+        Counterfactual predictions in the analysis window with canonical
+        prediction dimensions.
+    window_coords : pd.Index
+        Window coordinates from :func:`_extract_window`.
+    direction : {"increase", "decrease", "two-sided"}, default "increase"
+        Direction for tail probability calculation (Bayesian only).
+    alpha : float, default 0.05
+        Significance level for HDI/CI intervals.
+    cumulative : bool, default True
+        Whether to include cumulative effect statistics.
+    relative : bool, default True
+        Whether to include relative effect statistics.
+    min_effect : float, optional
+        Region of Practical Equivalence threshold (Bayesian only).
+    prefix : str, default "Post-period"
+        Prefix for prose generation.
+    experiment_type : str, optional
+        Experiment tag ("its", "sc", "piecewise_its") for tailored
+        assumptions text.
+    """
+    if has_posterior_draws(windowed_impact):
+        hdi_prob = 1 - alpha
+        stats = _compute_statistics(
+            windowed_impact,
+            counterfactual,
+            hdi_prob=hdi_prob,
+            direction=direction,
+            cumulative=cumulative,
+            relative=relative,
+            min_effect=min_effect,
+        )
+        table = _generate_table(stats, cumulative=cumulative, relative=relative)
 
-        # Handle treated_unit selection using helper
-        if "treated_units" in counterfactual.dims:
-            counterfactual = _select_treated_unit(counterfactual, treated_unit)
+        cf_avg = _as_scalar(counterfactual.mean(dim=["obs_ind", "chain", "draw"]))
+        obs_avg = cf_avg + stats["avg"]["mean"]
+        cf_cum = _as_scalar(
+            counterfactual.sum(dim="obs_ind").mean(dim=["chain", "draw"])
+        )
+        obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
 
-        # Select window using named dimension
-        counterfactual = counterfactual.sel(obs_ind=window_coords)
-        return counterfactual
-
-    # OLS: Handle xarray or numpy
-    if isinstance(post_pred, xr.DataArray):
-        # OLS with xarray (e.g., SyntheticControl)
-        # Select treated_unit using helper
-        if "treated_units" in post_pred.dims:
-            post_pred = _select_treated_unit(post_pred, treated_unit)
-
-        # Convert window_coords to integer indices for isel
-        indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
-        counterfactual = post_pred.isel(obs_ind=indices).values
-        return np.squeeze(counterfactual)
+        text = _generate_prose_detailed(
+            stats,
+            window_coords,
+            alpha=alpha,
+            direction=direction,
+            cumulative=cumulative,
+            relative=relative,
+            prefix=prefix,
+            observed_avg=obs_avg,
+            counterfactual_avg=cf_avg,
+            observed_cum=obs_cum,
+            counterfactual_cum=cf_cum if cumulative else None,
+            experiment_type=experiment_type,
+        )
     else:
-        # OLS with numpy array
-        # Convert window_coords to indices
-        indices = [result.datapost.index.get_loc(coord) for coord in window_coords]
-        counterfactual = post_pred[indices]
+        impact_array = np.asarray(windowed_impact.isel(chain=0, draw=0))
+        counterfactual_array = np.asarray(counterfactual.isel(chain=0, draw=0))
 
-        # Handle treated_unit for multi-unit numpy arrays using helper
-        if hasattr(counterfactual, "ndim") and counterfactual.ndim > 1:
-            counterfactual = _select_treated_unit_numpy(
-                counterfactual, result, treated_unit
-            )
+        stats = _compute_statistics_ols(
+            impact_array,
+            counterfactual_array,
+            alpha=alpha,
+            cumulative=cumulative,
+            relative=relative,
+        )
+        table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
 
-        return np.squeeze(counterfactual)
+        cf_avg = float(np.mean(counterfactual_array))
+        obs_avg = cf_avg + stats["avg"]["mean"]
+        cf_cum = float(np.sum(counterfactual_array))
+        obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
+
+        text = _generate_prose_detailed_ols(
+            stats,
+            window_coords,
+            alpha=alpha,
+            cumulative=cumulative,
+            relative=relative,
+            prefix=prefix,
+            observed_avg=obs_avg,
+            counterfactual_avg=cf_avg,
+            observed_cum=obs_cum,
+            counterfactual_cum=cf_cum if cumulative else None,
+            experiment_type=experiment_type,
+        )
+
+    return EffectSummary(table=table, text=text)
 
 
 def _compute_statistics(
     impact,
     counterfactual,
-    hdi_prob=0.95,
+    hdi_prob=HDI_PROB,
     direction="increase",
     cumulative=True,
     relative=True,
     min_effect=None,
     time_dim="obs_ind",
 ):
-    """Compute all summary statistics from posterior draws."""
+    """Compute all summary statistics from posterior draws.
+
+    Notes
+    -----
+    All in-tree callers pass ``hdi_prob`` explicitly (typically derived from
+    ``effect_summary``'s ``alpha`` as ``hdi_prob = 1 - alpha``), so this
+    default is effectively unused; it is set to :data:`HDI_PROB` to keep the
+    project-wide convention consistent.
+    """
     stats = {}
 
     # Average effect over window
     avg_effect = impact.mean(dim=time_dim)
     stats["avg"] = {
-        "mean": float(avg_effect.mean(dim=["chain", "draw"]).values),
-        "median": float(avg_effect.median(dim=["chain", "draw"]).values),
+        "mean": _as_scalar(avg_effect.mean(dim=["chain", "draw"])),
+        "median": _as_scalar(avg_effect.median(dim=["chain", "draw"])),
     }
 
     # HDI for average
@@ -882,21 +917,21 @@ def _compute_statistics(
     # Handle both Dataset and DataArray returns
     if isinstance(hdi_avg, xr.Dataset):
         hdi_data = list(hdi_avg.data_vars.values())[0]
-        stats["avg"]["hdi_lower"] = float(hdi_data.sel(hdi="lower").values)
-        stats["avg"]["hdi_upper"] = float(hdi_data.sel(hdi="higher").values)
+        stats["avg"]["hdi_lower"] = _as_scalar(hdi_data.sel(hdi="lower"))
+        stats["avg"]["hdi_upper"] = _as_scalar(hdi_data.sel(hdi="higher"))
     else:
         # If it's a DataArray, extract directly
-        stats["avg"]["hdi_lower"] = float(hdi_avg.sel(hdi="lower").values)
-        stats["avg"]["hdi_upper"] = float(hdi_avg.sel(hdi="higher").values)
+        stats["avg"]["hdi_lower"] = _as_scalar(hdi_avg.sel(hdi="lower"))
+        stats["avg"]["hdi_upper"] = _as_scalar(hdi_avg.sel(hdi="higher"))
 
     # Tail probabilities for average
     if direction == "increase":
-        stats["avg"]["p_gt_0"] = float((avg_effect > 0).mean().values)
+        stats["avg"]["p_gt_0"] = _as_scalar((avg_effect > 0).mean())
     elif direction == "decrease":
-        stats["avg"]["p_lt_0"] = float((avg_effect < 0).mean().values)
+        stats["avg"]["p_lt_0"] = _as_scalar((avg_effect < 0).mean())
     else:  # two-sided
-        p_gt = float((avg_effect > 0).mean().values)
-        p_lt = float((avg_effect < 0).mean().values)
+        p_gt = _as_scalar((avg_effect > 0).mean())
+        p_lt = _as_scalar((avg_effect < 0).mean())
         p_two_sided = 2 * min(p_gt, p_lt)
         stats["avg"]["p_two_sided"] = p_two_sided
         stats["avg"]["prob_of_effect"] = 1 - p_two_sided
@@ -918,28 +953,28 @@ def _compute_statistics(
         cum_final = cum_effect.isel({time_dim: -1})
 
         stats["cum"] = {
-            "mean": float(cum_final.mean(dim=["chain", "draw"]).values),
-            "median": float(cum_final.median(dim=["chain", "draw"]).values),
+            "mean": _as_scalar(cum_final.mean(dim=["chain", "draw"])),
+            "median": _as_scalar(cum_final.median(dim=["chain", "draw"])),
         }
 
         # HDI for cumulative
         hdi_cum = az.hdi(cum_final, hdi_prob=hdi_prob)
         if isinstance(hdi_cum, xr.Dataset):
             hdi_cum_data = list(hdi_cum.data_vars.values())[0]
-            stats["cum"]["hdi_lower"] = float(hdi_cum_data.sel(hdi="lower").values)
-            stats["cum"]["hdi_upper"] = float(hdi_cum_data.sel(hdi="higher").values)
+            stats["cum"]["hdi_lower"] = _as_scalar(hdi_cum_data.sel(hdi="lower"))
+            stats["cum"]["hdi_upper"] = _as_scalar(hdi_cum_data.sel(hdi="higher"))
         else:
-            stats["cum"]["hdi_lower"] = float(hdi_cum.sel(hdi="lower").values)
-            stats["cum"]["hdi_upper"] = float(hdi_cum.sel(hdi="higher").values)
+            stats["cum"]["hdi_lower"] = _as_scalar(hdi_cum.sel(hdi="lower"))
+            stats["cum"]["hdi_upper"] = _as_scalar(hdi_cum.sel(hdi="higher"))
 
         # Tail probabilities for cumulative
         if direction == "increase":
-            stats["cum"]["p_gt_0"] = float((cum_final > 0).mean().values)
+            stats["cum"]["p_gt_0"] = _as_scalar((cum_final > 0).mean())
         elif direction == "decrease":
-            stats["cum"]["p_lt_0"] = float((cum_final < 0).mean().values)
+            stats["cum"]["p_lt_0"] = _as_scalar((cum_final < 0).mean())
         else:  # two-sided
-            p_gt = float((cum_final > 0).mean().values)
-            p_lt = float((cum_final < 0).mean().values)
+            p_gt = _as_scalar((cum_final > 0).mean())
+            p_lt = _as_scalar((cum_final < 0).mean())
             p_two_sided = 2 * min(p_gt, p_lt)
             stats["cum"]["p_two_sided"] = p_two_sided
             stats["cum"]["prob_of_effect"] = 1 - p_two_sided
@@ -961,25 +996,23 @@ def _compute_statistics(
         counterfactual_mean = counterfactual.mean(dim=time_dim)
         rel_avg = (avg_effect / (counterfactual_mean + epsilon)) * 100
 
-        stats["avg"]["relative_mean"] = float(
-            rel_avg.mean(dim=["chain", "draw"]).values
-        )
+        stats["avg"]["relative_mean"] = _as_scalar(rel_avg.mean(dim=["chain", "draw"]))
 
         hdi_rel_avg = az.hdi(rel_avg, hdi_prob=hdi_prob)
         if isinstance(hdi_rel_avg, xr.Dataset):
             hdi_rel_avg_data = list(hdi_rel_avg.data_vars.values())[0]
-            stats["avg"]["relative_hdi_lower"] = float(
-                hdi_rel_avg_data.sel(hdi="lower").values
+            stats["avg"]["relative_hdi_lower"] = _as_scalar(
+                hdi_rel_avg_data.sel(hdi="lower")
             )
-            stats["avg"]["relative_hdi_upper"] = float(
-                hdi_rel_avg_data.sel(hdi="higher").values
+            stats["avg"]["relative_hdi_upper"] = _as_scalar(
+                hdi_rel_avg_data.sel(hdi="higher")
             )
         else:
-            stats["avg"]["relative_hdi_lower"] = float(
-                hdi_rel_avg.sel(hdi="lower").values
+            stats["avg"]["relative_hdi_lower"] = _as_scalar(
+                hdi_rel_avg.sel(hdi="lower")
             )
-            stats["avg"]["relative_hdi_upper"] = float(
-                hdi_rel_avg.sel(hdi="higher").values
+            stats["avg"]["relative_hdi_upper"] = _as_scalar(
+                hdi_rel_avg.sel(hdi="higher")
             )
 
         if cumulative:
@@ -989,25 +1022,25 @@ def _compute_statistics(
             )
             rel_cum = (cum_final / (counterfactual_cum + epsilon)) * 100
 
-            stats["cum"]["relative_mean"] = float(
-                rel_cum.mean(dim=["chain", "draw"]).values
+            stats["cum"]["relative_mean"] = _as_scalar(
+                rel_cum.mean(dim=["chain", "draw"])
             )
 
             hdi_rel_cum = az.hdi(rel_cum, hdi_prob=hdi_prob)
             if isinstance(hdi_rel_cum, xr.Dataset):
                 hdi_rel_cum_data = list(hdi_rel_cum.data_vars.values())[0]
-                stats["cum"]["relative_hdi_lower"] = float(
-                    hdi_rel_cum_data.sel(hdi="lower").values
+                stats["cum"]["relative_hdi_lower"] = _as_scalar(
+                    hdi_rel_cum_data.sel(hdi="lower")
                 )
-                stats["cum"]["relative_hdi_upper"] = float(
-                    hdi_rel_cum_data.sel(hdi="higher").values
+                stats["cum"]["relative_hdi_upper"] = _as_scalar(
+                    hdi_rel_cum_data.sel(hdi="higher")
                 )
             else:
-                stats["cum"]["relative_hdi_lower"] = float(
-                    hdi_rel_cum.sel(hdi="lower").values
+                stats["cum"]["relative_hdi_lower"] = _as_scalar(
+                    hdi_rel_cum.sel(hdi="lower")
                 )
-                stats["cum"]["relative_hdi_upper"] = float(
-                    hdi_rel_cum.sel(hdi="higher").values
+                stats["cum"]["relative_hdi_upper"] = _as_scalar(
+                    hdi_rel_cum.sel(hdi="higher")
                 )
 
     return stats
@@ -1643,6 +1676,28 @@ def _compute_statistics_ols(
     return stats
 
 
+def _point_residuals(result) -> np.ndarray:
+    """In-sample point residuals via the canonical prediction container.
+
+    Uses the model adapter's canonical ``predict`` output collapsed over
+    ``chain``/``draw``, so the t-based point-summary path works for any
+    backend. This path is only reached for singleton containers
+    (``chain * draw == 1``), where the mean is exactly the single point
+    estimate; taking the mean (rather than the first draw) keeps the helper
+    well-defined even if a many-draw container ever slips through.
+
+    ``y`` may have shape ``(n, 1)`` with dims ``(obs_ind, treated_units)``
+    while the fitted values are conceptually ``(n,)``; both are flattened to
+    1-D so they align positionally on ``obs_ind`` (letting xarray align them
+    would broadcast against ``treated_units`` and produce an ``(n, n)``
+    array).
+    """
+    y = np.asarray(result.design["y"]).reshape(-1)
+    pred = result._model_backend.predict(X=np.asarray(result.design["X"]))
+    y_fitted = np.asarray(pred.mean(dim=["chain", "draw"])).reshape(-1)
+    return y - y_fitted
+
+
 def _compute_statistics_did_ols(
     result,
     alpha=0.05,
@@ -1661,15 +1716,16 @@ def _compute_statistics_did_ols(
     dict
         Dictionary of statistics
     """
-    causal_impact = result.causal_impact  # scalar
+    causal_impact = _as_scalar(result.causal_impact)
 
     # Calculate standard error from model residuals
-    # Get fitted values and residuals
-    y_pred = result.model.predict(result.X)
-    residuals = result.y - y_pred
-    mse = np.mean(residuals**2)
-    n, p = result.X.shape
+    residuals = _point_residuals(result)
+    X_da = result.design["X"]
+    n, p = X_da.shape
     df = n - p
+    # Unbiased estimator of the residual variance: SSR / (n - p), consistent
+    # with the degrees of freedom used below for the t-distribution.
+    mse = np.sum(residuals**2) / df
 
     # Find the interaction term coefficient index
     interaction_term = (
@@ -1684,8 +1740,7 @@ def _compute_statistics_did_ols(
     if coeff_idx is None:
         raise ValueError(f"Could not find interaction term {interaction_term} in model")
 
-    # Calculate standard error for this coefficient
-    X = result.X
+    X = X_da
     try:
         # Try to get X as numpy array
         if hasattr(X, "values"):
@@ -1794,14 +1849,16 @@ def _generate_prose_did_ols(stats, alpha=0.05):
 
 def _compute_statistics_rd_ols(result, alpha=0.05):
     """Compute statistics for RD scalar effect with OLS model."""
-    discontinuity = result.discontinuity_at_threshold  # scalar
+    discontinuity = _as_scalar(result.discontinuity_at_threshold)
 
-    # Calculate standard error from model
-    y_pred = result.model.predict(result.X)
-    residuals = result.y - y_pred
-    mse = np.mean(residuals**2)
-    n, p = result.X.shape
+    # Calculate standard error from model residuals
+    residuals = _point_residuals(result)
+    X_da = result.design["X"]
+    n, p = X_da.shape
     df = n - p
+    # Unbiased estimator of the residual variance: SSR / (n - p), consistent
+    # with the degrees of freedom used below for the t-distribution.
+    mse = np.sum(residuals**2) / df
 
     # Find the treated coefficient index
     coeff_idx = None
@@ -1811,11 +1868,9 @@ def _compute_statistics_rd_ols(result, alpha=0.05):
             break
 
     if coeff_idx is None:
-        # Fallback: use simple approximation
         se = np.std(residuals) / np.sqrt(n)
     else:
-        # Calculate standard error for this coefficient
-        X = result.X
+        X = X_da
         try:
             if hasattr(X, "values"):
                 X = X.values

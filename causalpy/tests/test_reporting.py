@@ -15,6 +15,8 @@
 Tests for reporting utilities.
 """
 
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -31,13 +33,9 @@ sample_kwargs = {
 
 
 @pytest.mark.integration
-def test_effect_summary_basic(mock_pymc_sample):
+def test_effect_summary_basic(mock_pymc_sample, its_data):
     """Test basic effect_summary functionality with ITS."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -67,13 +65,9 @@ def test_effect_summary_basic(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_with_cumulative(mock_pymc_sample):
+def test_effect_summary_with_cumulative(mock_pymc_sample, its_data):
     """Test effect_summary with cumulative effects."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -89,13 +83,9 @@ def test_effect_summary_with_cumulative(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_without_cumulative(mock_pymc_sample):
+def test_effect_summary_without_cumulative(mock_pymc_sample, its_data):
     """Test effect_summary without cumulative effects."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -111,13 +101,9 @@ def test_effect_summary_without_cumulative(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_with_relative(mock_pymc_sample):
+def test_effect_summary_with_relative(mock_pymc_sample, its_data):
     """Test effect_summary with relative effects."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -134,13 +120,9 @@ def test_effect_summary_with_relative(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_direction_increase(mock_pymc_sample):
+def test_effect_summary_direction_increase(mock_pymc_sample, its_data):
     """Test effect_summary with direction='increase'."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -156,13 +138,9 @@ def test_effect_summary_direction_increase(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_direction_decrease(mock_pymc_sample):
+def test_effect_summary_direction_decrease(mock_pymc_sample, its_data):
     """Test effect_summary with direction='decrease'."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -178,13 +156,9 @@ def test_effect_summary_direction_decrease(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_direction_two_sided(mock_pymc_sample):
+def test_effect_summary_direction_two_sided(mock_pymc_sample, its_data):
     """Test effect_summary with direction='two-sided'."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -202,13 +176,9 @@ def test_effect_summary_direction_two_sided(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_window_datetime(mock_pymc_sample):
+def test_effect_summary_window_datetime(mock_pymc_sample, its_data):
     """Test effect_summary with datetime window."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -270,13 +240,9 @@ def test_effect_summary_window_integer(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_alpha(mock_pymc_sample):
+def test_effect_summary_alpha(mock_pymc_sample, its_data):
     """Test effect_summary with custom alpha."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -292,13 +258,9 @@ def test_effect_summary_alpha(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_rope(mock_pymc_sample):
+def test_effect_summary_rope(mock_pymc_sample, its_data):
     """Test effect_summary with ROPE (min_effect)."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -314,15 +276,11 @@ def test_effect_summary_rope(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_ols_its(mock_pymc_sample):
+def test_effect_summary_ols_its(mock_pymc_sample, its_data):
     """Test effect_summary with OLS model for ITS."""
     from sklearn.linear_model import LinearRegression
 
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -347,11 +305,11 @@ def test_effect_summary_ols_its(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_ols_did(mock_pymc_sample):
+def test_effect_summary_ols_did(mock_pymc_sample, did_data):
     """Test effect_summary with OLS model for DiD."""
     from sklearn.linear_model import LinearRegression
 
-    df = cp.load_data("did")
+    df = did_data
     result = cp.DifferenceInDifferences(
         df,
         formula="y ~ 1 + group * post_treatment",
@@ -375,11 +333,82 @@ def test_effect_summary_ols_did(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_ols_sc(mock_pymc_sample):
+def test_effect_summary_ols_did_residuals_are_per_observation(did_data):
+    """``_compute_statistics_did_ols`` must compute one residual per
+    observation, not an (n, n) array, and use the unbiased SSR/(n-p)
+    estimator of the residual variance (matching the ``df = n - p`` already
+    used for the t-distribution critical value).
+
+    ``y_da`` (shape ``(n, 1)``, dims ``obs_ind x treated_units``) minus a bare
+    ``(n,)`` ``y_pred`` array used to broadcast positionally against the
+    *last* axis (``treated_units``, size 1) instead of ``obs_ind``, producing
+    an ``(n, n)`` array of every observation's y minus every *other*
+    observation's prediction; that inflated the reported SE by roughly 70x
+    on this dataset. Separately, the residual variance was estimated as
+    SSR/n (biased) rather than SSR/(n-p) (unbiased). With both bugs fixed,
+    the reported SE/CI should match an independent statsmodels OLS fit
+    almost exactly, not just up to some remaining conversion factor.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    df = did_data
+    formula = "y ~ 1 + group * post_treatment"
+
+    result = cp.DifferenceInDifferences(
+        df,
+        formula=formula,
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    )
+
+    X_da = result.design["X"]
+    y_da = result.design["y"]
+    y_pred = result.model.predict(X_da)
+    residuals = np.asarray(y_da).reshape(-1) - np.asarray(y_pred).reshape(-1)
+    n = X_da.shape[0]
+    assert residuals.shape == (n,)
+
+    stats = result.effect_summary()
+    row = stats.table.loc["treatment_effect"]
+
+    import statsmodels.formula.api as smf
+    from scipy.stats import t as t_dist
+
+    sm_fit = smf.ols(formula, data=df).fit()
+    interaction_col = next(
+        name for name in sm_fit.params.index if "group" in name and "post" in name
+    )
+    unbiased_se = sm_fit.bse[interaction_col]
+    expected_ci_lower, expected_ci_upper = sm_fit.conf_int(alpha=0.05).loc[
+        interaction_col
+    ]
+
+    t_crit = t_dist.ppf(1 - 0.05 / 2, df=n - X_da.shape[1])
+    reported_se = (row["ci_upper"] - row["ci_lower"]) / (2 * t_crit)
+
+    assert reported_se == pytest.approx(unbiased_se, rel=1e-8)
+    assert row["ci_lower"] == pytest.approx(expected_ci_lower, rel=1e-6)
+    assert row["ci_upper"] == pytest.approx(expected_ci_upper, rel=1e-6)
+    # Guard against regressing to either the (n, n) broadcast bug (~70x
+    # inflation) or the biased SSR/n denominator (~5% understatement).
+    biased_mse = np.mean(residuals**2)
+    XtX_inv = np.linalg.inv(np.asarray(X_da).T @ np.asarray(X_da))
+    coeff_idx = next(
+        i
+        for i, label in enumerate(result.labels)
+        if "group" in label and "post_treatment" in label and ":" in label
+    )
+    biased_se = np.sqrt(biased_mse * XtX_inv[coeff_idx, coeff_idx])
+    assert reported_se != pytest.approx(biased_se, rel=1e-3)
+
+
+@pytest.mark.integration
+def test_effect_summary_ols_sc(mock_pymc_sample, sc_data):
     """Test effect_summary with OLS model for Synthetic Control."""
     from sklearn.linear_model import LinearRegression
 
-    df = cp.load_data("sc")
+    df = sc_data
     treatment_time = 70
     result = cp.SyntheticControl(
         df,
@@ -400,9 +429,9 @@ def test_effect_summary_ols_sc(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_rd_pymc(mock_pymc_sample):
+def test_effect_summary_rd_pymc(mock_pymc_sample, rd_data):
     """Test effect_summary with Regression Discontinuity (PyMC)."""
-    df = cp.load_data("rd")
+    df = rd_data
     result = cp.RegressionDiscontinuity(
         df,
         formula="y ~ 1 + x + treated + x:treated",
@@ -420,11 +449,11 @@ def test_effect_summary_rd_pymc(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_rd_ols(mock_pymc_sample):
+def test_effect_summary_rd_ols(mock_pymc_sample, rd_data):
     """Test effect_summary with Regression Discontinuity (OLS)."""
     from sklearn.linear_model import LinearRegression
 
-    df = cp.load_data("rd")
+    df = rd_data
     result = cp.RegressionDiscontinuity(
         df,
         formula="y ~ 1 + x + treated + x:treated",
@@ -444,6 +473,67 @@ def test_effect_summary_rd_ols(mock_pymc_sample):
     assert "median" not in stats.table.columns
     assert "hdi_lower" not in stats.table.columns
     assert "hdi_upper" not in stats.table.columns
+
+
+@pytest.mark.integration
+def test_effect_summary_ols_rd_residuals_are_per_observation(rd_data):
+    """Regression-pin for RD OLS ``effect_summary()`` intervals.
+
+    The pre-#1049 ``_compute_statistics_rd_ols`` subtracted a bare ``(n,)``
+    ``y_pred`` array from the ``(n, 1)`` y DataArray, broadcasting to an
+    ``(n, n)`` residual matrix (every observation's y minus every *other*
+    observation's prediction) and inflating the MSE ~9x on this dataset, so
+    the reported standard errors were ~3x too wide. ``_point_residuals``
+    fixed that. Separately, the residual variance was estimated as SSR/n
+    (biased) rather than SSR/(n-p) (unbiased), inconsistent with the
+    ``df = n - p`` already used for the t-distribution critical value. With
+    both bugs fixed, this test pins the corrected residual shape and SE
+    against an independent statsmodels fit almost exactly, not just up to
+    some remaining conversion factor.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    from causalpy.reporting import _point_residuals
+
+    formula = "y ~ 1 + x + treated + x:treated"
+    result = cp.RegressionDiscontinuity(
+        rd_data,
+        formula=formula,
+        treatment_threshold=0.5,
+        model=LinearRegression(),
+    )
+
+    n, p = result.design["X"].shape
+    residuals = _point_residuals(result)
+    assert residuals.shape == (n,)
+
+    stats = result.effect_summary()
+    row = stats.table.loc["discontinuity"]
+
+    import statsmodels.formula.api as smf
+    from scipy.stats import t as t_dist
+
+    sm_fit = smf.ols(formula, data=result.fit_data).fit()
+    interaction_col = next(name for name in sm_fit.params.index if "x:treated" in name)
+    unbiased_se = sm_fit.bse[interaction_col]
+
+    t_crit = t_dist.ppf(1 - 0.05 / 2, df=n - p)
+    reported_se = (row["ci_upper"] - row["ci_lower"]) / (2 * t_crit)
+
+    assert reported_se == pytest.approx(unbiased_se, rel=1e-8)
+    # Guard against regressing to either the (n, n) broadcast bug (~3x
+    # inflation) or the biased SSR/n denominator understatement.
+    biased_mse = np.mean(residuals**2)
+    XtX_inv = np.linalg.inv(
+        np.asarray(result.design["X"]).T @ np.asarray(result.design["X"])
+    )
+    coeff_idx = next(
+        i
+        for i, label in enumerate(result.labels)
+        if "treated" in label.lower() and ":" in label
+    )
+    biased_se = np.sqrt(biased_mse * XtX_inv[coeff_idx, coeff_idx])
+    assert reported_se != pytest.approx(biased_se, rel=1e-3)
 
 
 @pytest.mark.integration
@@ -570,13 +660,9 @@ def test_effect_summary_rkink_ols_raises():
 
 
 @pytest.mark.integration
-def test_effect_summary_empty_window_error(mock_pymc_sample):
+def test_effect_summary_empty_window_error(mock_pymc_sample, its_data):
     """Test that effect_summary raises error for empty window."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -592,13 +678,9 @@ def test_effect_summary_empty_window_error(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_hdi_coverage(mock_pymc_sample):
+def test_effect_summary_hdi_coverage(mock_pymc_sample, its_data):
     """Test that HDI intervals are properly ordered."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -622,13 +704,9 @@ def test_effect_summary_hdi_coverage(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_tail_probabilities_match(mock_pymc_sample):
+def test_effect_summary_tail_probabilities_match(mock_pymc_sample, its_data):
     """Test that tail probabilities match manual calculations."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -640,7 +718,7 @@ def test_effect_summary_tail_probabilities_match(mock_pymc_sample):
     stats = result.effect_summary(direction="increase")
 
     # Manually calculate P(effect > 0)
-    avg_effect = result.post_impact.mean(dim="obs_ind").isel(treated_units=0)
+    avg_effect = result.post_impact.mean(dim="obs_ind")
     manual_p_gt_0 = float((avg_effect > 0).mean().values)
 
     # Should match (within floating point precision)
@@ -648,9 +726,9 @@ def test_effect_summary_tail_probabilities_match(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_synthetic_control(mock_pymc_sample):
+def test_effect_summary_synthetic_control(mock_pymc_sample, sc_data):
     """Test effect_summary with Synthetic Control experiment (single treated unit)."""
-    df = cp.load_data("sc")
+    df = sc_data
     treatment_time = 70
     result = cp.SyntheticControl(
         df,
@@ -733,9 +811,9 @@ def test_effect_summary_synthetic_control_multi_unit(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_synthetic_control_window(mock_pymc_sample):
+def test_effect_summary_synthetic_control_window(mock_pymc_sample, sc_data):
     """Test effect_summary with Synthetic Control using window specification."""
-    df = cp.load_data("sc")
+    df = sc_data
     treatment_time = 70
     result = cp.SyntheticControl(
         df,
@@ -759,9 +837,9 @@ def test_effect_summary_synthetic_control_window(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_did(mock_pymc_sample):
+def test_effect_summary_did(mock_pymc_sample, did_data):
     """Test effect_summary with Difference-in-Differences experiment."""
-    df = cp.load_data("did")
+    df = did_data
     result = cp.DifferenceInDifferences(
         df,
         formula="y ~ 1 + group * post_treatment",
@@ -785,9 +863,9 @@ def test_effect_summary_did(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_did_direction_increase(mock_pymc_sample):
+def test_effect_summary_did_direction_increase(mock_pymc_sample, did_data):
     """Test effect_summary with DiD and direction='increase'."""
-    df = cp.load_data("did")
+    df = did_data
     result = cp.DifferenceInDifferences(
         df,
         formula="y ~ 1 + group * post_treatment",
@@ -803,9 +881,9 @@ def test_effect_summary_did_direction_increase(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_did_direction_decrease(mock_pymc_sample):
+def test_effect_summary_did_direction_decrease(mock_pymc_sample, did_data):
     """Test effect_summary with DiD and direction='decrease'."""
-    df = cp.load_data("did")
+    df = did_data
     result = cp.DifferenceInDifferences(
         df,
         formula="y ~ 1 + group * post_treatment",
@@ -821,9 +899,9 @@ def test_effect_summary_did_direction_decrease(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_did_direction_two_sided(mock_pymc_sample):
+def test_effect_summary_did_direction_two_sided(mock_pymc_sample, did_data):
     """Test effect_summary with DiD and direction='two-sided'."""
-    df = cp.load_data("did")
+    df = did_data
     result = cp.DifferenceInDifferences(
         df,
         formula="y ~ 1 + group * post_treatment",
@@ -841,9 +919,9 @@ def test_effect_summary_did_direction_two_sided(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_did_rope(mock_pymc_sample):
+def test_effect_summary_did_rope(mock_pymc_sample, did_data):
     """Test effect_summary with DiD and ROPE."""
-    df = cp.load_data("did")
+    df = did_data
     result = cp.DifferenceInDifferences(
         df,
         formula="y ~ 1 + group * post_treatment",
@@ -859,11 +937,11 @@ def test_effect_summary_did_rope(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_did_ols_error(mock_pymc_sample):
+def test_effect_summary_did_ols_error(mock_pymc_sample, did_data):
     """Test that effect_summary works for DiD with OLS model (OLS is now supported)."""
     from sklearn.linear_model import LinearRegression
 
-    df = cp.load_data("did")
+    df = did_data
     ols_model = cp.skl_models.create_causalpy_compatible_class(LinearRegression)()
     result = cp.DifferenceInDifferences(
         df,
@@ -884,9 +962,9 @@ def test_effect_summary_did_ols_error(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_did_hdi_coverage(mock_pymc_sample):
+def test_effect_summary_did_hdi_coverage(mock_pymc_sample, did_data):
     """Test that HDI intervals are properly ordered for DiD."""
-    df = cp.load_data("did")
+    df = did_data
     result = cp.DifferenceInDifferences(
         df,
         formula="y ~ 1 + group * post_treatment",
@@ -940,6 +1018,17 @@ def test_extract_hdi_bounds_dataarray():
 
     assert lower == 1.0
     assert upper == 3.0
+
+
+def test_as_scalar_handles_singleton_arrays():
+    """_as_scalar should work for both scalar and singleton-array values."""
+    import xarray as xr
+
+    from causalpy.utils import _as_scalar
+
+    assert _as_scalar(np.array(2.5)) == 2.5
+    assert _as_scalar(np.array([2.5])) == 2.5
+    assert _as_scalar(xr.DataArray([2.5], dims=["treated_units"])) == 2.5
 
 
 def test_compute_tail_probabilities_increase():
@@ -1070,6 +1159,120 @@ def test_compute_statistics_rope_decrease():
     # With draws around -5, virtually all should satisfy effect < -1.0
     assert stats["avg"]["p_rope"] > 0.95
     assert stats["cum"]["p_rope"] > 0.95
+
+
+def test_compute_statistics_with_singleton_treated_unit_dim():
+    """Regression test for singleton dims surviving reductions in xarray workflows."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    rng = np.random.default_rng(123)
+    impact = xr.DataArray(
+        rng.normal(loc=2.0, scale=0.1, size=(1, 100, 4, 1)),
+        dims=["chain", "draw", "obs_ind", "treated_units"],
+        coords={"obs_ind": [0, 1, 2, 3], "treated_units": ["unit_a"]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((1, 100, 4, 1)) * 10.0,
+        dims=["chain", "draw", "obs_ind", "treated_units"],
+        coords={"obs_ind": [0, 1, 2, 3], "treated_units": ["unit_a"]},
+    )
+
+    stats = _compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="two-sided",
+        cumulative=True,
+        relative=True,
+    )
+
+    assert isinstance(stats["avg"]["mean"], float)
+    assert isinstance(stats["cum"]["mean"], float)
+    assert isinstance(stats["avg"]["relative_mean"], float)
+    assert isinstance(stats["cum"]["relative_mean"], float)
+
+
+def test_compute_statistics_hdi_dataarray_paths(monkeypatch):
+    """Exercise _compute_statistics branches where az.hdi returns a DataArray."""
+    import xarray as xr
+
+    from causalpy import reporting as reporting_mod
+
+    def fake_hdi(_obj, hdi_prob=0.95):
+        _ = hdi_prob
+        return xr.DataArray(
+            [0.1, 0.9], dims=["hdi"], coords={"hdi": ["lower", "higher"]}
+        )
+
+    monkeypatch.setattr(reporting_mod.az, "hdi", fake_hdi)
+
+    impact = xr.DataArray(
+        np.random.normal(1.0, 0.1, (2, 20, 4)),
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2, 3]},
+    )
+    counterfactual = xr.DataArray(
+        np.ones((2, 20, 4)) * 10.0,
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2, 3]},
+    )
+
+    stats = reporting_mod._compute_statistics(
+        impact,
+        counterfactual,
+        hdi_prob=0.95,
+        direction="two-sided",
+        cumulative=True,
+        relative=True,
+    )
+
+    assert isinstance(stats["avg"]["hdi_lower"], float)
+    assert isinstance(stats["cum"]["hdi_lower"], float)
+    assert isinstance(stats["avg"]["relative_hdi_lower"], float)
+    assert isinstance(stats["cum"]["relative_hdi_lower"], float)
+
+
+def test_extract_window_canonical_dataarray():
+    """_extract_window returns the canonical DataArray unchanged for 'post'."""
+    import xarray as xr
+
+    from causalpy.reporting import _extract_window
+
+    datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
+    result = SimpleNamespace(
+        post_impact=xr.DataArray(
+            [1.0, 2.0, 3.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
+        ),
+        datapost=datapost,
+    )
+
+    windowed_impact, window_coords = _extract_window(result, window="post")
+
+    assert isinstance(windowed_impact, xr.DataArray)
+    assert window_coords.equals(datapost.index)
+
+
+def test_extract_counterfactual_canonical_dataarray():
+    """_extract_counterfactual selects the window from the canonical DataArray."""
+    import xarray as xr
+
+    from causalpy.reporting import _extract_counterfactual
+
+    datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
+    result = SimpleNamespace(
+        post_pred=xr.DataArray(
+            [5.0, 6.0, 7.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
+        ),
+        datapost=datapost,
+    )
+
+    window_coords = datapost.index[:2]
+    counterfactual = _extract_counterfactual(result, window_coords)
+
+    assert isinstance(counterfactual, xr.DataArray)
+    np.testing.assert_array_equal(counterfactual.values, np.array([5.0, 6.0]))
 
 
 def test_compute_statistics_rope_increase():
@@ -1248,26 +1451,43 @@ def test_select_treated_unit():
     assert "treated_units" not in result.dims
 
 
-def test_select_treated_unit_numpy():
-    """Test _select_treated_unit_numpy helper."""
-    from causalpy.reporting import _select_treated_unit_numpy
+def test_effect_summary_timeseries_dispatches_on_draws_not_backend():
+    """Contract: the container, not backend identity, decides the statistics.
 
-    # Create mock result object
-    class MockResult:
-        treated_units = ["unit_a", "unit_b", "unit_c"]
+    A prediction container carrying posterior draws gets HDI summaries; a
+    singleton (chain=1, draw=1) container falls back to t-based intervals —
+    regardless of which backend produced it.
+    """
+    import xarray as xr
 
-    result = MockResult()
+    from causalpy.reporting import _effect_summary_timeseries
 
-    # Create mock 2D numpy array (time x units)
-    data = np.array([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+    def containers(n_draws):
+        rng = np.random.default_rng(42)
+        obs_ind = [0, 1, 2, 3]
+        impact = xr.DataArray(
+            rng.normal(5.0, 0.5, size=(1, n_draws, 4)),
+            dims=["chain", "draw", "obs_ind"],
+            coords={"obs_ind": obs_ind},
+        )
+        counterfactual = xr.DataArray(
+            np.full((1, n_draws, 4), 10.0),
+            dims=["chain", "draw", "obs_ind"],
+            coords={"obs_ind": obs_ind},
+        )
+        return impact, counterfactual, pd.Index(obs_ind)
 
-    # Select by name
-    selected = _select_treated_unit_numpy(data, result, "unit_b")
-    np.testing.assert_array_equal(selected, np.array([2, 5, 8]))
+    impact, counterfactual, window_coords = containers(n_draws=200)
+    summary = _effect_summary_timeseries(impact, counterfactual, window_coords)
+    assert isinstance(summary, EffectSummary)
+    assert "hdi_lower" in summary.table.columns
+    assert "ci_lower" not in summary.table.columns
 
-    # Select first when None provided
-    selected = _select_treated_unit_numpy(data, result, None)
-    np.testing.assert_array_equal(selected, np.array([1, 4, 7]))
+    impact, counterfactual, window_coords = containers(n_draws=1)
+    summary = _effect_summary_timeseries(impact, counterfactual, window_coords)
+    assert isinstance(summary, EffectSummary)
+    assert "ci_lower" in summary.table.columns
+    assert "hdi_lower" not in summary.table.columns
 
 
 # ==============================================================================
@@ -1305,11 +1525,15 @@ def test_detect_experiment_type_prepostnegd():
 
 def test_extract_window_invalid_type():
     """Test _extract_window raises error for invalid window type."""
+    import xarray as xr
+
     from causalpy.reporting import _extract_window
 
     # Create a minimal mock result
     class MockResult:
-        post_impact = np.array([1, 2, 3])
+        post_impact = xr.DataArray(
+            [1.0, 2.0, 3.0], dims=["obs_ind"], coords={"obs_ind": [0, 1, 2]}
+        )
         datapost = pd.DataFrame({"y": [1, 2, 3]}, index=[0, 1, 2])
 
     result = MockResult()
@@ -1320,13 +1544,15 @@ def test_extract_window_invalid_type():
 
 
 @pytest.mark.integration
-def test_compute_statistics_did_ols_missing_interaction_term(mock_pymc_sample):
+def test_compute_statistics_did_ols_missing_interaction_term(
+    mock_pymc_sample, did_data
+):
     """Test _compute_statistics_did_ols error when interaction term is not found."""
     from sklearn.linear_model import LinearRegression
 
     from causalpy.reporting import _compute_statistics_did_ols
 
-    df = cp.load_data("did")
+    df = did_data
 
     # Create DiD result
     result = cp.DifferenceInDifferences(
@@ -1345,13 +1571,13 @@ def test_compute_statistics_did_ols_missing_interaction_term(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_compute_statistics_rd_ols_fallback_path(mock_pymc_sample):
+def test_compute_statistics_rd_ols_fallback_path(mock_pymc_sample, rd_data):
     """Test _compute_statistics_rd_ols uses fallback when coefficient not found."""
     from sklearn.linear_model import LinearRegression
 
     from causalpy.reporting import _compute_statistics_rd_ols
 
-    df = cp.load_data("rd")
+    df = rd_data
     result = cp.RegressionDiscontinuity(
         df,
         formula="y ~ 1 + x + treated + x:treated",
@@ -1482,15 +1708,11 @@ def test_relative_effects_with_near_zero_counterfactual(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_extract_counterfactual_dict_format(mock_pymc_sample):
-    """Test _extract_counterfactual with dict format PyMC results."""
+def test_extract_counterfactual_canonical_pymc(mock_pymc_sample, its_data):
+    """_extract_counterfactual selects a window from canonical PyMC predictions."""
     from causalpy.reporting import _extract_counterfactual
 
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -1499,20 +1721,11 @@ def test_extract_counterfactual_dict_format(mock_pymc_sample):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     )
 
-    # Convert InferenceData to dict format
-    post_pred_dict = {"posterior_predictive": result.post_pred.posterior_predictive}
-    original_post_pred = result.post_pred
-    result.post_pred = post_pred_dict
-
-    # Should handle dict format
     window_coords = result.datapost.index[:10]
     counterfactual = _extract_counterfactual(result, window_coords, treated_unit=None)
 
-    # Restore original
-    result.post_pred = original_post_pred
-
-    assert counterfactual is not None
-    assert hasattr(counterfactual, "shape")
+    assert counterfactual.sizes["obs_ind"] == 10
+    assert {"chain", "draw"} <= set(counterfactual.dims)
 
 
 @pytest.mark.integration
@@ -2526,9 +2739,9 @@ def test_prose_detailed_ols_no_observed_values():
 
 
 @pytest.mark.integration
-def test_effect_summary_prepostnegd_pymc(mock_pymc_sample):
+def test_effect_summary_prepostnegd_pymc(mock_pymc_sample, anova1_data):
     """Test effect_summary with PrePostNEGD experiment (PyMC)."""
-    df = cp.load_data("anova1")
+    df = anova1_data
     result = cp.PrePostNEGD(
         df,
         formula="post ~ 1 + C(group) + pre",
@@ -2552,9 +2765,9 @@ def test_effect_summary_prepostnegd_pymc(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_prepostnegd_directions(mock_pymc_sample):
+def test_effect_summary_prepostnegd_directions(mock_pymc_sample, anova1_data):
     """Test effect_summary with PrePostNEGD with different directions."""
-    df = cp.load_data("anova1")
+    df = anova1_data
     result = cp.PrePostNEGD(
         df,
         formula="post ~ 1 + C(group) + pre",
@@ -2578,9 +2791,9 @@ def test_effect_summary_prepostnegd_directions(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_prepostnegd_rope(mock_pymc_sample):
+def test_effect_summary_prepostnegd_rope(mock_pymc_sample, anova1_data):
     """Test effect_summary with PrePostNEGD with ROPE."""
-    df = cp.load_data("anova1")
+    df = anova1_data
     result = cp.PrePostNEGD(
         df,
         formula="post ~ 1 + C(group) + pre",
@@ -2601,13 +2814,9 @@ def test_effect_summary_prepostnegd_rope(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_its_relative_false(mock_pymc_sample):
+def test_effect_summary_its_relative_false(mock_pymc_sample, its_data):
     """Test effect_summary with ITS and relative=False."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -2623,15 +2832,11 @@ def test_effect_summary_its_relative_false(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_ols_cumulative_false(mock_pymc_sample):
+def test_effect_summary_ols_cumulative_false(mock_pymc_sample, its_data):
     """Test effect_summary with OLS model and cumulative=False."""
     from sklearn.linear_model import LinearRegression
 
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -2648,15 +2853,11 @@ def test_effect_summary_ols_cumulative_false(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_ols_relative_false(mock_pymc_sample):
+def test_effect_summary_ols_relative_false(mock_pymc_sample, its_data):
     """Test effect_summary with OLS model and relative=False."""
     from sklearn.linear_model import LinearRegression
 
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -2672,13 +2873,9 @@ def test_effect_summary_ols_relative_false(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_rope_with_two_sided_its(mock_pymc_sample):
+def test_effect_summary_rope_with_two_sided_its(mock_pymc_sample, its_data):
     """Test effect_summary with ROPE and two-sided direction for ITS."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -2696,9 +2893,9 @@ def test_effect_summary_rope_with_two_sided_its(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_rope_with_two_sided_did(mock_pymc_sample):
+def test_effect_summary_rope_with_two_sided_did(mock_pymc_sample, did_data):
     """Test effect_summary with ROPE and two-sided direction for DiD."""
-    df = cp.load_data("did")
+    df = did_data
     result = cp.DifferenceInDifferences(
         df,
         formula="y ~ 1 + group * post_treatment",
@@ -2714,9 +2911,9 @@ def test_effect_summary_rope_with_two_sided_did(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_rd_two_sided_with_rope(mock_pymc_sample):
+def test_effect_summary_rd_two_sided_with_rope(mock_pymc_sample, rd_data):
     """Test effect_summary with RD, two-sided direction, and ROPE."""
-    df = cp.load_data("rd")
+    df = rd_data
     result = cp.RegressionDiscontinuity(
         df,
         formula="y ~ 1 + x + treated + x:treated",
@@ -2733,9 +2930,9 @@ def test_effect_summary_rd_two_sided_with_rope(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_sc_cumulative_false(mock_pymc_sample):
+def test_effect_summary_sc_cumulative_false(mock_pymc_sample, sc_data):
     """Test effect_summary with Synthetic Control and cumulative=False."""
-    df = cp.load_data("sc")
+    df = sc_data
     treatment_time = 70
     result = cp.SyntheticControl(
         df,
@@ -2753,9 +2950,9 @@ def test_effect_summary_sc_cumulative_false(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_sc_relative_false(mock_pymc_sample):
+def test_effect_summary_sc_relative_false(mock_pymc_sample, sc_data):
     """Test effect_summary with Synthetic Control and relative=False."""
-    df = cp.load_data("sc")
+    df = sc_data
     treatment_time = 70
     result = cp.SyntheticControl(
         df,
@@ -2772,15 +2969,11 @@ def test_effect_summary_sc_relative_false(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_ols_both_false(mock_pymc_sample):
+def test_effect_summary_ols_both_false(mock_pymc_sample, its_data):
     """Test effect_summary with OLS model, cumulative=False and relative=False."""
     from sklearn.linear_model import LinearRegression
 
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
@@ -2798,13 +2991,9 @@ def test_effect_summary_ols_both_false(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_effect_summary_pymc_both_false(mock_pymc_sample):
+def test_effect_summary_pymc_both_false(mock_pymc_sample, its_data):
     """Test effect_summary with PyMC model, cumulative=False and relative=False."""
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
