@@ -5,7 +5,7 @@ Below is a list of written resources (books, blog posts, etc.) that are useful f
 ## Quasi-experiment resources
 
 * Angrist, J. D., & Pischke, J. S. (2009). [Mostly harmless econometrics: An empiricist's companion](https://www.mostlyharmlesseconometrics.com). Princeton university press.
-* Angrist, J. D., & Pischke, J. S. (2014). [Mastering'metrics: The path from cause to effect](https://www.masteringmetrics.com). Princeton University Press.
+* Angrist, J. D., & Pischke, J. S. (2014). [Mastering 'Metrics: The path from cause to effect](https://www.masteringmetrics.com). Princeton University Press.
 * Cunningham, S. (2021). [Causal inference: The Mixtape](https://mixtape.scunning.com). Yale University Press.
 * Huntington-Klein, N. (2021). [The effect: An introduction to research design and causality](https://theeffectbook.net). Chapman and Hall/CRC.
 * Reichardt, C. S. (2019). Quasi-experimentation: A guide to design and analysis. Guilford Publications.

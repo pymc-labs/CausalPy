@@ -394,7 +394,7 @@ class PrePostNEGD(BaseExperiment):
             fontsize=LEGEND_FONT_SIZE,
         )
 
-        # Plot estimated caual impact / treatment effect
+        # Plot estimated causal impact / treatment effect
         plot_scalar_posterior(
             self.causal_impact,
             ax=ax[1],
