@@ -106,6 +106,9 @@ jobs:
       - name: Setup micromamba environment
         uses: mamba-org/setup-micromamba@ce51e99f4bb8a82ab7158c4dc59ef4634c59c4f9 # v3.1.0
         with:
+          # Pinned: the micromamba binary is resolved at run time, so an
+          # unpinned version changes CI behaviour on an untouched branch.
+          micromamba-version: 2.9.0-0
           environment-file: environment.yml
           environment-name: CausalPy
           # Pin python to the matrix version. All other deps (including
@@ -154,7 +157,7 @@ jobs:
           ).stdout
           with compiler.open("rb") as source:
               compiler_sha256 = hashlib.file_digest(source, "sha256").hexdigest()
-          packages = json.loads(
+          listing = json.loads(
               subprocess.run(
                   ["micromamba", "list", "--json"],
                   check=True,
@@ -162,6 +165,9 @@ jobs:
                   text=True,
               ).stdout
           )
+          # micromamba >= 2.9 wraps the packages in an object; older versions
+          # print the bare list.
+          packages = listing["packages"] if isinstance(listing, dict) else listing
           runtime = {
               "compiler": {
                   "path": str(compiler),
