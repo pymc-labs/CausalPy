@@ -461,7 +461,6 @@ class PanelRegression(BaseExperiment):
         treated_unit: str | None = None,
         period: Literal["intervention", "post", "comparison"] | None = None,
         prefix: str = "Post-period",
-        **kwargs: Any,
     ) -> EffectSummary:
         """Generate a decision-ready summary of causal effects.
 
@@ -492,8 +491,6 @@ class PanelRegression(BaseExperiment):
             Period selector for three-period designs.
         prefix : str, default "Post-period"
             Prefix for prose generation.
-        **kwargs
-            Reserved for forward-compatibility.
 
         Raises
         ------
