@@ -13,7 +13,6 @@
 #   limitations under the License.
 """Contract tests for canonical model coefficient containers."""
 
-import arviz as az
 import numpy as np
 import pytest
 import xarray as xr
@@ -124,7 +123,7 @@ def test_pymc_coefficients_preserve_draws_and_normalize_dimension_order():
         },
     )
     model = PyMCLinearRegression()
-    model.idata = az.InferenceData(posterior=xr.Dataset({"beta": draws}))
+    model.idata = xr.DataTree.from_dict({"posterior": xr.Dataset({"beta": draws})})
 
     coefficients = PyMCModelAdapter(model).coefficients()
 
@@ -153,7 +152,7 @@ def test_pymc_coefficients_normalize_supported_model_families(variable, source_d
         coords={"chain": [0, 1], "draw": [0, 1, 2], source_dim: ["a", "b"]},
     )
     model = PyMCLinearRegression()
-    model.idata = az.InferenceData(posterior=xr.Dataset({variable: draws}))
+    model.idata = xr.DataTree.from_dict({"posterior": xr.Dataset({variable: draws})})
 
     coefficients = PyMCModelAdapter(model).coefficients()
 
@@ -176,7 +175,7 @@ def test_pymc_coefficients_normalize_supported_model_families(variable, source_d
 def test_pymc_coefficients_reject_noncanonical_dimensions(dims, shape, match):
     draws = xr.DataArray(np.zeros(shape), dims=dims)
     model = PyMCLinearRegression()
-    model.idata = az.InferenceData(posterior=xr.Dataset({"beta": draws}))
+    model.idata = xr.DataTree.from_dict({"posterior": xr.Dataset({"beta": draws})})
 
     with pytest.raises(ValueError, match=match):
         PyMCModelAdapter(model).coefficients()
@@ -206,7 +205,7 @@ def test_shared_print_coefficients_dispatches_on_draw_count(capsys):
         coords={"chain": [0, 1], "draw": [0, 1, 2], "coeffs": ["a", "b"]},
     )
     pymc_model = PyMCLinearRegression()
-    pymc_model.idata = az.InferenceData(posterior=xr.Dataset({"beta": draws}))
+    pymc_model.idata = xr.DataTree.from_dict({"posterior": xr.Dataset({"beta": draws})})
     PyMCModelAdapter(pymc_model).print_coefficients(["a", "b"])
     posterior_output = capsys.readouterr().out
 
