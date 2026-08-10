@@ -636,7 +636,7 @@ def test_effect_summary_raises(small_panel_data):
         model=LinearRegression(),
     )
     with pytest.raises(
-        NotImplementedError, match=r"not implemented for PanelRegression"
+        NotImplementedError, match=r"not yet implemented for PanelRegression"
     ):
         result.effect_summary()
 
