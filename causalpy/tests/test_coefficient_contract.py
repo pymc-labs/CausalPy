@@ -181,6 +181,30 @@ def test_pymc_coefficients_reject_noncanonical_dimensions(dims, shape, match):
         PyMCModelAdapter(model).coefficients()
 
 
+def test_pymc_coefficients_ignore_child_groups_named_like_coefficients():
+    """Coefficient lookup must read data variables, never sibling DataTree groups.
+
+    ``idata.posterior`` is an ``xarray.DataTree`` node on this stack, and ``in``
+    on a node also matches its child groups. A group named ``beta`` therefore
+    used to satisfy the lookup and hand back a ``DataTree`` instead of draws.
+    """
+    draws = xr.DataArray(
+        np.arange(6).reshape(1, 2, 3),
+        dims=("chain", "draw", "coeffs"),
+        coords={"chain": [0], "draw": [0, 1], "coeffs": ["a", "b", "c"]},
+    )
+    model = PyMCLinearRegression()
+    model.idata = xr.DataTree.from_dict(
+        {
+            "posterior": xr.Dataset({"gamma": draws}),
+            "posterior/beta": xr.Dataset({"gamma": draws}),
+        }
+    )
+
+    with pytest.raises(ValueError, match="must expose one of 'beta', 'b', or 'beta_z'"):
+        PyMCModelAdapter(model).coefficients()
+
+
 def test_shared_print_coefficients_dispatches_on_draw_count(capsys):
     X = xr.DataArray(
         np.arange(12).reshape(6, 2),

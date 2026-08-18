@@ -97,11 +97,12 @@ def _sklearn_y(y: Any) -> np.ndarray:
     return arr
 
 
-def _canonical_pymc_coefficients(posterior: xr.Dataset) -> xr.DataArray:
+def _canonical_pymc_coefficients(posterior: xr.DataTree) -> xr.DataArray:
     """Normalize supported PyMC coefficient variables to the canonical contract."""
+    variables = posterior.dataset
     coefficient_names = ("beta", "b", "beta_z")
     coefficient_name = next(
-        (name for name in coefficient_names if name in posterior), None
+        (name for name in coefficient_names if name in variables), None
     )
     if coefficient_name is None:
         raise ValueError(
@@ -109,7 +110,7 @@ def _canonical_pymc_coefficients(posterior: xr.Dataset) -> xr.DataArray:
             "as design-matrix coefficients."
         )
 
-    coefficients = posterior[coefficient_name]
+    coefficients = variables[coefficient_name]
     label_dims = ("coeffs", "covariates", "instruments", "outcome_coeffs")
     label_dim = next((dim for dim in label_dims if dim in coefficients.dims), None)
     if label_dim is None:
