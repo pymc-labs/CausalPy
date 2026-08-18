@@ -7,6 +7,12 @@ import xarray as xr
 # Minimum draws needed to satisfy notebook code that iterates over posterior samples
 MIN_DRAWS = 100
 FALLBACK_COMPILE_MODE = "FAST_COMPILE"
+# `sample_prior_predictive` always returns a single chain, but multi-chain diagnostics
+# are not optional extras for notebooks: arviz-stats raises outright on a one-chain
+# posterior (`_mtc_c requires at least 2 chains`), which broke
+# `az.plot_rank_dist` in the instrumental-variable notebook. Split the prior draws
+# into this many chains so rank/uniformity plots have something real to compare.
+MOCK_CHAINS = 2
 
 
 def mock_sample(*args, **kwargs):
@@ -25,23 +31,34 @@ def mock_sample(*args, **kwargs):
     if requested_draws is None and len(args) > 1 and isinstance(args[1], int):
         requested_draws = args[1]
 
-    # Ensure enough draws for notebook code while keeping execution fast.
+    # Ensure enough draws for notebook code while keeping execution fast. Each mock
+    # chain must carry the draw count the notebook asked for, so draw the total.
     n_draws = max(MIN_DRAWS, requested_draws or MIN_DRAWS)
+    total_draws = n_draws * MOCK_CHAINS
 
     try:
         idata = pm.sample_prior_predictive(
             model=model,
             random_seed=random_seed,
-            draws=n_draws,
+            draws=total_draws,
         )
     except ZeroDivisionError:
         idata = pm.sample_prior_predictive(
             model=model,
             random_seed=random_seed,
-            draws=n_draws,
+            draws=total_draws,
             compile_kwargs={"mode": FALLBACK_COMPILE_MODE},
         )
-    idata["posterior"] = idata["prior"].to_dataset().copy()
+    prior = idata["prior"].to_dataset().isel(chain=0, drop=True)
+    idata["posterior"] = xr.concat(
+        [
+            prior.isel(draw=slice(i * n_draws, (i + 1) * n_draws)).assign_coords(
+                draw=np.arange(n_draws)
+            )
+            for i in range(MOCK_CHAINS)
+        ],
+        dim="chain",
+    ).assign_coords(chain=np.arange(MOCK_CHAINS))
 
     log_likelihood = idata_kwargs.get("log_likelihood")
     if log_likelihood:
@@ -56,7 +73,7 @@ def mock_sample(*args, **kwargs):
 
     # Create mock sample stats with diverging data
     if "sample_stats" not in idata:
-        n_chains = 1
+        n_chains = MOCK_CHAINS
         sample_stats = xr.Dataset(
             {
                 "diverging": xr.DataArray(

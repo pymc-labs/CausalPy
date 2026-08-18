@@ -532,6 +532,17 @@ assert {{"chain", "draw"}}.issubset(result["log_likelihood"]["y"].dims)
 assert "prior" not in result
 assert "prior_predictive" not in result
 assert result["posterior"]["x"].sizes["draw"] == 100
+# arviz-stats refuses multi-chain diagnostics on a single-chain posterior
+# (`_mtc_c requires at least 2 chains`), which is what `az.plot_rank_dist` calls.
+assert namespace["MOCK_CHAINS"] >= 2
+assert result["posterior"]["x"].sizes["chain"] == namespace["MOCK_CHAINS"]
+# sample_stats describes the posterior, so its chain count must agree with it.
+assert result["sample_stats"]["diverging"].sizes["chain"] == namespace["MOCK_CHAINS"]
+assert result["sample_stats"]["diverging"].sizes["draw"] == 100
+# Chains must hold distinct draws, otherwise rank diagnostics compare a chain to itself.
+assert not result["posterior"]["x"].isel(chain=0).equals(
+    result["posterior"]["x"].isel(chain=1)
+)
 """
 
     result = subprocess.run(

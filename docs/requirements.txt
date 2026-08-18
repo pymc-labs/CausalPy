@@ -1,5 +1,8 @@
 # This VCS dependency is intentionally docs-only: PyPI rejects direct VCS references in published package metadata.
-# d710dc0 is the immutable PyMC-Marketing transition commit used by the documentation notebooks.
-pymc-marketing @ git+https://github.com/pymc-labs/pymc-marketing.git@d710dc035b654b96d6abab2087df4f577beb66f1
-# Match the pinned commit's declared pymc-extras interval, which permits compatible 0.11.x and 0.12.x releases.
-pymc-extras>=0.11,<0.13
+# f8b552c is the immutable PyMC-Marketing commit used by the documentation notebooks. The previously pinned
+# d710dc0 imports `extract_dims` from `pymc.model.fgraph`, which PyMC no longer exports, so it raises
+# ImportError on any supported PyMC. This commit drops that import.
+pymc-marketing @ git+https://github.com/pymc-labs/pymc-marketing.git@f8b552cb4fec02478cc9bffeaf976789d2e9585e
+# Match the pinned commit's declared pymc-extras interval. It also caps pymc to >=6.2,<6.3, which is what
+# the docs environment resolves; the runtime package keeps its wider pymc>=6.0.1,<7 range.
+pymc-extras>=0.14,<0.15
