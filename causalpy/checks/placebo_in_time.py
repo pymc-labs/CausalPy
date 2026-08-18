@@ -528,7 +528,7 @@ class PlaceboInTime:
             return self.intervention_length
 
         treatment_time = experiment.treatment_time  # type: ignore[attr-defined]
-        data = experiment.data  # type: ignore[attr-defined]
+        data = experiment.data
 
         treatment_end = getattr(experiment, "treatment_end_time", None)
         if treatment_end is not None:
@@ -1042,13 +1042,9 @@ class PlaceboInTime:
             raise ValueError("expected_effect_prior is not set.")
         if hasattr(prior, "rvs"):
             if self.random_seed is None:
-                return np.asarray(prior.rvs(n))  # type: ignore[union-attr]
+                return np.asarray(prior.rvs(n))
             if self._rvs_accepts_random_state(prior):
-                return np.asarray(
-                    prior.rvs(  # type: ignore[union-attr]
-                        n, random_state=self._rng_for_stage(0)
-                    )
-                )
+                return np.asarray(prior.rvs(n, random_state=self._rng_for_stage(0)))
 
             prior_type = f"{type(prior).__module__}.{type(prior).__qualname__}"
             if unseeded_custom_priors is not None:
@@ -1065,7 +1061,7 @@ class PlaceboInTime:
                 "marks its type as unseeded.",
                 stacklevel=2,
             )
-            return np.asarray(prior.rvs(n))  # type: ignore[union-attr]
+            return np.asarray(prior.rvs(n))
         raise TypeError(
             f"expected_effect_prior must have an .rvs(n) method, got "
             f"{type(prior).__name__}."
@@ -1147,7 +1143,7 @@ class PlaceboInTime:
         unseeded_custom_priors: list[dict[str, str]] = []
         factory = self._get_factory(context)
         treatment_time = experiment.treatment_time  # type: ignore[attr-defined]
-        data = experiment.data  # type: ignore[attr-defined]
+        data = experiment.data
         intervention_length = self._compute_intervention_length(experiment)
         required_pre_period_rows = self._get_intervention_window_observation_count(
             data, treatment_time, intervention_length

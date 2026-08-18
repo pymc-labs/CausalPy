@@ -854,11 +854,11 @@ class PanelRegression(BaseExperiment):
         if units is not None:
             selected_units = units
         elif self.n_units <= n_sample:
-            selected_units = all_units  # type: ignore[assignment]
+            selected_units = all_units
         else:
             if select == "random":
                 rng = np.random.default_rng(42)
-                selected_units = rng.choice(all_units, size=n_sample, replace=False)  # type: ignore[assignment]
+                selected_units = rng.choice(all_units, size=n_sample, replace=False)
             elif select == "extreme":
                 # Select units with the largest and smallest mean outcomes
                 unit_means = self.data.groupby(self.unit_fe_variable, observed=True)[
@@ -953,7 +953,7 @@ class PanelRegression(BaseExperiment):
                 # OLS: get fitted values for this unit
                 y_fitted = np.squeeze(self.model.predict(self.design["X"]))[
                     sorted_obs_indices
-                ]  # type: ignore[union-attr]
+                ]
                 ax.plot(
                     sorted_time_vals,
                     y_fitted,
