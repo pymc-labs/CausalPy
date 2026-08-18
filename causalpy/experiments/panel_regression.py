@@ -196,8 +196,7 @@ class PanelRegression(BaseExperiment):
     ) -> None:
         super().__init__(model=model)
 
-        # to_pandas returns a copy, so this rename lands on ours, not the
-        # caller's dataframe.
+        # to_pandas returns a copy, so this rename lands on ours, not the caller's dataframe.
         pandas_data = to_pandas(data)
         pandas_data.index.name = "obs_ind"
         self.data = pandas_data

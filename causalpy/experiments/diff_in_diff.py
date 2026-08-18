@@ -119,8 +119,7 @@ class DifferenceInDifferences(BaseExperiment):
     ) -> None:
         super().__init__(model=model)
         self.causal_impact: xr.DataArray | float | None
-        # to_pandas returns a copy, so index metadata is normalized on an
-        # owned frame rather than the caller's.
+        # to_pandas returns a copy, so index metadata is normalized on an owned frame rather than the caller's.
         pandas_data = to_pandas(data)
         pandas_data.index.name = "obs_ind"
         self.data = pandas_data
@@ -506,8 +505,7 @@ class DifferenceInDifferences(BaseExperiment):
                     showmedians=False,
                     widths=0.2,
                 )
-                # violinplot types every entry as a single Collection, but the
-                # "bodies" entry is a list of them.
+                # violinplot types every entry as a single Collection, but the "bodies" entry is a list of them.
                 for pc in parts["bodies"]:  # type: ignore[attr-defined]
                     pc.set_facecolor("C0")
                     pc.set_edgecolor("None")

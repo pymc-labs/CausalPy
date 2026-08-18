@@ -136,8 +136,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         time_column: str | None = None,
     ) -> None:
         super().__init__(model=model)
-        # to_pandas_with_time_index returns a copy, so index metadata is
-        # normalized on an owned frame rather than the caller's.
+        # to_pandas_with_time_index returns a copy, so index metadata is normalized on an owned frame rather than the caller's.
         pandas_data = to_pandas_with_time_index(data, time_column)
         pandas_data.index.name = "obs_ind"
         self.data = pandas_data
