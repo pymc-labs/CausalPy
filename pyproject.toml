@@ -82,9 +82,7 @@ forecast = [
 ]
 dev = [
     "prek",
-    # Pinned: a type checker that floats turns an untouched branch red whenever
-    # upstream ships new checks. Bump deliberately, with the allowlist in
-    # [tool.mypy] re-measured (issue #1127).
+    # Pinned: a type checker that floats turns an untouched branch red whenever upstream ships new checks. Bump deliberately, with the allowlist in [tool.mypy] re-measured (issue #1127). TOML cannot share the value, so the same pin appears in the ``lint`` extra below and the two must be bumped together.
     "mypy==2.3.0",
     "twine",
     "codespell",
@@ -118,6 +116,7 @@ docs = [
     "PyYAML",
     "sphinxext-rediraffe",
 ]
+# The mypy pin here must match the one in the ``dev`` extra above; TOML cannot share the value, so bump both together.
 lint = ["prek", "ruff", "mypy==2.3.0"]
 test = [
     "pytest",
@@ -227,24 +226,15 @@ exclude_lines = [
     "@(abc\\.)?abstractmethod",
 ]
 
-# Type checking (issue #1127). ``files = "causalpy"`` recurses, so the subpackages are
-# covered; the old ``causalpy/*.py`` glob did not and only reached 16 top-level modules.
-# ``make typecheck`` runs this from the project environment, where the real dependencies
-# are importable, and CI runs the same target. ``ignore_missing_imports`` drops the
-# untyped-third-party noise (pymc, patsy, arviz and friends ship no stubs).
+# Type checking (issue #1127). ``files = "causalpy"`` recurses, so the subpackages are covered; the old ``causalpy/*.py`` glob did not and only reached the 18 top-level modules. ``make typecheck`` runs this from the project environment, where the real dependencies are importable, and CI runs the same target. ``ignore_missing_imports`` drops the untyped-third-party noise (pymc, patsy, arviz and friends ship no stubs).
 [tool.mypy]
 files = "causalpy"
 exclude = "build|dist|docs|notebooks|tests|setup.py"
 ignore_missing_imports = true
-# Fail if an override below stops matching a real module, so a rename or a deletion
-# cannot leave a stale allowlist entry behind.
+# Report an override below that stops matching a real module, so a rename or a deletion does not leave a stale allowlist entry behind unnoticed. This warns rather than fails: mypy prints ``note: unused section(s)`` and still exits 0, so it surfaces the staleness in the log without turning the gate red on its own.
 warn_unused_configs = true
 
-# Allowlist of modules that already fail, so the gate starts green and ratchets down
-# (49 errors in 16 files, measured on pymc6_and_pymcmarketing1_migration at 194343ca).
-# Each entry disables only the error codes that module actually produces, so everything
-# else is still checked there. Removing an entry, or a single code from one, is a
-# self-contained follow-up PR.
+# Allowlist of modules that already fail, so the gate starts green and ratchets down (49 errors in 16 files, measured on pymc6_and_pymcmarketing1_migration at 194343ca). Each entry disables only the error codes that module actually produces, so everything else is still checked there. Removing an entry, or a single code from one, is a self-contained follow-up PR.
 [[tool.mypy.overrides]]
 module = "causalpy.experiments.inverse_propensity_weighting"
 disable_error_code = ["arg-type", "assignment", "index", "return-value"]
