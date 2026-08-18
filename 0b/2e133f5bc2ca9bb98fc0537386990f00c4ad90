@@ -1,0 +1,16 @@
+causalpy/experiments/model_adapter.py
+  h_d36ca8649a0e95 100,102,105,113
+causalpy/tests/test_coefficient_contract.py
+  h_d36ca8649a0e95 184-207
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "0b2e133f5bc2ca9bb98fc0537386990f00c4ad90",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}
