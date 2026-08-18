@@ -10,7 +10,25 @@ PACKAGE_DIR = causalpy
 
 .PHONY: init setup lint check_lint check-exports check-architecture test test-correctness test-patch-cov uml gallery html cleandocs doctest run_notebooks_full help
 
-DIFF_COVER_COMPARE_BRANCH ?= $(shell if git show-ref --verify --quiet refs/remotes/upstream/main; then printf "upstream/main"; else printf "origin/main"; fi)
+# Patch coverage must be measured against the branch the PR actually targets.
+# While the 1.0 transition branch exists, work branched from it targets it, not
+# `main` -- and it is hundreds of commits ahead of `main`, so comparing against
+# `main` reports the whole migration as "the patch" and the gate stops meaning
+# anything. Prefer the transition branch when HEAD descends from it (a branch
+# cut from `main` never does), otherwise fall back to `main`. Override
+# DIFF_COVER_COMPARE_BRANCH when a PR deliberately targets something else.
+DIFF_COVER_COMPARE_BRANCH ?= $(shell \
+	for ref in upstream/pymc6_and_pymcmarketing1_migration origin/pymc6_and_pymcmarketing1_migration; do \
+		if git show-ref --verify --quiet "refs/remotes/$$ref" \
+			&& git merge-base --is-ancestor "$$ref" HEAD; then \
+			printf "%s" "$$ref"; exit 0; \
+		fi; \
+	done; \
+	if git show-ref --verify --quiet refs/remotes/upstream/main; then \
+		printf "upstream/main"; \
+	else \
+		printf "origin/main"; \
+	fi)
 DIFF_COVER_FAIL_UNDER ?= 96
 # diff-cover (10.3.0, 10.4.1) matches exclude patterns against the basename
 # and then the absolute path, never the repo-relative path. The pattern goes
