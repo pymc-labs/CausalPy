@@ -123,6 +123,7 @@ class InstrumentalVariable(BaseExperiment):
     supports_ols = False
     supports_bayes = True
     _default_model_class = InstrumentalVariableRegression
+    model: InstrumentalVariableRegression
 
     def __init__(
         self,
@@ -206,11 +207,10 @@ class InstrumentalVariable(BaseExperiment):
                     "eta": 2,
                     "lkj_sd": 1,
                 }
-        # DECISION (#1127): the ignores below have one cause. `self.model` is declared as the base model union, while this experiment requires `InstrumentalVariableRegression`, whose `fit` takes numpy arrays plus `Z`, `t` and `priors`. Narrowing the attribute is the real fix and would drop every one of these codes, but that is a public type on the experiment classes, so it is left as a separate decision. mypy reports argument mismatches against the argument's own line, hence the per-argument ignores.
-        self.model.fit(  # type: ignore[call-arg,union-attr]
-            X=self.X,  # type: ignore[arg-type]
+        self.model.fit(
+            X=self.X,
             Z=self.Z,
-            y=self.y,  # type: ignore[arg-type]
+            y=self.y,
             t=self.t,
             coords=COORDS,
             priors=self.priors,
