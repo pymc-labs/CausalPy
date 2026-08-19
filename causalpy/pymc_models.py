@@ -1671,7 +1671,8 @@ class PropensityScore(PyMCModel):
         with self:
             # DECISION (#1127): the guarded block works on a local and assigns once at the end. Guarding ``self.idata`` in place left it Optional again after the branch rejoined, which is what made this return look nullable; the sibling fit methods that assign straight through already type-check. One consequence worth stating: if the predictive sampling below raises, ``self.idata`` keeps its previous value rather than holding a posterior with no predictive groups attached.
             idata = pm.sample(**self.sample_kwargs)
-            if idata is not None:
+            # pm.sample's return type excludes None, so the guard's False side never runs.
+            if idata is not None:  # pragma: no branch
                 idata = _extend_datatree_left(
                     idata, pm.sample_prior_predictive(random_seed=random_seed)
                 )
