@@ -268,19 +268,19 @@ def test_prior_effect_tail_probability_near_neutral(its_data):
     assert 0.25 < prob < 0.75
 
 
+class _MockTrendComponent:
+    """Minimal trend component: zero contribution, valid apply()."""
+
+    def apply(self, time_data):
+        return time_data * 0
+
+
 @pytest.mark.slow
 @pytest.mark.integration
-def test_refit_after_predict_restores_training_design(its_data):
-    """fit → plot (forecast-window conditioning) → fit must re-sample on the
-    training design; guards the BBETS time-feature re-arm path (round-1
-    review blocker) and the base X/y re-arm alike."""
-    import warnings
-
-    exp = cp.InterruptedTimeSeries(
-        its_data,
-        treatment_time=pd.Timestamp("2017-06-01"),
-        formula="y ~ 1 + t",
-        model=cp.pymc_models.LinearRegression(
+@pytest.mark.parametrize(
+    "model_factory",
+    [
+        lambda: cp.pymc_models.LinearRegression(
             sample_kwargs={
                 "draws": 20,
                 "tune": 20,
@@ -289,19 +289,52 @@ def test_refit_after_predict_restores_training_design(its_data):
                 "random_seed": 42,
             }
         ),
+        # Exercises the BBETS build() override that records the extra
+        # trend/seasonality pm.Data nodes for re-arming.
+        lambda: cp.pymc_models.BayesianBasisExpansionTimeSeries(
+            trend_component=_MockTrendComponent(),
+            seasonality_component=_MockTrendComponent(),
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+                "random_seed": 42,
+            },
+        ),
+    ],
+    ids=["linear-regression", "bbets"],
+)
+def test_refit_after_predict_restores_training_design(its_data, model_factory):
+    """fit → plot (forecast-window conditioning) → fit must re-sample on the
+    training design; guards the base X/y re-arm and, on the BBETS variant,
+    the trend/seasonality node re-arm added for the round-1 review blocker.
+    """
+    import warnings
+
+    exp = cp.InterruptedTimeSeries(
+        its_data,
+        treatment_time=pd.Timestamp("2017-06-01"),
+        formula="y ~ 1 + t",
+        model=model_factory(),
     )
     exp.fit()
     n_train = exp.idata["posterior"]["mu"].sizes["obs_ind"]
+
+    # Forward sampling through plot() conditions the shared data nodes on
+    # the forecast window. The recorded build-time values must still hold
+    # training lengths, and a second documented no-op build() call must not
+    # overwrite them with the poisoned live-node values.
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         exp.plot(show=False)
-        exp.fit()
-    assert exp.idata["posterior"]["mu"].sizes["obs_ind"] == n_train
-    # A second build() call is a documented no-op and must not poison the
-    # recorded data nodes with whatever window predict() last conditioned on.
-    nodes_before = {
+    expected_shapes = {
         name: value.shape for name, value in exp.model._build_data_nodes.items()
     }
+    for name, shape in expected_shapes.items():
+        if name in ("X", "y", "t_trend_data", "t_season_data"):
+            assert shape[0] == n_train, f"{name} recorded {shape}, not training"
+
     exp.model.build(
         exp.pre_design["X"],
         exp.pre_design["y"],
@@ -309,7 +342,14 @@ def test_refit_after_predict_restores_training_design(its_data):
     )
     assert {
         name: value.shape for name, value in exp.model._build_data_nodes.items()
-    } == nodes_before
+    } == expected_shapes
+
+    # The next fit re-arms from those recordings and samples on the
+    # training design again.
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        exp.fit()
+    assert exp.idata["posterior"]["mu"].sizes["obs_ind"] == n_train
 
 
 @pytest.mark.integration
