@@ -1371,4 +1371,5 @@ class InterruptedTimeSeries(BaseExperiment):
             min_effect=min_effect,
             prefix=prefix,
             experiment_type="its",
+            group=group,
         )

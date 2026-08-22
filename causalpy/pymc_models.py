@@ -492,6 +492,7 @@ class PyMCModel(pm.Model):
         groups without touching any other group.
         """
         self.require_built()
+        self._rearm_fit_data()
         resolved = {**self.prior_sample_kwargs, **kwargs}
         with self:
             prior_idata = pm.sample_prior_predictive(**resolved)
@@ -2423,6 +2424,38 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         # else: no exog vars, return None
 
         return time_for_trend, time_for_seasonality, X_for_pymc, num_obs
+
+    def build(self, X, y, coords=None):
+        """Construct the graph and record the time-feature data nodes.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Input features with dims ["obs_ind", "coeffs"]; obs_ind must be
+            datetimes.
+        y : xr.DataArray
+            Target variable with dims ["obs_ind", "treated_units"].
+        coords : dict, optional
+            Coordinates dictionary; must contain "datetime_index".
+
+        Notes
+        -----
+        The trend/seasonality inputs live under their own ``pm.Data`` names,
+        so they are added to :attr:`_build_data_nodes` for
+        :meth:`_rearm_fit_data`.
+        """
+        super().build(X=X, y=y, coords=coords)
+        # The graph's trend/seasonality inputs are derived from X at build
+        # time and stored under their own pm.Data node names; record them so
+        # _rearm_fit_data() can restore them after predict() re-purposes the
+        # nodes for forecast-window conditioning.
+        self._build_data_nodes.update(
+            {
+                name: self.named_vars[name].get_value()
+                for name in ("t_trend_data", "t_season_data")
+                if name in self.named_vars
+            }
+        )
 
     def build_model(
         self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None

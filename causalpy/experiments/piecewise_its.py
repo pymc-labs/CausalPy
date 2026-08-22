@@ -757,7 +757,6 @@ class PiecewiseITS(BaseExperiment):
 
         plt.tight_layout()
         return fig, [ax]
-        return fig, ax
 
     def get_plot_data(
         self,
@@ -914,4 +913,5 @@ class PiecewiseITS(BaseExperiment):
             min_effect=min_effect,
             prefix=prefix,
             experiment_type="piecewise_its",
+            group=group,
         )

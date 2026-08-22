@@ -1631,12 +1631,15 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
-        # Guard the requested group's sampled state before reporting.
-        self._resolve_group(group)
+        # Resolve the requested group's bundle; the helper reads ATT tables
+        # from it and frames prior-group prose as a plausibility check.
+        bundle = self._resolve_group(group)
         from causalpy.reporting import _effect_summary_staggered_did
 
         return _effect_summary_staggered_did(
             self,
+            bundle,
+            group=group,
             direction=direction,
             alpha=alpha,
             min_effect=min_effect,

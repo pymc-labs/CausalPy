@@ -48,7 +48,8 @@ def extract_r2_score(
     Parameters
     ----------
     score : pd.Series
-        Canonical score container as stored on ``experiment.score``.
+        Canonical score container, i.e. the ``score`` field of an
+        experiment's result bundle.
     unit_index : int, optional
         Index of the treated unit whose score to extract. Defaults to 0.
     """

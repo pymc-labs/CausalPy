@@ -507,7 +507,9 @@ def _effect_summary_did(
 
 def _effect_summary_staggered_did(
     experiment,
+    bundle=None,
     *,
+    group: Literal["prior", "posterior"] = "posterior",
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
     alpha: float = 0.06,
     min_effect: float | None = None,
@@ -520,8 +522,11 @@ def _effect_summary_staggered_did(
     Parameters
     ----------
     experiment
-        StaggeredDifferenceInDifferences experiment (must be fitted; its
-        posterior result bundle provides the event-time ATT table)
+        StaggeredDifferenceInDifferences experiment (supplies the
+        deterministic cohort list)
+    bundle
+        The resolved group result bundle providing the event-time ATT table;
+        defaults to ``experiment.result`` when omitted
     direction : {"increase", "decrease", "two-sided"}
         Direction for interpretation
     alpha : float, default=0.06
@@ -537,7 +542,8 @@ def _effect_summary_staggered_did(
     EffectSummary
         Summary with table of event-time ATTs and prose interpretation
     """
-    att_et = experiment.result.att_event_time.copy()
+    result_bundle = bundle if bundle is not None else experiment.result
+    att_et = result_bundle.att_event_time.copy()
 
     # Separate pre-treatment (placebo) and post-treatment effects
     pre_treatment = att_et[att_et["event_time"] < 0]
@@ -561,7 +567,7 @@ def _effect_summary_staggered_did(
             avg_lower = post_treatment["att_lower"].mean()
             avg_upper = post_treatment["att_upper"].mean()
             # Use the HDI probability that was actually used to compute the intervals
-            hdi_prob = getattr(experiment.result, "hdi_prob", 1 - alpha)
+            hdi_prob = getattr(result_bundle, "hdi_prob", 1 - alpha)
             hdi_pct = int(hdi_prob * 100)
             prose_parts.append(
                 f"Staggered DiD analysis: The average post-treatment effect "
@@ -607,6 +613,8 @@ def _effect_summary_staggered_did(
     prose_parts.append(f"Analysis includes {n_cohorts} treatment cohort(s).")
 
     text = " ".join(prose_parts)
+    if group == "prior":
+        text = _apply_prior_grouping(text, group)
 
     return EffectSummary(table=table, text=text)
 
@@ -808,6 +816,7 @@ def _effect_summary_timeseries(
     min_effect: float | None = None,
     prefix: str = "Post-period",
     experiment_type: str | None = None,
+    group: Literal["prior", "posterior"] = "posterior",
 ) -> EffectSummary:
     """Build an :class:`EffectSummary` for time-series experiments (ITS, SC,
     Piecewise ITS) from canonical impact/counterfactual containers.
@@ -915,6 +924,9 @@ def _effect_summary_timeseries(
             counterfactual_cum=cf_cum if cumulative else None,
             experiment_type=experiment_type,
         )
+
+    if group == "prior":
+        text = _apply_prior_grouping(text, group)
 
     return EffectSummary(table=table, text=text)
 

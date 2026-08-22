@@ -1072,4 +1072,5 @@ class SyntheticControl(BaseExperiment):
             min_effect=min_effect,
             prefix=prefix,
             experiment_type="sc",
+            group=group,
         )

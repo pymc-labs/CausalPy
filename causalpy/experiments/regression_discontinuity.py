@@ -363,6 +363,7 @@ class RegressionDiscontinuity(BaseExperiment):
 
     def plot(
         self,
+        *,
         group: Literal["prior", "posterior"] = "posterior",
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,

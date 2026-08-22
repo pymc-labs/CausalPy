@@ -376,6 +376,8 @@ class InstrumentalVariable(BaseExperiment):
         self._resolve_group("posterior")
 
         print(f"{self.expt_type:=^80}")
+        print(f"Formula: {self.formula}")
+        print(f"Instruments formula: {self.instruments_formula}")
 
         print("\nNaive OLS coefficients:")
         for name, val in self.ols_beta_params.items():
