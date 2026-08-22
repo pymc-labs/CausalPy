@@ -26,6 +26,7 @@ from patsy import ModelDesc
 import xarray as xr
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
+from causalpy.experiments._results import KinkResult
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
@@ -71,9 +72,32 @@ class RegressionKink(BaseExperiment):
 
     Notes
     -----
+    **Lazy lifecycle**
+
+    Construction only validates input and builds design matrices — nothing is
+    sampled. Call :meth:`fit` to run posterior inference (it returns ``self``,
+    so construction and fitting chain in one expression), and optionally
+    :meth:`sample_prior_predictive` first for prior predictive checks
+    (``plot(group="prior")``, ``effect_summary(group="prior")``). Results
+    live on ``exp.result`` / ``exp.prior_result``.
+
     **Estimate extraction**
 
     The class predicts the conditional expectation at ``kink_point - epsilon``, ``kink_point``, and ``kink_point + epsilon``. It forms finite-difference slopes on the left and right and stores their difference as ``gradient_change``. This is a local prediction contrast on derivatives, not a population-standardized effect.
+
+    Examples
+    --------
+    >>> import causalpy as cp
+    >>> df = cp.load_data("rd")
+    >>> kink = 0.5
+    >>> result = cp.RegressionKink(
+    ...     df,
+    ...     formula=f"y ~ 1 + x + I((x - {kink}) * treated)",
+    ...     kink_point=kink,
+    ...     model=cp.pymc_models.LinearRegression(
+    ...         sample_kwargs={"random_seed": 42, "progressbar": False}
+    ...     ),
+    ... ).fit()
     """
 
     supports_ols = False
@@ -102,7 +126,6 @@ class RegressionKink(BaseExperiment):
         self.input_validation()
         self._build_design_matrices()
         self._prepare_data()
-        self.algorithm()
 
     def _build_design_matrices(self) -> None:
         """Build design matrices from formula and data, applying bandwidth filtering."""
@@ -137,17 +160,27 @@ class RegressionKink(BaseExperiment):
         )
         del self._X_raw, self._y_raw
 
-    def algorithm(self) -> None:
-        """Run the experiment algorithm: fit model, predict, and evaluate gradient change."""
+    def _fit_inputs(self) -> tuple[Any, Any, dict[str, Any]]:
+        """Return the design matrices and coordinates for model build."""
+        X = self.design["X"]
+        return (
+            X,
+            self.design["y"],
+            build_coords(self.labels, X.shape[0]),
+        )
+
+    def _finalize(self, group: Literal["prior", "posterior"]) -> None:
+        """Compute the group's result bundle from its draws and assign it.
+
+        The body is the historical ``algorithm()`` with the draw group
+        threaded through prediction. Posterior fits score against the
+        observed data; prior draws are not scored (R² against observed
+        data is not informative under a prior).
+        """
         X = self.design["X"]
         y = self.design["y"]
 
-        COORDS = build_coords(self.labels, X.shape[0])
-        self._model_backend.fit(X=X, y=y, coords=COORDS)
-
-        self.score = self._model_backend.score(X=X, y=y)
-
-        # get the model predictions of the observed data
+        # get the model predictions over the running-variable grid
         if self.bandwidth is not np.inf:
             fmin = self.kink_point - self.bandwidth
             fmax = self.kink_point + self.bandwidth
@@ -162,13 +195,27 @@ class RegressionKink(BaseExperiment):
             {self.running_variable_name: xi, "treated": self._is_treated(xi)}
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
-        self.pred = self._model_backend.predict(X=np.asarray(new_x))
+        predictions = self._model_backend.predict(X=np.asarray(new_x), group=group)
 
         # evaluate gradient change around kink point
-        mu_kink_left, mu_kink, mu_kink_right = self._probe_kink_point()
-        self.gradient_change = self._eval_gradient_change(
+        mu_kink_left, mu_kink, mu_kink_right = self._probe_kink_point(group=group)
+        gradient_change = self._eval_gradient_change(
             mu_kink_left, mu_kink, mu_kink_right, self.epsilon
         )
+
+        score = None
+        if group == "posterior":
+            score = self._model_backend.score(X=X, y=y)
+
+        bundle = KinkResult(
+            predictions=predictions,
+            gradient_change=gradient_change,
+            score=score,
+        )
+        if group == "prior":
+            self._prior_result = bundle
+        else:
+            self._result = bundle
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -214,7 +261,9 @@ class RegressionKink(BaseExperiment):
         gradient_change = gradient_right - gradient_left
         return gradient_change
 
-    def _probe_kink_point(self) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray]:
+    def _probe_kink_point(
+        self, *, group: Literal["prior", "posterior"]
+    ) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray]:
         """Probe the kink point to evaluate the predicted outcome at the kink point and
         either side."""
         # Create a dataframe to evaluate predicted outcome at the kink point and either
@@ -232,7 +281,7 @@ class RegressionKink(BaseExperiment):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], x_predict)
-        predicted = self._model_backend.predict(X=np.asarray(new_x))
+        predicted = self._model_backend.predict(X=np.asarray(new_x), group=group)
         mu_kink_left = predicted.sel(obs_ind=0)
         mu_kink = predicted.sel(obs_ind=1)
         mu_kink_right = predicted.sel(obs_ind=2)
@@ -251,6 +300,7 @@ class RegressionKink(BaseExperiment):
             Number of decimals used to round results. Defaults to 2. Use
             ``None`` to return raw numbers.
         """
+        bundle = self.result
         print(
             f"""
         {self.expt_type:=^80}
@@ -259,7 +309,7 @@ class RegressionKink(BaseExperiment):
         Kink point on running variable: {self.kink_point}
 
         Results:
-        Change in slope at kink point = {round_num(self.gradient_change.mean(), round_to)}
+        Change in slope at kink point = {round_num(bundle.gradient_change.mean(), round_to)}
         """
         )
         self.print_coefficients(round_to)
@@ -267,6 +317,7 @@ class RegressionKink(BaseExperiment):
     def plot(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
@@ -280,6 +331,12 @@ class RegressionKink(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to plot. ``"prior"`` renders the reduced
+            prior-check figure — the prior-implied fit against the observed
+            data only — and requires :meth:`sample_prior_predictive`;
+            ``"posterior"`` (default) renders the full results figure and
+            requires :meth:`fit`.
         round_to : int, optional
             Number of decimals used to round numerical results in the figure
             title (e.g. the Bayesian :math:`R^2`). Defaults to 2. Use
@@ -326,6 +383,7 @@ class RegressionKink(BaseExperiment):
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
+            group=group,
             round_to=round_to,
             ci_prob=ci_prob,
             kind=kind,
@@ -336,6 +394,8 @@ class RegressionKink(BaseExperiment):
 
     def _plot(
         self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
@@ -348,10 +408,14 @@ class RegressionKink(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}
+            ``"prior"`` renders the reduced single-panel prior-check figure
+            via :meth:`_plot_prior_checks`; ``"posterior"`` renders the full
+            results figure.
         round_to : int, optional
             Number of decimals used to round results. Defaults to 2. Use ``None``
             to return raw numbers.
-        hdi_prob : float, optional
+        ci_prob : float, optional
             Probability mass of the highest density interval drawn around the
             posterior predictive band, and the central credible interval
             reported in the figure title for the change in gradient at the
@@ -361,6 +425,10 @@ class RegressionKink(BaseExperiment):
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
+        bundle = self._resolve_group(group)
+        if group == "prior":
+            return self._plot_prior_checks(bundle=bundle)
+
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
@@ -377,10 +445,9 @@ class RegressionKink(BaseExperiment):
             ax=ax,
         )
 
-        # Plot model fit to data
         h_line, h_patch = plot_posterior_over_x(
             self.x_pred[self.running_variable_name],
-            self.pred.isel(treated_units=0),
+            bundle.predictions.isel(treated_units=0),
             ax=ax,
             **style,
             plot_hdi_kwargs={"color": "C1"},
@@ -389,8 +456,8 @@ class RegressionKink(BaseExperiment):
         labels = ["Posterior mean"]
 
         # create strings to compose title
-        r2 = format_r2_score(self.score, round_to=round_to, context="on all data")
-        percentiles = self.gradient_change.quantile(
+        r2 = format_r2_score(bundle.score, round_to=round_to, context="on all data")
+        percentiles = bundle.gradient_change.quantile(
             [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
         ).values
         ci = (
@@ -398,7 +465,7 @@ class RegressionKink(BaseExperiment):
             + f"[{round_num(percentiles[0], round_to if round_to is not None else 2)}, {round_num(percentiles[1], round_to if round_to is not None else 2)}]"
         )
         grad_change = f"""
-            Change in gradient = {round_num(self.gradient_change.mean(), round_to if round_to is not None else 2)},
+            Change in gradient = {round_num(bundle.gradient_change.mean(), round_to if round_to is not None else 2)},
             """
         ax.set(title=r2 + "\n" + grad_change + ci)
         # Intervention line
@@ -410,15 +477,60 @@ class RegressionKink(BaseExperiment):
             label="treatment threshold",
         )
         ax.legend(
-            handles=(h_tuple for h_tuple in handles),
+            handles=handles,
             labels=labels,
             fontsize=LEGEND_FONT_SIZE,
         )
         return fig, ax
 
+    def _plot_prior_checks(self, *, bundle: KinkResult) -> tuple[plt.Figure, plt.Axes]:
+        """Render the reduced prior-check figure.
+
+        A prior check answers whether the prior-implied fit is plausible
+        against the observed data, so a single panel suffices: the observed
+        scatter plus the prior-implied fit line and band over the
+        running-variable grid, with the kink point marked.
+        """
+        style: _PosteriorPlotStyle = {
+            "ci_prob": HDI_PROB,
+            "kind": "ribbon",
+            "ci_kind": "hdi",
+            "num_samples": 50,
+        }
+        fig, ax = plt.subplots(figsize=(7, 4))
+        sns.scatterplot(
+            self.data,
+            x=self.running_variable_name,
+            y=self.outcome_variable_name,
+            c="k",
+            ax=ax,
+        )
+        h_line, h_patch = plot_posterior_over_x(
+            self.x_pred[self.running_variable_name],
+            bundle.predictions.isel(treated_units=0),
+            ax=ax,
+            **style,
+            plot_hdi_kwargs={"color": "C1"},
+        )
+        ax.axvline(
+            x=self.kink_point,
+            ls="--",
+            lw=1.5,
+            color="r",
+            label="treatment threshold",
+        )
+        ax.legend(
+            handles=[(h_line, h_patch)],
+            labels=["Prior fit"],
+            fontsize=LEGEND_FONT_SIZE,
+        )
+        ax.set(title="Prior predictive check")
+        return fig, ax
+
     def effect_summary(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
         alpha: float = 0.05,
         min_effect: float | None = None,
@@ -428,6 +540,13 @@ class RegressionKink(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to summarize. ``"prior"`` requires
+            :meth:`sample_prior_predictive` and produces prior-appropriate
+            prose — under a neutral prior, ``P(effect > 0)`` should sit near
+            0.5, so a tail probability far from 0.5 flags a design-matrix or
+            prior-specification problem rather than a causal finding.
+            ``"posterior"`` requires :meth:`fit`.
         direction : {"increase", "decrease", "two-sided"}, default="increase"
             Direction for tail probability calculation (PyMC only, ignored for OLS).
         alpha : float, default=0.05
@@ -440,9 +559,13 @@ class RegressionKink(BaseExperiment):
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
+        # Resolve the group's bundle once; helpers consume containers.
+        bundle = self._resolve_group(group)
+        # The helper applies the prior-plausibility prose prefix itself.
         return _effect_summary_rkink(
-            self,
+            bundle,
             direction=direction,
             alpha=alpha,
             min_effect=min_effect,
+            group=group,
         )

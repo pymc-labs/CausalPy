@@ -22,6 +22,13 @@ from causalpy.skl_models import create_causalpy_compatible_class
 from causalpy.transforms import ramp, step
 from causalpy.version import __version__
 
+from .custom_exceptions import (
+    BadIndexException,
+    DataException,
+    FormulaException,
+    GroupNotSampleedException,
+    PriorPredictiveNotSupportedException,
+)
 from .data import load_data
 from .experiments.diff_in_diff import DifferenceInDifferences
 from .experiments.instrumental_variable import InstrumentalVariable
@@ -49,14 +56,18 @@ from .utils import extract_lift_for_mmm, plot_correlations
 
 __all__ = [
     "__version__",
+    "BadIndexException",
     "checks",
+    "DataException",
     "create_causalpy_compatible_class",
     "DifferenceInDifferences",
     "EstimateEffect",
     "EffectSummary",
     "extract_lift_for_mmm",
+    "FormulaException",
     "GenerateReport",
     "InstrumentalVariable",
+    "GroupNotSampleedException",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
     "load_data",
@@ -67,6 +78,7 @@ __all__ = [
     "PanelRegression",
     "plot_correlations",
     "PrePostNEGD",
+    "PriorPredictiveNotSupportedException",
     "pymc_forecast_models",
     "pymc_models",
     "ramp",

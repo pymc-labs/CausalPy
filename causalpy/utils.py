@@ -461,7 +461,8 @@ def extract_lift_for_mmm(
 
     # Key on the container, not backend identity: sigma needs genuine
     # posterior dispersion, which a degenerate single-draw run also lacks.
-    if not has_posterior_draws(sc_result.post_impact):
+    impact_post = sc_result.result.impact_post
+    if not has_posterior_draws(impact_post):
         raise ValueError(
             "extract_lift_for_mmm requires a Bayesian (PyMC) model for uncertainty "
             "quantification. OLS models do not provide posterior distributions needed "
@@ -473,7 +474,7 @@ def extract_lift_for_mmm(
 
     for unit in treated_units:
         # Get posterior samples for this unit's causal impact
-        unit_impact = sc_result.post_impact.sel(treated_units=unit)
+        unit_impact = impact_post.sel(treated_units=unit)
 
         # Aggregate across time periods using the named method (e.g. "mean", "sum")
         lift_samples = getattr(unit_impact, aggregate)(dim="obs_ind")

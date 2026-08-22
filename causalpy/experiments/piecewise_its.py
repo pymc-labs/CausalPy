@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+import xarray as xr
 from matplotlib import pyplot as plt
 from patsy import ModelDesc
 from sklearn.base import RegressorMixin
@@ -26,6 +27,7 @@ from sklearn.base import RegressorMixin
 from causalpy._arviz_compat import hdi_bound_arrays
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import FormulaException
+from causalpy.experiments._results import CausalResult
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
@@ -84,13 +86,18 @@ class PiecewiseITS(BaseExperiment):
         Canonicalized interruption thresholds extracted from the formula.
     labels : list[str]
         Names of all coefficients in the design matrix.
-    effect : xr.DataArray or np.ndarray
-        Pointwise causal effect (fitted expectation - counterfactual expectation).
-    cumulative_effect : xr.DataArray or np.ndarray
-        Cumulative causal effect over time.
 
     Notes
     -----
+    **Lazy lifecycle**
+
+    Construction only validates input and builds the design matrix — nothing
+    is sampled. Call :meth:`fit` to run posterior inference (it returns
+    ``self``, so construction and fitting chain in one expression), and
+    optionally :meth:`sample_prior_predictive` first for prior predictive
+    checks (``plot(group="prior")``, ``effect_summary(group="prior")``).
+    Results live on ``exp.result`` / ``exp.prior_result``.
+
     **Estimate extraction**
 
     One model is fitted to the full time series. The no-intervention counterfactual is predicted after setting every ``step()`` and ``ramp()`` design-matrix column to zero, and the pointwise effect is the fitted conditional expectation minus that counterfactual expectation. Bayesian backends contrast posterior ``mu`` values, OLS contrasts point predictions, and the cumulative effect is the running sum.
@@ -132,7 +139,7 @@ class PiecewiseITS(BaseExperiment):
     ...     model=cp.pymc_models.LinearRegression(
     ...         sample_kwargs={"random_seed": 42, "progressbar": False}
     ...     ),
-    ... )
+    ... ).fit()
 
     **Different effects per intervention:**
 
@@ -205,20 +212,8 @@ class PiecewiseITS(BaseExperiment):
         # Track which columns are interruption-related (for counterfactual)
         self._interruption_cols = self._get_interruption_column_indices()
 
-        X = self.design["X"]
-        y = self.design["y"]
-
-        self._model_backend.fit(
-            X=X,
-            y=y,
-            coords=build_coords(self.labels, X.shape[0]),
-        )
-
-        self.y_pred = self._model_backend.predict(X=X)
-        self.score = self._model_backend.score(X=X, y=y)
-
-        # Compute counterfactual and effects
-        self._compute_counterfactual_and_effects()
+        # Derive the post-intervention window deterministically from config
+        self._create_post_intervention_attributes()
 
     def _validate_inputs(self) -> None:
         """Validate input data and formula."""
@@ -339,65 +334,94 @@ class PiecewiseITS(BaseExperiment):
                 indices.extend(range(term_slice.start, term_slice.stop))
         return indices
 
-    def _compute_counterfactual_and_effects(self) -> None:
-        """
-        Compute the counterfactual (no intervention) and causal effects.
+    def _fit_inputs(self) -> tuple[xr.DataArray, xr.DataArray, dict[str, Any]]:
+        """Return the full-window design matrices and coordinates for build."""
+        X = self.design["X"]
+        return (
+            X,
+            self.design["y"],
+            build_coords(self.labels, X.shape[0]),
+        )
 
-        The counterfactual is computed by setting step/ramp terms to zero.
-        Also creates post_impact, datapost, and post_pred attributes for
-        compatibility with effect_summary() from BaseExperiment.
+    def _finalize(self, group: Literal["prior", "posterior"]) -> None:
+        """Compute the group's result bundle from its draws and assign it.
+
+        The body is the historical inline fit-and-contrast block with the
+        draw group threaded through prediction and scoring. Posterior fits
+        score against the observed full series; prior draws are not scored
+        (R² against observed data is not informative under a prior).
+
+        Bundle mapping: ``predictions_pre`` carries the fitted expectation
+        over the FULL window and ``impact_pre`` the full pointwise effect;
+        ``predictions_post`` / ``impact_post`` are the counterfactual /
+        effect slices over the post-intervention window (at or after the
+        first interruption), reindexed onto ``datapost``.
         """
-        # Create design matrix for counterfactual (zero out interruption columns)
-        X_cf = self.design["X"].copy()
+        X = self.design["X"]
+        y = self.design["y"]
+
+        # Fitted expectation over the full window
+        predictions = self._model_backend.predict(X=X, group=group)
+
+        # Counterfactual: predict with every step/ramp column zeroed
+        X_cf = X.copy()
         for idx in self._interruption_cols:
             X_cf[:, idx] = 0
+        y_counterfactual = self._model_backend.predict(X=X_cf, group=group)
 
-        self.y_counterfactual = self._model_backend.predict(X=X_cf)
-        self.effect = self.y_pred.isel(treated_units=0) - self.y_counterfactual.isel(
+        effect = predictions.isel(treated_units=0) - y_counterfactual.isel(
             treated_units=0
         )
-        self.cumulative_effect = self.effect.cumsum(dim="obs_ind")
 
-        # Create compatibility attributes for effect_summary() from BaseExperiment
-        # These represent the post-intervention portion (after the first interruption)
-        self._create_post_intervention_attributes()
+        score = None
+        if group == "posterior":
+            score = self._model_backend.score(X=X, y=y)
+
+        # Post-intervention window slices (deterministic window from config)
+        post_indices = np.where(
+            np.asarray(self.data[self.time_col] >= self.interruption_times[0])
+        )[0]
+        predictions_post = (
+            y_counterfactual.isel(obs_ind=post_indices)
+            .assign_coords(obs_ind=self.datapost.index)
+            .transpose(..., "obs_ind", "treated_units")
+        )
+        impact_post = effect.isel(obs_ind=post_indices).assign_coords(
+            obs_ind=self.datapost.index
+        )
+
+        bundle = CausalResult(
+            predictions_pre=predictions,
+            predictions_post=predictions_post,
+            impact_pre=effect,
+            impact_post=impact_post,
+            impact_post_cumulative=impact_post.cumsum(dim="obs_ind"),
+            score=score,
+        )
+        if group == "prior":
+            self._prior_result = bundle
+        else:
+            self._result = bundle
 
     def _create_post_intervention_attributes(self) -> None:
-        """
-        Create post_impact, datapost, and post_pred attributes for effect_summary().
+        """Derive the post-intervention window from configuration.
 
-        These attributes make PiecewiseITS compatible with the effect_summary()
-        method inherited from BaseExperiment, which expects ITS-like attributes.
-
-        The "post-intervention" portion is defined as all observations at or after
-        the first interruption time.
+        The "post-intervention" portion is defined as all observations at or
+        after the first interruption time. Deterministic: no draws involved.
         """
         if not self.interruption_times:
             # No interruptions - all data is "pre-intervention"
-            # Create empty post-intervention attributes
             self.datapost = self.data.iloc[0:0]  # Empty DataFrame
             return
 
-        # Get the first interruption time
         first_interruption = self.interruption_times[0]
-        time_col = self.time_col
 
         # Post-intervention = time >= first_interruption (inclusive)
-        post_mask = self.data[time_col] >= first_interruption
+        post_mask = self.data[self.time_col] >= first_interruption
 
         # Create datapost - the post-intervention data
         self.datapost = self.data[post_mask].copy()
         self.datapost.index.name = "obs_ind"
-
-        # Get indices for post-intervention period
-        post_indices = np.where(np.asarray(post_mask))[0]
-
-        self.post_impact = self.effect.isel(obs_ind=post_indices).assign_coords(
-            obs_ind=self.datapost.index
-        )
-        self.post_pred = self.y_counterfactual.isel(obs_ind=post_indices).assign_coords(
-            obs_ind=self.datapost.index
-        )
 
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
@@ -415,6 +439,7 @@ class PiecewiseITS(BaseExperiment):
     def plot(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
@@ -428,6 +453,14 @@ class PiecewiseITS(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to plot. ``"prior"`` renders the reduced
+            prior-check panel set — the prior-implied fitted and
+            counterfactual series against the observations only — and
+            requires :meth:`sample_prior_predictive`; ``"posterior"``
+            (default) renders the full three-panel layout and requires
+            :meth:`fit`. The two groups intentionally return different axes
+            layouts.
         round_to : int, optional
             Number of decimals used to round numerical results in the figure
             title. Defaults to 2. Use ``None`` to render raw numbers.
@@ -472,6 +505,7 @@ class PiecewiseITS(BaseExperiment):
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
+            group=group,
             round_to=round_to,
             ci_prob=ci_prob,
             kind=kind,
@@ -482,6 +516,8 @@ class PiecewiseITS(BaseExperiment):
 
     def _plot(
         self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
@@ -491,15 +527,20 @@ class PiecewiseITS(BaseExperiment):
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """
-        Plot the results.
+        Plot the posterior or prior-check figure.
 
-        Consumes the canonical prediction container from any backend.
-        Uncertainty bands are drawn only when the container carries posterior
-        draws; point-estimate backends (singleton ``chain``/``draw``) get bare
+        Consumes the resolved group bundle injected by
+        :meth:`~causalpy.experiments.base.BaseExperiment._render_plot`.
+        Uncertainty bands are drawn only when the container carries draws;
+        point-estimate backends (singleton ``chain``/``draw``) get bare
         lines.
 
         Parameters
         ----------
+        group : {"prior", "posterior"}
+            ``"prior"`` renders the reduced single-panel prior-check figure
+            via :meth:`_plot_prior_checks`; ``"posterior"`` renders the full
+            three-panel layout.
         round_to : int, optional
             Number of decimals for rounding. Defaults to 2.
         ci_prob : float, optional
@@ -517,7 +558,11 @@ class PiecewiseITS(BaseExperiment):
         ax : list[plt.Axes]
             List of axes objects.
         """
-        with_uncertainty = has_posterior_draws(self.y_pred)
+        bundle = self._resolve_group(group)
+        if group == "prior":
+            return self._plot_prior_checks(bundle=bundle)
+
+        with_uncertainty = has_posterior_draws(bundle.predictions_pre)
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
@@ -525,8 +570,12 @@ class PiecewiseITS(BaseExperiment):
             "num_samples": num_samples,
         }
         time_values = self.data[self.time_col].values
-        y_pred_mu = self.y_pred.isel(treated_units=0)
-        y_cf_mu = self.y_counterfactual.isel(treated_units=0)
+        y_pred_mu = bundle.predictions_pre.isel(treated_units=0)
+        # No-intervention counterfactual over the FULL window, recovered
+        # exactly as fitted expectation minus pointwise effect.
+        y_cf_mu = y_pred_mu - bundle.impact_pre
+        effect = bundle.impact_pre
+        cumulative_effect = bundle.impact_pre.cumsum(dim="obs_ind")
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
 
@@ -577,7 +626,7 @@ class PiecewiseITS(BaseExperiment):
             )
 
         ax[0].set(
-            title=f"Piecewise ITS: {format_r2_score(self.score, round_to=round_to)}",
+            title=f"Piecewise ITS: {format_r2_score(bundle.score, round_to=round_to)}",
             ylabel=self.outcome_variable_name,
         )
 
@@ -585,7 +634,7 @@ class PiecewiseITS(BaseExperiment):
         if with_uncertainty:
             plot_posterior_over_x(
                 time_values,
-                self.effect,
+                effect,
                 ax=ax[1],
                 **style,
                 plot_hdi_kwargs={"color": "C2"},
@@ -593,12 +642,12 @@ class PiecewiseITS(BaseExperiment):
             ax[1].axhline(y=0, c="k", linestyle="--", alpha=0.5)
             ax[1].fill_between(
                 time_values,
-                y1=self.effect.mean(dim=["chain", "draw"]).values,
+                y1=effect.mean(dim=["chain", "draw"]).values,
                 alpha=0.25,
                 color="C2",
             )
         else:
-            effect_mean = self.effect.mean(dim=["chain", "draw"])
+            effect_mean = effect.mean(dim=["chain", "draw"])
             ax[1].plot(time_values, effect_mean, "C2-", linewidth=2)
             ax[1].fill_between(time_values, y1=effect_mean, alpha=0.25, color="C2")
             ax[1].axhline(y=0, c="k", linestyle="--", alpha=0.5)
@@ -608,7 +657,7 @@ class PiecewiseITS(BaseExperiment):
         if with_uncertainty:
             plot_posterior_over_x(
                 time_values,
-                self.cumulative_effect,
+                cumulative_effect,
                 ax=ax[2],
                 **style,
                 plot_hdi_kwargs={"color": "C3"},
@@ -616,7 +665,7 @@ class PiecewiseITS(BaseExperiment):
         else:
             ax[2].plot(
                 time_values,
-                self.cumulative_effect.mean(dim=["chain", "draw"]),
+                cumulative_effect.mean(dim=["chain", "draw"]),
                 "C3-",
                 linewidth=2,
             )
@@ -649,7 +698,73 @@ class PiecewiseITS(BaseExperiment):
         plt.tight_layout()
         return fig, ax
 
-    def get_plot_data(self, *, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
+    def _plot_prior_checks(
+        self, *, bundle: CausalResult
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Render the reduced prior-check panel set.
+
+        Prior-implied bands are typically far wider than the data, so the
+        effect panels are dropped rather than autoscaled into uselessness.
+        The question a prior check answers is whether the prior-implied
+        fitted and counterfactual series are plausible against the observed
+        series — one panel suffices.
+        """
+        y_pred_mu = bundle.predictions_pre.isel(treated_units=0)
+        # No-intervention counterfactual over the FULL window, recovered
+        # exactly as fitted expectation minus pointwise effect.
+        y_cf_mu = y_pred_mu - bundle.impact_pre
+        time_values = self.data[self.time_col].values
+
+        fig, ax = plt.subplots(1, 1, figsize=(10, 4))
+        style: _PosteriorPlotStyle = {
+            "ci_prob": HDI_PROB,
+            "kind": "ribbon",
+            "ci_kind": "hdi",
+            "num_samples": 50,
+        }
+        (h_obs,) = ax.plot(
+            time_values,
+            self.design["y"].isel(treated_units=0),
+            "k.",
+            label="Observations",
+        )
+        h_line_fit, h_patch_fit = plot_posterior_over_x(
+            time_values,
+            y_pred_mu,
+            ax=ax,
+            **style,
+            plot_hdi_kwargs={"color": "C0"},
+        )
+        h_line_cf, h_patch_cf = plot_posterior_over_x(
+            time_values,
+            y_cf_mu,
+            ax=ax,
+            **style,
+            plot_hdi_kwargs={"color": "C1"},
+        )
+        for t_k in self.interruption_times:
+            ax.axvline(x=t_k, ls="-", lw=2, color="red", alpha=0.7)
+        ax.legend(
+            handles=[
+                h_obs,
+                (h_line_fit, h_patch_fit),
+                (h_line_cf, h_patch_cf),
+            ],
+            labels=["Observations", "Prior fitted", "Prior counterfactual"],
+            fontsize=LEGEND_FONT_SIZE,
+        )
+        ax.set(title="Prior predictive check", ylabel=self.outcome_variable_name)
+
+        plt.tight_layout()
+        return fig, [ax]
+        return fig, ax
+
+    def get_plot_data(
+        self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+        hdi_prob: float = HDI_PROB,
+    ) -> pd.DataFrame:
         """
         Recover the data of the experiment along with prediction and effect information.
 
@@ -658,6 +773,10 @@ class PiecewiseITS(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to summarize. ``"prior"`` requires
+            :meth:`sample_prior_predictive`; ``"posterior"`` requires
+            :meth:`fit`.
         hdi_prob : float
             Probability for the highest density interval. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94). Ignored
@@ -667,25 +786,22 @@ class PiecewiseITS(BaseExperiment):
         -------
         pd.DataFrame
             DataFrame containing observed data, predictions, and effects.
+            Not cached on the experiment.
         """
-        with_uncertainty = has_posterior_draws(self.y_pred)
+        bundle = self._resolve_group(group)
+        with_uncertainty = has_posterior_draws(bundle.predictions_pre)
         hdi_pct = int(round(hdi_prob * 100))
 
         # Get time values
         time_values = self.data[self.time_col].values
 
-        # Extract predictions
-        y_pred_mu = self.y_pred.isel(treated_units=0)
-        y_cf_mu = self.y_counterfactual.isel(treated_units=0)
+        # Extract predictions. The counterfactual over the FULL window is
+        # recovered exactly as fitted expectation minus pointwise effect.
+        y_pred_mu = bundle.predictions_pre.isel(treated_units=0)
+        y_cf_mu = y_pred_mu - bundle.impact_pre
 
-        # Select/drop treated_units so HDI helpers see exactly one preserved
-        # dimension (obs_ind) after chain/draw reduction.
-        effect = self.effect
-        if "treated_units" in effect.dims:
-            effect = effect.isel(treated_units=0)
-        cumulative_effect = self.cumulative_effect
-        if "treated_units" in cumulative_effect.dims:
-            cumulative_effect = cumulative_effect.isel(treated_units=0)
+        effect = bundle.impact_pre
+        cumulative_effect = bundle.impact_pre.cumsum(dim="obs_ind")
 
         # Build DataFrame column-by-column so HDI columns interleave with the
         # quantities they describe.
@@ -717,14 +833,12 @@ class PiecewiseITS(BaseExperiment):
             data[f"cumulative_effect_hdi_lower_{hdi_pct}"] = cum_lower
             data[f"cumulative_effect_hdi_upper_{hdi_pct}"] = cum_upper
 
-        result = pd.DataFrame(data)
-
-        self.plot_data = result
-        return result
+        return pd.DataFrame(data)
 
     def effect_summary(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         window: Literal["post"] | tuple | slice = "post",
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
         alpha: float = 0.05,
@@ -739,6 +853,13 @@ class PiecewiseITS(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to summarize. ``"prior"`` requires
+            :meth:`sample_prior_predictive` and produces prior-appropriate
+            prose — under a neutral prior, ``P(effect > 0)`` should sit near
+            0.5, so a tail probability far from 0.5 flags a design-matrix or
+            prior-specification problem rather than a causal finding.
+            ``"posterior"`` requires :meth:`fit`.
         window : str, tuple, or slice, default "post"
             Time window for analysis (see :meth:`BaseExperiment.effect_summary`).
         direction : {"increase", "decrease", "two-sided"}, default "increase"
@@ -770,11 +891,17 @@ class PiecewiseITS(BaseExperiment):
                 "Use window to restrict the post-period summary."
             )
 
+        # Resolve the group's bundle once; helpers consume containers.
+        bundle = self._resolve_group(group)
+
         windowed_impact, window_coords = _extract_window(
-            self, window, treated_unit=treated_unit
+            bundle.impact_post,
+            self.datapost.index,
+            window,
+            treated_unit=treated_unit,
         )
         counterfactual = _extract_counterfactual(
-            self, window_coords, treated_unit=treated_unit
+            bundle.predictions_post, window_coords, treated_unit=treated_unit
         )
         return _effect_summary_timeseries(
             windowed_impact,

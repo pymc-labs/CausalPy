@@ -90,16 +90,17 @@ class GenerateReport:
         return base64.b64encode(buf.read()).decode("utf-8")
 
     def _render_plot(self, experiment: Any) -> list[str]:
-        """Render experiment plots as base64-encoded PNG strings."""
-        plots: list[str] = []
-        try:
-            import matplotlib.pyplot as plt
+        """Render experiment plots as base64-encoded PNG strings.
 
-            fig, _ = experiment.plot()
-            plots.append(self._encode_figure(fig))
-            plt.close(fig)
-        except Exception as exc:
-            logger.debug("Could not render plot: %s", exc)
+        Experiments are lazy: ``plot()`` requires fitted state, so any
+        guard raised by the experiment propagates to the caller instead of
+        being silently swallowed here.
+        """
+        import matplotlib.pyplot as plt
+
+        fig, _ = experiment.plot()
+        plots = [self._encode_figure(fig)]
+        plt.close(fig)
         return plots
 
     def _render_check_figures(self, check_result: Any) -> list[str]:

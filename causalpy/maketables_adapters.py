@@ -28,6 +28,8 @@ import xarray as xr
 
 from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB
+from causalpy.custom_exceptions import GroupNotSampleedException
+from causalpy.experiments._results import StaggeredDifferenceInDifferencesResult
 from causalpy.experiments.model_adapter import ModelAdapter
 
 
@@ -94,8 +96,17 @@ def _safe_observation_count(experiment: Any) -> int | None:
 
 
 def _safe_r2_value(experiment: Any) -> float | None:
-    """Best-effort model score extraction without assuming one score format."""
-    score_obj = getattr(experiment, "score", None)
+    """Best-effort model score extraction without assuming one score format.
+
+    The score lives on the experiment's posterior result bundle; experiments
+    that have not been fitted (or that do not support result bundles) yield
+    no score.
+    """
+    try:
+        bundle = experiment.result
+    except (GroupNotSampleedException, NotImplementedError, AttributeError):
+        return None
+    score_obj = getattr(bundle, "score", None)
     if score_obj is None:
         return None
     try:
@@ -151,12 +162,20 @@ def _get_maketables_hdi_prob(experiment: Any) -> float:
 
     Priority:
     1) explicit user override via BaseExperiment.set_maketables_options()
-    2) experiment-specific stored value (e.g. staggered_did hdi_prob_)
+    2) ``hdi_prob`` on the experiment's result bundle, but only for
+       :class:`~causalpy.experiments._results.StaggeredDifferenceInDifferencesResult`
     3) project-wide default :data:`causalpy.constants.HDI_PROB`
     """
     hdi_prob = getattr(experiment, "_maketables_hdi_prob", None)
     if hdi_prob is None:
-        hdi_prob = getattr(experiment, "hdi_prob_", HDI_PROB)
+        try:
+            bundle = experiment.result
+        except (GroupNotSampleedException, NotImplementedError, AttributeError):
+            bundle = None
+        if isinstance(bundle, StaggeredDifferenceInDifferencesResult):
+            hdi_prob = bundle.hdi_prob
+        else:
+            hdi_prob = HDI_PROB
     if hdi_prob is None:
         hdi_prob = HDI_PROB
 

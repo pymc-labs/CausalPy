@@ -14,7 +14,7 @@
 """Inverse propensity weighting."""
 
 import warnings
-from typing import Any, NoReturn
+from typing import Any, Literal, NoReturn
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -55,6 +55,14 @@ class InversePropensityWeighting(BaseExperiment):
 
     Notes
     -----
+    **Lazy lifecycle**
+
+    Construction validates the inputs and builds the design matrices — no
+    sampling happens. Call :meth:`fit` to build the propensity graph and
+    draw prior and posterior samples. The IPW diagnostics
+    (:meth:`get_ate`, :meth:`plot_ate`, :meth:`plot_balance_ecdf`) are
+    posterior-only and require :meth:`fit` first.
+
     **Estimate extraction**
 
     Fitting produces posterior propensity-score draws. ``get_ate()`` post-processes one draw at a time: ``"raw"`` and ``"robust"`` contrast inverse-probability-weighted mean outcomes for the treated and control potential outcomes, ``"overlap"`` contrasts overlap-weighted means for the overlap population, and ``"doubly_robust"`` augments inverse-probability weighting with separate OLS outcome regressions before averaging over all observations.
@@ -77,12 +85,16 @@ class InversePropensityWeighting(BaseExperiment):
     ...             "progressbar": False,
     ...         },
     ...     ),
-    ... )
+    ... ).fit()
     """
 
     supports_ols = False
     supports_bayes = True
     _default_model_class = PropensityScore
+
+    #: No grouped result bundles: fitted state keys off the backend's
+    #: posterior draws; read methods inspect ``.idata`` directly.
+    _supports_results = False
 
     def __init__(
         self,
@@ -101,7 +113,6 @@ class InversePropensityWeighting(BaseExperiment):
         self.weighting_scheme = weighting_scheme
         self._build_design_matrices()
         self.input_validation()
-        self.algorithm()
 
     def _build_design_matrices(self) -> None:
         """Build design matrices for the propensity score model.
@@ -129,13 +140,16 @@ class InversePropensityWeighting(BaseExperiment):
         self.X_outcome["trt"] = self.t
         self.coords["outcome_coeffs"] = self.X_outcome.columns
 
-    def algorithm(self) -> None:
-        """Run the experiment algorithm by fitting the propensity score model.
+    def _fit_inputs(self) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+        """Return ``(X, y, coords)`` for the backend build step.
 
-        Delegates to ``self.model.fit`` with the covariate matrix ``self.X``,
-        treatment vector ``self.t``, and coordinate metadata ``self.coords``.
+        The propensity model's ``y`` is the observed treatment vector: the
+        propensity score is trained to predict treatment assignment. The
+        base-class lifecycle then drives :meth:`build`,
+        :meth:`sample_prior_predictive`, and :meth:`fit` through
+        :class:`~causalpy.pymc_models.PropensityScore`.
         """
-        self.model.fit(X=self.X, t=self.t, coords=self.coords)  # type: ignore[call-arg]
+        return self.X, self.t, self.coords
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness.
@@ -510,6 +524,9 @@ class InversePropensityWeighting(BaseExperiment):
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
         """
+        # IPW estimand is computed per-draw from propensity draws;
+        # posterior-only helpers.
+        self._resolve_group("posterior")
         ps = idata["posterior"]["p"].stack(z=("chain", "draw"))[:, i].values
 
         ate_methods = {
@@ -554,6 +571,9 @@ class InversePropensityWeighting(BaseExperiment):
         exists so every experiment subclass offers an explicit,
         kwarg-only ``plot()`` signature
         (issue `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_).
+
+        Both diagnostics are posterior-only: they render posterior
+        propensity draws and require :meth:`fit` first.
         """
         raise NotImplementedError(
             "InversePropensityWeighting does not implement a unified plot(). "
@@ -604,6 +624,9 @@ class InversePropensityWeighting(BaseExperiment):
         tuple[plt.Figure, list[plt.Axes]]
             The matplotlib Figure and a list of three Axes objects.
         """
+        # IPW estimand is computed per-draw from propensity draws;
+        # posterior-only helpers.
+        self._resolve_group("posterior")
         if idata is None:
             idata = self._model_backend.require_idata()
         if method is None:
@@ -815,6 +838,9 @@ class InversePropensityWeighting(BaseExperiment):
             The matplotlib Figure and a list of two Axes objects (raw ECDF on
             the left, weighted ECDF on the right).
         """
+        # IPW estimand is computed per-draw from propensity draws;
+        # posterior-only helpers.
+        self._resolve_group("posterior")
         if idata is None:
             idata = self._model_backend.require_idata()
         if weighting_scheme is None:
@@ -881,8 +907,18 @@ class InversePropensityWeighting(BaseExperiment):
         axs[0].legend()
         return fig, list(axs)
 
-    def effect_summary(self) -> NoReturn:
+    def effect_summary(
+        self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+    ) -> NoReturn:
         """Raise because unified effect summaries are unavailable.
+
+        Parameters
+        ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Accepted first among the keyword-only parameters for base-contract
+            parity; these experiments implement no effect summary.
 
         Raises
         ------

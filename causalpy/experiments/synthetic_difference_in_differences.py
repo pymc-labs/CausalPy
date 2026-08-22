@@ -31,6 +31,7 @@ from causalpy.date_utils import (
     format_date_axes,
     validate_treatment_time_against_index,
 )
+from causalpy.experiments._results import SyntheticDifferenceInDifferencesResult
 from causalpy.input_data import DataFrameLike, to_pandas_with_time_index
 from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
 from causalpy.pymc_models import PyMCModel, SyntheticDifferenceInDifferencesWeightFitter
@@ -73,6 +74,15 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
     Notes
     -----
+    **Lazy lifecycle**
+
+    Construction only validates inputs and prepares the design matrices.
+    Call :meth:`fit` to build the weight-model graph and sample the
+    posterior (populating :attr:`result`), optionally preceded by
+    :meth:`sample_prior_predictive` for prior predictive checks. Read
+    methods (:meth:`summary`, :meth:`plot`, :meth:`effect_summary`) raise
+    until the matching phase has been sampled.
+
     **Estimate extraction**
 
     The Bayesian weight model produces posterior draws of synthetic-control unit weights and pre-period time weights. For each draw, the class constructs treated-minus-synthetic gaps and evaluates the weighted double-difference analytically to obtain the scalar ``tau_posterior`` ATT; the effect is not read from a regression coefficient or obtained by population-standardized g-computation. The time-indexed ``post_impact`` consumed by ``effect_summary()`` is the post-period treated-minus-synthetic trajectory rather than this time-weighted scalar.
@@ -119,7 +129,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     ...             "progressbar": False,
     ...         }
     ...     ),
-    ... )
+    ... ).fit()
     """
 
     supports_ols = True
@@ -148,7 +158,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         self.treated_units = treated_units
         self.expt_type = "SyntheticDifferenceInDifferences"
         self._prepare_data()
-        self.algorithm()
 
     @property
     def datapre(self) -> pd.DataFrame:
@@ -228,25 +237,10 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             }
         )
 
-    def algorithm(self) -> None:
-        """Run the SDiD algorithm: fit weight modules, compute tau analytically.
-
-        The method is a thin orchestrator that delegates each step to a
-        private helper so that the individual pieces can be unit tested in
-        isolation:
-
-        1. :meth:`_build_weight_fitter_inputs` prepares the dict-based ``X``,
-           ``y`` and ``coords`` inputs for the weight fitter.
-        2. :meth:`PyMCModel.fit` fits both the omega and lambda modules via
-           MCMC.
-        3. :meth:`_extract_weight_posteriors` pulls the posterior weight
-           arrays out of the fitted model.
-        4. :meth:`_compute_synthetic_and_gaps` builds the synthetic control
-           trajectory and the gap between treated and synthetic.
-        5. :meth:`_compute_tau` evaluates the double-difference ATT.
-        6. :meth:`_build_reporting_objects` constructs the xarray objects
-           required by the reporting helpers.
-        """
+    def _fit_inputs(
+        self,
+    ) -> tuple[dict[str, xr.DataArray], dict[str, xr.DataArray], dict[str, Any]]:
+        """Return the dict-based inputs handed to the weight fitter at build time."""
         # Backend-identity check is justified here: capability validation
         # (trust boundary), not statistical dispatch.
         if self._model_backend.is_ols:
@@ -258,14 +252,34 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         Y_co = self.data[self.control_units].to_numpy().T  # (N_co, T)
         y_tr = self.data[self.treated_units].to_numpy().mean(axis=1)  # (T,)
         T_pre = self.datapre.shape[0]
+        return self._build_weight_fitter_inputs(Y_co, y_tr, T_pre)
 
-        X, y, coords = self._build_weight_fitter_inputs(Y_co, y_tr, T_pre)
-        self._model_backend.fit(X=X, y=y, coords=coords)
+    def _finalize(self, group: Literal["prior", "posterior"]) -> None:
+        """Compute the group's result bundle from its draws and assign it.
 
-        omega, omega0, lam, n_chains, n_draws = self._extract_weight_posteriors()
+        The body is the historical ``algorithm()`` minus the fitting step —
+        base :meth:`~causalpy.experiments.base.BaseExperiment.fit` builds the
+        graph and samples both phases. Weight draws are pulled from the
+        requested idata group, the synthetic-control trajectory and gaps are
+        recomputed analytically exactly as before, and everything is packed
+        into a
+        :class:`~causalpy.experiments._results.SyntheticDifferenceInDifferencesResult`.
+        """
+        omega, omega0, lam, n_chains, n_draws = self._extract_weight_posteriors(group)
+
+        Y_co = self.data[self.control_units].to_numpy().T  # (N_co, T)
+        y_tr = self.data[self.treated_units].to_numpy().mean(axis=1)  # (T,)
+        T_pre = self.datapre.shape[0]
+
         sc_all, gaps = self._compute_synthetic_and_gaps(omega, omega0, Y_co, y_tr)
-        self.tau_posterior = self._compute_tau(gaps, lam, T_pre, n_chains, n_draws)
-        self._build_reporting_objects(sc_all, T_pre, n_chains, n_draws)
+        tau_posterior = self._compute_tau(gaps, lam, T_pre, n_chains, n_draws)
+        bundle = self._build_reporting_objects(
+            sc_all, T_pre, n_chains, n_draws, tau_posterior=tau_posterior
+        )
+        if group == "prior":
+            self._prior_result = bundle
+        else:
+            self._result = bundle
 
     def _build_weight_fitter_inputs(
         self,
@@ -342,27 +356,32 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         return X, y, coords
 
     def _extract_weight_posteriors(
-        self,
+        self, group: Literal["prior", "posterior"]
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
-        """Pull posterior samples of the weight parameters from the model.
+        """Pull weight-parameter samples of the requested group from the model.
+
+        Parameters
+        ----------
+        group : {"prior", "posterior"}
+            Which idata group to read ``omega`` / ``omega0`` / ``lam`` from.
 
         Returns
         -------
         omega : np.ndarray
-            Unit-weight posterior with shape ``(chain, draw, N_co)``.
+            Unit-weight draws with shape ``(chain, draw, N_co)``.
         omega0 : np.ndarray
-            Unit intercept posterior with shape ``(chain, draw)``.
+            Unit intercept draws with shape ``(chain, draw)``.
         lam : np.ndarray
-            Time-weight posterior with shape ``(chain, draw, T_pre)``.
+            Time-weight draws with shape ``(chain, draw, T_pre)``.
         n_chains : int
             Number of MCMC chains.
         n_draws : int
             Number of draws per chain.
         """
-        posterior = self._model_backend.require_idata().posterior
-        omega = posterior["omega"].to_numpy()
-        lam = posterior["lam"].to_numpy()
-        omega0 = posterior["omega0"].to_numpy()
+        draws = self._model_backend.require_idata()[group]
+        omega = draws["omega"].to_numpy()
+        lam = draws["lam"].to_numpy()
+        omega0 = draws["omega0"].to_numpy()
         n_chains, n_draws = omega.shape[0], omega.shape[1]
         return omega, omega0, lam, n_chains, n_draws
 
@@ -452,19 +471,24 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         T_pre: int,
         n_chains: int,
         n_draws: int,
-    ) -> None:
-        """Build the xarray objects consumed by the reporting helpers.
+        *,
+        tau_posterior: xr.DataArray,
+    ) -> SyntheticDifferenceInDifferencesResult:
+        """Build the result bundle consumed by the reporting helpers.
 
-        Sets the following attributes on ``self``:
+        The returned
+        :class:`~causalpy.experiments._results.SyntheticDifferenceInDifferencesResult`
+        carries:
 
-        - ``pre_pred`` / ``post_pred``: ``xr.DataArray`` synthetic-control
-          predictions with canonical dims ``(chain, draw, obs_ind,
-          treated_units)``.
-        - ``pre_impact`` / ``post_impact``: ``xr.DataArray`` of observed
+        - ``predictions_pre`` / ``predictions_post``: ``xr.DataArray``
+          synthetic-control predictions with canonical dims ``(chain, draw,
+          obs_ind, treated_units)``.
+        - ``impact_pre`` / ``impact_post``: ``xr.DataArray`` of observed
           minus counterfactual with dims ``(chain, draw, obs_ind,
           treated_units)``.
-        - ``post_impact_cumulative``: cumulative sum of ``post_impact`` along
+        - ``impact_post_cumulative``: cumulative sum of ``impact_post`` along
           the time axis.
+        - ``tau_posterior``: analytic double-difference ATT draws.
 
         Parameters
         ----------
@@ -477,14 +501,21 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             Number of MCMC chains.
         n_draws : int
             Number of draws per chain.
+        tau_posterior : xr.DataArray
+            Analytic double-difference ATT draws with dims ``(chain, draw)``.
+
+        Returns
+        -------
+        SyntheticDifferenceInDifferencesResult
+            The packed result bundle.
         """
         sc_pre = sc_all[..., :T_pre]
         sc_post = sc_all[..., T_pre:]
 
-        self.pre_pred = self._build_prediction(
+        predictions_pre = self._build_prediction(
             sc_pre, self.datapre.index, n_chains, n_draws
         )
-        self.post_pred = self._build_prediction(
+        predictions_post = self._build_prediction(
             sc_post, self.datapost.index, n_chains, n_draws
         )
 
@@ -494,7 +525,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         pre_impact_vals = y_tr_pre[np.newaxis, np.newaxis, :] - sc_pre
         post_impact_vals = y_tr_post[np.newaxis, np.newaxis, :] - sc_post
 
-        self.pre_impact = xr.DataArray(
+        impact_pre = xr.DataArray(
             pre_impact_vals[..., np.newaxis],
             dims=["chain", "draw", "obs_ind", "treated_units"],
             coords={
@@ -504,7 +535,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 "treated_units": [self.treated_units[0]],
             },
         )
-        self.post_impact = xr.DataArray(
+        impact_post = xr.DataArray(
             post_impact_vals[..., np.newaxis],
             dims=["chain", "draw", "obs_ind", "treated_units"],
             coords={
@@ -514,7 +545,16 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 "treated_units": [self.treated_units[0]],
             },
         )
-        self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
+        impact_post_cumulative = impact_post.cumsum(dim="obs_ind")
+        return SyntheticDifferenceInDifferencesResult(
+            predictions_pre=predictions_pre,
+            predictions_post=predictions_post,
+            impact_pre=impact_pre,
+            impact_post=impact_post,
+            impact_post_cumulative=impact_post_cumulative,
+            score=None,
+            tau_posterior=tau_posterior,
+        )
 
     def _build_prediction(
         self,
@@ -570,9 +610,10 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         else:
             print(f"Treated unit: {self.treated_units[0]}")
 
-        tau_mean = float(self.tau_posterior.mean())
+        tau_posterior = self.result.tau_posterior
+        tau_mean = float(tau_posterior.mean())
         tau_lower, tau_upper = hdi_bounds(
-            self.tau_posterior.values, prob=HDI_PROB, flatten_chains_draws=True
+            tau_posterior.values, prob=HDI_PROB, flatten_chains_draws=True
         )
         print(
             f"Average treatment effect on the treated (ATT): "
@@ -585,6 +626,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     def plot(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         round_to: int | None = None,
         ci_prob: float = HDI_PROB,
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
@@ -597,6 +639,13 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to plot. ``"prior"`` renders the reduced
+            prior-check panel set — the prior-implied synthetic control
+            against the observed treated series only — and requires
+            :meth:`sample_prior_predictive`; ``"posterior"`` (default)
+            renders the full three-panel layout and requires :meth:`fit`.
+            The two groups intentionally return different axes layouts.
         round_to : int, optional
             Number of decimals used to round the ATT in the title. Defaults to
             2. Use ``None`` for raw values.
@@ -638,6 +687,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
+            group=group,
             round_to=round_to,
             ci_prob=ci_prob,
             kind=kind,
@@ -657,6 +707,8 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
     def _plot(
         self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
         round_to: int | None = None,
         ci_prob: float = HDI_PROB,
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
@@ -666,12 +718,19 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot the results: counterfactual, impact, and cumulative impact.
 
+        Consumes the resolved group bundle injected by
+        :meth:`~causalpy.experiments.base.BaseExperiment._render_plot`.
+
         Parameters
         ----------
+        group : {"prior", "posterior"}
+            ``"prior"`` renders the reduced single-panel prior-check figure
+            via :meth:`_plot_prior_checks`; ``"posterior"`` renders the full
+            three-panel layout.
         round_to : int, optional
             Number of decimals used to round results. Defaults to 2. Use
             ``None`` to return raw numbers.
-        hdi_prob : float, optional
+        ci_prob : float, optional
             Probability mass of the credible interval. Must be in ``(0, 1]``.
             Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         kind : {"ribbon", "histogram", "spaghetti"}, optional
@@ -688,6 +747,10 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         ax : list of matplotlib.axes.Axes
             The three axes (counterfactual, impact, cumulative impact).
         """
+        bundle = self._resolve_group(group)
+        if group == "prior":
+            return self._plot_prior_checks(bundle=bundle)
+
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
@@ -699,8 +762,8 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         # ---- TOP PLOT: Observed vs counterfactual ----
-        pre_pred = self.pre_pred.sel(treated_units=treated_unit)
-        post_pred = self.post_pred.sel(treated_units=treated_unit)
+        pre_pred = bundle.predictions_pre.sel(treated_units=treated_unit)
+        post_pred = bundle.predictions_post.sel(treated_units=treated_unit)
 
         # Pre-intervention synthetic control fit
         h_line, h_patch = plot_posterior_over_x(
@@ -752,21 +815,21 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         handles.append(h)
         labels.append("Causal impact")
 
-        tau_mean = float(self.tau_posterior.mean())
+        tau_mean = float(bundle.tau_posterior.mean())
         r_to = round_to if round_to is not None else 2
         ax[0].set(title=f"SDiD: ATT = {round(tau_mean, r_to)}")
 
         # ---- MIDDLE PLOT: Impact ----
         plot_posterior_over_x(
             self.datapre.index,
-            self.pre_impact.sel(treated_units=treated_unit),
+            bundle.impact_pre.sel(treated_units=treated_unit),
             ax=ax[1],
             **style,
             plot_hdi_kwargs={"color": "C0"},
         )
         plot_posterior_over_x(
             self.datapost.index,
-            self.post_impact.sel(treated_units=treated_unit),
+            bundle.impact_post.sel(treated_units=treated_unit),
             ax=ax[1],
             **style,
             plot_hdi_kwargs={"color": "C1"},
@@ -774,7 +837,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         ax[1].axhline(y=0, c="k")
         ax[1].fill_between(
             self.datapost.index,
-            y1=self.post_impact.mean(["chain", "draw"])
+            y1=bundle.impact_post.mean(["chain", "draw"])
             .sel(treated_units=treated_unit)
             .values,
             color="C0",
@@ -787,7 +850,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         ax[2].set(title="Cumulative Causal Impact")
         plot_posterior_over_x(
             self.datapost.index,
-            self.post_impact_cumulative.sel(treated_units=treated_unit),
+            bundle.impact_post_cumulative.sel(treated_units=treated_unit),
             ax=ax[2],
             **style,
             plot_hdi_kwargs={"color": "C1"},
@@ -821,9 +884,82 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
         return fig, ax
 
+    def _plot_prior_checks(
+        self, *, bundle: SyntheticDifferenceInDifferencesResult
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Render the reduced prior-check panel set.
+
+        The question a prior check answers is whether the prior-implied
+        synthetic control is plausible against the observed treated series —
+        one panel suffices; the impact and cumulative-impact panels are
+        dropped rather than autoscaled into uselessness.
+        """
+        treated_unit = self.treated_units[0]
+        pre_pred = bundle.predictions_pre.sel(treated_units=treated_unit)
+        post_pred = bundle.predictions_post.sel(treated_units=treated_unit)
+
+        fig, ax = plt.subplots(1, 1, figsize=(7, 4))
+        style: _PosteriorPlotStyle = {
+            "ci_prob": HDI_PROB,
+            "kind": "ribbon",
+            "ci_kind": "hdi",
+            "num_samples": 50,
+        }
+
+        # Pre-intervention synthetic control fit
+        h_line, h_patch = plot_posterior_over_x(
+            self.datapre.index,
+            pre_pred,
+            ax=ax,
+            **style,
+            plot_hdi_kwargs={"color": "C0"},
+        )
+
+        # Observed treated outcome
+        ax.plot(
+            self.datapre.index,
+            self.datapre[self.treated_units].values.mean(axis=1),
+            "k.",
+            label="Observations",
+        )
+
+        # Post-intervention prior-implied counterfactual
+        plot_posterior_over_x(
+            self.datapost.index,
+            post_pred,
+            ax=ax,
+            **style,
+            plot_hdi_kwargs={"color": "C1"},
+        )
+        ax.plot(
+            self.datapost.index,
+            self.datapost[self.treated_units].values.mean(axis=1),
+            "k.",
+            zorder=3,
+        )
+
+        treatment_time = self._convert_treatment_time_for_axis(ax, self.treatment_time)
+        ax.axvline(x=treatment_time, ls="-", lw=3, color="r")
+        ax.legend(
+            handles=[(h_line, h_patch)],
+            labels=["Prior counterfactual"],
+        )
+        ax.set(title="Prior predictive check")
+
+        # Apply intelligent date formatting if data has datetime index
+        if isinstance(self.datapre.index, pd.DatetimeIndex):
+            full_index = _combine_datetime_indices(
+                pd.DatetimeIndex(self.datapre.index),
+                pd.DatetimeIndex(self.datapost.index),
+            )
+            format_date_axes([ax], full_index)
+
+        return fig, [ax]
+
     def effect_summary(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         window: Literal["post"] | tuple | slice = "post",
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
         alpha: float = 0.05,
@@ -838,6 +974,13 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to summarize. ``"prior"`` requires
+            :meth:`sample_prior_predictive` and produces prior-appropriate
+            prose — under a neutral prior, ``P(effect > 0)`` should sit near
+            0.5, so a tail probability far from 0.5 flags a design-matrix or
+            prior-specification problem rather than a causal finding.
+            ``"posterior"`` requires :meth:`fit`.
         window : str, tuple, or slice, default="post"
             Time window for analysis.
         direction : {"increase", "decrease", "two-sided"}, default="increase"
@@ -880,14 +1023,20 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 stacklevel=2,
             )
 
+        # Resolve the group's bundle once; helpers consume containers.
+        bundle = self._resolve_group(group)
+
         # Extract windowed impact data
         windowed_impact, window_coords = _extract_window(
-            self, window, treated_unit=treated_unit
+            bundle.impact_post,
+            self.datapost.index,
+            window,
+            treated_unit=treated_unit,
         )
 
         # Extract counterfactual for relative effects
         counterfactual = _extract_counterfactual(
-            self, window_coords, treated_unit=treated_unit
+            bundle.predictions_post, window_coords, treated_unit=treated_unit
         )
 
         hdi_prob = 1 - alpha
@@ -911,6 +1060,10 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             counterfactual.sum(dim=time_dim).mean(dim=["chain", "draw"]).values
         )
         obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
+
+        if group == "prior":
+            # A prior summary is a plausibility check, not a causal claim.
+            prefix = "Prior predictive check (not a causal estimate)"
 
         text = _generate_prose_detailed(
             stats,

@@ -27,6 +27,7 @@ import xarray as xr
 from patsy import dmatrix
 from pymc_extras.prior import Prior
 
+from causalpy.custom_exceptions import GroupNotSampleedException
 from causalpy.utils import _bayesian_r2_score
 from causalpy.variable_selection_priors import VariableSelectionPrior
 
@@ -102,6 +103,11 @@ class PyMCModel(pm.Model):
     priors : dict, optional
         Dictionary of priors for the model. Defaults to ``None``, in which
         case default priors are used.
+    prior_sample_kwargs : dict, optional
+        Dictionary of kwargs that get unpacked and passed to the
+        :func:`pymc.sample_prior_predictive` function when the prior
+        predictive phase runs. Defaults to ``{"draws": 500}`` plus the
+        posterior ``random_seed`` if ``None``.
 
     Examples
     --------
@@ -160,6 +166,11 @@ class PyMCModel(pm.Model):
     """
 
     default_priors: dict[str, Prior] = {}
+
+    #: Whether this backend can sample a prior predictive phase. Backends
+    #: without one raise ``PriorPredictiveNotSupportedException`` from
+    #: :meth:`sample_prior_predictive`.
+    supports_prior_predictive: bool = True
 
     def priors_from_data(self, X, y) -> dict[str, Any]:
         """
@@ -239,6 +250,7 @@ class PyMCModel(pm.Model):
         self,
         sample_kwargs: dict[str, Any] | None = None,
         priors: dict[str, Any] | None = None,
+        prior_sample_kwargs: dict[str, Any] | None = None,
     ) -> None:
         """
         Parameters
@@ -250,13 +262,29 @@ class PyMCModel(pm.Model):
         priors : dict, optional
             Dictionary of priors for the model. Defaults to None, in which
             case default priors are used.
+        prior_sample_kwargs : dict, optional
+            Dictionary of kwargs that get unpacked and passed to the
+            :func:`pymc.sample_prior_predictive` function when the prior
+            predictive phase runs. Defaults to ``{"draws": 500}`` plus the
+            posterior ``random_seed`` if ``None``.
         """
         super().__init__()
         self.idata = None
         self.sample_kwargs = sample_kwargs if sample_kwargs is not None else {}
+        self.prior_sample_kwargs = (
+            prior_sample_kwargs
+            if prior_sample_kwargs is not None
+            else {
+                "draws": 500,
+                "random_seed": self.sample_kwargs.get("random_seed"),
+            }
+        )
         self._user_priors = priors
 
         self.priors = {**self.default_priors, **(priors or {})}
+        #: Whether the PyMC graph has been constructed. A graph is built at
+        #: most once per instance; re-sampling never rebuilds it.
+        self._built = False
 
     def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
         """Create a fresh, unfitted copy with the same configuration.
@@ -275,6 +303,7 @@ class PyMCModel(pm.Model):
         """
         return type(self)(
             sample_kwargs=dict(self.sample_kwargs),
+            prior_sample_kwargs=dict(self.prior_sample_kwargs),
             priors=self._user_priors if priors is None else priors,
         )
 
@@ -343,21 +372,205 @@ class PyMCModel(pm.Model):
                 coords={"obs_ind": obs_coords},
             )
 
-    def fit(
+    def build(
         self,
         X: xr.DataArray,
         y: xr.DataArray,
         coords: dict[str, Any] | None = None,
-    ) -> xr.DataTree:
-        """Draw samples from posterior, prior predictive, and posterior
-        predictive distributions.
+    ) -> None:
+        """Construct the PyMC graph without sampling anything.
+
+        Merges the effective prior set (defaults -> data-derived -> user) and
+        calls :meth:`build_model`. Idempotent by skipping when the graph
+        already exists: a graph is built at most once per instance, so this is
+        safe to call before every sampling verb.
 
         Parameters
         ----------
-        X : xarray.DataArray
-            Input features as a labeled array.
-        y : xarray.DataArray
-            Target values as a labeled array.
+        X : xarray.DataArray or dict of str to xarray.DataArray
+            Input features as a labeled array, or mapping inputs for models
+            that accept them.
+        y : xarray.DataArray or dict of str to xarray.DataArray
+            Target values as a labeled array, or mapping inputs for models
+            that accept them.
+        coords : dict, optional
+            Dictionary with coordinate names for named dimensions.
+        """
+        if self._built:
+            return
+        mapping_inputs = isinstance(X, dict) and isinstance(y, dict)
+        if mapping_inputs:
+            valid_mapping = all(
+                isinstance(value, xr.DataArray)
+                for data in (X, y)
+                for value in data.values()
+            )
+            if not (X and y and valid_mapping):
+                raise TypeError(
+                    "Mapping inputs must be non-empty dictionaries mapping "
+                    "strings to xarray.DataArray objects"
+                )
+        elif not isinstance(X, xr.DataArray) or not isinstance(y, xr.DataArray):
+            raise TypeError(
+                "X and y must both be xarray.DataArray objects (or both be "
+                "mappings); specialized mapping inputs must be built through "
+                "PyMCModelAdapter"
+            )
+
+        coords = {} if coords is None else coords.copy()
+        if mapping_inputs:
+            for data in X.values():
+                for dimension in data.dims:
+                    coords.setdefault(dimension, data.get_index(dimension))
+        else:
+            for data in (X, y):
+                for dimension in data.dims:
+                    coords.setdefault(dimension, data.get_index(dimension))
+        if not mapping_inputs:
+            self._n_treated_units = y.sizes.get("treated_units", 1)
+
+        # Merge the effective priors from scratch, exactly once per graph.
+        # Precedence is defaults -> data-derived -> user.
+        self.priors = {
+            **self.default_priors,
+            **self.priors_from_data(X, y),
+            **(self._user_priors or {}),
+        }
+        self.build_model(X, y, coords)
+        # Recorded so sample_posterior() can re-arm the graph's mutable data
+        # nodes after any forward-sampling call re-purposed them (predict()
+        # permanently points data nodes at whatever array it conditioned on).
+        # Subclasses whose graphs use different node names override build()
+        # and populate this mapping themselves.
+        self._build_data_nodes: dict[str, np.ndarray] = (
+            {} if mapping_inputs else {"X": np.asarray(X), "y": np.asarray(y)}
+        )
+        self._built = True
+
+    def _rearm_fit_data(self) -> None:
+        """Point the graph's data nodes back at their build-time arrays.
+
+        Forward sampling via :meth:`predict` mutates those nodes to the
+        conditioning array's shape; posterior sampling must always see the
+        design the graph was built with. Models without recorded data nodes
+        (mapping-input builds, fused-fit overrides) skip silently.
+        """
+        payload = {
+            name: value
+            for name, value in getattr(self, "_build_data_nodes", {}).items()
+            if name in self.named_vars
+        }
+        if not payload:
+            return
+        n_obs = next(iter(payload.values())).shape[0]
+        with self:
+            pm.set_data(
+                payload,
+                coords={"obs_ind": np.arange(n_obs)},
+            )
+
+    def require_built(self) -> None:
+        """Raise unless the PyMC graph has been constructed with :meth:`build`."""
+        if not self._built:
+            raise RuntimeError(
+                "Model graph has not been built. Call build(X, y, coords) — "
+                "or an experiment's build() / fit() / sample_prior_predictive(), "
+                "which auto-call it — before sampling."
+            )
+
+    def sample_prior_predictive(self, **kwargs: Any) -> xr.DataTree:
+        """Sample the prior predictive phase and merge it into ``idata``.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Keyword arguments override ``prior_sample_kwargs`` for this call only.
+
+        Notes
+        -----
+        Re-sampling overwrites the previous ``prior`` / ``prior_predictive``
+        groups without touching any other group.
+        """
+        self.require_built()
+        resolved = {**self.prior_sample_kwargs, **kwargs}
+        with self:
+            prior_idata = pm.sample_prior_predictive(**resolved)
+        if self.idata is None:
+            self.idata = prior_idata
+        else:
+            for group in ("prior", "prior_predictive"):
+                self.idata[group] = prior_idata[group]
+        return self.idata
+
+    def _ppc_var_names(self) -> list[str] | None:
+        """Variable subset drawn by posterior-predictive sampling.
+
+        ``None`` samples every observed random variable. Subclasses with
+        large graphs may restrict the draw set; see
+        :class:`~causalpy.pymc_models.BayesianBasisExpansionTimeSeries`.
+        """
+        return None
+
+    def _ppc_progressbar(self) -> bool:
+        """Progressbar setting for posterior-predictive sampling."""
+        return False
+
+    def sample_posterior(self, **kwargs: Any) -> xr.DataTree:
+        """Sample the posterior phase: NUTS plus posterior predictive draws.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Keyword arguments override ``sample_kwargs`` for this call only.
+
+        Notes
+        -----
+        Re-sampling overwrites the ``posterior`` / ``sample_stats`` /
+        ``posterior_predictive`` groups and leaves every other group — in
+        particular a previously sampled prior phase — untouched.
+        """
+        self.require_built()
+        self._rearm_fit_data()
+        resolved = {**self.sample_kwargs, **kwargs}
+        random_seed = resolved.get("random_seed")
+        with self:
+            post = pm.sample(**resolved)
+            if post is None:
+                raise RuntimeError("pm.sample() returned None")
+            if self.idata is None:
+                self.idata = post
+            else:
+                self.idata["posterior"] = post["posterior"]
+                if "sample_stats" in post.children:
+                    self.idata["sample_stats"] = post["sample_stats"]
+            pm.sample_posterior_predictive(
+                self.idata,
+                var_names=self._ppc_var_names(),
+                progressbar=self._ppc_progressbar(),
+                random_seed=random_seed,
+                extend_inferencedata=True,
+            )
+        return self.idata
+
+    def fit(
+        self,
+        X: xr.DataArray | dict[str, xr.DataArray],
+        y: xr.DataArray | dict[str, xr.DataArray],
+        coords: dict[str, Any] | None = None,
+    ) -> xr.DataTree:
+        """Build the graph (if needed), then sample prior and posterior phases.
+
+        The prior phase runs first so that a prior-sampling failure surfaces
+        before compute is spent on MCMC. This is the eager convenience entry
+        point for direct model users; experiments drive the phases separately
+        through their own lazy lifecycle.
+
+        Parameters
+        ----------
+        X : xarray.DataArray or dict of str to xarray.DataArray
+            Input features as a labeled array, or mapping inputs.
+        y : xarray.DataArray or dict of str to xarray.DataArray
+            Target values as a labeled array, or mapping inputs.
         coords : dict, optional
             Dictionary with coordinate names for named dimensions.
             Defaults to None.
@@ -367,19 +580,9 @@ class PyMCModel(pm.Model):
         xr.DataTree
             DataTree containing the samples.
         """
-
-        if not isinstance(X, xr.DataArray) or not isinstance(y, xr.DataArray):
-            raise TypeError(
-                "X and y must both be xarray.DataArray objects; specialized "
-                "mapping inputs must be fitted through PyMCModelAdapter"
-            )
-
-        coords = {} if coords is None else coords.copy()
-        for data in (X, y):
-            for dimension in data.dims:
-                coords.setdefault(dimension, data.get_index(dimension))
-        self._n_treated_units = y.sizes.get("treated_units", 1)
-        return self._fit_with_validated_data(X, y, coords)
+        self.build(X=X, y=y, coords=coords)
+        self.sample_prior_predictive()
+        return self.sample_posterior()
 
     def fit_mapping(
         self,
@@ -400,53 +603,39 @@ class PyMCModel(pm.Model):
         """
         raise TypeError(f"{type(self).__name__} does not support mapping-valued inputs")
 
-    def _fit_with_validated_data(
-        self,
-        X: Any,
-        y: Any,
-        coords: dict[str, Any],
-    ) -> xr.DataTree:
-        """Build and sample a model after its public fit boundary validates inputs."""
-        # Ensure random_seed is used in sample_prior_predictive() and
-        # sample_posterior_predictive() if provided in sample_kwargs.
-        random_seed = self.sample_kwargs.get("random_seed", None)
+    def require_group(self, group: str) -> xr.Dataset:
+        """Return the draws Dataset for *group* or raise an actionable error.
 
-        # Rebuild the effective priors from scratch on every fit, so that a
-        # previous fit's data-derived priors cannot leak into this one. The
-        # configured state is restored first, which is also what the model is
-        # left in if priors_from_data rejects the data. Precedence is
-        # defaults -> data-derived -> user.
-        self.priors = {**self.default_priors, **(self._user_priors or {})}
-        self.priors = {
-            **self.default_priors,
-            **self.priors_from_data(X, y),
-            **(self._user_priors or {}),
-        }
+        Parameters
+        ----------
+        group : {"prior", "posterior"}
+            Requested draw group.
 
-        self.build_model(X, y, coords)
-        with self:
-            self.idata = pm.sample(**self.sample_kwargs)
-            if self.idata is None:
-                raise RuntimeError("pm.sample() returned None")
-            self.idata = _extend_datatree_left(
-                self.idata, pm.sample_prior_predictive(random_seed=random_seed)
+        Returns
+        -------
+        xr.Dataset
+            The conditioning draws for *group*.
+        """
+        if group not in ("prior", "posterior"):
+            raise ValueError(f"group must be 'prior' or 'posterior', got {group!r}")
+        if self.idata is None or group not in self.idata.children:
+            call = "fit()" if group == "posterior" else "sample_prior_predictive()"
+            raise GroupNotSampleedException(
+                f"No {group!r} draws are available on this model. Call {call} first.",
+                group=group,
             )
-            pm.sample_posterior_predictive(
-                self.idata,
-                progressbar=False,
-                random_seed=random_seed,
-                extend_inferencedata=True,
-            )
-        return self.idata
+        return self.idata[group]
 
     def predict(
         self,
         X: xr.DataArray,
         coords: dict[str, Any] | None = None,
         out_of_sample: bool | None = False,
-    ):
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+    ) -> xr.DataTree:
         """
-        Predict data given input data `X`.
+        Predict data given input data `X`, conditioned on the given draw group.
 
         .. caution::
             Results in KeyError if model hasn't been fit.
@@ -461,17 +650,32 @@ class PyMCModel(pm.Model):
         out_of_sample : bool, optional
             Marker for out-of-sample prediction. Reserved for subclasses;
             the base implementation does not act on it.
-        """
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group to condition forward sampling on. ``"prior"``
+            reproduces the posterior-predictive machinery using prior draws,
+            which is how the experiment-level prior phase computes
+            counterfactuals without any posterior.
 
-        # Ensure random_seed is used in sample_prior_predictive() and
-        # sample_posterior_predictive() if provided in sample_kwargs.
+        Returns
+        -------
+        xr.DataTree
+            Forward samples in the ``posterior_predictive`` group (PyMC's
+            canonical output location regardless of conditioning group) on
+            dims ``("chain", "draw", "obs_ind", "treated_units")``.
+        """
+        conditioning_draws = self.require_group(group)
         random_seed = self.sample_kwargs.get("random_seed", None)
+        # NOTE: _data_setter permanently re-arms the graph's mutable data to
+        # *X*. Downstream posterior sampling must go through
+        # :meth:`sample_posterior`, which re-arms the build-time arrays first;
+        # this mirrors the historical eager flow, where predictions only ever
+        # followed all sampling.
         # Base _data_setter doesn't use coords, but subclasses might override _data_setter to use it.
         # If a subclass needs coords in _data_setter, it should handle it.
         self._data_setter(X)
         with self:
             pp = pm.sample_posterior_predictive(
-                self.idata,
+                conditioning_draws,
                 var_names=["y_hat", "mu"],
                 progressbar=False,
                 random_seed=random_seed,
@@ -1095,13 +1299,13 @@ class SyntheticDifferenceInDifferencesWeightFitter(PyMCModel):
             raise TypeError("X and y must either both be mappings or both be arrays")
         return super().fit(X, y, coords)
 
-    def fit_mapping(
+    def build_mapping(
         self,
         X: dict[str, xr.DataArray],
         y: dict[str, xr.DataArray],
         coords: dict[str, Any] | None = None,
-    ) -> xr.DataTree:
-        """Fit the unit- and time-weight modules from labeled mapping inputs.
+    ) -> None:
+        """Construct the unit- and time-weight graph without sampling.
 
         Parameters
         ----------
@@ -1127,11 +1331,28 @@ class SyntheticDifferenceInDifferencesWeightFitter(PyMCModel):
             )
 
         self._n_treated_units = 1
-        return self._fit_with_validated_data(
-            X,
-            y,
-            {} if coords is None else coords.copy(),
-        )
+        self.build(X=X, y=y, coords=coords)
+
+    def fit_mapping(
+        self,
+        X: dict[str, xr.DataArray],
+        y: dict[str, xr.DataArray],
+        coords: dict[str, Any] | None = None,
+    ) -> xr.DataTree:
+        """Fit the unit- and time-weight modules from labeled mapping inputs.
+
+        Parameters
+        ----------
+        X : dict of str to xarray.DataArray
+            Unit- and time-weight design matrices.
+        y : dict of str to xarray.DataArray
+            Unit- and time-weight target arrays.
+        coords : dict, optional
+            Coordinate metadata shared by the two modules.
+        """
+        self.build_mapping(X=X, y=y, coords=coords)
+        self.sample_prior_predictive()
+        return self.sample_posterior()
 
     def priors_from_data(self, X, y) -> dict[str, Any]:
         """
@@ -1269,6 +1490,11 @@ class InstrumentalVariableRegression(PyMCModel):
     ...     None,
     ... )
     """
+
+    #: The IV graph's multivariate likelihood has no prior predictive path
+    #: wired up yet; routing one through ``ppc_sampler="pymc"`` is tracked as
+    #: a follow-up (issue #1092).
+    supports_prior_predictive = False
 
     def __init__(
         self,
@@ -1506,6 +1732,89 @@ class InstrumentalVariableRegression(PyMCModel):
                     extend_inferencedata=True,
                 )
 
+    def build(  # type: ignore[override]
+        self,
+        X: np.ndarray,
+        Z: np.ndarray,
+        y: np.ndarray,
+        t: np.ndarray,
+        coords: dict[str, Any],
+        priors: dict[str, Any],
+        ppc_sampler: Literal["jax", "pymc"] | None = None,
+        vs_prior_type: Literal["spike_and_slab", "horseshoe", "normal"] | None = None,
+        vs_hyperparams: dict[str, Any] | None = None,
+        binary_treatment: bool = False,
+    ) -> None:
+        """Construct the IV graph without sampling.
+
+        Same signature as the historical fused ``fit``; sampling now happens
+        in :meth:`sample_posterior`. Idempotent by skipping when the graph
+        already exists.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Array used to predict the outcome ``y``.
+        Z : np.ndarray
+            Array used to predict the treatment variable ``t``.
+        y : np.ndarray
+            Focal outcome.
+        t : np.ndarray
+            Treatment whose causal impact is being estimated.
+        coords : dict
+            Coordinate names for the instruments and covariates.
+        priors : dict
+            Prior specification dictionary forwarded to :meth:`build_model`.
+        ppc_sampler : {"jax", "pymc"}, optional
+            Backend for posterior predictive sampling, applied at
+            :meth:`sample_posterior` time. ``"jax"`` requires JAX and ``None``
+            skips posterior-predictive sampling entirely.
+        vs_prior_type : {"spike_and_slab", "horseshoe", "normal"}, optional
+            Variable-selection prior type, forwarded to :meth:`build_model`.
+        vs_hyperparams : dict, optional
+            Hyperparameters for the variable-selection prior.
+        binary_treatment : bool, default False
+            Whether the treatment ``t`` is binary.
+        """
+        if self._built:
+            return
+        self.build_model(
+            X, Z, y, t, coords, priors, vs_prior_type, vs_hyperparams, binary_treatment
+        )
+        self._iv_ppc_sampler = ppc_sampler
+        self._built = True
+
+    def sample_posterior(self, **kwargs: Any) -> xr.DataTree:
+        """Sample the IV posterior phase.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Keyword arguments override ``sample_kwargs``.
+
+        Notes
+        -----
+        Posterior predictive sampling follows via
+        :meth:`sample_predictive_distribution` using the ``ppc_sampler``
+        recorded at :meth:`build` time (default ``None``, which skips it).
+        """
+        self.require_built()
+        resolved = {**self.sample_kwargs, **kwargs}
+        with self:
+            post = pm.sample(**resolved)
+            if post is None:
+                raise RuntimeError("pm.sample() returned None")
+            if self.idata is None:
+                self.idata = post
+            else:
+                self.idata["posterior"] = post["posterior"]
+                if "sample_stats" in post.children:
+                    self.idata["sample_stats"] = post["sample_stats"]
+        self.sample_predictive_distribution(
+            ppc_sampler=getattr(self, "_iv_ppc_sampler", None)
+        )
+        return self.idata
+
     def fit(  # type: ignore[override]
         self,
         X: np.ndarray,
@@ -1519,13 +1828,10 @@ class InstrumentalVariableRegression(PyMCModel):
         vs_hyperparams: dict[str, Any] | None = None,
         binary_treatment: bool = False,
     ) -> xr.DataTree:
-        """Draw samples from posterior distribution and potentially
-        from the prior and posterior predictive distributions. The
-        fit call can take values for the
-        ppc_sampler = ['jax', 'pymc', None]
-        We default to None, so the user can determine if they wish
-        to spend time sampling the posterior predictive distribution
-        independently.
+        """Build the graph if needed, then draw posterior samples.
+
+        The IV model does not expose a prior predictive phase; see
+        :attr:`supports_prior_predictive`.
 
         Parameters
         ----------
@@ -1550,18 +1856,19 @@ class InstrumentalVariableRegression(PyMCModel):
         binary_treatment : bool, default False
             Whether the treatment ``t`` is binary.
         """
-
-        # Ensure random_seed is used in sample_prior_predictive() and
-        # sample_posterior_predictive() if provided in sample_kwargs.
-        # Use JAX for ppc sampling of multivariate likelihood
-
-        self.build_model(
-            X, Z, y, t, coords, priors, vs_prior_type, vs_hyperparams, binary_treatment
+        self.build(
+            X=X,
+            Z=Z,
+            y=y,
+            t=t,
+            coords=coords,
+            priors=priors,
+            ppc_sampler=ppc_sampler,
+            vs_prior_type=vs_prior_type,
+            vs_hyperparams=vs_hyperparams,
+            binary_treatment=binary_treatment,
         )
-        with self:
-            self.idata = pm.sample(**self.sample_kwargs)
-        self.sample_predictive_distribution(ppc_sampler=ppc_sampler)
-        return self.idata
+        return self.sample_posterior()
 
 
 class PropensityScore(PyMCModel):
@@ -1635,7 +1942,50 @@ class PropensityScore(PyMCModel):
             p = pm.Deterministic("p", pm.math.invlogit(mu))
             pm.Bernoulli("t_pred", p=p, observed=t_data, dims="obs_ind")
 
-    def fit(  # type: ignore
+    def build(  # type: ignore[override]
+        self,
+        X: np.ndarray,
+        y: np.ndarray,
+        coords: dict[str, Any] | None = None,
+        prior: dict[str, Any] | None = None,
+        noncentred: bool = True,
+    ) -> None:
+        """Construct the propensity graph without sampling.
+
+        Parameters
+        ----------
+        X : np.ndarray
+            Covariate matrix used to predict the treatment.
+        y : np.ndarray
+            Observed treatment indicator (0/1); named ``t`` elsewhere.
+        coords : dict, optional
+            Coordinate names for named dimensions of the model.
+        prior : dict, optional
+            Historical compatibility parameter; currently unused by
+            :meth:`build_model`, which reads :attr:`priors`.
+        noncentred : bool, default True
+            Reserved for future non-centred parameterisations of the
+            coefficient prior. Currently informational only.
+        """
+        if self._built:
+            return
+        self._n_treated_units = 1
+        self.build_model(
+            X,
+            np.asarray(y),
+            {} if coords is None else coords,
+            prior,
+            noncentred,
+        )
+        # The propensity graph names its treatment node "t", not "y", and
+        # stores it flattened to 1-D.
+        self._build_data_nodes = {
+            "X": np.asarray(X),
+            "t": np.asarray(y).ravel(),
+        }
+        self._built = True
+
+    def fit(  # type: ignore[override]
         self,
         X: np.ndarray,
         t: np.ndarray,
@@ -1643,9 +1993,7 @@ class PropensityScore(PyMCModel):
         prior: dict[str, list] | None = None,
         noncentred: bool = True,
     ) -> xr.DataTree:
-        """Draw samples from posterior, prior predictive, and posterior predictive
-        distributions. We overwrite the base method because the base method assumes
-        a variable y and we use t to indicate the treatment variable here.
+        """Build the graph if needed, then sample prior and posterior phases.
 
         Parameters
         ----------
@@ -1656,30 +2004,13 @@ class PropensityScore(PyMCModel):
         coords : dict
             Coordinate names for named dimensions of the model.
         prior : dict, optional
-            Prior specification overrides. Defaults to ``{"b": [0, 1]}``.
+            Historical compatibility parameter; see :meth:`build`.
         noncentred : bool, default True
-            Forwarded to :meth:`build_model`.
+            Forwarded to :meth:`build`.
         """
-        if prior is None:
-            prior = {"b": [0, 1]}
-        # Ensure random_seed is used in sample_prior_predictive() and
-        # sample_posterior_predictive() if provided in sample_kwargs.
-        random_seed = self.sample_kwargs.get("random_seed", None)
-
-        self.build_model(X, t, coords, prior, noncentred)
-        with self:
-            self.idata = pm.sample(**self.sample_kwargs)
-            if self.idata is not None:
-                self.idata = _extend_datatree_left(
-                    self.idata, pm.sample_prior_predictive(random_seed=random_seed)
-                )
-                pm.sample_posterior_predictive(
-                    self.idata,
-                    progressbar=False,
-                    random_seed=random_seed,
-                    extend_inferencedata=True,
-                )
-        return self.idata
+        self.build(X=X, y=t, coords=coords, prior=prior, noncentred=noncentred)
+        self.sample_prior_predictive()
+        return self.sample_posterior()
 
     def fit_outcome_model(
         self,
@@ -1872,6 +2203,11 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
     priors : dict, optional
         Dictionary of priors for the model. Defaults to ``None``, in which
         case default priors are used.
+    prior_sample_kwargs : dict, optional
+        A dictionary of kwargs that get unpacked and passed to the
+        :func:`pymc.sample_prior_predictive` function when the prior phase
+        runs. Defaults to ``{"draws": 500}`` plus the posterior
+        ``random_seed`` if ``None``.
     """  # noqa: W605
 
     def __init__(
@@ -1883,8 +2219,13 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         seasonality_component: Any | None = None,
         sample_kwargs: dict[str, Any] | None = None,
         priors: dict[str, Any] | None = None,
+        prior_sample_kwargs: dict[str, Any] | None = None,
     ):
-        super().__init__(sample_kwargs=sample_kwargs, priors=priors)
+        super().__init__(
+            sample_kwargs=sample_kwargs,
+            priors=priors,
+            prior_sample_kwargs=prior_sample_kwargs,
+        )
 
         # Warn that this is experimental
         warnings.warn(
@@ -1923,6 +2264,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             trend_component=self._custom_trend_component,
             seasonality_component=self._custom_seasonality_component,
             sample_kwargs=dict(self.sample_kwargs),
+            prior_sample_kwargs=dict(self.prior_sample_kwargs),
             priors=self._user_priors if priors is None else priors,
         )
 
@@ -2182,38 +2524,13 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
                 dims=["obs_ind", "treated_units"],
             )
 
-    def fit(
-        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None = None
-    ) -> xr.DataTree:
-        """Draw samples from posterior, prior predictive, and posterior predictive
-        distributions, placing them in the model's idata attribute.
+    def _ppc_var_names(self) -> list[str] | None:
+        """Restrict posterior-predictive draws to the response-scale nodes."""
+        return ["y_hat", "mu"]
 
-        Parameters
-        ----------
-        X : xr.DataArray
-            Input features with dims ["obs_ind", "coeffs"]. Can have 0 columns if
-            no exogenous variables.
-        y : xr.DataArray
-            Target variable with dims ["obs_ind", "treated_units"].
-        coords : dict
-            Coordinates dictionary. Must contain "datetime_index" (pd.DatetimeIndex).
-        """
-        random_seed = self.sample_kwargs.get("random_seed", None)
-        self.build_model(X, y, coords=coords)
-        with self:
-            self.idata = pm.sample(**self.sample_kwargs)
-            if self.idata is not None:
-                self.idata = _extend_datatree_left(
-                    self.idata, pm.sample_prior_predictive(random_seed=random_seed)
-                )
-                pm.sample_posterior_predictive(
-                    self.idata,
-                    var_names=["y_hat", "mu"],
-                    progressbar=self.sample_kwargs.get("progressbar", True),
-                    random_seed=random_seed,
-                    extend_inferencedata=True,
-                )
-        return self.idata  # type: ignore[return-value]
+    def _ppc_progressbar(self) -> bool:
+        """Honor the configured ``progressbar`` sample kwarg."""
+        return self.sample_kwargs.get("progressbar", False)
 
     def _data_setter(self, X: xr.DataArray) -> None:
         """
@@ -2278,71 +2595,6 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         with self:
             pm.set_data(data_to_set, coords=coords_to_set)
 
-    def predict(
-        self,
-        X: xr.DataArray,
-        coords: dict[str, Any] | None = None,
-        out_of_sample: bool | None = False,
-    ) -> xr.DataTree:
-        """
-        Predict data given input X.
-
-        Parameters
-        ----------
-        X : xr.DataArray
-            Input features with dims ["obs_ind", "coeffs"]. Must have datetime
-            coordinates on obs_ind.
-        coords : dict, optional
-            Not used, kept for API compatibility.
-        out_of_sample : bool, optional
-            Not used, kept for API compatibility.
-
-        Returns
-        -------
-        xr.DataTree
-            Posterior predictive samples.
-        """
-        random_seed = self.sample_kwargs.get("random_seed", None)
-        self._data_setter(X)
-        with self:
-            post_pred = pm.sample_posterior_predictive(
-                self.idata,
-                var_names=["y_hat", "mu"],
-                progressbar=self.sample_kwargs.get("progressbar", False),
-                random_seed=random_seed,
-            )
-
-        # Assign coordinates from input X for proper alignment
-        if isinstance(X, xr.DataArray) and "obs_ind" in X.coords:
-            _assign_group_coords(post_pred, "posterior_predictive", obs_ind=X.obs_ind)
-
-        return post_pred
-
-    def score(
-        self,
-        X: xr.DataArray,
-        y: xr.DataArray,
-        coords: dict[str, Any] | None = None,
-    ) -> pd.Series:
-        """Score the Bayesian R^2.
-
-        Parameters
-        ----------
-        X : xr.DataArray
-            Input features with dims ["obs_ind", "coeffs"].
-        y : xr.DataArray
-            Target variable with dims ["obs_ind", "treated_units"].
-        coords : dict, optional
-            Not used, kept for API compatibility.
-
-        Returns
-        -------
-        pd.Series
-            R² score and standard deviation for each treated unit.
-        """
-        # Use base class score method now that we have treated_units dimension
-        return super().score(X, y, coords=coords)
-
 
 class StateSpaceTimeSeries(PyMCModel):
     """
@@ -2379,6 +2631,10 @@ class StateSpaceTimeSeries(PyMCModel):
         `default_priors`. The `P0` covariance is parameterized through its
         diagonal under the key `"P0_diag"`. Dims are resolved from the built
         state-space model, so priors do not need to declare them.
+    prior_sample_kwargs : dict, optional
+        Kwargs passed to `pm.sample_prior_predictive` when the prior phase
+        runs. Defaults to ``{"draws": 500}`` plus the posterior
+        ``random_seed`` if ``None``.
     """
 
     default_priors = {
@@ -2399,8 +2655,13 @@ class StateSpaceTimeSeries(PyMCModel):
         sample_kwargs: dict[str, Any] | None = None,
         mode: str | None = None,
         priors: dict[str, Prior] | None = None,
+        prior_sample_kwargs: dict[str, Any] | None = None,
     ):
-        super().__init__(sample_kwargs=sample_kwargs, priors=priors)
+        super().__init__(
+            sample_kwargs=sample_kwargs,
+            priors=priors,
+            prior_sample_kwargs=prior_sample_kwargs,
+        )
 
         # Warn that this is experimental
         warnings.warn(
@@ -2432,6 +2693,7 @@ class StateSpaceTimeSeries(PyMCModel):
             trend_component=self._custom_trend_component,
             seasonality_component=self._custom_seasonality_component,
             sample_kwargs=dict(self.sample_kwargs),
+            prior_sample_kwargs=dict(self.prior_sample_kwargs),
             mode=self.mode,
             priors=self._user_priors if priors is None else priors,
         )
@@ -2675,14 +2937,97 @@ class StateSpaceTimeSeries(PyMCModel):
                 pm.Data("data_exog", X.sel(coeffs=self._exog_names).values)
             self.ss_mod.build_statespace_graph(df[["y"]])
 
+    #: The Kalman smoothing/forecast path has no prior equivalent yet; a
+    #: prior phase for this backend is tracked as a follow-up (issue #1092).
+    supports_prior_predictive = False
+
+    def build(  # type: ignore[override]
+        self,
+        X: xr.DataArray | None = None,
+        y: xr.DataArray | None = None,
+        coords: dict[str, Any] | None = None,
+    ) -> None:
+        """Construct the state-space graph without sampling.
+
+        Merges the effective prior set (defaults -> data-derived -> user) and
+        calls :meth:`build_model`. Idempotent by skipping when the graph
+        already exists.
+
+        Parameters
+        ----------
+        X : xr.DataArray, optional
+            Input features with dims ["obs_ind", "coeffs"]. Columns other than
+            the patsy "Intercept" become exogenous regressors.
+        y : xr.DataArray
+            Target variable with dims ["obs_ind", "treated_units"]. Must have
+            datetime coordinates on obs_ind.
+        coords : dict, optional
+            Coordinates dictionary. Can contain "datetime_index" for backwards
+            compatibility.
+        """
+        if self._built:
+            return
+        if y is None:
+            raise ValueError("y must be provided for StateSpaceTimeSeries.build()")
+        coords = {} if coords is None else coords.copy()
+        for data in (X, y):
+            if isinstance(data, xr.DataArray):
+                for dimension in data.dims:
+                    coords.setdefault(dimension, data.get_index(dimension))
+
+        # Merge the effective priors from scratch, exactly once per graph.
+        # Precedence is defaults -> data-derived -> user.
+        self.priors = {
+            **self.default_priors,
+            **self.priors_from_data(X, y),
+            **(self._user_priors or {}),
+        }
+        self.build_model(X, y, coords)
+        self._built = True
+
+    def sample_posterior(self, **kwargs: Any) -> xr.DataTree:
+        """Sample the posterior phase and attach Kalman-smoothed predictions.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Keyword arguments override ``sample_kwargs``.
+
+        Notes
+        -----
+        After NUTS and posterior predictive sampling, the conditional
+        (smoothed) posterior replaces the ``posterior_predictive`` group with
+        ``y_hat`` / ``mu`` on CausalPy's canonical dimensions.
+        """
+        self.require_built()
+        resolved = {**self.sample_kwargs, **kwargs}
+        with self:
+            post = pm.sample(**resolved)
+            if post is None:
+                raise RuntimeError("pm.sample() returned None")
+            if self.idata is None:
+                self.idata = post
+            else:
+                self.idata["posterior"] = post["posterior"]
+                if "sample_stats" in post.children:
+                    self.idata["sample_stats"] = post["sample_stats"]
+            pm.sample_posterior_predictive(
+                self.idata,
+                extend_inferencedata=True,
+            )
+        self.conditional_idata = self._smooth()
+        return self._prepare_idata()
+
     def fit(
         self,
         X: xr.DataArray | None = None,
         y: xr.DataArray | None = None,
         coords: dict[str, Any] | None = None,
     ) -> xr.DataTree:
-        """
-        Fit the model, drawing posterior samples.
+        """Build the graph if needed, then draw smoothed posterior samples.
+
+        The state-space backend does not expose a prior predictive phase; see
+        :attr:`supports_prior_predictive`.
 
         Parameters
         ----------
@@ -2700,20 +3045,8 @@ class StateSpaceTimeSeries(PyMCModel):
         xr.DataTree
             DataTree with parameter draws.
         """
-        if y is None:
-            raise ValueError("y must be provided for StateSpaceTimeSeries.fit()")
-        # Merge in data-driven priors, matching the base class fit()
-        self.priors = {**self.priors_from_data(X, y), **self.priors}
-        self.build_model(X, y, coords)
-        with self:
-            self.idata = pm.sample(**self.sample_kwargs)
-            if self.idata is not None:
-                pm.sample_posterior_predictive(
-                    self.idata,
-                    extend_inferencedata=True,
-                )
-        self.conditional_idata = self._smooth()
-        return self._prepare_idata()
+        self.build(X=X, y=y, coords=coords)
+        return self.sample_posterior()
 
     def _prepare_idata(self) -> xr.DataTree:
         """Prepare DataTree with proper dimensions including treated_units."""
@@ -2786,6 +3119,8 @@ class StateSpaceTimeSeries(PyMCModel):
         X: xr.DataArray | None = None,
         coords: dict[str, Any] | None = None,
         out_of_sample: bool | None = False,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
     ) -> xr.DataTree:
         """
         Predict data given input X.
@@ -2802,12 +3137,22 @@ class StateSpaceTimeSeries(PyMCModel):
             Not used directly, datetime extracted from X coordinates.
         out_of_sample : bool, optional
             If True, forecast future values. If False, return in-sample predictions.
+        group : {"prior", "posterior"}, default "posterior"
+            Only the posterior is supported; requesting ``"prior"`` raises
+            the group-not-sampled error (the Kalman path has no prior
+            equivalent).
 
         Returns
         -------
         xr.DataTree
             Posterior predictive samples with y_hat and mu.
         """
+        if group != "posterior":
+            raise GroupNotSampleedException(
+                "No 'prior' draws are available on this backend; the "
+                "Kalman-filter path only supports posterior predictions.",
+                group="prior",
+            )
         if not out_of_sample:
             return self._prepare_idata()
         else:

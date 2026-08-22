@@ -64,7 +64,7 @@ def extract_r2_score(
 
 
 def format_r2_score(
-    score: pd.Series,
+    score: pd.Series | None,
     *,
     unit_index: int = 0,
     round_to: int | None = 2,
@@ -74,8 +74,9 @@ def format_r2_score(
 
     Parameters
     ----------
-    score : pd.Series
-        Canonical score container.
+    score : pd.Series or None
+        Canonical score container. ``None`` (unscored bundles, e.g. the prior
+        group) renders an empty title.
     unit_index : int, default 0
         Index of the treated unit whose score to format.
     round_to : int, optional
@@ -83,6 +84,8 @@ def format_r2_score(
     context : str, default ""
         Text appended to the :math:`R^2` label, such as ``"on fit data"``.
     """
+    if score is None:
+        return ""
     r2, r2_std = extract_r2_score(score, unit_index)
     label = "Bayesian $R^2$" if r2_std is not None else "$R^2$"
     title = f"{label}{f' {context}' if context else ''} = {round_num(r2, round_to)}"

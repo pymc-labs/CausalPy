@@ -439,7 +439,7 @@ class PlaceboInTime:
                 f"explicit treatment time."
             )
         # Any InferenceData-capable backend (PyMCModel or PyMCForecastModel)
-        # yields the draw-level post_impact this check consumes.
+        # yields the draw-level posterior impact this check consumes.
         backend = getattr(experiment, "_model_backend", None)
         if backend is None or not backend.supports_idata:
             raise TypeError(
@@ -518,7 +518,7 @@ class PlaceboInTime:
                 kw["model"] = self._clone_model_for_fold(
                     model_template, fold_random_seed
                 )
-            return method(data, **kw)
+            return method(data, **kw).fit()
 
         return _factory
 
@@ -835,7 +835,7 @@ class PlaceboInTime:
         obtained by summing over ``obs_ind`` and stacking
         ``(chain, draw)``.
         """
-        post_impact = experiment.post_impact  # type: ignore[attr-defined]
+        post_impact = experiment.result.impact_post
 
         if "treated_units" in post_impact.dims:
             post_impact = post_impact.isel(treated_units=0)
