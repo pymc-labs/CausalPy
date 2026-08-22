@@ -124,22 +124,24 @@ class TestPyMCModel:
             PyMCModel().fit(X=X, y=y, coords={"a": 1})
 
     @pytest.mark.parametrize(
-        ("X", "y"),
+        ("X", "y", "match"),
         [
             (
                 {"unit": xr.DataArray([1.0], dims=["obs_ind"])},
                 xr.DataArray([1.0], dims=["obs_ind"]),
+                "both be xarray.DataArray",
             ),
             (
                 {"unit": np.array([1.0])},
                 {"unit": xr.DataArray([1.0], dims=["obs_ind"])},
+                "mapping strings to xarray.DataArray",
             ),
         ],
         ids=["mixed-direct-and-mapping", "mapping-with-non-dataarray-value"],
     )
-    def test_fit_rejects_mixed_or_malformed_input_shapes(self, X, y) -> None:
+    def test_fit_rejects_mixed_or_malformed_input_shapes(self, X, y, match) -> None:
         """Fit rejects non-DataArray pairs before model construction."""
-        with pytest.raises(TypeError, match="both be xarray.DataArray"):
+        with pytest.raises(TypeError, match=match):
             MyToyModel().fit(X=X, y=y)
 
     def test_base_mapping_fit_rejects_unsupported_model(self) -> None:
@@ -409,7 +411,7 @@ def test_idata_property(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit(**sample_kwargs)
     assert hasattr(result, "idata")
     assert isinstance(result.idata, xr.DataTree)
 
@@ -511,14 +513,14 @@ def test_result_reproducibility(seed, mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit(**sample_kwargs)
     result2 = cp.DifferenceInDifferences(
         did_data,
         formula="y ~ 1 + group + t + group:post_treatment",
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit(**sample_kwargs)
     assert np.all(result1.idata.posterior.mu == result2.idata.posterior.mu)
     assert np.all(result1.idata.prior.mu == result2.idata.prior.mu)
     assert np.all(

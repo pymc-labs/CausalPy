@@ -60,27 +60,27 @@ def test_staggered_did_pymc(mock_pymc_sample):
         treated_variable_name="treated",
         treatment_time_variable_name="treatment_time",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Check result type
     assert isinstance(result, cp.StaggeredDifferenceInDifferences)
 
     # Check augmented data
-    assert "G" in result.data_.columns
-    assert "event_time" in result.data_.columns
-    assert "y_hat0" in result.data_.columns
-    assert "tau_hat" in result.data_.columns
+    assert "G" in result.data.columns
+    assert "event_time" in result.data.columns
+    # Per-observation counterfactual draws live on the result bundle
+    assert hasattr(result.result, "y_pred")
 
     # Check ATT tables exist
-    assert hasattr(result, "att_group_time_")
-    assert hasattr(result, "att_event_time_")
-    assert len(result.att_event_time_) > 0
+    assert hasattr(result.result, "att_group_time")
+    assert hasattr(result.result, "att_event_time")
+    assert len(result.result.att_event_time) > 0
 
     # Check ATT table columns for Bayesian
-    assert "event_time" in result.att_event_time_.columns
-    assert "att" in result.att_event_time_.columns
-    assert "att_lower" in result.att_event_time_.columns
-    assert "att_upper" in result.att_event_time_.columns
+    assert "event_time" in result.result.att_event_time.columns
+    assert "att" in result.result.att_event_time.columns
+    assert "att_lower" in result.result.att_event_time.columns
+    assert "att_upper" in result.result.att_event_time.columns
 
     # Check plot
     fig, ax = result.plot()
@@ -108,19 +108,19 @@ def test_staggered_did_sklearn():
         treated_variable_name="treated",
         treatment_time_variable_name="treatment_time",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Check result type
     assert isinstance(result, cp.StaggeredDifferenceInDifferences)
 
     # Check augmented data
-    assert "G" in result.data_.columns
-    assert "tau_hat" in result.data_.columns
+    assert "G" in result.data.columns
+    assert hasattr(result.result, "y_pred")
 
     # Check ATT tables
-    assert len(result.att_event_time_) > 0
-    assert "event_time" in result.att_event_time_.columns
-    assert "att" in result.att_event_time_.columns
+    assert len(result.result.att_event_time) > 0
+    assert "event_time" in result.result.att_event_time.columns
+    assert "att" in result.result.att_event_time.columns
 
     # Check plot
     fig, ax = result.plot()
@@ -155,19 +155,23 @@ def test_staggered_did_recovers_known_effect_sklearn():
         treated_variable_name="treated",
         treatment_time_variable_name="treatment_time",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Check that recovered post-treatment effects are close to true effect
     # (with some tolerance for noise)
-    # Note: att_event_time_ now includes pre-treatment placebo effects, so filter to post
-    post_treatment = result.att_event_time_[result.att_event_time_["event_time"] >= 0]
+    # Note: att_event_time now includes pre-treatment placebo effects, so filter to post
+    post_treatment = result.result.att_event_time[
+        result.result.att_event_time["event_time"] >= 0
+    ]
     avg_att = post_treatment["att"].mean()
     assert abs(avg_att - constant_effect) < 0.5, (
         f"Recovered ATT {avg_att:.2f} is too far from true effect {constant_effect}"
     )
 
     # Verify pre-treatment placebo effects are close to zero
-    pre_treatment = result.att_event_time_[result.att_event_time_["event_time"] < 0]
+    pre_treatment = result.result.att_event_time[
+        result.result.att_event_time["event_time"] < 0
+    ]
     if len(pre_treatment) > 0:
         avg_pre_att = pre_treatment["att"].mean()
         assert abs(avg_pre_att) < 0.5, (
@@ -295,14 +299,14 @@ def test_staggered_did_accepts_transformed_outcome():
         time_variable_name="time",
         treated_variable_name="treated",
         model=LinearRegression(),
-    )
+    ).fit()
 
     np.testing.assert_allclose(
         result._observed_outcome.to_numpy(), np.log(df["positive_y"])
     )
     assert result.outcome_variable_name == "np.log(positive_y)"
-    assert result.data_["tau_hat"].notna().any()
-    assert not result._get_group_time_placebo_data().empty
+    assert result.result.att_event_time["att"].notna().any()
+    assert not result._get_group_time_placebo_data(bundle=result.result).empty
 
 
 def test_staggered_did_bayesian_plot_data_accepts_transformed_outcome(
@@ -321,9 +325,9 @@ def test_staggered_did_bayesian_plot_data_accepts_transformed_outcome(
         time_variable_name="time",
         treated_variable_name="treated",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
-    assert not result._get_group_time_placebo_data().empty
+    assert not result._get_group_time_placebo_data(bundle=result.result).empty
     assert not result.get_plot_data(hdi_prob=0.8).empty
 
 
@@ -351,9 +355,9 @@ def test_no_treated_in_training_set():
     )
 
     # Check that training set only contains untreated observations
-    # The untreated observations are marked in data_["_is_untreated"]
-    training_mask = result.data_["_is_untreated"]
-    treated_in_training = result.data_.loc[training_mask, "treated"].sum()
+    # The untreated observations are marked in data["_is_untreated"]
+    training_mask = result.data["_is_untreated"]
+    treated_in_training = result.data.loc[training_mask, "treated"].sum()
 
     assert treated_in_training == 0, (
         f"Found {treated_in_training} treated observations in training set"
@@ -383,13 +387,13 @@ def test_never_treated_and_not_yet_treated_as_controls():
     )
 
     # Check never-treated units are in training set (all periods)
-    never_treated = result.data_[result.data_["G"] == np.inf]
+    never_treated = result.data[result.data["G"] == np.inf]
     assert all(never_treated["_is_untreated"]), (
         "Never-treated units should all be in training set"
     )
 
     # Check not-yet-treated observations are in training set
-    eventually_treated = result.data_[result.data_["G"] != np.inf]
+    eventually_treated = result.data[result.data["G"] != np.inf]
     pre_treatment = eventually_treated[
         eventually_treated["time"] < eventually_treated["G"]
     ]
@@ -419,9 +423,9 @@ def test_treatment_time_inference():
     )
 
     # Check treatment times
-    assert result.data_.loc[result.data_["unit"] == 0, "G"].iloc[0] == 2
-    assert result.data_.loc[result.data_["unit"] == 1, "G"].iloc[0] == 1
-    assert result.data_.loc[result.data_["unit"] == 2, "G"].iloc[0] == np.inf
+    assert result.data.loc[result.data["unit"] == 0, "G"].iloc[0] == 2
+    assert result.data.loc[result.data["unit"] == 1, "G"].iloc[0] == 1
+    assert result.data.loc[result.data["unit"] == 2, "G"].iloc[0] == np.inf
 
 
 def test_event_time_computation():
@@ -446,13 +450,13 @@ def test_event_time_computation():
     )
 
     # Check event times for unit 0 (treated at time 2)
-    unit0_data = result.data_[result.data_["unit"] == 0]
+    unit0_data = result.data[result.data["unit"] == 0]
     expected_event_times = [-2, -1, 0, 1]  # time - G = time - 2
     actual_event_times = unit0_data["event_time"].tolist()
     assert actual_event_times == expected_event_times
 
     # Check event times for never-treated unit 1 (should be NaN)
-    unit1_data = result.data_[result.data_["unit"] == 1]
+    unit1_data = result.data[result.data["unit"] == 1]
     assert all(pd.isna(unit1_data["event_time"]))
 
 
@@ -473,10 +477,10 @@ def test_event_window_filtering():
         treated_variable_name="treated",
         event_window=(-2, 3),  # Only event times -2 to 3
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Check that event times are within window
-    event_times = result.att_event_time_["event_time"].values
+    event_times = result.result.att_event_time["event_time"].values
     assert all(event_times >= -2), "Event times should be >= -2"
     assert all(event_times <= 3), "Event times should be <= 3"
 
@@ -511,11 +515,11 @@ def test_staggered_did_unbalanced_panel():
         treated_variable_name="treated",
         treatment_time_variable_name="treatment_time",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Basic sanity checks
-    assert result.att_event_time_ is not None
-    assert len(result.att_event_time_) > 0
+    assert result.result.att_event_time is not None
+    assert len(result.result.att_event_time) > 0
 
     # Verify summary runs without error (this exercises the fixed counting logic)
     result.summary()
@@ -539,7 +543,7 @@ def test_staggered_did_summary():
         time_variable_name="time",
         treated_variable_name="treated",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Should not raise
     result.summary()
@@ -558,7 +562,7 @@ def test_staggered_did_get_plot_data():
         time_variable_name="time",
         treated_variable_name="treated",
         model=LinearRegression(),
-    )
+    ).fit()
 
     plot_data = result.get_plot_data()
 
@@ -581,7 +585,7 @@ def test_staggered_did_effect_summary(mock_pymc_sample):
         time_variable_name="time",
         treated_variable_name="treated",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     summary = result.effect_summary()
 
@@ -594,7 +598,7 @@ def test_staggered_did_effect_summary(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_staggered_did_hdi_prob_stored_and_reported(mock_pymc_sample):
-    """Test that Bayesian results store hdi_prob_ and report it correctly in prose.
+    """Test that Bayesian results store hdi_prob and report it correctly in prose.
 
     This verifies the fix for the mismatch between computed interval bounds
     (94% by default) and reported percentage in effect_summary prose.
@@ -610,11 +614,13 @@ def test_staggered_did_hdi_prob_stored_and_reported(mock_pymc_sample):
         time_variable_name="time",
         treated_variable_name="treated",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
-    # Verify hdi_prob_ is stored on the result
-    assert hasattr(result, "hdi_prob_"), "Bayesian result should have hdi_prob_ attr"
-    assert result.hdi_prob_ == 0.94, "Default hdi_prob_ should be 0.94"
+    # Verify hdi_prob is stored on the result bundle
+    assert hasattr(result.result, "hdi_prob"), (
+        "Bayesian result should have hdi_prob attr"
+    )
+    assert result.result.hdi_prob == 0.94, "Default hdi_prob should be 0.94"
 
     # Verify effect summary prose reports the correct percentage
     summary = result.effect_summary()
@@ -696,9 +702,9 @@ def test_staggered_did_explicit_treatment_time_column():
     )
 
     # Check treatment times are correctly read from column
-    assert result.data_.loc[result.data_["unit"] == 0, "G"].iloc[0] == 2
-    assert result.data_.loc[result.data_["unit"] == 1, "G"].iloc[0] == 1
-    assert result.data_.loc[result.data_["unit"] == 2, "G"].iloc[0] == np.inf
+    assert result.data.loc[result.data["unit"] == 0, "G"].iloc[0] == 2
+    assert result.data.loc[result.data["unit"] == 1, "G"].iloc[0] == 1
+    assert result.data.loc[result.data["unit"] == 2, "G"].iloc[0] == np.inf
 
 
 def test_staggered_did_missing_treatment_time_column():
@@ -739,16 +745,16 @@ def test_staggered_did_group_time_att_structure():
         time_variable_name="time",
         treated_variable_name="treated",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Check group-time ATT table structure
-    assert isinstance(result.att_group_time_, pd.DataFrame)
-    assert "cohort" in result.att_group_time_.columns
-    assert "time" in result.att_group_time_.columns
-    assert "att" in result.att_group_time_.columns
+    assert isinstance(result.result.att_group_time, pd.DataFrame)
+    assert "cohort" in result.result.att_group_time.columns
+    assert "time" in result.result.att_group_time.columns
+    assert "att" in result.result.att_group_time.columns
 
     # Check we have multiple cohorts
-    assert len(result.att_group_time_["cohort"].unique()) >= 2
+    assert len(result.result.att_group_time["cohort"].unique()) >= 2
 
 
 def _no_never_treated_staggered_did_df() -> pd.DataFrame:
@@ -788,21 +794,23 @@ def test_staggered_did_warns_non_identified_without_never_treated(
             treated_variable_name="treated",
             treatment_time_variable_name="treatment_time",
             model=model_factory(),
-        )
+        ).fit()
 
     assert result.non_identified_periods_
     assert 7 in result.non_identified_periods_
     assert 7 in result.non_identified_cohorts_
 
-    assert "identified" in result.att_group_time_.columns
-    non_identified_gt = result.att_group_time_[~result.att_group_time_["identified"]]
+    assert "identified" in result.result.att_group_time.columns
+    non_identified_gt = result.result.att_group_time[
+        ~result.result.att_group_time["identified"]
+    ]
     assert len(non_identified_gt) > 0
     assert non_identified_gt["att"].isna().all()
 
-    assert "identified" in result.att_event_time_.columns
-    non_identified_et = result.att_event_time_[
-        (result.att_event_time_["event_time"] >= 0)
-        & ~result.att_event_time_["identified"]
+    assert "identified" in result.result.att_event_time.columns
+    non_identified_et = result.result.att_event_time[
+        (result.result.att_event_time["event_time"] >= 0)
+        & ~result.result.att_event_time["identified"]
     ]
     assert len(non_identified_et) > 0
     assert non_identified_et["att"].isna().all()
@@ -825,7 +833,7 @@ def test_staggered_did_get_plot_data_bayesian_masks_non_identified_on_recompute(
             treated_variable_name="treated",
             treatment_time_variable_name="treatment_time",
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-        )
+        ).fit()
 
     plot_data = result.get_plot_data(hdi_prob=0.80)
 
@@ -854,9 +862,11 @@ def test_staggered_did_effect_summary_excludes_non_identified_cells():
             treated_variable_name="treated",
             treatment_time_variable_name="treatment_time",
             model=LinearRegression(),
-        )
+        ).fit()
 
-    post_treatment = result.att_event_time_[result.att_event_time_["event_time"] >= 0]
+    post_treatment = result.result.att_event_time[
+        result.result.att_event_time["event_time"] >= 0
+    ]
     assert (~post_treatment["identified"]).any()
 
     summary = result.effect_summary()
@@ -923,11 +933,13 @@ def test_staggered_did_all_identified_with_never_treated(
             treated_variable_name="treated",
             treatment_time_variable_name="treatment_time",
             model=model_factory(),
-        )
+        ).fit()
 
     assert result.non_identified_periods_ == set()
-    assert result.att_group_time_["identified"].all()
-    post_treatment = result.att_event_time_[result.att_event_time_["event_time"] >= 0]
+    assert result.result.att_group_time["identified"].all()
+    post_treatment = result.result.att_event_time[
+        result.result.att_event_time["event_time"] >= 0
+    ]
     assert post_treatment["identified"].all()
 
 
@@ -978,9 +990,9 @@ def test_staggered_did_custom_never_treated_value():
     )
 
     # Check never-treated unit is correctly identified
-    assert result.data_.loc[result.data_["unit"] == 1, "G"].iloc[0] == -1
+    assert result.data.loc[result.data["unit"] == 1, "G"].iloc[0] == -1
     # Never-treated should have NaN event_time
-    assert all(pd.isna(result.data_.loc[result.data_["unit"] == 1, "event_time"]))
+    assert all(pd.isna(result.data.loc[result.data["unit"] == 1, "event_time"]))
 
 
 def test_staggered_did_does_not_modify_original_data():
@@ -1082,11 +1094,11 @@ def test_staggered_did_ols_att_std_column():
         time_variable_name="time",
         treated_variable_name="treated",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Check OLS-specific columns
-    assert "att_std" in result.att_event_time_.columns
-    assert "n_obs" in result.att_event_time_.columns
+    assert "att_std" in result.result.att_event_time.columns
+    assert "n_obs" in result.result.att_event_time.columns
 
 
 def test_staggered_did_dynamic_effects_recovery():
@@ -1110,10 +1122,10 @@ def test_staggered_did_dynamic_effects_recovery():
         time_variable_name="time",
         treated_variable_name="treated",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Check that effects are increasing (qualitatively correct pattern)
-    att_et = result.att_event_time_
+    att_et = result.result.att_event_time
     post_treatment = att_et[att_et["event_time"] >= 0].sort_values("event_time")
 
     if len(post_treatment) >= 3:
@@ -1141,7 +1153,7 @@ def test_staggered_did_plot_elements_ols():
         time_variable_name="time",
         treated_variable_name="treated",
         model=LinearRegression(),
-    )
+    ).fit()
 
     fig, axes = result.plot()
 
@@ -1178,7 +1190,7 @@ def test_staggered_did_plot_group_time_elements_ols():
         time_variable_name="time",
         treated_variable_name="treated",
         model=LinearRegression(),
-    )
+    ).fit()
 
     fig, axes = result.plot_group_time(show=False)
 
@@ -1214,7 +1226,7 @@ def test_staggered_did_plot_group_time_overlay_calendar_ols():
         time_variable_name="time",
         treated_variable_name="treated",
         model=LinearRegression(),
-    )
+    ).fit()
 
     fig, axes = result.plot_group_time(
         layout="overlay", x_axis="calendar_time", show=False
@@ -1256,7 +1268,7 @@ def test_staggered_did_plot_elements_bayesian(mock_pymc_sample):
         time_variable_name="time",
         treated_variable_name="treated",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     fig, axes = result.plot()
 
@@ -1288,7 +1300,7 @@ def test_staggered_did_plot_group_time_elements_bayesian(mock_pymc_sample):
         time_variable_name="time",
         treated_variable_name="treated",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     fig, axes = result.plot_group_time(show=False)
 
@@ -1324,7 +1336,7 @@ def test_staggered_did_summary_can_include_group_time(capsys):
         time_variable_name="time",
         treated_variable_name="treated",
         model=LinearRegression(),
-    )
+    ).fit()
 
     result.summary(include_group_time=True)
     captured = capsys.readouterr().out
@@ -1373,12 +1385,12 @@ def test_staggered_did_n_obs_column():
         time_variable_name="time",
         treatment_time_variable_name="treatment_time",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Check n_obs for each event time
     # event_time 0: 2 units (0 and 1) at time 2
     # event_time 1: 2 units (0 and 1) at time 3
-    att_et = result.att_event_time_
+    att_et = result.result.att_event_time
     e0_obs = att_et.loc[att_et["event_time"] == 0, "n_obs"].values[0]
     e1_obs = att_et.loc[att_et["event_time"] == 1, "n_obs"].values[0]
 
@@ -1403,9 +1415,9 @@ def test_staggered_did_bayesian_uncertainty_reasonable(mock_pymc_sample):
         time_variable_name="time",
         treated_variable_name="treated",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
-    att_et = result.att_event_time_
+    att_et = result.result.att_event_time
 
     # Check that all rows have uncertainty bounds
     assert all(att_et["att_lower"].notna())
@@ -1533,7 +1545,7 @@ def test_staggered_did_training_data_shape():
     assert result.X_train.shape[1] == result.X_full.shape[1]
 
     # Number of training observations should match _is_untreated
-    expected_train = result.data_["_is_untreated"].sum()
+    expected_train = result.data["_is_untreated"].sum()
     assert result.X_train.shape[0] == expected_train
 
 
@@ -1554,7 +1566,7 @@ def test_staggered_did_get_plot_data_pymc(mock_pymc_sample):
         time_variable_name="time",
         treated_variable_name="treated",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     plot_data = result.get_plot_data()
 
@@ -1586,7 +1598,7 @@ def test_staggered_did_get_plot_data_bayesian_hdi_prob_respected(mock_pymc_sampl
         time_variable_name="time",
         treated_variable_name="treated",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Get intervals with default 94% HDI
     plot_data_94 = result.get_plot_data(hdi_prob=0.94)
@@ -1639,7 +1651,7 @@ def test_staggered_did_get_plot_data_ols():
         time_variable_name="time",
         treated_variable_name="treated",
         model=LinearRegression(),
-    )
+    ).fit()
 
     plot_data = result.get_plot_data()
 
@@ -1686,8 +1698,8 @@ def test_staggered_did_only_never_treated_as_controls():
     )
 
     # Training set should only contain never-treated observations
-    training_mask = result.data_["_is_untreated"]
-    training_units = result.data_.loc[training_mask, "unit"].unique()
+    training_mask = result.data["_is_untreated"]
+    training_units = result.data.loc[training_mask, "unit"].unique()
 
     # Only units 2 and 3 should be in training set
     assert set(training_units) == {2, 3}
@@ -1723,7 +1735,7 @@ def test_staggered_did_skip_absorbing_validation_when_using_treatment_time():
         model=LinearRegression(),
     )
 
-    assert result.data_.loc[result.data_["unit"] == 0, "G"].iloc[0] == 2
+    assert result.data.loc[result.data["unit"] == 0, "G"].iloc[0] == 2
 
 
 def test_staggered_did_unrecognized_model_type_fit():
@@ -1814,10 +1826,10 @@ def test_staggered_did_late_treatment():
         time_variable_name="time",
         treated_variable_name="treated",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Should have few post-treatment event times
-    att_et = result.att_event_time_
+    att_et = result.result.att_event_time
     assert len(att_et[att_et["event_time"] >= 0]) <= 2  # Only event times 0 and 1
 
 
@@ -1837,10 +1849,10 @@ def test_staggered_did_early_treatment():
         time_variable_name="time",
         treated_variable_name="treated",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Should have many post-treatment event times
-    att_et = result.att_event_time_
+    att_et = result.result.att_event_time
     assert len(att_et[att_et["event_time"] >= 0]) >= 10
 
 
@@ -1861,9 +1873,9 @@ def test_staggered_did_event_window_restricts_negative():
         treated_variable_name="treated",
         event_window=(-3, 5),  # Restrict pre-treatment to -3
         model=LinearRegression(),
-    )
+    ).fit()
 
-    att_et = result.att_event_time_
+    att_et = result.result.att_event_time
     # No event times should be less than -3
     assert all(att_et["event_time"] >= -3)
     # No event times should be greater than 5
@@ -1887,10 +1899,10 @@ def test_staggered_did_group_time_att_bayesian(mock_pymc_sample):
         time_variable_name="time",
         treated_variable_name="treated",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Check Bayesian group-time ATT structure
-    att_gt = result.att_group_time_
+    att_gt = result.result.att_group_time
     assert isinstance(att_gt, pd.DataFrame)
     assert "cohort" in att_gt.columns
     assert "time" in att_gt.columns
@@ -1916,14 +1928,14 @@ def test_staggered_did_plot_only_post_treatment():
         treated_variable_name="treated",
         event_window=(0, 10),  # Only post-treatment event times
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Plot should work even without pre-treatment period
     fig, axes = result.plot()
     assert len(axes) == 1
 
     # Check that all event times are >= 0
-    att_et = result.att_event_time_
+    att_et = result.result.att_event_time
     assert all(att_et["event_time"] >= 0)
 
     plt.close(fig)
@@ -1947,7 +1959,7 @@ def test_staggered_did_plot_only_post_treatment_bayesian(mock_pymc_sample):
         treated_variable_name="treated",
         event_window=(0, 10),  # Only post-treatment event times
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Plot should work even without pre-treatment period
     fig, axes = result.plot()
@@ -1975,15 +1987,15 @@ def test_staggered_did_sklearn_model_without_fit_intercept():
         time_variable_name="time",
         treated_variable_name="treated",
         model=KNeighborsRegressor(n_neighbors=3),
-    )
+    ).fit()
 
     # Should still work
-    assert hasattr(result, "att_event_time_")
-    assert len(result.att_event_time_) > 0
+    assert hasattr(result.result, "att_event_time")
+    assert len(result.result.att_event_time) > 0
 
 
 def test_staggered_did_att_event_time_includes_pre_and_post_treatment():
-    """Test that att_event_time_ includes both pre and post-treatment event times.
+    """Test that att_event_time includes both pre and post-treatment event times.
 
     This verifies the design: ATT estimates are computed for both:
 
@@ -2004,9 +2016,9 @@ def test_staggered_did_att_event_time_includes_pre_and_post_treatment():
         time_variable_name="time",
         treated_variable_name="treated",
         model=LinearRegression(),
-    )
+    ).fit()
 
-    att_et = result.att_event_time_
+    att_et = result.result.att_event_time
 
     # ATT table should include both pre-treatment (placebo) and post-treatment effects
     pre_treatment_et = att_et[att_et["event_time"] < 0]

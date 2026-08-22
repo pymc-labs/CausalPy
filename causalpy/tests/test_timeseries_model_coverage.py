@@ -542,7 +542,7 @@ class TestStateSpaceTimeSeriesCoverage:
 
         with pytest.raises(
             ValueError,
-            match="y must be provided for StateSpaceTimeSeries.fit",
+            match="y must be provided for StateSpaceTimeSeries.build()",
         ):
             model.fit(y=None)
 

@@ -104,8 +104,8 @@ def test_did_validation_post_treatment_formula():
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
-    assert result.causal_impact is not None
+    ).fit()
+    assert result.result.causal_impact is not None
 
     # Test 6: Three-way interactions using * (should be invalid)
     with pytest.raises(FormulaException):
@@ -200,8 +200,8 @@ def test_did_validation_interaction_term_order_independent():
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
-    assert result.causal_impact is not None
+    ).fit()
+    assert result.result.causal_impact is not None
 
 
 @pytest.mark.parametrize(
@@ -223,9 +223,9 @@ def test_did_validation_uses_patsy_interaction_terms(did_data, formula):
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
-    assert result.causal_impact is not None
+    assert result.result.causal_impact is not None
 
 
 def test_did_validation_rejects_substring_only_interaction(did_data):
@@ -256,9 +256,9 @@ def test_did_exact_interaction_matching_preserves_categorical_wrapper(did_data):
         group_variable_name="g",
         post_treatment_variable_name="post",
         model=LinearRegression(),
-    )
+    ).fit()
 
-    assert result.causal_impact is not None
+    assert result.result.causal_impact is not None
 
 
 def test_did_ols_matches_only_exact_interaction(did_data):
@@ -276,18 +276,22 @@ def test_did_ols_matches_only_exact_interaction(did_data):
         group_variable_name="g",
         post_treatment_variable_name="post",
         model=LinearRegression(),
-    )
+    ).fit()
 
-    assert result.causal_impact == pytest.approx(4)
+    assert result.result.causal_impact == pytest.approx(4)
     expected_counterfactual = (
-        1 + 2 + 3 + 5 * result.x_pred_counterfactual["g_post"].to_numpy()
+        1
+        + 2
+        + 3
+        + 5 * result.result.scenario_counterfactual.inputs["g_post"].to_numpy()
     )
     np.testing.assert_allclose(
-        np.squeeze(result.y_pred_counterfactual), expected_counterfactual
+        np.squeeze(result.result.scenario_counterfactual.prediction),
+        expected_counterfactual,
     )
 
 
-def test_did_bayesian_matches_only_exact_interaction(mock_pymc_sample, did_data):
+def test_did_bayesian_matches_only_exact_interaction(did_data):
     """Bayesian lookup must not confuse a similarly named main effect."""
     df = did_data.rename(columns={"group": "g", "post_treatment": "post"}).copy()
     df["g_post"] = np.arange(len(df))
@@ -299,9 +303,9 @@ def test_did_bayesian_matches_only_exact_interaction(mock_pymc_sample, did_data)
         group_variable_name="g",
         post_treatment_variable_name="post",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
-    assert result.causal_impact.coords["coeffs"].item() == "post[T.True]:g"
+    assert result.result.causal_impact.coords["coeffs"].item() == "post[T.True]:g"
 
 
 def test_did_validation_post_treatment_data():
@@ -899,7 +903,7 @@ def test_rd_ols_plot_with_donut_hole():
         model=LinearRegression(),
         treatment_threshold=threshold,
         donut_hole=0.1,
-    )
+    ).fit()
 
     fig, ax = result.plot(show=False)
     try:
@@ -951,7 +955,7 @@ def test_rd_plot_isolated_from_user_column_names() -> None:
         model=LinearRegression(),
         running_variable_name="prediction",
         treatment_threshold=0,
-    )
+    ).fit()
 
     fig, ax = result.plot(show=False)
     try:
@@ -975,7 +979,7 @@ def test_rd_plot_isolated_from_user_column_names() -> None:
         )
         np.testing.assert_allclose(
             model_fit.get_ydata(),
-            result.pred.isel(chain=0, draw=0, treated_units=0).to_numpy(),
+            result.result.predictions.isel(chain=0, draw=0, treated_units=0).to_numpy(),
         )
     finally:
         plt.close(fig)
@@ -992,7 +996,7 @@ def test_rd_bayesian_plot_with_donut_hole():
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         treatment_threshold=threshold,
         donut_hole=0.1,
-    )
+    ).fit()
 
     fig, ax = result.plot(show=False)
     try:

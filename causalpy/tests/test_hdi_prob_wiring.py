@@ -131,7 +131,7 @@ def fitted_its(its_data):
         pd.to_datetime("2017-01-01"),
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -143,7 +143,7 @@ def fitted_sc(sc_data):
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -155,7 +155,7 @@ def fitted_did(did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -167,7 +167,7 @@ def fitted_rd(rd_data):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         treatment_threshold=0.5,
         epsilon=0.001,
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -180,7 +180,7 @@ def fitted_rkink():
         formula=f"y ~ 1 + x + I((x-{kink})*treated)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         kink_point=kink,
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -192,7 +192,7 @@ def fitted_prepost(anova1_data):
         group_variable_name="group",
         pretreatment_variable_name="pre",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -203,7 +203,7 @@ def fitted_piecewise():
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -236,7 +236,7 @@ def fitted_panel():
         time_fe_variable="time",
         fe_method="dummies",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -253,7 +253,7 @@ def fitted_staggered():
         treated_variable_name="treated",
         treatment_time_variable_name="treatment_time",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -270,7 +270,7 @@ def fitted_staggered_ols():
         treated_variable_name="treated",
         treatment_time_variable_name="treatment_time",
         model=SkLinearRegression(),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -285,7 +285,7 @@ def fitted_sdid():
         model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
             sample_kwargs=sample_kwargs,
         ),
-    )
+    ).fit()
 
 
 # ---------------------------------------------------------------------------
@@ -561,7 +561,7 @@ def test_removed_hdi_prob_raises_typeerror_and_ci_prob_still_wired(
 def test_staggered_plot_uses_cached_hdi_prob(mock_pymc_sample, fitted_staggered):
     """Default ``plot()`` and ``plot(hdi_prob=cached)`` both succeed."""
     fig1, _ = fitted_staggered.plot()
-    fig2, _ = fitted_staggered.plot(hdi_prob=fitted_staggered.hdi_prob_)
+    fig2, _ = fitted_staggered.plot(hdi_prob=fitted_staggered.result.hdi_prob)
     assert fig1 is not None
     assert fig2 is not None
 
@@ -569,7 +569,7 @@ def test_staggered_plot_uses_cached_hdi_prob(mock_pymc_sample, fitted_staggered)
 @pytest.mark.integration
 def test_staggered_plot_rejects_mismatched_hdi_prob(mock_pymc_sample, fitted_staggered):
     """Supplying a non-cached ``hdi_prob`` must raise rather than silently no-op."""
-    other = 0.50 if fitted_staggered.hdi_prob_ != 0.50 else 0.99
+    other = 0.50 if fitted_staggered.result.hdi_prob != 0.50 else 0.99
     with pytest.raises(ValueError, match="HDI bounds are computed during"):
         fitted_staggered.plot(hdi_prob=other)
 
@@ -579,6 +579,6 @@ def test_staggered_group_time_plot_rejects_mismatched_hdi_prob(
     mock_pymc_sample, fitted_staggered
 ):
     """The group-time plot must also reject a non-cached ``hdi_prob``."""
-    other = 0.50 if fitted_staggered.hdi_prob_ != 0.50 else 0.99
+    other = 0.50 if fitted_staggered.result.hdi_prob != 0.50 else 0.99
     with pytest.raises(ValueError, match="HDI bounds are computed during"):
         fitted_staggered.plot_group_time(hdi_prob=other)

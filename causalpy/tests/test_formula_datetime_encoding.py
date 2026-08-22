@@ -103,11 +103,11 @@ def test_interrupted_time_series_predicts_with_bare_datetime_predictor():
         treatment_time=pd.Timestamp("2021-07-01"),
         formula="y ~ 1 + date",
         model=LinearRegression(),
-    )
+    ).fit()
 
     assert result.labels == ["Intercept", "elapsed(date)"]
     assert result.pre_design["X"].shape[1] == result.post_design["X"].shape[1] == 2
-    assert result.post_pred.sizes["obs_ind"] == len(result.datapost)
+    assert result.result.predictions_post.sizes["obs_ind"] == len(result.datapost)
 
 
 def test_piecewise_its_uses_single_datetime_baseline_column():

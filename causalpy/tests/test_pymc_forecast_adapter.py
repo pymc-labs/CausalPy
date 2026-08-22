@@ -145,7 +145,7 @@ def forecast_result(its_data):
         treatment_time,
         formula="y ~ 1 + t",
         model=make_forecast_model(),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -158,7 +158,7 @@ def pymc_result(its_data):
         model=cp.pymc_models.LinearRegression(
             sample_kwargs={**sample_kwargs, "progressbar": False, "random_seed": 42}
         ),
-    )
+    ).fit()
 
 
 @pytest.mark.integration
@@ -168,7 +168,7 @@ class TestRoundTripAgainstPyMCBackend:
     def test_output_contract_matches_pymc_backend(self, forecast_result, pymc_result):
         """Draw-level posterior-predictive output mirrors the native backend."""
         for result in (forecast_result, pymc_result):
-            mu = result.post_pred
+            mu = result.result.predictions_post
             assert mu.dims == ("chain", "draw", "obs_ind", "treated_units")
             assert list(mu.coords["treated_units"].values) == ["unit_0"]
             pd.testing.assert_index_equal(
@@ -180,27 +180,29 @@ class TestRoundTripAgainstPyMCBackend:
     def test_impact_recovers_true_effect(self, forecast_result, pymc_result):
         """Both backends recover the simulated level shift at the draw level."""
         for result in (forecast_result, pymc_result):
-            impact = result.post_impact
+            impact = result.result.impact_post
             assert set(impact.dims) == {"chain", "draw", "obs_ind"}
             assert impact.dims[-1] == "obs_ind"
             mean_impact = float(impact.mean(("chain", "draw")).mean())
             assert mean_impact == pytest.approx(TRUE_EFFECT, abs=0.5)
         forecast_mean = float(
-            forecast_result.post_impact.mean(("chain", "draw")).mean()
+            forecast_result.result.impact_post.mean(("chain", "draw")).mean()
         )
-        pymc_mean = float(pymc_result.post_impact.mean(("chain", "draw")).mean())
+        pymc_mean = float(pymc_result.result.impact_post.mean(("chain", "draw")).mean())
         assert forecast_mean == pytest.approx(pymc_mean, abs=0.5)
 
     def test_cumulative_impact(self, forecast_result):
-        cum = forecast_result.post_impact_cumulative
+        cum = forecast_result.result.impact_post_cumulative
         assert "obs_ind" in cum.dims
         last = float(cum.isel(obs_ind=-1).mean(("chain", "draw")).squeeze())
         n_post = len(forecast_result.datapost)
         assert last == pytest.approx(TRUE_EFFECT * n_post, rel=0.4)
 
     def test_score_matches_pymc_shape(self, forecast_result, pymc_result):
-        assert list(forecast_result.score.index) == list(pymc_result.score.index)
-        assert forecast_result.score["unit_0_r2"] > 0.7
+        assert list(forecast_result.result.score.index) == list(
+            pymc_result.result.score.index
+        )
+        assert forecast_result.result.score["unit_0_r2"] > 0.7
 
     def test_plot_and_summaries_smoke(self, forecast_result, capsys):
         fig, ax = forecast_result.plot(show=False)
@@ -238,8 +240,16 @@ class TestRoundTripAgainstPyMCBackend:
         """mu carries the upstream noise-free latent (mu/mu_future), so it is
         strictly narrower than the posterior predictive y_hat."""
         for X, mu, out_of_sample in (
-            (forecast_result.pre_design["X"], forecast_result.pre_pred, False),
-            (forecast_result.post_design["X"], forecast_result.post_pred, True),
+            (
+                forecast_result.pre_design["X"],
+                forecast_result.result.predictions_pre,
+                False,
+            ),
+            (
+                forecast_result.post_design["X"],
+                forecast_result.result.predictions_post,
+                True,
+            ),
         ):
             full_prediction = forecast_result.model.predict(
                 X, out_of_sample=out_of_sample
@@ -249,9 +259,14 @@ class TestRoundTripAgainstPyMCBackend:
             y_hat_spread = float(y_hat.std(("chain", "draw")).mean())
             assert mu_spread < y_hat_spread
         # impact is computed from mu, i.e. excludes observation noise
-        impact_spread = float(forecast_result.post_impact.std(("chain", "draw")).mean())
+        impact_spread = float(
+            forecast_result.result.impact_post.std(("chain", "draw")).mean()
+        )
         assert impact_spread == pytest.approx(
-            float(forecast_result.post_pred.std(("chain", "draw")).mean()), rel=1e-6
+            float(
+                forecast_result.result.predictions_post.std(("chain", "draw")).mean()
+            ),
+            rel=1e-6,
         )
 
     def test_predictions_are_draw_coherent(self, forecast_result):
@@ -262,8 +277,16 @@ class TestRoundTripAgainstPyMCBackend:
         model = forecast_result.model
         posterior = forecast_result.idata.posterior
         for X, pred, out_of_sample in (
-            (forecast_result.pre_design["X"], forecast_result.pre_pred, False),
-            (forecast_result.post_design["X"], forecast_result.post_pred, True),
+            (
+                forecast_result.pre_design["X"],
+                forecast_result.result.predictions_pre,
+                False,
+            ),
+            (
+                forecast_result.post_design["X"],
+                forecast_result.result.predictions_post,
+                True,
+            ),
         ):
             mu = pred
             expected = xr.dot(
@@ -297,8 +320,8 @@ def test_covariate_free_future_index_path(its_data):
             num_samples=50,
             random_seed=42,
         ),
-    )
-    mu = result.post_pred
+    ).fit()
+    mu = result.result.predictions_post
     assert mu.dims == ("chain", "draw", "obs_ind", "treated_units")
     pd.testing.assert_index_equal(
         pd.Index(mu.coords["obs_ind"].values),
@@ -307,7 +330,7 @@ def test_covariate_free_future_index_path(its_data):
     )
     # A local level frozen at treatment time underestimates the trend, but the
     # level shift must dominate the impact estimate.
-    mean_impact = float(result.post_impact.mean(("chain", "draw")).mean())
+    mean_impact = float(result.result.impact_post.mean(("chain", "draw")).mean())
     assert mean_impact > TRUE_EFFECT / 2
 
 
@@ -428,9 +451,11 @@ def test_three_period_design(its_data):
         formula="y ~ 1 + t",
         model=make_fast_forecast_model(),
         treatment_end_time=df.index[85],
-    )
-    assert result.intervention_pred.sizes["obs_ind"] == 15
-    assert result.post_intervention_pred.sizes["obs_ind"] == 15
+    ).fit()
+    # Three-period views are derived on demand from the fitted bundle.
+    slices = result._period_slices(result.result)
+    assert slices["intervention_pred"].sizes["obs_ind"] == 15
+    assert slices["post_intervention_pred"].sizes["obs_ind"] == 15
     summary = result.effect_summary(period="comparison")
     assert "persistence" in summary.text
 
@@ -580,7 +605,7 @@ class TestPlaceboInTime:
                 treatment_time,
                 formula="y ~ 1 + t",
                 model=clone_model(base_model),
-            )
+            ).fit()
 
         # ``n_folds=1`` is forced by this fixture's geometry, not by convenience: the intervention window is 29 daily observations (``dates[70]`` through ``dates[99]``), so a fold is only eligible when at least 29 pre-treatment rows precede its pseudo treatment time. Two sequential folds would sit at ``dates[12]`` and ``dates[41]``, and the first is skipped as ``insufficient_pre_period``, so the fixture can never admit two eligible sequential folds. This test is about PlaceboInTime accepting and refitting the forecast backend, so one fitted fold exercises it fully; do not raise ``n_folds`` here.
         check = cp.checks.PlaceboInTime(
@@ -708,7 +733,7 @@ def test_approximate_forecasters_fit_and_predict_canonical_containers(
             num_samples=num_samples,
             random_seed=42,
         ),
-    )
+    ).fit()
 
     model = result.model
     assert isinstance(model.forecaster, forecaster)
@@ -720,10 +745,10 @@ def test_approximate_forecasters_fit_and_predict_canonical_containers(
             _ = model.fit_idata
     else:
         assert isinstance(model.fit_idata, xr.DataTree)
-    assert list(result.score.index) == ["unit_0_r2", "unit_0_r2_std"]
+    assert list(result.result.score.index) == ["unit_0_r2", "unit_0_r2_std"]
     for pred, expected_index in (
-        (result.pre_pred, result.datapre.index),
-        (result.post_pred, result.datapost.index),
+        (result.result.predictions_pre, result.datapre.index),
+        (result.result.predictions_post, result.datapost.index),
     ):
         assert isinstance(pred, xr.DataArray)
         assert pred.name == "mu"

@@ -111,6 +111,25 @@ def _load_harness_module() -> ModuleType:
 harness = _load_harness_module()
 
 
+@pytest.fixture(scope="module", autouse=True)
+def real_pymc_sampling():
+    """Undo the session-scoped ``mock_pymc_sample`` patch for this module.
+
+    The conftest registers PyMC's ``mock_sample`` (prior sampling instead of
+    MCMC) session-wide, so once any earlier test module requests it,
+    ``pm.sample`` stays mocked for the rest of the run. These tests recover
+    known data-generating parameters from real NUTS posteriors and the harness
+    extraction requires a ``sample_stats`` group, which mock sampling does not
+    produce — restore the real sampler for this module only.
+    """
+    import pymc.sampling.mcmc
+
+    patched = pm.sample
+    pm.sample = pymc.sampling.mcmc.sample
+    yield
+    pm.sample = patched
+
+
 def _simulate_did_records() -> tuple[tuple[dict[str, Any], ...], dict[str, float]]:
     """Return a seeded, identified two-period DiD DGP and its coefficient truths."""
     rng = np.random.default_rng(PARAMETER_RECOVERY_SEED)
@@ -408,7 +427,7 @@ def did_parameter_recovery_result(
         model=cp.pymc_models.LinearRegression(
             sample_kwargs=dict(parameter_recovery_sample_kwargs)
         ),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -427,7 +446,7 @@ def sc_parameter_recovery_result(
         model=cp.pymc_models.WeightedSumFitter(
             sample_kwargs=dict(parameter_recovery_sample_kwargs)
         ),
-    )
+    ).fit()
 
 
 def test_parameter_recovery_dgps_are_identified() -> None:
@@ -597,7 +616,7 @@ def test_did_parameter_recovery(
     for name, value in sampling_quality.items():
         record_property(f"did_sampling_{name}", str(value))
 
-    causal_impact = harness._canonical_scalar_effect(result.causal_impact)
+    causal_impact = harness._canonical_scalar_effect(result.result.causal_impact)
     causal_impact_series = _capture_focal_series("did.causal_impact", causal_impact)
     causal_impact_metric = harness._series_metric(causal_impact_series, {})
     causal_impact_gate = _parameter_recovery_gate(
@@ -640,7 +659,7 @@ def test_did_parameter_recovery(
     )
 
     counterfactual_semantics = _assert_posterior_array_semantics(
-        result.y_pred_counterfactual,
+        result.result.scenario_counterfactual.prediction,
         expected_dims=("chain", "draw", "obs_ind", "treated_units"),
         expected_name="mu",
     )
@@ -689,10 +708,10 @@ def test_synthetic_control_parameter_recovery(
         _assert_recovery_gate(gate, f"SC beta[{control_unit!r}]")
         _record_gate_diagnostics(record_property, f"sc_beta_{control_unit}", gate)
 
-    average_impact = result.post_impact.mean(dim="obs_ind")
-    final_cumulative_impact = result.post_impact_cumulative.isel(obs_ind=-1)
-    first_impact = result.post_impact.isel(obs_ind=0)
-    last_impact = result.post_impact.isel(obs_ind=-1)
+    average_impact = result.result.impact_post.mean(dim="obs_ind")
+    final_cumulative_impact = result.result.impact_post_cumulative.isel(obs_ind=-1)
+    first_impact = result.result.impact_post.isel(obs_ind=0)
+    last_impact = result.result.impact_post.isel(obs_ind=-1)
     average_series = _capture_focal_series("sc.post_average_impact", average_impact)
     cumulative_series = _capture_focal_series(
         "sc.post_final_cumulative_impact", final_cumulative_impact
@@ -773,16 +792,16 @@ def test_synthetic_control_parameter_recovery(
     )
 
     post_prediction_semantics = _assert_posterior_array_semantics(
-        result.post_pred,
+        result.result.predictions_post,
         expected_dims=("chain", "draw", "obs_ind", "treated_units"),
         expected_name="mu",
     )
     expected_post_coordinates = data.index[data.index >= SC_TREATMENT_TIME].tolist()
     assert post_prediction_semantics["coords"]["obs_ind"] == expected_post_coordinates
     assert post_prediction_semantics["coords"]["treated_units"] == ["actual"]
-    post_counterfactual_mean = result.post_pred.mean(dim=["chain", "draw"]).sel(
-        treated_units="actual"
-    )
+    post_counterfactual_mean = result.result.predictions_post.mean(
+        dim=["chain", "draw"]
+    ).sel(treated_units="actual")
     counterfactual_error = (
         np.asarray(post_counterfactual_mean.values, dtype=float)
         - dgp["counterfactual"][SC_TREATMENT_TIME:]
@@ -795,7 +814,7 @@ def test_synthetic_control_parameter_recovery(
     record_property("sc_counterfactual_max_error", str(counterfactual_max_error))
 
     draw_wise_r2 = harness._draw_wise_r2(
-        result.pre_design["treated"], result.pre_pred, xr, np
+        result.pre_design["treated"], result.result.predictions_pre, xr, np
     )
     r2_series = _capture_focal_series("sc.draw_wise_r2", draw_wise_r2)
     r2_metric = r2_series["metrics"][0]

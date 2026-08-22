@@ -40,7 +40,7 @@ def its_context() -> PipelineContext:
     model = cp.create_causalpy_compatible_class(LinearRegression())
     experiment = InterruptedTimeSeries(
         df, treatment_time=70, formula="y ~ 1 + t", model=model
-    )
+    ).fit()
     ctx = PipelineContext(data=df)
     ctx.experiment = experiment
     ctx.effect_summary = experiment.effect_summary()
@@ -196,15 +196,15 @@ class TestGenerateReport:
     def test_handles_plot_rendering_failure(self, its_context):
         from unittest.mock import patch
 
-        with patch.object(
-            type(its_context.experiment),
-            "plot",
-            side_effect=RuntimeError("plot failed"),
+        with (
+            patch.object(
+                type(its_context.experiment),
+                "plot",
+                side_effect=RuntimeError("plot failed"),
+            ),
+            pytest.raises(RuntimeError, match="plot failed"),
         ):
-            step = GenerateReport(include_plots=True)
-            ctx = step.run(its_context)
-        assert isinstance(ctx.report, str)
-        assert "data:image/png;base64," not in ctx.report
+            GenerateReport(include_plots=True).run(its_context)
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +256,7 @@ class TestStandaloneGenerateReport:
         model = cp.create_causalpy_compatible_class(LinearRegression())
         return InterruptedTimeSeries(
             df, treatment_time=70, formula="y ~ 1 + t", model=model
-        )
+        ).fit()
 
     def test_returns_html_string(self, experiment):
         html = experiment.generate_report(include_plots=False)

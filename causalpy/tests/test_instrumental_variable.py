@@ -180,7 +180,7 @@ def test_iv_default_model_uses_safe_sampling_kwargs(monkeypatch, iv_data):
         data=iv_data["data"],
         instruments_formula=iv_data["instruments_formula"],
         formula=iv_data["formula"],
-    )
+    ).fit()
 
     assert result.model.sample_kwargs["cores"] == 1
     assert sampled_kwargs["cores"] == 1
@@ -205,7 +205,7 @@ def test_iv_default_sampling_completes_with_two_chains(iv_data):
         instruments_formula=iv_data["instruments_formula"],
         formula=iv_data["formula"],
         model=model,
-    )
+    ).fit()
 
     assert model.sample_kwargs["cores"] == 1
     assert result.idata.posterior.sizes["chain"] == 2
@@ -615,7 +615,7 @@ def test_iv_variable_selection_priors(
         ),
         vs_prior_type=vs_prior_type,
         vs_hyperparams={"outcome": True},
-    )
+    ).fit()
 
     assert vs_prior_type == result.vs_prior_type
     assert expected_var in result.model.named_vars
@@ -636,7 +636,7 @@ def test_iv_idata_structure(iv_data, sample_kwargs):
         model=cp.pymc_models.InstrumentalVariableRegression(
             sample_kwargs=sample_kwargs
         ),
-    )
+    ).fit()
 
     # Check idata exists and has posterior
     assert hasattr(result, "idata")
@@ -716,7 +716,7 @@ def test_iv_sample_predictive_distribution(iv_data, sample_kwargs):
         model=cp.pymc_models.InstrumentalVariableRegression(
             sample_kwargs=sample_kwargs
         ),
-    )
+    ).fit()
 
     assert isinstance(result.idata, xr.DataTree)
     assert "posterior_predictive" not in result.idata
@@ -752,7 +752,7 @@ def test_iv_default_jax_ppc_mutates_existing_datatree(
         model=cp.pymc_models.InstrumentalVariableRegression(
             sample_kwargs=sample_kwargs
         ),
-    )
+    ).fit()
 
     assert isinstance(result.idata, xr.DataTree)
     assert "posterior_predictive" not in result.idata

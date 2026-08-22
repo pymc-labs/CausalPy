@@ -117,7 +117,7 @@ def test_auto_scale_sets_exponential_prior_matching_2_over_s(
         control_units=["a", "b", "c"],
         treated_units=treated,
         model=model,
-    )
+    ).fit()
     sigma = _sigma_prior(result)
     assert sigma.distribution == "Exponential"
     np.testing.assert_allclose(
@@ -179,7 +179,7 @@ def test_auto_scale_false_preserves_halfnormal_default(mock_pymc_sample, fitter_
         treated_units=treated,
         model=_fitter(fitter_cls),
         auto_scale_sigma=False,
-    )
+    ).fit()
     sigma = _sigma_prior(result)
     assert sigma.distribution == "HalfNormal"
     assert sigma.parameters["sigma"] == 1
@@ -199,7 +199,7 @@ def test_auto_scale_false_skips_scale_estimation(mock_pymc_sample, fitter_cls):
         treated_units=treated,
         model=_fitter(fitter_cls),
         auto_scale_sigma=False,
-    )
+    ).fit()
     sigma = _sigma_prior(result)
     assert sigma.distribution == "HalfNormal"
     assert sigma.parameters["sigma"] == 1
@@ -220,7 +220,7 @@ def test_constant_treated_series_still_fits_with_auto_scaling(
             control_units=["a", "b", "c"],
             treated_units=treated,
             model=_fitter(fitter_cls),
-        )
+        ).fit()
     sigma = _sigma_prior(result)
     assert sigma.distribution == "Exponential"
     assert np.asarray(sigma.parameters["lam"]) == 2.0
@@ -240,7 +240,7 @@ def test_user_supplied_y_hat_prior_is_respected(mock_pymc_sample, fitter_cls):
     model = _fitter(fitter_cls, priors={"y_hat": custom})
     result = cp.SyntheticControl(
         df, tt, control_units=["a", "b", "c"], treated_units=treated, model=model
-    )
+    ).fit()
     sigma = _sigma_prior(result)
     # Untouched: still the user's HalfNormal(42), not the auto Exponential.
     assert sigma.distribution == "HalfNormal"
@@ -263,7 +263,7 @@ def test_multiple_treated_units_get_per_unit_lam(mock_pymc_sample, fitter_cls):
         control_units=["a", "b", "c"],
         treated_units=treated,
         model=_fitter(fitter_cls),
-    )
+    ).fit()
     lam = np.asarray(_sigma_prior(result).parameters["lam"])
     assert lam.shape == (2,)
     np.testing.assert_allclose(lam, _expected_lam(df, tt, treated))
@@ -286,7 +286,7 @@ def test_reused_model_does_not_carry_auto_scaled_prior_into_opt_out(
         control_units=["a", "b", "c"],
         treated_units=treated,
         model=source_model,
-    )
+    ).fit()
     second_df, _, _ = _make_data([100.0])
     second = cp.SyntheticControl(
         second_df,
@@ -295,7 +295,7 @@ def test_reused_model_does_not_carry_auto_scaled_prior_into_opt_out(
         treated_units=treated,
         model=first.model,
         auto_scale_sigma=False,
-    )
+    ).fit()
     second_sigma = _sigma_prior(second)
     assert second_sigma.distribution == "HalfNormal"
     assert second_sigma.parameters["sigma"] == 1
@@ -321,7 +321,7 @@ def test_reused_model_recomputes_the_auto_scale(mock_pymc_sample, fitter_cls):
         control_units=["a", "b", "c"],
         treated_units=treated,
         model=_fitter(fitter_cls),
-    )
+    ).fit()
     second_df, _, _ = _make_data([100.0])
     second = cp.SyntheticControl(
         second_df,
@@ -329,7 +329,7 @@ def test_reused_model_recomputes_the_auto_scale(mock_pymc_sample, fitter_cls):
         control_units=["a", "b", "c"],
         treated_units=treated,
         model=first.model._clone(),
-    )
+    ).fit()
     first_lam = np.asarray(_sigma_prior(first).parameters["lam"])
     second_lam = np.asarray(_sigma_prior(second).parameters["lam"])
     np.testing.assert_allclose(second_lam, _expected_lam(second_df, tt, treated))
@@ -622,7 +622,7 @@ def test_opt_out_preserves_subclass_init_config_through_clone(mock_pymc_sample):
         treated_units=treated,
         model=model,
         auto_scale_sigma=False,
-    )
+    ).fit()
     pinned = result.model
     assert pinned is not model  # the opt-out fit a fresh copy
     assert isinstance(pinned, _ExtraArgWeightedSumFitter)
@@ -645,7 +645,7 @@ def test_opt_out_survives_refit_and_cloning(mock_pymc_sample, fitter_cls):
         treated_units=treated,
         model=_fitter(fitter_cls),
         auto_scale_sigma=False,
-    )
+    ).fit()
     X, y = _pre_treatment_design(*_make_data([100.0]))
     refitted = result.model._clone()
     refitted.fit(X, y)
@@ -668,7 +668,7 @@ def test_opt_out_leaves_the_callers_model_untouched(mock_pymc_sample, fitter_cls
         treated_units=treated,
         model=source_model,
         auto_scale_sigma=False,
-    )
+    ).fit()
     assert result.model is not source_model
     assert source_model._user_priors is None
     assert source_model.idata is None

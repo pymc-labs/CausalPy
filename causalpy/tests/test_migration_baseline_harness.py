@@ -524,8 +524,8 @@ def test_did_capture_fixture_passes_constructor_validation_without_mcmc() -> Non
             '    time_variable_name="t",',
             '    group_variable_name="group",',
             "    model=LinearRegression(),",
-            ")",
-            "assert result.causal_impact is not None",
+            ").fit()",
+            "assert result.result.causal_impact is not None",
         ]
     )
 

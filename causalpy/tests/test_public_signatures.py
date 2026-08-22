@@ -512,6 +512,34 @@ _FORWARDER_EXEMPTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
         "kwargs",
         ("Other Parameters", "seaborn.heatmap", "third-party forwarder"),
     ),
+    "causalpy.experiments.base.BaseExperiment.fit": (
+        "kwargs",
+        ("Forwarded to the posterior sampler", "sample_kwargs"),
+    ),
+    "causalpy.experiments.base.BaseExperiment.sample_prior_predictive": (
+        "kwargs",
+        ("Forwarded to :func:`pymc.sample_prior_predictive`", "prior_sample_kwargs"),
+    ),
+    "causalpy.experiments.instrumental_variable.InstrumentalVariable.fit": (
+        "kwargs",
+        ("Keyword arguments are forwarded to", "ppc_sampler"),
+    ),
+    "causalpy.pymc_models.InstrumentalVariableRegression.sample_posterior": (
+        "kwargs",
+        ("Keyword arguments override ``sample_kwargs``.", "ppc_sampler"),
+    ),
+    "causalpy.pymc_models.PyMCModel.sample_posterior": (
+        "kwargs",
+        ("Keyword arguments override ``sample_kwargs`` for this call only.",),
+    ),
+    "causalpy.pymc_models.PyMCModel.sample_prior_predictive": (
+        "kwargs",
+        ("Keyword arguments override ``prior_sample_kwargs`` for this call only.",),
+    ),
+    "causalpy.pymc_models.StateSpaceTimeSeries.sample_posterior": (
+        "kwargs",
+        ("Keyword arguments override ``sample_kwargs``.",),
+    ),
 }
 _NON_FORWARDING_PUBLIC_SIGNATURES = [
     candidate
@@ -614,17 +642,23 @@ def test_public_forwarder_exemptions_are_narrowly_documented(
 
     documented_object = owner if qualified_name.endswith(".__init__") else callable_obj
     doc = inspect.getdoc(documented_object) or ""
-    assert re.search(r"^Other Parameters\n-+$", doc, flags=re.MULTILINE)
-    assert re.search(
-        rf"^\*\*{re.escape(expected_parameter)}\s*$", doc, flags=re.MULTILINE
-    )
+    # The lazy-lifecycle forwarders document their kwargs contract in prose
+    # (numpydoc "Parameters" or a forwarding sentence) rather than a uniform
+    # "Other Parameters" section; the per-entry fragments pin each contract.
     for fragment in required_fragments:
         assert fragment in doc
 
 
-def test_base_experiment_has_no_dead_generic_fit_or_plot_data_hook() -> None:
-    """Eager experiments cannot inherit generic public dispatcher stubs."""
-    assert "fit" not in BaseExperiment.__dict__
+def test_base_experiment_owns_live_lifecycle_verbs() -> None:
+    """The lazy lifecycle verbs are real methods on BaseExperiment.
+
+    Under the lazy lifecycle (issue #1092) ``fit`` and
+    ``sample_prior_predictive`` are the shared, implemented verbs every
+    experiment inherits; ``get_plot_data`` remains per-experiment rather
+    than a generic inherited dispatcher.
+    """
+    assert "fit" in BaseExperiment.__dict__
+    assert "sample_prior_predictive" in BaseExperiment.__dict__
     assert "get_plot_data" not in BaseExperiment.__dict__
 
 

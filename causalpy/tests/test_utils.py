@@ -315,7 +315,7 @@ def sc_result_single_unit():
                 "tune": 100,
             }
         ),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -340,7 +340,7 @@ def sc_result_multi_unit():
                 "tune": 100,
             }
         ),
-    )
+    ).fit()
 
 
 def test_extract_lift_for_mmm_single_unit(sc_result_single_unit):
@@ -457,7 +457,7 @@ def test_extract_lift_for_mmm_raises_for_ols():
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.create_causalpy_compatible_class(LinearRegression)(),
-    )
+    ).fit()
 
     with pytest.raises(ValueError, match="Bayesian"):
         extract_lift_for_mmm(
