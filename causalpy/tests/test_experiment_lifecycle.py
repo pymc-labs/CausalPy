@@ -268,6 +268,69 @@ def test_prior_effect_tail_probability_near_neutral(its_data):
     assert 0.25 < prob < 0.75
 
 
+@pytest.mark.slow
+@pytest.mark.integration
+def test_refit_after_predict_restores_training_design(its_data):
+    """fit → plot (forecast-window conditioning) → fit must re-sample on the
+    training design; guards the BBETS time-feature re-arm path (round-1
+    review blocker) and the base X/y re-arm alike."""
+    import warnings
+
+    exp = cp.InterruptedTimeSeries(
+        its_data,
+        treatment_time=pd.Timestamp("2017-06-01"),
+        formula="y ~ 1 + t",
+        model=cp.pymc_models.LinearRegression(
+            sample_kwargs={
+                "draws": 20,
+                "tune": 20,
+                "chains": 1,
+                "progressbar": False,
+                "random_seed": 42,
+            }
+        ),
+    )
+    exp.fit()
+    n_train = exp.idata["posterior"]["mu"].sizes["obs_ind"]
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        exp.plot(show=False)
+        exp.fit()
+    assert exp.idata["posterior"]["mu"].sizes["obs_ind"] == n_train
+    # A second build() call is a documented no-op and must not poison the
+    # recorded data nodes with whatever window predict() last conditioned on.
+    nodes_before = {
+        name: value.shape for name, value in exp.model._build_data_nodes.items()
+    }
+    exp.model.build(
+        exp.pre_design["X"],
+        exp.pre_design["y"],
+        coords=None,
+    )
+    assert {
+        name: value.shape for name, value in exp.model._build_data_nodes.items()
+    } == nodes_before
+
+
+@pytest.mark.integration
+def test_prior_after_fit_overwrites_prior_preserves_posterior(its_data):
+    """sample_prior_predictive() after a completed fit replaces prior draws
+    and the prior bundle while leaving posterior groups untouched."""
+    exp = _make_its(its_data, prior_sample_kwargs={"draws": 25, "random_seed": 1})
+    exp.fit()
+    post_sizes = dict(exp.idata["posterior"]["mu"].sizes)
+    post_draws = exp.idata["posterior"].sizes["draw"]
+    prior_bundle = exp._prior_result
+
+    exp.sample_prior_predictive(draws=40, random_seed=2)
+
+    assert exp.idata["prior"].sizes["draw"] == 40
+    assert dict(exp.idata["posterior"]["mu"].sizes) == post_sizes
+    assert exp.idata["posterior"].sizes["draw"] == post_draws
+    assert exp._prior_result is not prior_bundle  # recomputed
+    assert exp.result is not None
+
+
 @pytest.mark.integration
 def test_exceptions_are_exported():
     """Guard exceptions are part of the public contract."""

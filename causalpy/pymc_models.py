@@ -2444,7 +2444,13 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         so they are added to :attr:`_build_data_nodes` for
         :meth:`_rearm_fit_data`.
         """
+        already_built = self._built
         super().build(X=X, y=y, coords=coords)
+        if already_built:
+            # Base build() was a no-op (graph exists); reading back shared
+            # nodes now would record whatever forecast window predict() last
+            # conditioned on instead of the training design.
+            return
         # The graph's trend/seasonality inputs are derived from X at build
         # time and stored under their own pm.Data node names; record them so
         # _rearm_fit_data() can restore them after predict() re-purposes the
