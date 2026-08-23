@@ -788,7 +788,7 @@ class TestStateSpaceTimeSeriesCoverage:
         with pytest.raises(RuntimeError, match="must be fit first"):
             unfit.get_shrinkage_factors()
 
-    def test_vs_spike_and_slab_structure(self, sample_data):
+    def test_vs_spike_and_slab_structure(self, sample_data, mock_pymc_sample):
         """Spike-and-slab on covariates: selection variables in the
         posterior and a well-formed inclusion-probability table.
 
@@ -823,7 +823,7 @@ class TestStateSpaceTimeSeriesCoverage:
         assert list(incl.columns) == ["prob", "selected", "gamma_mean"]
         assert len(incl) == 2
 
-    def test_vs_horseshoe_structure(self, sample_data):
+    def test_vs_horseshoe_structure(self, sample_data, mock_pymc_sample):
         """Horseshoe on covariates: shrinkage factor table is well formed.
 
         Structure-only by design: the suite mocks pm.sample session-wide.
