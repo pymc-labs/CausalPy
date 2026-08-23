@@ -2390,6 +2390,50 @@ class StateSpaceTimeSeries(PyMCModel):
     vs_hyperparams : dict, optional
         Hyperparameters for the variable selection prior. See
         :class:`causalpy.variable_selection_priors.VariableSelectionPrior`.
+        The defaults work without hand-tuning on roughly unit-scale data:
+        the horseshoe scales its global shrinkage from the data with an
+        expected model size of ``min(5, p / 2)`` (Piironen & Vehtari, 2017),
+        while spike-and-slab uses a ``Beta(2, 2)`` inclusion prior (prior
+        inclusion probability centered on 0.5, no expected-model-size knob).
+
+    Examples
+    --------
+    Covariate selection through :class:`causalpy.InterruptedTimeSeries`:
+    pass many candidate covariates in the formula and let the model select.
+
+    >>> import numpy as np
+    >>> import pandas as pd
+    >>> import causalpy as cp
+    >>> rng = np.random.default_rng(7)
+    >>> n = 60
+    >>> dates = pd.date_range(start="2023-01-01", periods=n, freq="D")
+    >>> X = rng.normal(size=(n, 3))
+    >>> y = 5 + 2.0 * X[:, 0] + rng.normal(0, 0.3, size=n)
+    >>> df = pd.DataFrame(
+    ...     {"y": y, "x1": X[:, 0], "x2": X[:, 1], "x3": X[:, 2]}, index=dates
+    ... )
+    >>> model = cp.pymc_models.StateSpaceTimeSeries(
+    ...     level_order=1,
+    ...     seasonal_length=7,
+    ...     sample_kwargs={
+    ...         "chains": 1,
+    ...         "draws": 10,
+    ...         "tune": 10,
+    ...         "progressbar": False,
+    ...     },
+    ...     vs_prior_type="spike_and_slab",
+    ... )
+    >>> import io
+    >>> from contextlib import redirect_stdout
+    >>> with redirect_stdout(io.StringIO()):  # silence the model-build table
+    ...     result = cp.InterruptedTimeSeries(
+    ...         data=df,
+    ...         treatment_time=dates[45],
+    ...         formula="y ~ 0 + x1 + x2 + x3",
+    ...         model=model,
+    ...     )
+    >>> result.model.get_inclusion_probabilities().columns.tolist()
+    ['prob', 'selected', 'gamma_mean']
     """
 
     default_priors = {
