@@ -2555,6 +2555,10 @@ class StateSpaceTimeSeries(PyMCModel):
                 )
         return names
 
+    def _exog_values(self, X: xr.DataArray) -> np.ndarray:
+        """Exogenous regressor values from X, in fit-time column order."""
+        return X.sel(coeffs=self._exog_names).values
+
     def build_model(
         self,
         X: xr.DataArray | None = None,
@@ -2697,9 +2701,7 @@ class StateSpaceTimeSeries(PyMCModel):
                         "beta_exog",
                         n_params=len(self._exog_names),
                         dims=dims,
-                        X=X.sel(coeffs=self._exog_names).values
-                        if X is not None
-                        else None,
+                        X=self._exog_values(X) if X is not None else None,
                     )
                 else:
                     prior = deepcopy(self.priors[name])
@@ -2716,7 +2718,7 @@ class StateSpaceTimeSeries(PyMCModel):
             df = pd.DataFrame({"y": y_values.flatten()}, index=datetime_index)
             if self._exog_names and X is not None:
                 # The state-space graph looks this variable up by name
-                pm.Data("data_exog", X.sel(coeffs=self._exog_names).values)
+                pm.Data("data_exog", self._exog_values(X))
             self.ss_mod.build_statespace_graph(df[["y"]])
 
     def fit(
@@ -2803,6 +2805,22 @@ class StateSpaceTimeSeries(PyMCModel):
             else conditional_idata
         )
 
+    def _require_vs_diagnostics(self, what: str) -> tuple[VariableSelectionPrior, Any]:
+        """Guard the variable-selection accessors.
+
+        Returns the prior and the fitted idata, raising the same errors both
+        accessors documented: ValueError when the model was not configured
+        with `vs_prior_type`, RuntimeError when it has not been fit.
+        """
+        if self.vs_prior is None:
+            raise ValueError(
+                "Model was not configured with vs_prior_type; there are no "
+                f"{what} to report."
+            )
+        if self.idata is None:
+            raise RuntimeError("Model must be fit first.")
+        return self.vs_prior, self.idata
+
     def get_inclusion_probabilities(
         self, param_name: str = "beta_exog"
     ) -> pd.DataFrame:
@@ -2830,14 +2848,8 @@ class StateSpaceTimeSeries(PyMCModel):
             probability), "selected" (probability above 0.5), and
             "gamma_mean" (mean of the selection indicator).
         """
-        if self.vs_prior is None:
-            raise ValueError(
-                "Model was not configured with vs_prior_type; there are no "
-                "inclusion probabilities to report."
-            )
-        if self.idata is None:
-            raise RuntimeError("Model must be fit first.")
-        return self.vs_prior.get_inclusion_probabilities(self.idata, param_name)
+        vs_prior, idata = self._require_vs_diagnostics("inclusion probabilities")
+        return vs_prior.get_inclusion_probabilities(idata, param_name)
 
     def get_shrinkage_factors(self, param_name: str = "beta_exog") -> pd.DataFrame:
         """
@@ -2857,14 +2869,8 @@ class StateSpaceTimeSeries(PyMCModel):
             One row per regressor with the effective shrinkage applied to
             its coefficient.
         """
-        if self.vs_prior is None:
-            raise ValueError(
-                "Model was not configured with vs_prior_type; there are no "
-                "shrinkage factors to report."
-            )
-        if self.idata is None:
-            raise RuntimeError("Model must be fit first.")
-        return self.vs_prior.get_shrinkage_factors(self.idata, param_name)
+        vs_prior, idata = self._require_vs_diagnostics("shrinkage factors")
+        return vs_prior.get_shrinkage_factors(idata, param_name)
 
     def _forecast(
         self,
@@ -2947,7 +2953,7 @@ class StateSpaceTimeSeries(PyMCModel):
                     raise ValueError(
                         f"X is missing exogenous columns used at fit time: {missing}."
                     )
-                scenario = X.sel(coeffs=self._exog_names).values
+                scenario = self._exog_values(X)
             last = self._train_index[-1]  # start forecasting after the last observed
             forecast_data = self._forecast(
                 start=last, periods=len(idx), scenario=scenario
