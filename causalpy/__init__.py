@@ -26,7 +26,7 @@ from .custom_exceptions import (
     BadIndexException,
     DataException,
     FormulaException,
-    GroupNotSampleedException,
+    GroupNotSampledException,
     PriorPredictiveNotSupportedException,
 )
 from .data import load_data
@@ -66,8 +66,8 @@ __all__ = [
     "extract_lift_for_mmm",
     "FormulaException",
     "GenerateReport",
+    "GroupNotSampledException",
     "InstrumentalVariable",
-    "GroupNotSampleedException",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
     "load_data",

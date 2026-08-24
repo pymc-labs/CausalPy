@@ -27,7 +27,7 @@ import xarray as xr
 from patsy import dmatrix
 from pymc_extras.prior import Prior
 
-from causalpy.custom_exceptions import GroupNotSampleedException
+from causalpy.custom_exceptions import GroupNotSampledException
 from causalpy.utils import _bayesian_r2_score
 from causalpy.variable_selection_priors import VariableSelectionPrior
 
@@ -621,7 +621,7 @@ class PyMCModel(pm.Model):
             raise ValueError(f"group must be 'prior' or 'posterior', got {group!r}")
         if self.idata is None or group not in self.idata.children:
             call = "fit()" if group == "posterior" else "sample_prior_predictive()"
-            raise GroupNotSampleedException(
+            raise GroupNotSampledException(
                 f"No {group!r} draws are available on this model. Call {call} first.",
                 group=group,
             )
@@ -3187,7 +3187,7 @@ class StateSpaceTimeSeries(PyMCModel):
             Posterior predictive samples with y_hat and mu.
         """
         if group != "posterior":
-            raise GroupNotSampleedException(
+            raise GroupNotSampledException(
                 "No 'prior' draws are available on this backend; the "
                 "Kalman-filter path only supports posterior predictions.",
                 group="prior",

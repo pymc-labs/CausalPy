@@ -123,7 +123,7 @@ class PanelRegression(BaseExperiment):
     sampling happens. Call :meth:`fit` to draw posterior samples (and
     optionally :meth:`sample_prior_predictive` first for a prior predictive
     check); every method that reads draws raises
-    :class:`~causalpy.custom_exceptions.GroupNotSampleedException` until you
+    :class:`~causalpy.custom_exceptions.GroupNotSampledException` until you
     do.
 
     Examples
@@ -439,7 +439,7 @@ class PanelRegression(BaseExperiment):
 
         Raises
         ------
-        GroupNotSampleedException
+        GroupNotSampledException
             If the experiment has not been fitted yet.
         """
         self._resolve_group("posterior")
@@ -626,7 +626,7 @@ class PanelRegression(BaseExperiment):
 
         Raises
         ------
-        GroupNotSampleedException
+        GroupNotSampledException
             If the experiment has not been fitted yet.
         """
         self._resolve_group("posterior")
@@ -693,7 +693,7 @@ class PanelRegression(BaseExperiment):
 
         Raises
         ------
-        GroupNotSampleedException
+        GroupNotSampledException
             If the experiment has not been fitted yet.
         """
         self._resolve_group("posterior")
@@ -779,7 +779,7 @@ class PanelRegression(BaseExperiment):
         ------
         ValueError
             If fe_method is not "dummies"
-        GroupNotSampleedException
+        GroupNotSampledException
             If the experiment has not been fitted yet.
         """
         self._resolve_group("posterior")
@@ -866,7 +866,7 @@ class PanelRegression(BaseExperiment):
         ------
         ValueError
             If time_fe_variable is not provided (cannot plot trajectories without time)
-        GroupNotSampleedException
+        GroupNotSampledException
             If the experiment has not been fitted yet.
         """
         self._resolve_group("posterior")

@@ -26,7 +26,7 @@ import pytest
 
 import causalpy as cp
 from causalpy.custom_exceptions import (
-    GroupNotSampleedException,
+    GroupNotSampledException,
     PriorPredictiveNotSupportedException,
 )
 
@@ -94,17 +94,17 @@ def test_read_guards_name_the_missing_call(its_data):
     """Every group-requiring read fails fast naming the lifecycle verb."""
     exp = _make_its(its_data)
 
-    with pytest.raises(GroupNotSampleedException, match=r"fit\(\)"):
+    with pytest.raises(GroupNotSampledException, match=r"fit\(\)"):
         _ = exp.result
-    with pytest.raises(GroupNotSampleedException, match=r"fit\(\)"):
+    with pytest.raises(GroupNotSampledException, match=r"fit\(\)"):
         exp.plot(show=False)
-    with pytest.raises(GroupNotSampleedException, match=r"fit\(\)"):
+    with pytest.raises(GroupNotSampledException, match=r"fit\(\)"):
         exp.effect_summary()
-    with pytest.raises(GroupNotSampleedException, match=r"sample_prior_predictive"):
+    with pytest.raises(GroupNotSampledException, match=r"sample_prior_predictive"):
         exp.plot(group="prior", show=False)
-    with pytest.raises(GroupNotSampleedException, match=r"sample_prior_predictive"):
+    with pytest.raises(GroupNotSampledException, match=r"sample_prior_predictive"):
         _ = exp.prior_result
-    with pytest.raises(GroupNotSampleedException, match=r"fit\(\)"):
+    with pytest.raises(GroupNotSampledException, match=r"fit\(\)"):
         exp.print_coefficients()
 
 
@@ -146,7 +146,7 @@ def test_sample_prior_predictive_returns_self(its_data):
     assert exp.has_prior_predictive
     assert not exp.is_fitted
     # Posterior reads stay guarded after a prior-only phase
-    with pytest.raises(GroupNotSampleedException, match=r"fit\(\)"):
+    with pytest.raises(GroupNotSampledException, match=r"fit\(\)"):
         exp.plot(show=False)
 
 
@@ -378,7 +378,7 @@ def test_exceptions_are_exported():
         "BadIndexException",
         "DataException",
         "FormulaException",
-        "GroupNotSampleedException",
+        "GroupNotSampledException",
         "PriorPredictiveNotSupportedException",
     ):
         assert hasattr(cp, name), f"cp.{name} missing"

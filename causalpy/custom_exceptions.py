@@ -60,7 +60,7 @@ class DataException(Exception):
         self.message = message
 
 
-class GroupNotSampleedException(Exception):
+class GroupNotSampledException(Exception):
     """Raised when a read method requests a draw group that has not been sampled.
 
     Under the lazy lifecycle an experiment holds no draws until

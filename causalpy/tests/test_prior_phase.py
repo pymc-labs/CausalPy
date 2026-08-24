@@ -27,7 +27,7 @@ import pytest
 
 import causalpy as cp
 from causalpy.custom_exceptions import (
-    GroupNotSampleedException,
+    GroupNotSampledException,
     PriorPredictiveNotSupportedException,
 )
 from causalpy.data.simulate_data import (
@@ -321,7 +321,7 @@ def test_no_bundle_experiment_guard_names_fit():
         fe_method="dummies",
         model=SkLinearRegression(),
     )
-    with pytest.raises(GroupNotSampleedException, match=r"fit\(\) first"):
+    with pytest.raises(GroupNotSampledException, match=r"fit\(\) first"):
         exp._resolve_group("posterior")
 
 
@@ -363,7 +363,7 @@ def test_generate_report_swallows_only_not_implemented():
         formula="y ~ 1 + t",
         model=_linear_model(),
     )
-    with pytest.raises(GroupNotSampleedException):
+    with pytest.raises(GroupNotSampledException):
         unfitted.generate_report(include_plots=False)
 
 
@@ -423,7 +423,7 @@ def test_model_require_group_guards():
     model = cp.pymc_models.LinearRegression()
     with pytest.raises(ValueError, match="group must be"):
         model.require_group("bogus")
-    with pytest.raises(GroupNotSampleedException, match=r"sample_prior_predictive\(\)"):
+    with pytest.raises(GroupNotSampledException, match=r"sample_prior_predictive\(\)"):
         model.require_group("prior")
 
 
@@ -481,10 +481,10 @@ def test_sklearn_adapter_capability_guards(rd_data):
     with pytest.raises(TypeError, match="no sampling overrides"):
         backend.sample_posterior(draws=5)
 
-    with pytest.raises(GroupNotSampleedException, match="'prior' draws"):
+    with pytest.raises(GroupNotSampledException, match="'prior' draws"):
         backend.predict(X.isel(obs_ind=slice(0, 5)), group="prior")
 
-    with pytest.raises(GroupNotSampleedException, match="'prior' draws"):
+    with pytest.raises(GroupNotSampledException, match="'prior' draws"):
         backend.coefficients(group="prior")
 
     from sklearn.linear_model import LinearRegression as SkLinearRegression
@@ -492,7 +492,7 @@ def test_sklearn_adapter_capability_guards(rd_data):
     with pytest.raises(RuntimeError, match="not been recorded"):
         model_adapter.SklearnModelAdapter(SkLinearRegression()).sample_posterior()
 
-    with pytest.raises(GroupNotSampleedException, match=r"fit\(\) first"):
+    with pytest.raises(GroupNotSampledException, match=r"fit\(\) first"):
         backend.coefficients()
 
 
@@ -561,7 +561,7 @@ def test_pymc_adapter_prior_capability_error():
 
 def test_pymc_adapter_coefficients_group_guard():
     backend = model_adapter.PyMCModelAdapter(cp.pymc_models.LinearRegression())
-    with pytest.raises(GroupNotSampleedException, match=r"sample_prior_predictive\(\)"):
+    with pytest.raises(GroupNotSampledException, match=r"sample_prior_predictive\(\)"):
         backend.coefficients(group="prior")
 
 
@@ -582,7 +582,7 @@ def test_forecast_adapter_guards():
     with pytest.raises(TypeError, match="no sampling overrides"):
         backend.sample_posterior(draws=5)
 
-    with pytest.raises(GroupNotSampleedException, match="'prior' draws"):
+    with pytest.raises(GroupNotSampledException, match="'prior' draws"):
         backend.predict(np.zeros((3, 1)), group="prior")
 
 
@@ -651,5 +651,5 @@ def test_propensity_score_build_is_idempotent():
 
 def test_state_space_predict_rejects_prior_group():
     model = cp.pymc_models.StateSpaceTimeSeries()
-    with pytest.raises(GroupNotSampleedException, match="Kalman"):
+    with pytest.raises(GroupNotSampledException, match="Kalman"):
         model.predict(group="prior")

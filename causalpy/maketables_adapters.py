@@ -28,7 +28,7 @@ import xarray as xr
 
 from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB
-from causalpy.custom_exceptions import GroupNotSampleedException
+from causalpy.custom_exceptions import GroupNotSampledException
 from causalpy.experiments._results import StaggeredDifferenceInDifferencesResult
 from causalpy.experiments.model_adapter import ModelAdapter
 
@@ -104,7 +104,7 @@ def _safe_r2_value(experiment: Any) -> float | None:
     """
     try:
         bundle = experiment.result
-    except (GroupNotSampleedException, NotImplementedError, AttributeError):
+    except (GroupNotSampledException, NotImplementedError, AttributeError):
         return None
     score_obj = getattr(bundle, "score", None)
     if score_obj is None:
@@ -170,7 +170,7 @@ def _get_maketables_hdi_prob(experiment: Any) -> float:
     if hdi_prob is None:
         try:
             bundle = experiment.result
-        except (GroupNotSampleedException, NotImplementedError, AttributeError):
+        except (GroupNotSampledException, NotImplementedError, AttributeError):
             bundle = None
         if isinstance(bundle, StaggeredDifferenceInDifferencesResult):
             hdi_prob = bundle.hdi_prob

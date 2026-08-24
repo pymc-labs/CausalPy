@@ -29,7 +29,7 @@ from sklearn.metrics import r2_score
 from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import (
-    GroupNotSampleedException,
+    GroupNotSampledException,
     PriorPredictiveNotSupportedException,
 )
 from causalpy.pymc_forecast_models import PyMCForecastModel
@@ -620,7 +620,7 @@ class PyMCModelAdapter(ModelAdapter):
         idata = self._model.idata
         if idata is None or group not in idata.children:
             call = "fit()" if group == "posterior" else "sample_prior_predictive()"
-            raise GroupNotSampleedException(
+            raise GroupNotSampledException(
                 f"No {group!r} draws are available on this model. Call {call} first.",
                 group=group,
             )
@@ -792,7 +792,7 @@ class SklearnModelAdapter(ModelAdapter):
             singleton ``chain``/``draw`` dimensions.
         """
         if group != "posterior":
-            raise GroupNotSampleedException(
+            raise GroupNotSampledException(
                 "No 'prior' draws are available on a point-estimate backend. "
                 "Call sample_prior_predictive() first — which itself raises "
                 "PriorPredictiveNotSupportedException for this backend — or "
@@ -900,14 +900,14 @@ class SklearnModelAdapter(ModelAdapter):
             error naming :meth:`sample_prior_predictive`.
         """
         if group != "posterior":
-            raise GroupNotSampleedException(
+            raise GroupNotSampledException(
                 "No 'prior' draws are available on a point-estimate backend. "
                 "Call sample_prior_predictive() first — which itself raises "
                 "PriorPredictiveNotSupportedException for this backend.",
                 group=group,
             )
         if not self._is_fitted:
-            raise GroupNotSampleedException(
+            raise GroupNotSampledException(
                 "No posterior draws are available on this model. Call fit() first.",
                 group="posterior",
             )
@@ -1124,7 +1124,7 @@ class PyMCForecastAdapter(ModelAdapter):
             Posterior draws of ``mu`` with canonical prediction dimensions.
         """
         if group != "posterior":
-            raise GroupNotSampleedException(
+            raise GroupNotSampledException(
                 "No 'prior' draws are available on a pymc-forecast backend. "
                 "Call sample_prior_predictive() first — which itself raises "
                 "PriorPredictiveNotSupportedException for this backend.",

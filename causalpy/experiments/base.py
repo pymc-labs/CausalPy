@@ -30,7 +30,7 @@ import xarray as xr
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import (
-    GroupNotSampleedException,
+    GroupNotSampledException,
     PriorPredictiveNotSupportedException,
 )
 from causalpy.experiments.model_adapter import ModelAdapter, make_model_adapter
@@ -277,7 +277,7 @@ class BaseExperiment(ABC):
                 "bundle; inspect the backend draws via .idata instead."
             )
         if self._result is None:
-            raise GroupNotSampleedException(
+            raise GroupNotSampledException(
                 f"No posterior draws are available. Call "
                 f"{type(self).__name__}.fit() first.",
                 group="posterior",
@@ -293,7 +293,7 @@ class BaseExperiment(ABC):
                 "bundle; inspect the backend draws via .idata instead."
             )
         if self._prior_result is None:
-            raise GroupNotSampleedException(
+            raise GroupNotSampledException(
                 f"No prior predictive draws are available. Call "
                 f"{type(self).__name__}.sample_prior_predictive() first.",
                 group="prior",
@@ -419,7 +419,7 @@ class BaseExperiment(ABC):
     def _resolve_group(self, group: str) -> Any:
         """Guard and resolve the read-method draw group.
 
-        Raises :class:`~causalpy.custom_exceptions.GroupNotSampleedException`
+        Raises :class:`~causalpy.custom_exceptions.GroupNotSampledException`
         naming the missing lifecycle verb; returns ``None`` for experiments
         without result bundles (their read methods guard on fitted state
         instead).
@@ -433,7 +433,7 @@ class BaseExperiment(ABC):
             raise ValueError(f"group must be 'prior' or 'posterior', got {group!r}")
         if not self._supports_results:
             if not self.is_fitted:
-                raise GroupNotSampleedException(
+                raise GroupNotSampledException(
                     f"No posterior draws are available. Call "
                     f"{type(self).__name__}.fit() first.",
                     group="posterior",
@@ -441,14 +441,14 @@ class BaseExperiment(ABC):
             return None
         if group == "prior":
             if self._prior_result is None:
-                raise GroupNotSampleedException(
+                raise GroupNotSampledException(
                     f"No prior predictive draws are available. Call "
                     f"{type(self).__name__}.sample_prior_predictive() first.",
                     group="prior",
                 )
             return self._prior_result
         if self._result is None:
-            raise GroupNotSampleedException(
+            raise GroupNotSampledException(
                 f"No posterior draws are available. Call "
                 f"{type(self).__name__}.fit() first.",
                 group="posterior",
@@ -471,11 +471,11 @@ class BaseExperiment(ABC):
 
         Raises
         ------
-        GroupNotSampleedException
+        GroupNotSampledException
             If the experiment has not been fitted yet.
         """
         if not self.is_fitted:
-            raise GroupNotSampleedException(
+            raise GroupNotSampledException(
                 f"No posterior draws are available. Call "
                 f"{type(self).__name__}.fit() before printing coefficients.",
                 group="posterior",
@@ -733,7 +733,7 @@ class BaseExperiment(ABC):
             except NotImplementedError:
                 # Experiments without an effect-summary implementation keep
                 # reporting; a missing draw group must NOT be swallowed —
-                # GroupNotSampleedException propagates so the report tells
+                # GroupNotSampledException propagates so the report tells
                 # the user to call fit() first.
                 logger.debug(
                     "effect_summary() not available for %s",
