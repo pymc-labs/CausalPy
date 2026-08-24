@@ -706,8 +706,4 @@ class RegressionDiscontinuity(BaseExperiment):
                 table=_generate_table_rd_ols(stats),
                 text=_generate_prose_rd_ols(stats, alpha=alpha),
             )
-        if group == "prior":
-            summary.text = (
-                "Prior predictive check (not a causal estimate):\n" + summary.text
-            )
         return summary

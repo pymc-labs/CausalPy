@@ -745,10 +745,20 @@ def _extract_window(
             mask = (post_index >= start_val) & (post_index <= end_val)
             window_coords = post_index[mask]
     elif isinstance(window, slice):
-        # Handle slice object
+        # Handle slice object. Boolean-mask in both cases: pandas 3.x no
+        # longer accepts Timestamp/string-bounded slices on DatetimeIndex.
         if isinstance(post_index, pd.DatetimeIndex):
-            # For datetime, slice works directly
-            window_coords = post_index[window]
+            start = (
+                pd.Timestamp(window.start)
+                if window.start is not None
+                else post_index.min()
+            )
+            stop = (
+                pd.Timestamp(window.stop)
+                if window.stop is not None
+                else post_index.max()
+            )
+            window_coords = post_index[(post_index >= start) & (post_index <= stop)]
         else:
             # For integer indices, convert slice to value-based filtering
             start_val = (
