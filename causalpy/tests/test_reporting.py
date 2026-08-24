@@ -42,7 +42,7 @@ def test_effect_summary_basic(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -74,7 +74,7 @@ def test_effect_summary_with_cumulative(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(cumulative=True)
 
@@ -92,7 +92,7 @@ def test_effect_summary_without_cumulative(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(cumulative=False)
 
@@ -110,7 +110,7 @@ def test_effect_summary_with_relative(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(relative=True)
 
@@ -129,7 +129,7 @@ def test_effect_summary_direction_increase(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="increase")
 
@@ -147,7 +147,7 @@ def test_effect_summary_direction_decrease(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="decrease")
 
@@ -165,7 +165,7 @@ def test_effect_summary_direction_two_sided(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="two-sided")
 
@@ -185,7 +185,7 @@ def test_effect_summary_window_datetime(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Get post-period dates
     post_dates = result.datapost.index
@@ -228,7 +228,7 @@ def test_effect_summary_window_integer(mock_pymc_sample):
         treatment_time,
         formula="y ~ 1 + t",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test with tuple window
     stats1 = result.effect_summary(window=(55, 65))
@@ -249,7 +249,7 @@ def test_effect_summary_alpha(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(alpha=0.1)  # 90% HDI
 
@@ -267,7 +267,7 @@ def test_effect_summary_rope(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(min_effect=1.0)
 
@@ -297,7 +297,7 @@ def test_effect_summary_ols_its(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -326,7 +326,7 @@ def test_effect_summary_ols_did(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -370,7 +370,7 @@ def test_effect_summary_ols_did_residuals_are_per_observation(did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
     X_da = result.design["X"]
     y_da = result.design["y"]
@@ -438,14 +438,14 @@ def test_effect_summary_ols_did_order_independent(did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
     result_post_first = cp.DifferenceInDifferences(
         df.copy(),
         formula="y ~ 1 + post_treatment * group",
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats_group_first = result_group_first.effect_summary().table.loc[
         "treatment_effect"
@@ -479,14 +479,14 @@ def test_effect_summary_ols_did_categorical_group_spelling(did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
     result_categorical = cp.DifferenceInDifferences(
         df.copy(),
         formula="y ~ 1 + C(group) * post_treatment",
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats_plain = result_plain.effect_summary().table.loc["treatment_effect"]
     stats_categorical = result_categorical.effect_summary().table.loc[
@@ -510,7 +510,7 @@ def test_effect_summary_ols_sc(mock_pymc_sample, sc_data):
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats = result.effect_summary(treated_unit="actual")
 
@@ -531,7 +531,7 @@ def test_effect_summary_rd_pymc(mock_pymc_sample, rd_data):
         formula="y ~ 1 + x + treated + x:treated",
         treatment_threshold=0.5,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -553,7 +553,7 @@ def test_effect_summary_rd_ols(mock_pymc_sample, rd_data):
         formula="y ~ 1 + x + treated + x:treated",
         treatment_threshold=0.5,
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -581,7 +581,7 @@ def test_effect_summary_ols_rd_residuals_are_per_observation(rd_data):
         formula="y ~ 1 + x + treated + x:treated",
         treatment_threshold=0.5,
         model=LinearRegression(),
-    )
+    ).fit()
 
     n, _ = result.design["X"].shape
     residuals = _point_residuals(result)
@@ -610,7 +610,7 @@ def test_effect_summary_ols_rd_matches_statsmodels_threshold_contrast(rd_data, f
         formula=formula,
         treatment_threshold=0.5,
         model=LinearRegression(),
-    )
+    ).fit()
     row = result.effect_summary().table.loc["discontinuity"]
 
     threshold_data = pd.DataFrame(
@@ -671,7 +671,7 @@ def test_effect_summary_rkink_pymc(mock_pymc_sample):
         formula="y ~ 1 + x + I(x**2) + I((x-0.5)*treated) + I(((x-0.5)**2)*treated)",
         kink_point=kink_point,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -709,7 +709,7 @@ def test_effect_summary_rkink_directions(mock_pymc_sample):
         formula="y ~ 1 + x + I(x**2) + I((x-0.5)*treated) + I(((x-0.5)**2)*treated)",
         kink_point=kink_point,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test increase
     stats_increase = result.effect_summary(direction="increase")
@@ -750,7 +750,7 @@ def test_effect_summary_rkink_rope(mock_pymc_sample):
         formula="y ~ 1 + x + I(x**2) + I((x-0.5)*treated) + I(((x-0.5)**2)*treated)",
         kink_point=kink_point,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(min_effect=0.2)
     assert "p_rope" in stats.table.columns
@@ -779,7 +779,7 @@ def test_effect_summary_empty_window_error(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Create window that doesn't overlap with post-period
     future_date = pd.to_datetime("2100-01-01")
@@ -797,7 +797,7 @@ def test_effect_summary_hdi_coverage(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -823,12 +823,12 @@ def test_effect_summary_tail_probabilities_match(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="increase")
 
     # Manually calculate P(effect > 0)
-    avg_effect = result.post_impact.mean(dim="obs_ind")
+    avg_effect = result.result.impact_post.mean(dim="obs_ind")
     manual_p_gt_0 = float((avg_effect > 0).mean().values)
 
     # Should match (within floating point precision)
@@ -846,7 +846,7 @@ def test_effect_summary_synthetic_control(mock_pymc_sample, sc_data):
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(treated_unit="actual")
 
@@ -903,7 +903,7 @@ def test_effect_summary_synthetic_control_multi_unit(mock_pymc_sample):
         control_units=control_units,
         treated_units=treated_units,
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test with first treated unit
     stats1 = result.effect_summary(treated_unit="treated_0")
@@ -931,7 +931,7 @@ def test_effect_summary_synthetic_control_window(mock_pymc_sample, sc_data):
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test with integer window
     post_indices = result.datapost.index
@@ -956,7 +956,7 @@ def test_effect_summary_did(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -982,7 +982,7 @@ def test_effect_summary_did_direction_increase(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="increase")
 
@@ -1000,7 +1000,7 @@ def test_effect_summary_did_direction_decrease(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="decrease")
 
@@ -1018,7 +1018,7 @@ def test_effect_summary_did_direction_two_sided(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="two-sided")
 
@@ -1038,7 +1038,7 @@ def test_effect_summary_did_rope(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(min_effect=1.0)
 
@@ -1061,7 +1061,7 @@ def test_effect_summary_did_ols_error(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=ols_model,
-    )
+    ).fit()
 
     # OLS is now supported for DiD, so this should not raise an error
     stats = result.effect_summary()
@@ -1083,7 +1083,7 @@ def test_effect_summary_did_hdi_coverage(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -1831,14 +1831,13 @@ def test_extract_window_canonical_dataarray():
     from causalpy.reporting import _extract_window
 
     datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
-    result = SimpleNamespace(
-        post_impact=xr.DataArray(
-            [1.0, 2.0, 3.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
-        ),
-        datapost=datapost,
+    post_impact = xr.DataArray(
+        [1.0, 2.0, 3.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
     )
 
-    windowed_impact, window_coords = _extract_window(result, window="post")
+    windowed_impact, window_coords = _extract_window(
+        post_impact, datapost.index, window="post"
+    )
 
     assert isinstance(windowed_impact, xr.DataArray)
     assert window_coords.equals(datapost.index)
@@ -1851,16 +1850,12 @@ def test_extract_counterfactual_canonical_dataarray():
     from causalpy.reporting import _extract_counterfactual
 
     datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
-    result = SimpleNamespace(
-        post_pred=xr.DataArray(
-            [5.0, 6.0, 7.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
-        ),
-        datapost=datapost,
+    post_pred = xr.DataArray(
+        [5.0, 6.0, 7.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
     )
 
     window_coords = datapost.index[:2]
-    counterfactual = _extract_counterfactual(result, window_coords)
-
+    counterfactual = _extract_counterfactual(post_pred, window_coords)
     assert isinstance(counterfactual, xr.DataArray)
     np.testing.assert_array_equal(counterfactual.values, np.array([5.0, 6.0]))
 
@@ -2092,9 +2087,10 @@ def test_detect_experiment_type_unknown():
     """Test _detect_experiment_type raises error for unknown experiment type."""
     from causalpy.reporting import _detect_experiment_type
 
-    # Create mock result with no recognized attributes
+    # Mock experiment whose result bundle is not a recognized type
     class MockResult:
         some_other_attribute = "value"
+        result = None
 
     result = MockResult()
 
@@ -2104,14 +2100,19 @@ def test_detect_experiment_type_unknown():
 
 def test_detect_experiment_type_prepostnegd():
     """Test _detect_experiment_type correctly identifies PrePostNEGD (has causal_impact but not post_impact)."""
+    from causalpy.experiments._results import CoefficientResult
     from causalpy.reporting import _detect_experiment_type
 
-    # Create mock result like PrePostNEGD
+    # Create mock experiment with a CoefficientResult bundle, like PrePostNEGD
     class MockPrePostNEGD:
-        causal_impact = None
+        result = CoefficientResult(
+            causal_impact=None,
+            scenario_control=None,
+            scenario_treated=None,
+            scenario_counterfactual=None,
+        )
 
     result = MockPrePostNEGD()
-
     experiment_type = _detect_experiment_type(result)
     assert experiment_type == "did"
 
@@ -2133,7 +2134,9 @@ def test_extract_window_invalid_type():
 
     # Invalid window type (not "post", tuple, or slice)
     with pytest.raises(ValueError, match="window must be"):
-        _extract_window(result, window=[1, 2, 3])  # list is invalid
+        _extract_window(
+            result.post_impact, result.datapost.index, window=[1, 2, 3]
+        )  # list is invalid
 
 
 @pytest.mark.integration
@@ -2154,7 +2157,7 @@ def test_compute_statistics_did_ols_missing_interaction_term(
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Manually corrupt the labels to trigger error
     result.labels = ["Intercept", "some_other_term"]
@@ -2175,7 +2178,7 @@ def test_compute_statistics_rd_ols_raises_when_threshold_design_is_missing(rd_da
         formula="y ~ 1 + x + treated + x:treated",
         treatment_threshold=0.5,
         model=LinearRegression(),
-    )
+    ).fit()
     del result.x_discon_design
 
     with pytest.raises(ValueError, match="threshold design rows are unavailable"):
@@ -2217,7 +2220,7 @@ def test_compute_statistics_rd_ols_raises_when_threshold_design_is_malformed(
         formula="y ~ 1 + x + treated + x:treated",
         treatment_threshold=0.5,
         model=LinearRegression(),
-    )
+    ).fit()
     result.x_discon_design = invalid_design(result.x_discon_design)
 
     with pytest.raises(ValueError, match="threshold design"):
@@ -2236,7 +2239,7 @@ def test_compute_statistics_rd_ols_raises_when_fitted_design_is_singular(rd_data
         formula="y ~ 1 + x + I(2 * x) + treated",
         treatment_threshold=0.5,
         model=LinearRegression(),
-    )
+    ).fit()
 
     with pytest.raises(ValueError, match="X.T @ X is singular"):
         _compute_statistics_rd_ols(result)
@@ -2302,7 +2305,7 @@ def test_extract_window_slice_with_step(mock_pymc_sample):
         treatment_time,
         formula="y ~ 1 + t",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test with slice having step
     stats = result.effect_summary(window=slice(50, 70, 2))  # Every other point
@@ -2361,10 +2364,12 @@ def test_extract_counterfactual_canonical_pymc(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     window_coords = result.datapost.index[:10]
-    counterfactual = _extract_counterfactual(result, window_coords, treated_unit=None)
+    counterfactual = _extract_counterfactual(
+        result.result.predictions_post, window_coords, treated_unit=None
+    )
 
     assert counterfactual.sizes["obs_ind"] == 10
     assert {"chain", "draw"} <= set(counterfactual.dims)
@@ -3558,7 +3563,7 @@ def test_effect_summary_prepostnegd_pymc(mock_pymc_sample, anova1_data):
         group_variable_name="group",
         pretreatment_variable_name="pre",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -3584,7 +3589,7 @@ def test_effect_summary_prepostnegd_directions(mock_pymc_sample, anova1_data):
         group_variable_name="group",
         pretreatment_variable_name="pre",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test increase
     stats_increase = result.effect_summary(direction="increase")
@@ -3610,7 +3615,7 @@ def test_effect_summary_prepostnegd_rope(mock_pymc_sample, anova1_data):
         group_variable_name="group",
         pretreatment_variable_name="pre",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(min_effect=0.5)
 
@@ -3633,7 +3638,7 @@ def test_effect_summary_its_relative_false(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(relative=False)
 
@@ -3653,7 +3658,7 @@ def test_effect_summary_ols_cumulative_false(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats = result.effect_summary(cumulative=False)
 
@@ -3674,7 +3679,7 @@ def test_effect_summary_ols_relative_false(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats = result.effect_summary(relative=False)
 
@@ -3692,7 +3697,7 @@ def test_effect_summary_rope_with_two_sided_its(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="two-sided", min_effect=1.0)
 
@@ -3712,7 +3717,7 @@ def test_effect_summary_rope_with_two_sided_did(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="two-sided", min_effect=0.5)
 
@@ -3729,7 +3734,7 @@ def test_effect_summary_rd_two_sided_with_rope(mock_pymc_sample, rd_data):
         formula="y ~ 1 + x + treated + x:treated",
         treatment_threshold=0.5,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="two-sided", min_effect=0.5)
 
@@ -3750,7 +3755,7 @@ def test_effect_summary_sc_cumulative_false(mock_pymc_sample, sc_data):
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(cumulative=False, treated_unit="actual")
 
@@ -3770,7 +3775,7 @@ def test_effect_summary_sc_relative_false(mock_pymc_sample, sc_data):
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(relative=False, treated_unit="actual")
 
@@ -3790,7 +3795,7 @@ def test_effect_summary_ols_both_false(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats = result.effect_summary(cumulative=False, relative=False)
 
@@ -3810,7 +3815,7 @@ def test_effect_summary_pymc_both_false(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(cumulative=False, relative=False)
 

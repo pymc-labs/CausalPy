@@ -133,6 +133,28 @@ upstream bug is tracked at
 [pymc-devs/pymc#8377](https://github.com/pymc-devs/pymc/issues/8377), and
 removal of the workaround is tracked in CausalPy issue #1067.
 
+#### Lazy experiment lifecycle: `configure` → optional prior checks → `fit()`
+
+Experiment constructors no longer run inference. `__init__` validates input and builds design matrices only; posterior inference happens through an explicit `fit()` — which returns the fitted experiment, so existing call sites migrate with one appended token:
+
+```python
+# Before (0.x / eager)
+result = cp.InterruptedTimeSeries(data, treatment_time=t0, formula="y ~ 1 + t")
+result.plot()
+
+# After (1.0 / lazy)
+result = cp.InterruptedTimeSeries(data, treatment_time=t0, formula="y ~ 1 + t").fit()
+result.plot()
+```
+
+The optional prior phase runs before MCMC when you want prior predictive checks: `exp.sample_prior_predictive()` (draws controlled by the model's `prior_sample_kwargs`, default 500), then `exp.plot(group="prior")`, `exp.effect_summary(group="prior")`, and `exp.get_plot_data(group="prior")`. Prior-group plots render a reduced panel set (counterfactual vs observations only) and prior effect summaries are worded as plausibility checks, not causal claims. `build()` constructs the PyMC graph without sampling so the spec can be inspected (`pm.model_to_graphviz(exp.model)`); both samplers auto-call it.
+
+Draw-derived results moved off the experiment object into per-group bundles: `exp.result` (posterior group) and `exp.prior_result` (prior group). The old flat attributes are removed: `pre_pred` → `result.predictions_pre`, `post_pred` → `result.predictions_post`, `pre_impact` → `result.impact_pre`, `post_impact` → `result.impact_post`, `post_impact_cumulative` → `result.impact_post_cumulative`, `score` → `result.score`; DiD/PrePostNEGD's `causal_impact`, RD's `discontinuity_at_threshold`, RK's `gradient_change`, StaggeredDiD's `att_group_time_`/`att_event_time_`/`y_pred`/`hdi_prob_`, and SDID's weight-derived attributes live on the corresponding bundle fields. Read methods raise `GroupNotSampledException` (new; exported from `causalpy`) naming the missing call instead of failing deep inside plotting or reporting. Attempting the prior phase on backends without one raises `PriorPredictiveNotSupportedException`.
+
+Re-running a phase overwrites only its own draws: a second `fit()` replaces the posterior (emitting a warning) and preserves prior state. Assigning a new model — also the documented way to revise priors, replacing the never-shipped `set_priors()` — resets all results, because graph identity is the model instance. Third-party experiment subclasses that overrode `algorithm()` must migrate to `_fit_inputs()` + `_finalize(group)`; see `ARCHITECTURE.md`.
+
+Additional removals and timing changes worth calling out: StaggeredDiD's documented `data_` frame is gone — its `att_group_time`/`att_event_time` tables and raw counterfactual draws live on the result bundle (`result.att_group_time`, `result.att_event_time`, `result.y_pred`), and the per-draw quantities it cached (`y_hat0`, `tau_hat`) are recomputed inside the aggregators. Validation that used to abort construction for a few backend/design combinations now runs at first build/fit instead, under the lazy lifecycle: `PrePostNEGD` and `SyntheticDifferenceInDifferences` with an OLS model construct fine and raise their `NotImplementedError` at `fit()` time rather than in `__init__`.
+
 ### Behaviour that intentionally did *not* change
 
 #### The ArviZ default-interval change is a no-op for CausalPy

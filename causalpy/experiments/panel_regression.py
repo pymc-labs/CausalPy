@@ -34,10 +34,11 @@ from causalpy.plot_utils import _plot_interval_band
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 
+from ._results import ResultBundle
 from .base import BaseExperiment
 
 
-class PanelRegression(BaseExperiment):
+class PanelRegression(BaseExperiment[ResultBundle]):
     """Panel regression with fixed effects estimation.
 
     Enables panel-aware visualization and diagnostics, with support for both
@@ -117,6 +118,15 @@ class PanelRegression(BaseExperiment):
     sensitivity or using dedicated FE packages that implement iterative
     two-way demeaning (e.g. reghdfe, pyfixest).
 
+    **Lazy lifecycle**
+
+    Construction only validates inputs and builds the design matrices — no
+    sampling happens. Call :meth:`fit` to draw posterior samples (and
+    optionally :meth:`sample_prior_predictive` first for a prior predictive
+    check); every method that reads draws raises
+    :class:`~causalpy.custom_exceptions.GroupNotSampledException` until you
+    do.
+
     Examples
     --------
     Small panel with dummy variables:
@@ -149,7 +159,7 @@ class PanelRegression(BaseExperiment):
     ...     model=cp.pymc_models.LinearRegression(
     ...         sample_kwargs={"random_seed": 42, "progressbar": False, "cores": 1}
     ...     ),
-    ... )
+    ... ).fit()
 
     Large panel with demeaned transformation:
 
@@ -179,11 +189,14 @@ class PanelRegression(BaseExperiment):
     ...     model=cp.pymc_models.LinearRegression(
     ...         sample_kwargs={"random_seed": 42, "progressbar": False, "cores": 1}
     ...     ),
-    ... )
+    ... ).fit()
     """
 
     supports_ols = True
     supports_bayes = True
+    # PanelRegression stores no result bundle; fitted state is keyed off the
+    # backend and every draw-reading method guards via _resolve_group.
+    _supports_results = False
 
     def __init__(
         self,
@@ -223,7 +236,6 @@ class PanelRegression(BaseExperiment):
         self.n_periods = data[time_fe_variable].nunique() if time_fe_variable else None
         self._build_design_matrices()
         self._prepare_data()
-        self.algorithm()
 
     def input_validation(self) -> None:
         """Validate input parameters."""
@@ -321,15 +333,13 @@ class PanelRegression(BaseExperiment):
         )
         del self._X_raw, self._y_raw
 
-    def algorithm(self) -> None:
-        """Run the experiment algorithm: fit the model."""
+    def _fit_inputs(self) -> tuple[Any, Any, dict[str, Any] | None]:
+        """Return the design matrices and coordinates for build."""
         X = self.design["X"]
-        y = self.design["y"]
-
-        self._model_backend.fit(
-            X=X,
-            y=y,
-            coords=build_coords(self.labels, X.shape[0]),
+        return (
+            X,
+            self.design["y"],
+            build_coords(self.labels, X.shape[0]),
         )
 
     def _demean_transform(self, data: pd.DataFrame, group_var: str) -> pd.DataFrame:
@@ -427,7 +437,13 @@ class PanelRegression(BaseExperiment):
         round_to : int, optional
             Number of significant figures to round to. Defaults to None,
             in which case 2 significant figures are used.
+
+        Raises
+        ------
+        GroupNotSampledException
+            If the experiment has not been fitted yet.
         """
+        self._resolve_group("posterior")
         print(f"\n{self.expt_type}")
         print("=" * 60)
         print(f"Units: {self.n_units} ({self.unit_fe_variable})")
@@ -452,6 +468,7 @@ class PanelRegression(BaseExperiment):
     def effect_summary(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         window: Literal["post"] | tuple | slice = "post",
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
         alpha: float = 0.05,
@@ -473,6 +490,10 @@ class PanelRegression(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to summarize. Accepted for API parity with the
+            other experiments; ``PanelRegression`` implements no effect
+            summary for either group.
         window : str, tuple, or slice, default "post"
             Time window for analysis (placeholder; not consumed).
         direction : {"increase", "decrease", "two-sided"}, default "increase"
@@ -507,6 +528,7 @@ class PanelRegression(BaseExperiment):
     def plot(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         hdi_prob: float = HDI_PROB,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -520,6 +542,13 @@ class PanelRegression(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group to render. ``"posterior"`` (default) plots
+            coefficient draws after :meth:`fit`; ``"prior"`` plots the
+            coefficient draws implied by the prior phase and requires
+            :meth:`sample_prior_predictive` first — on backends without a
+            prior phase that call raises
+            :class:`~causalpy.custom_exceptions.PriorPredictiveNotSupportedException`.
         hdi_prob : float
             Probability mass of the highest density interval drawn around
             each posterior coefficient. Must be in ``(0, 1]``. Ignored for
@@ -544,19 +573,30 @@ class PanelRegression(BaseExperiment):
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
+            group=group,
             hdi_prob=hdi_prob,
         )
 
     def _plot(
-        self, hdi_prob: float = HDI_PROB, **kwargs: Any
+        self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+        hdi_prob: float = HDI_PROB,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
         """Create coefficient plot.
 
         Bayesian models render a forest plot with HDI intervals; point-estimate
         models render a bar plot of coefficient values.
 
+        ``PanelRegression`` consumes no result bundle (``_supports_results``
+        is ``False``); the requested *group* selects which coefficient
+        draws are rendered instead of being guessed.
+
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group whose coefficient draws are rendered.
         hdi_prob : float, optional
             Probability mass of the highest density interval drawn around each
             posterior coefficient. Must be in ``(0, 1]``. Ignored for
@@ -568,10 +608,14 @@ class PanelRegression(BaseExperiment):
         tuple[plt.Figure, plt.Axes]
             Figure and axes objects
         """
-        return self._plot_coefficients_internal(hdi_prob=hdi_prob)
+        return self._plot_coefficients_internal(hdi_prob=hdi_prob, group=group)
 
     def _plot_coefficients_internal(
-        self, var_names: list[str] | None = None, hdi_prob: float = HDI_PROB
+        self,
+        var_names: list[str] | None = None,
+        hdi_prob: float = HDI_PROB,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
     ) -> tuple[plt.Figure, plt.Axes]:
         """Internal method to create coefficient plot.
 
@@ -584,7 +628,15 @@ class PanelRegression(BaseExperiment):
             Probability mass for the HDI interval when plotting Bayesian
             coefficients. Must be in (0, 1). Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group whose coefficients are rendered.
+
+        Raises
+        ------
+        GroupNotSampledException
+            If the requested draw group has not been sampled.
         """
+        self._resolve_group(group)
         if not 0 < hdi_prob < 1:
             raise ValueError("hdi_prob must be between 0 and 1")
 
@@ -592,7 +644,9 @@ class PanelRegression(BaseExperiment):
         if not coeff_names:
             raise ValueError("var_names must contain at least one coefficient")
 
-        coefficients = self._model_backend.coefficients().sel(coeffs=coeff_names)
+        coefficients = self._model_backend.coefficients(group=group).sel(
+            coeffs=coeff_names
+        )
         if "treated_units" in coefficients.dims:
             if coefficients.sizes["treated_units"] != 1:
                 raise ValueError(
@@ -645,7 +699,13 @@ class PanelRegression(BaseExperiment):
         pd.DataFrame
             DataFrame with fitted values (and credible intervals when the
             model carries posterior draws).
+
+        Raises
+        ------
+        GroupNotSampledException
+            If the experiment has not been fitted yet.
         """
+        self._resolve_group("posterior")
         columns: dict[str, Any] = {"y_actual": self.design["y"].values.flatten()}
 
         # ponytail: PanelRegression stores no canonical prediction container,
@@ -653,6 +713,7 @@ class PanelRegression(BaseExperiment):
         # (idata mu vs sklearn predict); the branch is isolated here. Upgrade
         # path: store canonical in-sample predictions at fit time.
         if self._model_backend.is_bayesian:
+            # PanelRegression is posterior-only; no group= phase.
             mu = self._model_backend.require_idata().posterior["mu"]
             columns["y_fitted"] = mu.mean(dim=["chain", "draw"]).values.flatten()
             columns["y_fitted_lower"] = mu.quantile(
@@ -727,7 +788,10 @@ class PanelRegression(BaseExperiment):
         ------
         ValueError
             If fe_method is not "dummies"
+        GroupNotSampledException
+            If the experiment has not been fitted yet.
         """
+        self._resolve_group("posterior")
         if self.fe_method != "dummies":
             raise ValueError(
                 "plot_unit_effects() only available with fe_method='dummies'. "
@@ -811,7 +875,10 @@ class PanelRegression(BaseExperiment):
         ------
         ValueError
             If time_fe_variable is not provided (cannot plot trajectories without time)
+        GroupNotSampledException
+            If the experiment has not been fitted yet.
         """
+        self._resolve_group("posterior")
         if self.time_fe_variable is None:
             raise ValueError(
                 "plot_trajectories() requires time_fe_variable to be specified"
@@ -826,6 +893,7 @@ class PanelRegression(BaseExperiment):
 
         # Get posterior for HDI plotting (Bayesian only)
         if is_bayesian:
+            # PanelRegression is posterior-only; no group= phase.
             idata = self._model_backend.require_idata()
             mu = idata.posterior["mu"]
             if interval_type == "predictive":

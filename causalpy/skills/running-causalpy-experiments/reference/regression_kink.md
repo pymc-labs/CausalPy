@@ -40,7 +40,12 @@ rng = np.random.default_rng(42)
 x = np.linspace(-1, 1, 100)
 df = pd.DataFrame({"x": x})
 df["treated"] = (df["x"] >= kink_point).astype(int)
-df["y"] = 1 + 0.5 * df["x"] + 2 * (df["x"] - kink_point) * df["treated"] + rng.normal(0, 0.1, len(df))
+df["y"] = (
+    1
+    + 0.5 * df["x"]
+    + 2 * (df["x"] - kink_point) * df["treated"]
+    + rng.normal(0, 0.1, len(df))
+)
 
 result = cp.RegressionKink(
     data=df,

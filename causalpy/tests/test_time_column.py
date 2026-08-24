@@ -149,19 +149,20 @@ class TestInterruptedTimeSeries:
             treatment_time,
             formula="timeseries ~ 1 + linear_trend",
             model=LinearRegression(),
-        )
+        ).fit()
         from_polars = cp.InterruptedTimeSeries(
             to_polars_with_time(its_simple_data, "date"),
             treatment_time,
             formula="timeseries ~ 1 + linear_trend",
             model=LinearRegression(),
             time_column="date",
-        )
+        ).fit()
 
         assert from_polars.datapre.index.equals(from_pandas.datapre.index)
         assert from_polars.datapost.index.equals(from_pandas.datapost.index)
         np.testing.assert_allclose(
-            np.asarray(from_polars.post_impact), np.asarray(from_pandas.post_impact)
+            np.asarray(from_polars.result.impact_post),
+            np.asarray(from_pandas.result.impact_post),
         )
 
     def test_time_column_on_pandas_input(self, its_simple_data):

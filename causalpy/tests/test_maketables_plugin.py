@@ -26,6 +26,7 @@ from causalpy.data.simulate_data import (
     generate_piecewise_its_data,
     generate_staggered_did_data,
 )
+from causalpy.experiments._results import StaggeredDifferenceInDifferencesResult
 from causalpy.experiments.model_adapter import (
     ModelAdapter,
     PyMCModelAdapter,
@@ -60,7 +61,7 @@ def test_maketables_coef_table_pymc_contract(mock_pymc_sample):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
 
@@ -86,7 +87,7 @@ def test_maketables_coef_table_sklearn_contract(mock_pymc_sample):
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
 
@@ -135,7 +136,7 @@ def test_maketables_multi_treated_unit_requires_explicit_selection(mock_pymc_sam
         control_units=[f"control_{i}" for i in range(n_control)],
         treated_units=[f"treated_{j}" for j in range(n_treated)],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     with pytest.raises(ValueError, match="Ambiguous multi-treated-unit"):
         _ = result.__maketables_coef_table__
@@ -189,7 +190,7 @@ def test_maketables_hdi_prob_user_control_smoke(mock_pymc_sample):
             time_variable_name="t",
             group_variable_name="group",
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-        )
+        ).fit()
     except (AttributeError, TypeError) as exc:
         message = str(exc)
         if "DataTree" in message or "extend" in message:
@@ -230,7 +231,7 @@ def test_maketables_prepostnegd_pymc_contract(mock_pymc_sample):
         group_variable_name="group",
         pretreatment_variable_name="pre",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
     assert table.index.name == "Coefficient"
@@ -264,7 +265,7 @@ def test_maketables_regression_kink_pymc_contract(mock_pymc_sample):
         formula="y ~ 1 + x + I(x**2) + I((x-0.5)*treated) + I(((x-0.5)**2)*treated)",
         kink_point=kink_point,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
     assert table.index.name == "Coefficient"
@@ -280,7 +281,7 @@ def test_maketables_piecewise_its_pymc_contract(mock_pymc_sample):
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
     assert table.index.name == "Coefficient"
@@ -304,7 +305,7 @@ def test_maketables_staggered_did_pymc_contract(mock_pymc_sample):
         treated_variable_name="treated",
         treatment_time_variable_name="treatment_time",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
     assert table.index.name == "Coefficient"
@@ -325,7 +326,7 @@ def test_maketables_interrupted_time_series_pymc_contract(mock_pymc_sample):
         treatment_time=pd.to_datetime("2017-01-01"),
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
     assert table.index.name == "Coefficient"
@@ -343,7 +344,7 @@ def test_maketables_regression_discontinuity_pymc_contract(mock_pymc_sample):
         formula="y ~ 1 + x + treated + x:treated",
         treatment_threshold=0.5,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
     assert table.index.name == "Coefficient"
@@ -362,7 +363,7 @@ def test_maketables_synthetic_control_single_treated_pymc_contract(mock_pymc_sam
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
     assert table.index.name == "Coefficient"
@@ -380,7 +381,7 @@ def test_maketables_inverse_propensity_weighting_pymc_contract(mock_pymc_sample)
         outcome_variable="outcome",
         weighting_scheme="robust",
         model=cp.pymc_models.PropensityScore(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
     assert table.index.name == "Coefficient"
@@ -400,7 +401,7 @@ def test_maketables_instrumental_variable_pymc_contract(mock_pymc_sample):
         model=cp.pymc_models.InstrumentalVariableRegression(
             sample_kwargs=sample_kwargs
         ),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
     assert table.index.name == "Coefficient"
@@ -421,7 +422,7 @@ def test_maketables_interrupted_time_series_sklearn_contract(mock_pymc_sample):
         treatment_time=pd.to_datetime("2017-01-01"),
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
     assert table.index.name == "Coefficient"
@@ -444,7 +445,7 @@ def test_maketables_regression_discontinuity_sklearn_contract(mock_pymc_sample):
         formula="y ~ 1 + x + treated + x:treated",
         treatment_threshold=0.5,
         model=LinearRegression(),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
     assert table.index.name == "Coefficient"
@@ -461,7 +462,7 @@ def test_maketables_piecewise_its_sklearn_contract(mock_pymc_sample):
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
     assert table.index.name == "Coefficient"
@@ -480,7 +481,7 @@ def test_maketables_synthetic_control_single_treated_sklearn_contract(mock_pymc_
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=LinearRegression(),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
     assert table.index.name == "Coefficient"
@@ -506,7 +507,7 @@ def test_maketables_staggered_did_sklearn_contract(mock_pymc_sample):
         treated_variable_name="treated",
         treatment_time_variable_name="treatment_time",
         model=LinearRegression(),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
     assert table.index.name == "Coefficient"
@@ -525,7 +526,7 @@ def test_maketables_missing_pymc_coef_variable_raises(mock_pymc_sample):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     posterior = (
         result.model.idata["posterior"].to_dataset().rename({"beta": "beta_missing"})
@@ -549,7 +550,7 @@ def test_maketables_incompatible_pymc_label_dim_raises(mock_pymc_sample):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     posterior = (
         result.model.idata["posterior"].to_dataset().rename({"coeffs": "bad_coeff_dim"})
@@ -612,32 +613,34 @@ class TestSafeR2Value:
         assert _safe_r2_value(_Stub()) is None
 
     def test_returns_none_when_score_is_none(self):
-        assert _safe_r2_value(_Stub(score=None)) is None
+        assert _safe_r2_value(_Stub(result=_Stub(score=None))) is None
 
     def test_returns_float_for_numeric_score(self):
-        assert _safe_r2_value(_Stub(score=0.85)) == pytest.approx(0.85)
+        assert _safe_r2_value(_Stub(result=_Stub(score=0.85))) == pytest.approx(0.85)
 
     def test_returns_float_for_numpy_int(self):
-        assert _safe_r2_value(_Stub(score=np.int64(1))) == pytest.approx(1.0)
+        assert _safe_r2_value(_Stub(result=_Stub(score=np.int64(1)))) == pytest.approx(
+            1.0
+        )
 
     def test_series_with_r2_key(self):
         s = pd.Series({"r2": 0.9, "r2_std": 0.05})
-        result = _safe_r2_value(_Stub(score=s))
+        result = _safe_r2_value(_Stub(result=_Stub(score=s)))
         assert result == pytest.approx(0.9)
 
     def test_series_with_no_r2_keys(self):
         s = pd.Series({"rmse": 1.5, "mae": 0.8})
-        assert _safe_r2_value(_Stub(score=s)) is None
+        assert _safe_r2_value(_Stub(result=_Stub(score=s))) is None
 
     def test_series_with_only_nan_r2(self):
         s = pd.Series({"r2": np.nan})
-        assert _safe_r2_value(_Stub(score=s)) is None
+        assert _safe_r2_value(_Stub(result=_Stub(score=s))) is None
 
     def test_returns_none_for_string_score(self):
-        assert _safe_r2_value(_Stub(score="high")) is None
+        assert _safe_r2_value(_Stub(result=_Stub(score="high"))) is None
 
     def test_returns_none_for_dict_score(self):
-        assert _safe_r2_value(_Stub(score={"r2": 0.9})) is None
+        assert _safe_r2_value(_Stub(result=_Stub(score={"r2": 0.9}))) is None
 
     def test_exception_in_series_ops_returns_none(self):
         class _ExplodingSeries(pd.Series):
@@ -645,7 +648,7 @@ class TestSafeR2Value:
                 raise RuntimeError("kaboom")
 
         s = _ExplodingSeries({"r2_mean": 0.9})
-        assert _safe_r2_value(_Stub(score=s)) is None
+        assert _safe_r2_value(_Stub(result=_Stub(score=s))) is None
 
 
 class TestCanonicalFrame:
@@ -690,16 +693,30 @@ class TestGetMaketablesHdiProb:
         stub = _Stub(_maketables_hdi_prob=0.89)
         assert _get_maketables_hdi_prob(stub) == pytest.approx(0.89)
 
-    def test_fallback_to_hdi_prob_attr(self):
-        stub = _Stub(hdi_prob_=0.95)
+    def test_fallback_to_staggered_bundle_hdi_prob(self):
+        stub = _Stub(
+            result=StaggeredDifferenceInDifferencesResult(
+                att_group_time=pd.DataFrame(),
+                att_event_time=pd.DataFrame(),
+                y_pred=xr.DataArray([]),
+                hdi_prob=0.95,
+            )
+        )
         assert _get_maketables_hdi_prob(stub) == pytest.approx(0.95)
 
     def test_default_094(self):
         stub = _Stub()
         assert _get_maketables_hdi_prob(stub) == pytest.approx(0.94)
 
-    def test_none_hdi_prob_attr_falls_to_default(self):
-        stub = _Stub(hdi_prob_=None)
+    def test_none_hdi_prob_on_bundle_falls_to_default(self):
+        stub = _Stub(
+            result=StaggeredDifferenceInDifferencesResult(
+                att_group_time=pd.DataFrame(),
+                att_event_time=pd.DataFrame(),
+                y_pred=xr.DataArray([]),
+                hdi_prob=None,
+            )
+        )
         assert _get_maketables_hdi_prob(stub) == pytest.approx(0.94)
 
     def test_non_convertible_raises(self):
@@ -752,7 +769,7 @@ class TestSklearnAdapterUnit:
 
     def test_stat_returns_expected_keys(self):
         adapter = SklearnMaketablesAdapter()
-        stub = _Stub(data=np.zeros((20, 3)), score=0.75)
+        stub = _Stub(data=np.zeros((20, 3)), result=_Stub(score=0.75))
         assert adapter.stat(stub, "N") == 20
         assert adapter.stat(stub, "r2") == pytest.approx(0.75)
         assert adapter.stat(stub, "model_type") == "ols"
@@ -771,7 +788,7 @@ class TestSklearnAdapterUnit:
 
     def test_default_stat_keys_includes_r2_when_available(self):
         adapter = SklearnMaketablesAdapter()
-        stub = _Stub(score=0.9)
+        stub = _Stub(result=_Stub(score=0.9))
         keys = adapter.default_stat_keys(stub)
         assert keys is not None
         assert "r2" in keys
@@ -814,7 +831,7 @@ def test_maketables_pymc_stat_hooks(mock_pymc_sample):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     adapter = PyMCMaketablesAdapter()
     assert adapter.stat(result, "N") is not None

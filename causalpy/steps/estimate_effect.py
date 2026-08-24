@@ -34,8 +34,9 @@ class EstimateEffect:
     """Pipeline step that fits a causal experiment.
 
     Captures the experiment class and its keyword arguments.  When the
-    pipeline runs, instantiates the experiment with the pipeline's data
-    (which triggers fitting) and stores the result in the context.
+    pipeline runs, it constructs the experiment with the pipeline's data,
+    calls ``fit()`` explicitly (constructors are lazy and do not fit),
+    and stores the fitted experiment in the context.
 
     Parameters
     ----------
@@ -104,10 +105,12 @@ class EstimateEffect:
             ) from error
 
     def run(self, context: PipelineContext) -> PipelineContext:
-        """Instantiate and fit the experiment.
+        """Instantiate, fit, and register the experiment.
 
         The experiment constructor receives ``context.data`` as its first
         positional argument, followed by all captured keyword arguments.
+        Constructors no longer fit; :meth:`EstimateEffect.run` calls
+        ``.fit()`` explicitly on the freshly constructed experiment.
 
         Parameters
         ----------
@@ -122,7 +125,7 @@ class EstimateEffect:
             and (if available) ``effect_summary`` populated.
         """
         logger.info("Fitting %s", self.method.__name__)
-        experiment = self.method(context.data, **self.kwargs)
+        experiment = self.method(context.data, **self.kwargs).fit()
 
         context.experiment = experiment
         context.experiment_config = {

@@ -14,6 +14,7 @@
 """Instrumental variable regression."""
 
 import warnings  # noqa: I001
+from typing import Any, Literal, NoReturn, Self
 
 import numpy as np
 from patsy import PatsyError
@@ -28,11 +29,11 @@ from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.pymc_models import InstrumentalVariableRegression
 from causalpy.utils import round_num
 
+from ._results import ResultBundle
 from .base import BaseExperiment
-from typing import Any, NoReturn
 
 
-class InstrumentalVariable(BaseExperiment):
+class InstrumentalVariable(BaseExperiment[ResultBundle]):
     """A class to analyse instrumental variable style experiments.
 
     Parameters
@@ -71,6 +72,16 @@ class InstrumentalVariable(BaseExperiment):
 
     Notes
     -----
+    **Lazy lifecycle**
+
+    Construction validates the inputs, builds the design matrices, and runs
+    the deterministic OLS/2SLS reference fits — no sampling happens. Call
+    :meth:`fit` to build the model graph and draw posterior samples. Prior
+    predictive sampling is unavailable: the
+    :class:`~causalpy.pymc_models.InstrumentalVariableRegression` backend
+    declares no prior phase, so :meth:`sample_prior_predictive` raises
+    :class:`~causalpy.custom_exceptions.PriorPredictiveNotSupportedException`.
+
     **Estimate extraction**
 
     The class computes naive OLS and two-stage least-squares reference fits, then fits a joint Bayesian model for the treatment and outcome equations. Under the instrumental-variable assumptions, the causal quantity is read from the outcome-stage coefficient associated with the instrumented treatment; no counterfactual prediction or population standardization is performed. For binary treatments, its LATE interpretation applies to the complier population induced by the instrument; continuous treatments require the corresponding structural IV interpretation.
@@ -107,7 +118,7 @@ class InstrumentalVariable(BaseExperiment):
     ...     instruments_formula=instruments_formula,
     ...     formula=formula,
     ...     model=InstrumentalVariableRegression(sample_kwargs=sample_kwargs),
-    ... )
+    ... ).fit()
     >>> # With variable selection
     >>> iv = cp.InstrumentalVariable(
     ...     instruments_data=instruments_data,
@@ -117,12 +128,16 @@ class InstrumentalVariable(BaseExperiment):
     ...     model=InstrumentalVariableRegression(sample_kwargs=sample_kwargs),
     ...     vs_prior_type="spike_and_slab",
     ...     vs_hyperparams={"slab_sigma": 5.0},
-    ... )
+    ... ).fit()
     """
 
     supports_ols = False
     supports_bayes = True
     _default_model_class = InstrumentalVariableRegression
+
+    #: No grouped result bundles: fitted state keys off the backend's
+    #: posterior draws; read methods inspect ``.idata`` directly.
+    _supports_results = False
 
     def __init__(
         self,
@@ -153,10 +168,35 @@ class InstrumentalVariable(BaseExperiment):
         self._build_design_matrices()
         self.input_validation()
 
-        # Store user-provided priors (will set defaults in algorithm() if None)
+        # Store user-provided priors; data-informed defaults are derived
+        # below ONLY when the user supplied none (issue #1092).
         self.priors = priors
 
-        self.algorithm()
+        # Deterministic OLS/2SLS reference pre-step: pure point-estimate
+        # regressions feeding summary() and the default priors. No sampling.
+        self.get_naive_OLS_fit()
+        self.get_2SLS_fit()
+        COORDS = {"instruments": self.labels_instruments, "covariates": self.labels}
+        self.coords = COORDS
+        # Only derive default priors (from the OLS/2SLS estimates above) if
+        # user didn't provide custom priors; arithmetic only — no sampling.
+        if self.priors is None:
+            if self.binary_treatment:
+                # Different default priors for binary treatment
+                self.priors = {
+                    "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
+                    "sigmas": [1, 1],
+                    "sigma_U": 1.0,
+                    "rho_bounds": [-0.99, 0.99],
+                }
+            else:
+                # Original continuous treatment priors
+                self.priors = {
+                    "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
+                    "sigmas": [1, 1],
+                    "eta": 2,
+                    "lkj_sd": 1,
+                }
 
     def _build_design_matrices(self) -> None:
         """Build design matrices for outcome and instrument formulas."""
@@ -180,43 +220,72 @@ class InstrumentalVariable(BaseExperiment):
         self.t, self.Z = np.asarray(t), np.asarray(Z)
         self.instrument_variable_name = t.design_info.column_names[0]
 
-    def algorithm(self) -> None:
-        """Run the experiment algorithm: fit OLS, 2SLS, and Bayesian IV model."""
-        self.get_naive_OLS_fit()
-        self.get_2SLS_fit()
+    def build(self) -> Self:
+        """No-op: IV constructs its graph lazily inside the model's fit.
 
-        # fit the model to the data
-        COORDS = {"instruments": self.labels_instruments, "covariates": self.labels}
-        self.coords = COORDS
-        # Only set default priors if user didn't provide custom priors
-        if self.priors is None:
-            if self.binary_treatment:
-                # Different default priors for binary treatment
-                self.priors = {
-                    "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
-                    "sigmas": [1, 1],
-                    "sigma_U": 1.0,
-                    "rho_bounds": [-0.99, 0.99],
-                }
-            else:
-                # Original continuous treatment priors
-                self.priors = {
-                    "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
-                    "sigmas": [1, 1],
-                    "eta": 2,
-                    "lkj_sd": 1,
-                }
-        self.model.fit(  # type: ignore[call-arg,union-attr]
+        Deliberate exception to the "graph inspectable after ``build()``
+        acceptance criterion (issue #1092): ``InstrumentalVariableRegression``
+        fuses graph construction into its fused ``fit`` entry point, so
+        ``pm.model_to_graphviz(exp.model)`` only becomes meaningful *after*
+        :meth:`fit`. Splitting that model into separate build/sample phases
+        is tracked as the IV prior-capability follow-up on issue #1092.
+
+        Returns
+        -------
+        Self
+            The same experiment, for chaining.
+        """
+        return self
+
+    def fit(self, **kwargs: Any) -> Self:
+        """Build the IV model graph and sample the posterior phase.
+
+        Returns
+        -------
+        Self
+            The same experiment, for chaining.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Sampler overrides forwarded to
+            :meth:`~causalpy.pymc_models.InstrumentalVariableRegression.sample_posterior`
+            (e.g. ``draws=500``), and ``ppc_sampler="jax" | "pymc" | None``
+            selecting the posterior-predictive backend at :meth:`fit` time.
+            Omitting ``ppc_sampler`` on a refit keeps the previous choice,
+            so predictive groups are never left stale against a resampled
+            posterior. The IV backend exposes no prior predictive phase, so
+            :meth:`sample_prior_predictive` raises
+            :class:`~causalpy.custom_exceptions.PriorPredictiveNotSupportedException`.
+        """
+        if self._model_backend.has_posterior:
+            warnings.warn(
+                f"Refitting {type(self).__name__}: the previous posterior "
+                "draws will be replaced. Prior-phase state, if any, is "
+                "preserved.",
+                UserWarning,
+                stacklevel=2,
+            )
+        # A refit that omits ppc_sampler keeps the previous choice: letting
+        # it fall back to None would leave posterior_predictive (and any
+        # prior-predictive groups from ppc_sampler="pymc") stale against the
+        # freshly resampled posterior.
+        previous_ppc = getattr(self.model, "_iv_ppc_sampler", None)
+        ppc_sampler = kwargs.pop("ppc_sampler", previous_ppc)
+        self.model.build(  # type: ignore[call-arg,union-attr]
             X=self.X,
             Z=self.Z,
             y=self.y,
             t=self.t,
-            coords=COORDS,
+            coords=self.coords,
             priors=self.priors,
+            ppc_sampler=ppc_sampler,
             vs_prior_type=self.vs_prior_type,
             vs_hyperparams=self.vs_hyperparams,
             binary_treatment=self.binary_treatment,
         )
+        self.model.sample_posterior(**kwargs)  # type: ignore[union-attr]
+        return self
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -327,6 +396,9 @@ class InstrumentalVariable(BaseExperiment):
             Number of decimals used to round results. Defaults to 2. Use
             ``None`` to return raw numbers.
         """
+        # IV summary is posterior-only; no prior phase.
+        self._resolve_group("posterior")
+
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         print(f"Instruments formula: {self.instruments_formula}")
@@ -363,8 +435,18 @@ class InstrumentalVariable(BaseExperiment):
                     f"{round_num(hi, round_to)}]"
                 )
 
-    def effect_summary(self) -> NoReturn:
+    def effect_summary(
+        self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+    ) -> NoReturn:
         """Raise because unified effect summaries are unavailable.
+
+        Parameters
+        ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Accepted first among the keyword-only parameters for base-contract
+            parity; these experiments implement no effect summary.
 
         Raises
         ------

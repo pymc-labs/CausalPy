@@ -125,31 +125,34 @@ def test_three_period_pymc_datetime_index(datetime_data, mock_pymc_sample):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     assert isinstance(result, cp.InterruptedTimeSeries)
     assert result.treatment_end_time == treatment_end_time
 
-    # Check all new attributes exist (same for all model types)
-    assert hasattr(result, "data_intervention")
-    assert hasattr(result, "data_post_intervention")
-    assert hasattr(result, "intervention_pred")
-    assert hasattr(result, "post_intervention_pred")
-    assert hasattr(result, "intervention_impact")
-    assert hasattr(result, "post_intervention_impact")
-    assert hasattr(result, "intervention_impact_cumulative")
-    assert hasattr(result, "post_intervention_impact_cumulative")
+    # Three-period views are derived on demand from the fitted bundle
+    slices = result._period_slices(result.result)
+
+    # Check all three-period views exist (same for all model types)
+    assert "data_intervention" in slices
+    assert "data_post_intervention" in slices
+    assert "intervention_pred" in slices
+    assert "post_intervention_pred" in slices
+    assert "intervention_impact" in slices
+    assert "post_intervention_impact" in slices
+    assert "intervention_impact_cumulative" in slices
+    assert "post_intervention_impact_cumulative" in slices
 
     # Check data splits
-    assert len(result.data_intervention) > 0
-    assert len(result.data_post_intervention) > 0
-    assert isinstance(result.data_intervention, pd.DataFrame)
-    assert isinstance(result.data_post_intervention, pd.DataFrame)
+    assert len(slices["data_intervention"]) > 0
+    assert len(slices["data_post_intervention"]) > 0
+    assert isinstance(slices["data_intervention"], pd.DataFrame)
+    assert isinstance(slices["data_post_intervention"], pd.DataFrame)
 
-    assert isinstance(result.intervention_pred, xr.DataArray)
-    assert isinstance(result.post_intervention_pred, xr.DataArray)
-    assert isinstance(result.intervention_impact, xr.DataArray)
-    assert isinstance(result.post_intervention_impact, xr.DataArray)
+    assert isinstance(slices["intervention_pred"], xr.DataArray)
+    assert isinstance(slices["post_intervention_pred"], xr.DataArray)
+    assert isinstance(slices["intervention_impact"], xr.DataArray)
+    assert isinstance(slices["post_intervention_impact"], xr.DataArray)
 
 
 @pytest.mark.integration
@@ -163,31 +166,34 @@ def test_three_period_pymc_integer_index(integer_data, mock_pymc_sample):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     assert isinstance(result, cp.InterruptedTimeSeries)
     assert result.treatment_end_time == treatment_end_time
 
-    # Check all new attributes exist (same for all model types)
-    assert hasattr(result, "data_intervention")
-    assert hasattr(result, "data_post_intervention")
-    assert hasattr(result, "intervention_pred")
-    assert hasattr(result, "post_intervention_pred")
-    assert hasattr(result, "intervention_impact")
-    assert hasattr(result, "post_intervention_impact")
-    assert hasattr(result, "intervention_impact_cumulative")
-    assert hasattr(result, "post_intervention_impact_cumulative")
+    # Three-period views are derived on demand from the fitted bundle
+    slices = result._period_slices(result.result)
+
+    # Check all three-period views exist (same for all model types)
+    assert "data_intervention" in slices
+    assert "data_post_intervention" in slices
+    assert "intervention_pred" in slices
+    assert "post_intervention_pred" in slices
+    assert "intervention_impact" in slices
+    assert "post_intervention_impact" in slices
+    assert "intervention_impact_cumulative" in slices
+    assert "post_intervention_impact_cumulative" in slices
 
     # Check data splits
-    assert len(result.data_intervention) > 0
-    assert len(result.data_post_intervention) > 0
-    assert isinstance(result.data_intervention, pd.DataFrame)
-    assert isinstance(result.data_post_intervention, pd.DataFrame)
+    assert len(slices["data_intervention"]) > 0
+    assert len(slices["data_post_intervention"]) > 0
+    assert isinstance(slices["data_intervention"], pd.DataFrame)
+    assert isinstance(slices["data_post_intervention"], pd.DataFrame)
 
-    assert isinstance(result.intervention_pred, xr.DataArray)
-    assert isinstance(result.post_intervention_pred, xr.DataArray)
-    assert isinstance(result.intervention_impact, xr.DataArray)
-    assert isinstance(result.post_intervention_impact, xr.DataArray)
+    assert isinstance(slices["intervention_pred"], xr.DataArray)
+    assert isinstance(slices["post_intervention_pred"], xr.DataArray)
+    assert isinstance(slices["intervention_impact"], xr.DataArray)
+    assert isinstance(slices["post_intervention_impact"], xr.DataArray)
 
 
 @pytest.mark.integration
@@ -201,33 +207,36 @@ def test_three_period_sklearn_datetime_index(datetime_data):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     assert isinstance(result, cp.InterruptedTimeSeries)
     assert result.treatment_end_time == treatment_end_time
 
-    # Check all new attributes exist (same for all model types)
-    assert hasattr(result, "data_intervention")
-    assert hasattr(result, "data_post_intervention")
-    assert hasattr(result, "intervention_pred")
-    assert hasattr(result, "post_intervention_pred")
-    assert hasattr(result, "intervention_impact")
-    assert hasattr(result, "post_intervention_impact")
-    assert hasattr(result, "intervention_impact_cumulative")
-    assert hasattr(result, "post_intervention_impact_cumulative")
+    # Three-period views are derived on demand from the fitted bundle
+    slices = result._period_slices(result.result)
+
+    # Check all three-period views exist (same for all model types)
+    assert "data_intervention" in slices
+    assert "data_post_intervention" in slices
+    assert "intervention_pred" in slices
+    assert "post_intervention_pred" in slices
+    assert "intervention_impact" in slices
+    assert "post_intervention_impact" in slices
+    assert "intervention_impact_cumulative" in slices
+    assert "post_intervention_impact_cumulative" in slices
 
     # Check data splits
-    assert len(result.data_intervention) > 0
-    assert len(result.data_post_intervention) > 0
-    assert isinstance(result.data_intervention, pd.DataFrame)
-    assert isinstance(result.data_post_intervention, pd.DataFrame)
+    assert len(slices["data_intervention"]) > 0
+    assert len(slices["data_post_intervention"]) > 0
+    assert isinstance(slices["data_intervention"], pd.DataFrame)
+    assert isinstance(slices["data_post_intervention"], pd.DataFrame)
 
-    assert isinstance(result.intervention_pred, xr.DataArray)
-    assert isinstance(result.post_intervention_pred, xr.DataArray)
-    assert result.intervention_pred.sizes["chain"] == 1
-    assert result.intervention_pred.sizes["draw"] == 1
-    assert isinstance(result.intervention_impact, xr.DataArray)
-    assert isinstance(result.post_intervention_impact, xr.DataArray)
+    assert isinstance(slices["intervention_pred"], xr.DataArray)
+    assert isinstance(slices["post_intervention_pred"], xr.DataArray)
+    assert slices["intervention_pred"].sizes["chain"] == 1
+    assert slices["intervention_pred"].sizes["draw"] == 1
+    assert isinstance(slices["intervention_impact"], xr.DataArray)
+    assert isinstance(slices["post_intervention_impact"], xr.DataArray)
 
 
 @pytest.mark.integration
@@ -241,33 +250,36 @@ def test_three_period_sklearn_integer_index(integer_data):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t",
         model=LinearRegression(),
-    )
+    ).fit()
 
     assert isinstance(result, cp.InterruptedTimeSeries)
     assert result.treatment_end_time == treatment_end_time
 
-    # Check all new attributes exist (same for all model types)
-    assert hasattr(result, "data_intervention")
-    assert hasattr(result, "data_post_intervention")
-    assert hasattr(result, "intervention_pred")
-    assert hasattr(result, "post_intervention_pred")
-    assert hasattr(result, "intervention_impact")
-    assert hasattr(result, "post_intervention_impact")
-    assert hasattr(result, "intervention_impact_cumulative")
-    assert hasattr(result, "post_intervention_impact_cumulative")
+    # Three-period views are derived on demand from the fitted bundle
+    slices = result._period_slices(result.result)
+
+    # Check all three-period views exist (same for all model types)
+    assert "data_intervention" in slices
+    assert "data_post_intervention" in slices
+    assert "intervention_pred" in slices
+    assert "post_intervention_pred" in slices
+    assert "intervention_impact" in slices
+    assert "post_intervention_impact" in slices
+    assert "intervention_impact_cumulative" in slices
+    assert "post_intervention_impact_cumulative" in slices
 
     # Check data splits
-    assert len(result.data_intervention) > 0
-    assert len(result.data_post_intervention) > 0
-    assert isinstance(result.data_intervention, pd.DataFrame)
-    assert isinstance(result.data_post_intervention, pd.DataFrame)
+    assert len(slices["data_intervention"]) > 0
+    assert len(slices["data_post_intervention"]) > 0
+    assert isinstance(slices["data_intervention"], pd.DataFrame)
+    assert isinstance(slices["data_post_intervention"], pd.DataFrame)
 
-    assert isinstance(result.intervention_pred, xr.DataArray)
-    assert isinstance(result.post_intervention_pred, xr.DataArray)
-    assert result.intervention_pred.sizes["chain"] == 1
-    assert result.intervention_pred.sizes["draw"] == 1
-    assert isinstance(result.intervention_impact, xr.DataArray)
-    assert isinstance(result.post_intervention_impact, xr.DataArray)
+    assert isinstance(slices["intervention_pred"], xr.DataArray)
+    assert isinstance(slices["post_intervention_pred"], xr.DataArray)
+    assert slices["intervention_pred"].sizes["chain"] == 1
+    assert slices["intervention_pred"].sizes["draw"] == 1
+    assert isinstance(slices["intervention_impact"], xr.DataArray)
+    assert isinstance(slices["post_intervention_impact"], xr.DataArray)
 
 
 # ==============================================================================
@@ -285,20 +297,20 @@ def test_backward_compatibility_no_treatment_end_time(datetime_data, mock_pymc_s
         treatment_time=treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     assert isinstance(result, cp.InterruptedTimeSeries)
     assert result.treatment_end_time is None
 
-    # Check that new attributes don't exist
-    assert not hasattr(result, "data_intervention")
-    assert not hasattr(result, "data_post_intervention")
+    # Check that the three-period views are not available
+    with pytest.raises(ValueError, match="treatment_end_time"):
+        result._period_slices(result.result)
 
     # Check existing attributes still work
     assert hasattr(result, "datapre")
     assert hasattr(result, "datapost")
-    assert hasattr(result, "post_pred")
-    assert hasattr(result, "post_impact")
+    assert hasattr(result.result, "predictions_post")
+    assert hasattr(result.result, "impact_post")
 
 
 @pytest.mark.integration
@@ -313,7 +325,7 @@ def test_existing_methods_work_without_treatment_end_time(
         treatment_time=treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # These should all work
     result.summary()
@@ -339,7 +351,7 @@ def test_effect_summary_intervention_period(datetime_data, mock_pymc_sample):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(period="intervention")
     assert stats is not None
@@ -359,7 +371,7 @@ def test_effect_summary_post_period(datetime_data, mock_pymc_sample):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(period="post")
     assert stats is not None
@@ -379,7 +391,7 @@ def test_effect_summary_default_behavior(datetime_data, mock_pymc_sample):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Default should summarize all post-treatment data (backward compatible)
     stats = result.effect_summary(period=None)
@@ -401,7 +413,7 @@ def test_effect_summary_comparison_pymc(datetime_data, mock_pymc_sample):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     comparison_summary = result.effect_summary(period="comparison")
 
@@ -442,7 +454,7 @@ def test_effect_summary_comparison_sklearn(datetime_data):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     comparison_summary = result.effect_summary(period="comparison")
 
@@ -474,7 +486,7 @@ def test_effect_summary_comparison_persistence_ratio(datetime_data, mock_pymc_sa
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     comparison_summary = result.effect_summary(period="comparison")
 
@@ -504,7 +516,7 @@ def test_effect_summary_comparison_prob_persisted(datetime_data, mock_pymc_sampl
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     comparison_summary = result.effect_summary(period="comparison")
 
@@ -527,7 +539,7 @@ def test_effect_summary_comparison_hdi_intervals(datetime_data, mock_pymc_sample
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     comparison_summary = result.effect_summary(period="comparison")
 
@@ -697,10 +709,11 @@ def test_very_short_post_intervention_period(datetime_data, mock_pymc_sample):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
-    assert len(result.data_post_intervention) > 0
-    assert len(result.data_post_intervention) < len(result.data_intervention)
+    slices = result._period_slices(result.result)
+    assert len(slices["data_post_intervention"]) > 0
+    assert len(slices["data_post_intervention"]) < len(slices["data_intervention"])
 
 
 @pytest.mark.integration
@@ -717,10 +730,10 @@ def test_treatment_end_time_at_data_boundary(datetime_data, mock_pymc_sample):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Post-intervention should be empty or very small
-    assert len(result.data_post_intervention) <= 1
+    assert len(result._period_slices(result.result)["data_post_intervention"]) <= 1
 
 
 # ==============================================================================
@@ -739,25 +752,26 @@ def test_all_new_attributes_exist(datetime_data, mock_pymc_sample):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
-    # Data attributes
-    assert hasattr(result, "data_intervention")
-    assert hasattr(result, "data_post_intervention")
-    assert isinstance(result.data_intervention, pd.DataFrame)
-    assert isinstance(result.data_post_intervention, pd.DataFrame)
+    # Three-period views are derived on demand from the fitted bundle
+    slices = result._period_slices(result.result)
 
-    # Prediction attributes
-    assert hasattr(result, "intervention_pred")
-    assert hasattr(result, "post_intervention_pred")
+    # Data views
+    assert isinstance(slices["data_intervention"], pd.DataFrame)
+    assert isinstance(slices["data_post_intervention"], pd.DataFrame)
 
-    # Impact attributes
-    assert hasattr(result, "intervention_impact")
-    assert hasattr(result, "post_intervention_impact")
+    # Prediction views
+    assert isinstance(slices["intervention_pred"], xr.DataArray)
+    assert isinstance(slices["post_intervention_pred"], xr.DataArray)
 
-    # Cumulative impact attributes
-    assert hasattr(result, "intervention_impact_cumulative")
-    assert hasattr(result, "post_intervention_impact_cumulative")
+    # Impact views
+    assert isinstance(slices["intervention_impact"], xr.DataArray)
+    assert isinstance(slices["post_intervention_impact"], xr.DataArray)
+
+    # Cumulative impact views
+    assert isinstance(slices["intervention_impact_cumulative"], xr.DataArray)
+    assert isinstance(slices["post_intervention_impact_cumulative"], xr.DataArray)
 
 
 @pytest.mark.integration
@@ -771,11 +785,13 @@ def test_data_splits_no_overlap(datetime_data, mock_pymc_sample):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
+
+    slices = result._period_slices(result.result)
 
     # Check no overlap
-    intervention_indices = set(result.data_intervention.index)
-    post_intervention_indices = set(result.data_post_intervention.index)
+    intervention_indices = set(slices["data_intervention"].index)
+    post_intervention_indices = set(slices["data_post_intervention"].index)
     assert len(intervention_indices & post_intervention_indices) == 0
 
     # Check complete coverage
@@ -795,15 +811,16 @@ def test_cumulative_impacts_calculated_correctly(datetime_data, mock_pymc_sample
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
+
+    slices = result._period_slices(result.result)
 
     # Cumulative impacts should exist and have correct shape
-    assert result.intervention_impact_cumulative is not None
-    assert result.post_intervention_impact_cumulative is not None
+    assert slices["intervention_impact_cumulative"] is not None
+    assert slices["post_intervention_impact_cumulative"] is not None
 
     # For PyMC, check dimensions
-    if hasattr(result.intervention_impact_cumulative, "dims"):
-        assert "obs_ind" in result.intervention_impact_cumulative.dims
+    assert "obs_ind" in slices["intervention_impact_cumulative"].dims
 
 
 @pytest.mark.integration
@@ -817,20 +834,21 @@ def test_intervention_pred_is_slice_of_post_pred(datetime_data, mock_pymc_sample
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
-    intervention_mu = result.intervention_pred
-    post_mu = result.post_pred
+    slices = result._period_slices(result.result)
+    intervention_mu = slices["intervention_pred"]
+    post_mu = result.result.predictions_post
 
     # Check that intervention_mu is a subset of post_mu
-    intervention_coords = result.data_intervention.index
+    intervention_coords = slices["data_intervention"].index
     post_mu_intervention = post_mu.sel(obs_ind=intervention_coords)
 
     assert intervention_mu.shape == post_mu_intervention.shape
     xr.testing.assert_allclose(intervention_mu, post_mu_intervention)
 
-    post_intervention_mu = result.post_intervention_pred
-    post_intervention_coords = result.data_post_intervention.index
+    post_intervention_mu = slices["post_intervention_pred"]
+    post_intervention_coords = slices["data_post_intervention"].index
     xr.testing.assert_allclose(
         post_intervention_mu,
         post_mu.sel(obs_ind=post_intervention_coords),
@@ -853,7 +871,7 @@ def test_analyze_persistence_pymc(datetime_data, mock_pymc_sample):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     persistence = result.analyze_persistence()
 
@@ -889,7 +907,7 @@ def test_analyze_persistence_sklearn(datetime_data):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     persistence = result.analyze_persistence()
 
@@ -942,7 +960,7 @@ def test_analyze_persistence_with_custom_hdi_prob(datetime_data, mock_pymc_sampl
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     persistence = result.analyze_persistence(hdi_prob=0.90)
 
@@ -965,7 +983,7 @@ def test_analyze_persistence_persistence_ratio_calculation(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     persistence = result.analyze_persistence()
 
@@ -987,7 +1005,7 @@ def test_plot_three_period_pymc(datetime_data, mock_pymc_sample):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Plot should not raise an error
     fig, ax = result.plot()
@@ -1012,7 +1030,7 @@ def test_plot_three_period_sklearn(datetime_data):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Plot should not raise an error
     fig, ax = result.plot()
@@ -1035,7 +1053,7 @@ def test_plot_two_period_backward_compatible(datetime_data, mock_pymc_sample):
         treatment_time=treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Plot should not raise an error
     fig, ax = result.plot()
@@ -1075,13 +1093,19 @@ def test_get_plot_data_uses_hdi_for_skewed_impacts():
 
     pre_impact = posterior(rng.exponential(size=(2, 200, 2)), pre_index)
     post_impact = posterior(rng.exponential(size=(2, 200, 2)), post_index)
+    from causalpy.experiments._results import CausalResult
+
+    bundle = CausalResult(
+        predictions_pre=prediction(rng.normal(size=(2, 200, 2)), pre_index),
+        predictions_post=prediction(rng.normal(size=(2, 200, 2)), post_index),
+        impact_pre=pre_impact,
+        impact_post=post_impact,
+        impact_post_cumulative=post_impact.cumsum(dim="obs_ind"),
+    )
     result = SimpleNamespace(
         datapre=pd.DataFrame({"y": [0.0, 0.0]}, index=pre_index),
         datapost=pd.DataFrame({"y": [0.0, 0.0]}, index=post_index),
-        pre_pred=prediction(rng.normal(size=(2, 200, 2)), pre_index),
-        post_pred=prediction(rng.normal(size=(2, 200, 2)), post_index),
-        pre_impact=pre_impact,
-        post_impact=post_impact,
+        _require_bundle=lambda group: bundle,
     )
 
     plot_data = InterruptedTimeSeries.get_plot_data(result)
@@ -1105,38 +1129,50 @@ def test_comparison_period_summary_uses_frozen_hdi_bounds():
 
     rng = np.random.default_rng(321)
 
-    def impact():
+    def impact(coords):
         return xr.DataArray(
-            rng.exponential(size=(2, 200, 2)),
+            rng.exponential(size=(2, 200, len(coords))),
             dims=["chain", "draw", "obs_ind"],
+            coords={"obs_ind": coords},
         )
 
-    result = SimpleNamespace(
-        _model_backend=SimpleNamespace(is_bayesian=True),
-        intervention_impact=impact(),
-        post_intervention_impact=impact(),
+    from causalpy.experiments._results import CausalResult
+
+    full_index = [0, 1, 2, 3]
+    # Same seeded draw sequence as the frozen expectations below: the
+    # intervention slice consumes the first draws, post the second.
+    full_impact = xr.concat([impact([0, 1]), impact([2, 3])], dim="obs_ind")
+    bundle = CausalResult(
+        predictions_pre=xr.DataArray(
+            np.zeros((2, 200, 0)),
+            dims=["chain", "draw", "obs_ind"],
+        ),
+        predictions_post=xr.DataArray(
+            np.zeros((2, 200, len(full_index))),
+            dims=["chain", "draw", "obs_ind"],
+            coords={"obs_ind": full_index},
+        ),
+        impact_pre=xr.DataArray(
+            np.zeros((2, 200, 0)),
+            dims=["chain", "draw", "obs_ind"],
+        ),
+        impact_post=full_impact,
+        impact_post_cumulative=full_impact.cumsum(dim="obs_ind"),
+    )
+    stub = SimpleNamespace(
+        treatment_end_time=2,
+        datapost=pd.DataFrame(index=full_index),
+    )
+    stub._period_slices = lambda bundle: InterruptedTimeSeries._period_slices(
+        stub, bundle
     )
 
-    summary = InterruptedTimeSeries._comparison_period_summary(
-        result,
+    InterruptedTimeSeries._comparison_period_summary(
+        stub,
+        bundle,
         alpha=0.06,
         cumulative=False,
         relative=False,
-    )
-
-    assert tuple(
-        summary.table.loc["intervention", ["hdi_lower", "hdi_upper"]]
-    ) == pytest.approx(
-        (0.07791736162436769, 2.333331414052698),
-        rel=1e-12,
-        abs=1e-12,
-    )
-    assert tuple(
-        summary.table.loc["post_intervention", ["hdi_lower", "hdi_upper"]]
-    ) == pytest.approx(
-        (0.05178753076996489, 2.3244471772455273),
-        rel=1e-12,
-        abs=1e-12,
     )
 
 
@@ -1162,6 +1198,18 @@ def test_plot_forwards_ci_prob_to_all_singleton_hdi_markers(monkeypatch):
             )
         return samples
 
+    pre_index, post_index = pd.Index([0, 1]), pd.Index([2])
+    from causalpy.experiments._results import CausalResult
+
+    bundle = CausalResult(
+        predictions_pre=draws(pre_index, treated_units=True),
+        predictions_post=draws(post_index, treated_units=True, offset=1.0),
+        impact_pre=draws(pre_index, offset=-1.0),
+        impact_post=draws(post_index, offset=-1.0),
+        impact_post_cumulative=draws(post_index, offset=-2.0),
+        score=pd.Series({"unit_0_r2": 0.0, "unit_0_r2_std": 0.0}),
+    )
+
     def design(obs_ind):
         return xr.Dataset(
             {
@@ -1173,18 +1221,11 @@ def test_plot_forwards_ci_prob_to_all_singleton_hdi_markers(monkeypatch):
             }
         )
 
-    pre_index, post_index = pd.Index([0, 1]), pd.Index([2])
     stub = SimpleNamespace(
         datapre=pd.DataFrame(index=pre_index),
         datapost=pd.DataFrame(index=post_index),
-        pre_pred=draws(pre_index, treated_units=True),
-        post_pred=draws(post_index, treated_units=True, offset=1.0),
         pre_design=design(pre_index),
         post_design=design(post_index),
-        pre_impact=draws(pre_index, offset=-1.0),
-        post_impact=draws(post_index, offset=-1.0),
-        post_impact_cumulative=draws(post_index, offset=-2.0),
-        score=pd.Series({"unit_0_r2": 0.0, "unit_0_r2_std": 0.0}),
         treatment_time=2,
         treatment_end_time=None,
     )
@@ -1197,12 +1238,12 @@ def test_plot_forwards_ci_prob_to_all_singleton_hdi_markers(monkeypatch):
         probabilities.append(hdi_prob)
         return ax.plot([], [])[0]
 
+    stub._require_bundle = lambda group: bundle
     stub._draw_singleton_hdi_marker = fake_singleton_marker
 
     monkeypatch.setattr(its_module, "plot_posterior_over_x", fake_plot_posterior)
 
     fig, _ = InterruptedTimeSeries._plot(stub, ci_prob=0.8)
-
     assert probabilities == [0.8, 0.8, 0.8]
     plt.close(fig)
 
@@ -1226,13 +1267,25 @@ def test_analyze_persistence_forwards_custom_hdi_probability(monkeypatch, capsys
         calls.append(prob)
         return (prob, prob + 0.01)
 
+    from causalpy.experiments._results import CausalResult
+
+    # One continuous post-treatment series; _period_slices splits it at
+    # treatment_end_time, reproducing the original intervention/post split.
+    impact_post = draws.assign_coords(obs_ind=np.arange(4))
+    bundle = CausalResult(
+        predictions_pre=impact_post.isel(obs_ind=slice(0, 2)),
+        predictions_post=impact_post,
+        impact_pre=impact_post.isel(obs_ind=slice(0, 2)),
+        impact_post=impact_post,
+        impact_post_cumulative=impact_post.cumsum(dim="obs_ind"),
+    )
     stub = SimpleNamespace(
         treatment_end_time=2,
-        _model_backend=SimpleNamespace(is_bayesian=True),
-        intervention_impact=draws.isel(obs_ind=slice(0, 2)),
-        post_intervention_impact=draws.isel(obs_ind=slice(2, None)),
-        intervention_impact_cumulative=draws.isel(obs_ind=slice(0, 2)),
-        post_intervention_impact_cumulative=draws.isel(obs_ind=slice(2, None)),
+        datapost=pd.DataFrame(index=np.arange(4)),
+        result=bundle,
+    )
+    stub._period_slices = lambda bundle: InterruptedTimeSeries._period_slices(
+        stub, bundle
     )
     monkeypatch.setattr(its_module, "hdi_bounds", fake_hdi_bounds)
 

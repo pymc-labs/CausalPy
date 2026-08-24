@@ -90,16 +90,31 @@ class GenerateReport:
         return base64.b64encode(buf.read()).decode("utf-8")
 
     def _render_plot(self, experiment: Any) -> list[str]:
-        """Render experiment plots as base64-encoded PNG strings."""
-        plots: list[str] = []
-        try:
-            import matplotlib.pyplot as plt
+        """Render experiment plots as base64-encoded PNG strings.
 
+        Experiments are lazy: ``plot()`` requires fitted state, so any
+        guard raised by the experiment propagates to the caller instead of
+        being silently swallowed here. The only tolerated failure is
+        ``NotImplementedError`` — the documented contract of experiments
+        without a unified plot view (``InstrumentalVariable``,
+        ``InversePropensityWeighting``) — which degrades to a report
+        without an experiment figure rather than crashing report
+        generation.
+        """
+        import matplotlib.pyplot as plt
+
+        try:
             fig, _ = experiment.plot()
-            plots.append(self._encode_figure(fig))
-            plt.close(fig)
-        except Exception as exc:
-            logger.debug("Could not render plot: %s", exc)
+        except NotImplementedError as exc:
+            logger.debug(
+                "plot() not implemented for %s; omitting the experiment "
+                "figure from the report: %s",
+                type(experiment).__name__,
+                exc,
+            )
+            return []
+        plots = [self._encode_figure(fig)]
+        plt.close(fig)
         return plots
 
     def _render_check_figures(self, check_result: Any) -> list[str]:

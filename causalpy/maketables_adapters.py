@@ -28,6 +28,8 @@ import xarray as xr
 
 from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB
+from causalpy.custom_exceptions import GroupNotSampledException
+from causalpy.experiments._results import StaggeredDifferenceInDifferencesResult
 from causalpy.experiments.model_adapter import ModelAdapter
 
 
@@ -93,11 +95,34 @@ def _safe_observation_count(experiment: Any) -> int | None:
     return None
 
 
+def _result_bundle_or_none(experiment: Any) -> Any:
+    """Return the experiment's posterior bundle, or ``None`` if unavailable.
+
+    ``BaseExperiment.result`` raises
+    :class:`~causalpy.custom_exceptions.GroupNotSampledException` before a
+    fit and ``NotImplementedError`` on experiments without bundles.
+    ``AttributeError`` is also tolerated because these adapters accept any
+    duck-typed experiment-like object (see ``_Stub`` in
+    ``test_maketables_plugin.py``), which may not expose ``result`` at all;
+    all three mean "no score to report", never an error worth surfacing.
+    """
+    try:
+        return experiment.result
+    except (GroupNotSampledException, NotImplementedError, AttributeError):
+        return None
+
+
 def _safe_r2_value(experiment: Any) -> float | None:
-    """Best-effort model score extraction without assuming one score format."""
-    score_obj = getattr(experiment, "score", None)
+    """Best-effort model score extraction without assuming one score format.
+
+    The score lives on the experiment's posterior result bundle; experiments
+    that have not been fitted (or that do not support result bundles) yield
+    no score.
+    """
+    score_obj = getattr(_result_bundle_or_none(experiment), "score", None)
     if score_obj is None:
         return None
+
     try:
         if isinstance(score_obj, pd.Series):
             r2_like = score_obj[[idx for idx in score_obj.index if "r2" in str(idx)]]
@@ -151,12 +176,17 @@ def _get_maketables_hdi_prob(experiment: Any) -> float:
 
     Priority:
     1) explicit user override via BaseExperiment.set_maketables_options()
-    2) experiment-specific stored value (e.g. staggered_did hdi_prob_)
+    2) ``hdi_prob`` on the experiment's result bundle, but only for
+       :class:`~causalpy.experiments._results.StaggeredDifferenceInDifferencesResult`
     3) project-wide default :data:`causalpy.constants.HDI_PROB`
     """
     hdi_prob = getattr(experiment, "_maketables_hdi_prob", None)
     if hdi_prob is None:
-        hdi_prob = getattr(experiment, "hdi_prob_", HDI_PROB)
+        bundle = _result_bundle_or_none(experiment)
+        if isinstance(bundle, StaggeredDifferenceInDifferencesResult):
+            hdi_prob = bundle.hdi_prob
+        else:
+            hdi_prob = HDI_PROB
     if hdi_prob is None:
         hdi_prob = HDI_PROB
 

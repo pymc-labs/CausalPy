@@ -120,7 +120,7 @@ class PlaceboInSpace:
                 kw["model"] = clone_model(kw["model"])
 
             try:
-                alt_experiment = method(context.data, **kw)
+                alt_experiment = method(context.data, **kw).fit()
                 summary = alt_experiment.effect_summary()
                 row: dict[str, Any] = {"placebo_treated": placebo_treated}
                 if summary.table is not None and not summary.table.empty:

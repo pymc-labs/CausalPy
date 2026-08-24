@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -28,6 +29,28 @@ if TYPE_CHECKING:
     from causalpy.experiments.synthetic_control import SyntheticControl
 
 from causalpy.constants import HDI_PROB
+
+
+def _design_fingerprint(*inputs: Any) -> tuple:
+    """Structural hash of build-time inputs (shapes, dtypes, raw bytes).
+
+    Inputs may be mappings of named arrays or array-likes. A second
+    ``build()`` whose fingerprint differs from the recorded one means the
+    caller is trying to reuse an immutable graph with different data, which
+    must fail loudly instead of being silently ignored.
+    """
+
+    def _digest(value: Any) -> Any:
+        if isinstance(value, dict):
+            return tuple(sorted((key, _digest(item)) for key, item in value.items()))
+        arr = np.ascontiguousarray(np.asarray(value))
+        return (
+            arr.shape,
+            str(arr.dtype),
+            hashlib.blake2b(arr.tobytes(), digest_size=16).hexdigest(),
+        )
+
+    return tuple(_digest(value) for value in inputs)
 
 
 def _as_scalar(value: Any) -> float:
@@ -461,7 +484,8 @@ def extract_lift_for_mmm(
 
     # Key on the container, not backend identity: sigma needs genuine
     # posterior dispersion, which a degenerate single-draw run also lacks.
-    if not has_posterior_draws(sc_result.post_impact):
+    impact_post = sc_result.result.impact_post
+    if not has_posterior_draws(impact_post):
         raise ValueError(
             "extract_lift_for_mmm requires a Bayesian (PyMC) model for uncertainty "
             "quantification. OLS models do not provide posterior distributions needed "
@@ -473,7 +497,7 @@ def extract_lift_for_mmm(
 
     for unit in treated_units:
         # Get posterior samples for this unit's causal impact
-        unit_impact = sc_result.post_impact.sel(treated_units=unit)
+        unit_impact = impact_post.sel(treated_units=unit)
 
         # Aggregate across time periods using the named method (e.g. "mean", "sum")
         lift_samples = getattr(unit_impact, aggregate)(dim="obs_ind")

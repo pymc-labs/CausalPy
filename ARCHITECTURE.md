@@ -66,7 +66,15 @@ The optional third backend, `PyMCForecastModel` (`causalpy/pymc_forecast_models.
 
 ## Experiment Lifecycle
 
-Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepare_data()` → `algorithm()`. There is no separate `.fit()` on the experiment. Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls the subclass's backend-agnostic `_plot()`. Uncertainty rendering keys on data properties of the canonical prediction container (`has_posterior_draws()`), not on backend identity. `effect_summary()` returns `EffectSummary(table, text)` using helpers from `causalpy.reporting`.
+Construction is lazy: `__init__` runs validation and deterministic preprocessing only (`_build_design_matrices()` → `_prepare_data()`); nothing is sampled. The lifecycle is `configure → optional prior checks → fit()`:
+
+- **`build()`** — public, idempotent, auto-called by both samplers. Merges data-driven priors (defaults → data-derived → user) and constructs the PyMC graph so the spec is inspectable (`pm.model_to_graphviz(exp.model)`, `exp.model.basic_RVs`) before any compute is spent.
+- **`sample_prior_predictive(**kwargs)`** — optional prior phase; populates `exp.prior_result`. Raises `PriorPredictiveNotSupportedException` on backends without a prior phase (sklearn, pymc-forecast, IV, state space).
+- **`fit(**kwargs)`** — posterior phase; runs NUTS + posterior predictive first (forward-sampling machinery mutates shared data nodes, so posterior must sample on freshly armed data), then fills the absent prior phase so `idata` matches the historical eager output. Returns `Self`, so call sites migrate with one appended token: `cp.InterruptedTimeSeries(...).fit()`.
+
+Draw-derived state lives in per-experiment bundles (`causalpy/experiments/_results.py`) exposed through two raising properties: `exp.result` (posterior group) and `exp.prior_result` (prior group). Nothing derived from draws is assigned to the experiment itself; `is_fitted` / `has_prior_predictive` are predicates over those two slots. Read methods take keyword-only `group: Literal["prior", "posterior"]`; the guard and group→bundle resolution live once in `_render_plot()` / `_resolve_group()`. Missing groups raise `GroupNotSampledException` naming the call to make; both exceptions are re-exported from `causalpy`. Re-sampling overwrites its own group only (`fit()` again replaces posterior and warns; prior state survives). Assigning a new model — also the documented prior-revision path instead of a `set_priors()` — resets everything, because graph identity *is* the model instance.
+
+Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls the subclass's backend-agnostic `_plot(group=..., ...)`. Uncertainty rendering keys on data properties of the canonical prediction container (`has_posterior_draws()`), not on backend identity. `plot(group="prior")` renders a reduced panel set (counterfactual vs observed only). `effect_summary(group=...)` returns `EffectSummary(table, text)` using helpers from `causalpy.reporting`; prior-group prose reads as a plausibility check, not a causal claim.
 
 ## Experiment Inventory
 
@@ -98,21 +106,20 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 
 | Topic | Detail |
 |-------|--------|
+| **Lazy fitting** | `__init__` never samples. Explicit `fit()` / `sample_prior_predictive()` run the phases; see Experiment Lifecycle. |
 | **Formulas** | Patsy `dmatrices()` for design matrices; `build_design_matrices()` for counterfactual prediction. Bare datetime predictors are encoded as continuous elapsed days from the fitted origin; use `C(date)` for date fixed effects. `PiecewiseITS` uses `step()`/`ramp()` stateful transforms. |
 | **obs_ind** | All experiments set `data.index.name = "obs_ind"`. Canonical xarray/PyMC dimension name. |
 | **treated_units always 2D** | Even single-unit experiments use `treated_units=["unit_0"]`. Never pass 1D y to PyMC. |
 | **Impact uses mu, not y_hat** | The adapter's `predict()` extracts posterior `mu` (conditional expected outcome in observed units), not `y_hat` (with observation noise); impact is `y - predict(X)`. For GLMs, `mu` must be inverse-linked before impact; see `docs/source/knowledgebase/prediction-contract.md`. |
 | **Intercept handling** | Patsy includes intercept by default. sklearn models must use `fit_intercept=False`. |
-| **Eager fitting** | MCMC runs during `__init__`. No lazy `.fit()` on the experiment. |
-| **HDI_PROB** | Project default is 0.94 (ArviZ default), not 0.95. |
 | **create_causalpy_compatible_class** | Applied during `make_model_adapter()` for sklearn backends; clones the user instance before patching. |
 
 ## Adding New Code
 
 Copy the closest existing experiment or model and follow the `BaseExperiment` contract:
 
-- Declare `supports_ols` / `supports_bayes` (and `supports_pymc_forecast` to opt into the optional pymc-forecast backend); implement a single backend-agnostic `_plot()` (and an explicit `get_plot_data(*, ...)` only where that view is supported) that consumes the canonical prediction container, keying uncertainty rendering on `has_posterior_draws()` rather than backend identity
-- `algorithm()` with the fit/predict/impact flow; every concrete experiment declares its own explicit `effect_summary(...)` contract, using helpers in `causalpy.reporting` where that summary is implemented
+- Implement `_fit_inputs()` returning the `(X, y, coords)` handed to the backend at build time, and `_finalize(group)` computing the experiment's result bundle from the group's draws; every concrete experiment declares its own explicit `effect_summary(*, group=..., ...)` contract, using helpers in `causalpy.reporting` where that summary is implemented
+- Declare `supports_ols` / `supports_bayes` (and `supports_pymc_forecast` when the experiment accepts a `PyMCForecastModel`) plus `_default_model_class`; `make_model_adapter()` validates them at construction. Subscript the base with the experiment's bundle type (e.g. `BaseExperiment[CausalResult]`, or `BaseExperiment[ResultBundle]` when it stores no bundles)
 - Public APIs expose explicit named parameters rather than bare `*args` / `**kwargs`; use keyword-only optional controls for public plotting and plot-data APIs (enforced by `causalpy/tests/test_public_signatures.py` and surveyed by `scripts/audit_public_signatures.py`). A genuine dynamic or third-party forwarder requires an `Other Parameters` contract and a narrow structural-test exemption. For experiments without a unified plot view (e.g. `InversePropensityWeighting`, `InstrumentalVariable`), declare an explicit `plot()` stub that raises `NotImplementedError`. For `hdi_prob` defaults, use ``Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).`` in the docstring.
 - Raise `FormulaException`, `DataException`, or `BadIndexException` from `causalpy.custom_exceptions` for formula, data, and index errors
 - Avoid backwards-compat shims for APIs introduced in the same PR

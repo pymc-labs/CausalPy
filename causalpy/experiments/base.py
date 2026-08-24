@@ -17,10 +17,11 @@ Base class for quasi experimental designs.
 
 from __future__ import annotations
 
-import contextlib
+import logging
+import warnings
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Self
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -28,11 +29,18 @@ import pandas as pd
 import xarray as xr
 from sklearn.base import RegressorMixin
 
+from causalpy.custom_exceptions import (
+    GroupNotSampledException,
+    PriorPredictiveNotSupportedException,
+)
+from causalpy.experiments._results import ResultBundle
 from causalpy.experiments.model_adapter import ModelAdapter, make_model_adapter
 from causalpy.maketables_adapters import coefficient_table, get_maketables_adapter
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
+
+logger = logging.getLogger(__name__)
 
 
 def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
@@ -94,7 +102,7 @@ def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
         legend.set_title(kwargs["title"])
 
 
-class BaseExperiment(ABC):
+class BaseExperiment[ResultT: ResultBundle](ABC):
     """Base class for quasi experimental designs.
 
     Subclasses should set ``_default_model_class`` to a PyMC model class
@@ -171,6 +179,11 @@ class BaseExperiment(ABC):
 
     _model_backend: ModelAdapter
 
+    #: Whether this experiment produces grouped result bundles. Experiments
+    #: that store no draw-derived state (IV, IPW, PanelRegression) set False
+    #: and key their fitted-state off the backend instead.
+    _supports_results: bool = True
+
     def __init__(
         self, model: PyMCModel | RegressorMixin | PyMCForecastModel | None = None
     ) -> None:
@@ -183,21 +196,363 @@ class BaseExperiment(ABC):
         )
         self._model_backend = adapter
         self.model = adapter.model
+        self._result: ResultT | None = None
+        self._prior_result: ResultT | None = None
+
+    @property
+    def model(self) -> PyMCModel | RegressorMixin | PyMCForecastModel:
+        """The underlying model instance.
+
+        Assigning a new model is the documented reset: it swaps in the fresh
+        instance and clears ``idata``, ``result``, and ``prior_result``,
+        because graph identity *is* the model instance. Prior revision works
+        through assignment (``exp.model = Model(priors={...})``); there is no
+        ``set_priors()``.
+        """
+        return self._model_backend.model
+
+    @model.setter
+    def model(self, value: PyMCModel | RegressorMixin | PyMCForecastModel) -> None:
+        """Install *value* as the backend model and reset all lifecycle state.
+
+        Parameters
+        ----------
+        value : PyMCModel, RegressorMixin, or PyMCForecastModel
+            The new backend model instance.
+
+        Notes
+        -----
+        The swap clears ``idata``, ``result``, and ``prior_result``: graph
+        identity is the model instance, so stale draws would be incoherent.
+        This assignment is the documented prior-revision mechanism.
+        """
+        self._model_backend = make_model_adapter(
+            value,
+            default_model_class=self._default_model_class,
+            supports_bayes=self.supports_bayes,
+            supports_ols=self.supports_ols,
+            supports_pymc_forecast=self.supports_pymc_forecast,
+        )
+        self._result = None
+        self._prior_result = None
 
     @property
     def idata(self) -> xr.DataTree | None:
         """Return fitted DataTree when the model backend supports it."""
         return self._model_backend.idata
 
+    @property
+    def is_configured(self) -> bool:
+        """Whether construction succeeded: design matrices are ready.
+
+        Always ``True`` on a successfully constructed experiment; sampling has
+        not happened unless the other lifecycle predicates say so.
+        """
+        return True
+
+    @property
+    def is_built(self) -> bool:
+        """Whether the model graph / fit design exists (no draws implied)."""
+        return self._model_backend.is_built or self.is_fitted
+
+    @property
+    def is_fitted(self) -> bool:
+        """Whether posterior draws and the posterior result bundle exist."""
+        if self._supports_results:
+            return self._result is not None
+        return self._model_backend.has_posterior
+
+    @property
+    def has_prior_predictive(self) -> bool:
+        """Whether the prior phase has run (draws, and bundle where kept)."""
+        if self._supports_results:
+            return self._prior_result is not None
+        # Bundle-less experiments key off the backend's idata groups, but a
+        # backend that cannot run the phase at all must never report True —
+        # e.g. IV with ppc_sampler="pymc" incidentally writes a prior group.
+        return (
+            self._model_backend.supports_prior_predictive
+            and self._model_backend.has_prior
+        )
+
+    @property
+    def result(self) -> ResultT:
+        """Posterior-group result bundle; raises before :meth:`fit`."""
+        if not self._supports_results:
+            raise NotImplementedError(
+                f"{type(self).__name__} does not produce a grouped result "
+                "bundle; inspect the backend draws via .idata instead."
+            )
+        if self._result is None:
+            raise GroupNotSampledException(
+                f"No posterior draws are available. Call "
+                f"{type(self).__name__}.fit() first.",
+                group="posterior",
+            )
+        return self._result
+
+    @property
+    def prior_result(self) -> ResultT:
+        """Prior-group result bundle; raises before prior sampling."""
+        if not self._supports_results:
+            raise NotImplementedError(
+                f"{type(self).__name__} does not produce a grouped result "
+                "bundle; inspect the backend draws via .idata instead."
+            )
+        if self._prior_result is None:
+            raise GroupNotSampledException(
+                f"No prior predictive draws are available. Call "
+                f"{type(self).__name__}.sample_prior_predictive() first.",
+                group="prior",
+            )
+        return self._prior_result
+
+    def build(self) -> Self:
+        """Construct the model graph without sampling anything.
+
+        Public, idempotent, and auto-called by both sampling verbs, so users
+        never have to call it — but calling it explicitly makes the spec
+        inspectable (``pm.model_to_graphviz(exp.model)``,
+        ``exp.model.basic_RVs``, merged priors) before any compute is spent.
+
+        The inputs are recomputed from the experiment's data on every call:
+        for an already-built graph they are verified against the build-time
+        fingerprint, so mutating ``exp.data`` and rebuilding raises
+        :class:`RuntimeError` instead of silently keeping a stale graph. The
+        documented reset path is assigning a fresh model instance.
+
+        Returns
+        -------
+        Self
+            The same experiment, for chaining.
+
+        Raises
+        ------
+        RuntimeError
+            If the graph exists and the experiment's data changed since it
+            was built.
+        """
+        X, y, coords = self._fit_inputs()
+        self._model_backend.build(X=X, y=y, coords=coords)
+        return self
+
+    def sample_prior_predictive(self, **kwargs: Any) -> Self:
+        """Run the optional prior phase and populate :attr:`prior_result`.
+
+        Keyword arguments override ``model.prior_sample_kwargs`` for this call
+        only. Re-running overwrites the previous prior groups and
+        ``prior_result`` without touching any posterior state.
+
+        Returns
+        -------
+        Self
+            The same experiment, for chaining.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Forwarded to :func:`pymc.sample_prior_predictive`, overriding
+            the model's stored ``prior_sample_kwargs`` for this call only.
+
+        Raises
+        ------
+        PriorPredictiveNotSupportedException
+            If the model backend declares no prior predictive capability.
+        """
+        if not self._model_backend.supports_prior_predictive:
+            raise PriorPredictiveNotSupportedException(
+                f"The {type(self.model).__name__} backend does not support "
+                "prior predictive sampling."
+            )
+        self.build()
+        resolved = {
+            **getattr(self.model, "prior_sample_kwargs", {}),
+            **kwargs,
+        }
+        self._model_backend.sample_prior_predictive(**resolved)
+        if self._supports_results:
+            self._finalize("prior")
+        return self
+
+    def fit(self, **kwargs: Any) -> Self:
+        """Run the posterior phase and populate :attr:`result`.
+
+        Builds the graph (idempotent), samples NUTS plus posterior predictive
+        draws, then — when the backend supports a prior phase and no prior
+        state exists yet — fills the prior groups and :attr:`prior_result` so
+        ``idata`` is as complete as the historical eager fit produced. The
+        posterior runs FIRST because forward-sampling machinery conditions
+        through the graph's mutable data nodes; re-arming them for every
+        sampling call keeps each phase's draws computed from the right design.
+        Standalone prior checks stay cheap: call
+        :meth:`sample_prior_predictive` directly before :meth:`fit`.
+        Re-running overwrites posterior state only and warns; prior state is
+        preserved.
+
+        Returns
+        -------
+        Self
+            The same experiment, for chaining. This turns every pre-1.0 call
+            site into a one-token migration:
+            ``cp.InterruptedTimeSeries(...).fit()``.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Forwarded to the posterior sampler (:func:`pymc.sample` for
+            PyMC backends), overriding the model's stored ``sample_kwargs``
+            for this call only.
+
+        """
+        self.build()
+        if self._model_backend.has_posterior:
+            warnings.warn(
+                f"Refitting {type(self).__name__}: the previous posterior "
+                "draws will be replaced. Prior-phase state, if any, is "
+                "preserved.",
+                UserWarning,
+                stacklevel=2,
+            )
+        self._model_backend.sample_posterior(**kwargs)
+        if self._supports_results:
+            self._finalize("posterior")
+        if (
+            self._model_backend.supports_prior_predictive
+            and not self.has_prior_predictive
+        ):
+            self.sample_prior_predictive()
+        return self
+
+    def _fit_inputs(self) -> tuple[Any, Any, dict[str, Any] | None]:
+        """Return ``(X, y, coords)`` handed to the backend at build time.
+
+        Not ``@abstractmethod``: ``InstrumentalVariable`` and
+        ``InversePropensityWeighting`` legitimately bypass the standard
+        build/``_finalize`` pipeline and override the lifecycle verbs
+        instead. Ordinary subclasses must implement it (see
+        ``ARCHITECTURE.md``); a missing implementation still fails fast at
+        the first sampling call with a message naming what to implement.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement _fit_inputs() or override "
+            "the lifecycle verbs."
+        )
+
+    def _finalize(self, group: Literal["prior", "posterior"]) -> None:
+        """Compute the group's result bundle from its draws and assign it
+        through :meth:`_assign_bundle`.
+
+        Not ``@abstractmethod`` for the same reason as :meth:`_fit_inputs`.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must implement _finalize(group)."
+        )
+
+    def _assign_bundle(
+        self, group: Literal["prior", "posterior"], bundle: ResultT
+    ) -> None:
+        """Store *bundle* in the slot backing *group*'s raising property."""
+        if group == "prior":
+            self._prior_result = bundle
+        else:
+            self._result = bundle
+
+    def _resolve_group(self, group: Literal["prior", "posterior"]) -> ResultT | None:
+        """Guard and resolve the read-method draw group.
+
+        Raises :class:`~causalpy.custom_exceptions.GroupNotSampledException`
+        naming the missing lifecycle verb; returns ``None`` for experiments
+        without result bundles (their read methods guard on fitted state
+        instead).
+
+        Parameters
+        ----------
+        group : {"prior", "posterior"}
+            Requested draw group.
+        """
+        if group not in ("prior", "posterior"):
+            raise ValueError(f"group must be 'prior' or 'posterior', got {group!r}")
+        if not self._supports_results:
+            # Experiments without bundles still honor the requested group:
+            # "prior" keys off the backend's prior draws so a prior-only
+            # phase is readable without a fit, never silently treated as
+            # posterior (issue #1092: no smart inference of group).
+            if group == "prior":
+                if not self.has_prior_predictive:
+                    if not self._model_backend.supports_prior_predictive:
+                        # Mirror what sample_prior_predictive() would raise,
+                        # instead of pointing the user at a call that cannot
+                        # succeed on this backend.
+                        raise PriorPredictiveNotSupportedException(
+                            f"The {type(self.model).__name__} backend does "
+                            "not support prior predictive sampling."
+                        )
+                    raise GroupNotSampledException(
+                        f"No prior predictive draws are available. Call "
+                        f"{type(self).__name__}.sample_prior_predictive() "
+                        "first.",
+                        group="prior",
+                    )
+                return None
+            if not self.is_fitted:
+                raise GroupNotSampledException(
+                    f"No posterior draws are available. Call "
+                    f"{type(self).__name__}.fit() first.",
+                    group="posterior",
+                )
+            return None
+        if group == "prior":
+            if self._prior_result is None:
+                raise GroupNotSampledException(
+                    f"No prior predictive draws are available. Call "
+                    f"{type(self).__name__}.sample_prior_predictive() first.",
+                    group="prior",
+                )
+            return self._prior_result
+        if self._result is None:
+            raise GroupNotSampledException(
+                f"No posterior draws are available. Call "
+                f"{type(self).__name__}.fit() first.",
+                group="posterior",
+            )
+        return self._result
+
+    def _require_bundle(self, group: Literal["prior", "posterior"]) -> ResultT:
+        """Guard and return *group*'s bundle for bundle-backed readers.
+
+        :meth:`_resolve_group` yields ``None`` only on experiments without
+        result bundles, whose read methods never consume one — so a
+        ``None`` here is statically unreachable.
+        """
+        bundle = self._resolve_group(group)
+        assert bundle is not None
+        return bundle
+
     def print_coefficients(self, round_to: int | None = None) -> None:
-        """Ask the model to print its coefficients.
+        """Ask the model to print its posterior coefficients.
+        Posterior-only by design: prior coefficient draws include merged
+        data-driven defaults the user never typed. To inspect those, call
+        :meth:`build` first and read ``exp.model.priors`` /
+        ``exp.model.basic_RVs`` directly — that is a better tool for prior
+        inspection than a second printing path.
 
         Parameters
         ----------
         round_to : int, optional
             Number of significant figures to round to. Defaults to None,
             in which case 2 significant figures are used.
+
+        Raises
+        ------
+        GroupNotSampledException
+            If the experiment has not been fitted yet.
         """
+        if not self.is_fitted:
+            raise GroupNotSampledException(
+                f"No posterior draws are available. Call "
+                f"{type(self).__name__}.fit() before printing coefficients.",
+                group="posterior",
+            )
         self._model_backend.print_coefficients(self.labels, round_to)
 
     def set_maketables_options(self, *, hdi_prob: float | None = None) -> None:
@@ -267,6 +622,7 @@ class BaseExperiment(ABC):
         *,
         show: bool,
         legend_kwargs: dict[str, Any] | None,
+        group: Literal["prior", "posterior"] = "posterior",
         **draw_kwargs: Any,
     ) -> tuple:
         """Template Method shared by every subclass's public ``plot``.
@@ -289,6 +645,13 @@ class BaseExperiment(ABC):
         the discoverability problem described in #886. Subclasses are
         instead required to declare their own ``plot()`` with an explicit
         keyword-only signature and call ``self._render_plot(...)``.
+
+        The ``group`` keyword is guarded here — once for every subclass —
+        via :meth:`_resolve_group`: the group-not-sampled error is raised in
+        exactly one place. The literal group is forwarded to the subclass's
+        ``_plot(group=..., ...)`` which resolves its own bundle; prior-group
+        plots render the reduced panel set (counterfactual vs observations
+        only).
 
         Parameters
         ----------
@@ -333,8 +696,12 @@ class BaseExperiment(ABC):
         ...     legend_kwargs={"loc": "upper left", "bbox_to_anchor": (1.04, 1)},
         ... )
         """
+        # The guard runs here, once for every subclass; the subclass's
+        # ``_plot`` resolves its own bundle from the group so that override
+        # signatures stay keyword-only with defaults (LSP-clean).
+        self._resolve_group(group)
         with plt.style.context("arviz-darkgrid"):
-            fig, ax = self._plot(**draw_kwargs)
+            fig, ax = self._plot(group=group, **draw_kwargs)
 
         # Apply legend customization if requested.  We mutate the existing
         # Legend object in place so that custom handles — especially the
@@ -367,20 +734,32 @@ class BaseExperiment(ABC):
     def _plot(self, **kwargs: Any) -> tuple:
         """Draw the experiment figure; called by :meth:`_render_plot`.
 
-        Subclasses implement a single backend-agnostic ``_plot`` that consumes
-        the canonical prediction container. Uncertainty rendering should key
-        on data properties (e.g.
-        :func:`~causalpy.utils.has_posterior_draws`), not backend
-        identity.
+        Subclasses implement a single backend-agnostic ``_plot`` that declares
+        ``group`` among its keyword-only parameters and resolves the group's
+        result bundle itself via ``self._resolve_group(group)`` — never flat
+        draw-derived attributes. ``group == "prior"`` renders the reduced
+        panel set: the prior-implied counterfactual against observed data
+        only, dropping impact and cumulative-impact panels, whose axis
+        scaling is meaningless under a prior. Uncertainty rendering should
+        key on data properties (e.g.
+        :func:`~causalpy.utils.has_posterior_draws`), not backend identity.
         """
         raise NotImplementedError("_plot method not yet implemented")
 
     @abstractmethod
-    def effect_summary(self) -> EffectSummary:
+    def effect_summary(
+        self, *, group: Literal["prior", "posterior"] = "posterior"
+    ) -> EffectSummary:
         """Generate a decision-ready summary of causal effects.
 
-        Concrete experiments declare only the keyword-only parameters that
-        their own effect-summary implementation supports.
+        Parameters
+        ----------
+        group : {"prior", "posterior"}, default "posterior"
+            ``"prior"`` resolves the prior bundle (after
+            :meth:`sample_prior_predictive`) with prior-appropriate prose;
+            ``"posterior"`` (default) requires :meth:`fit`. Concrete
+            experiments declare additional keyword-only parameters that their
+            own effect-summary implementation supports.
 
         Returns
         -------
@@ -422,8 +801,17 @@ class BaseExperiment(ABC):
         ctx = PipelineContext(data=self.data)
         ctx.experiment = self
         if include_effect_summary:
-            with contextlib.suppress(Exception):
+            try:
                 ctx.effect_summary = self.effect_summary()
+            except NotImplementedError:
+                # Experiments without an effect-summary implementation keep
+                # reporting; a missing draw group must NOT be swallowed —
+                # GroupNotSampledException propagates so the report tells
+                # the user to call fit() first.
+                logger.debug(
+                    "effect_summary() not available for %s",
+                    type(self).__name__,
+                )
 
         step = GenerateReport(
             include_plots=include_plots,

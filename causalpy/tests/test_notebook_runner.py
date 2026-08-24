@@ -627,6 +627,7 @@ def test_production_skip_configuration_is_consistent() -> None:
     assert skip_notebooks == {
         "gallery/instrumental-variables-pymc.ipynb",
         "gallery/instrumental-variables-weak-instruments.ipynb",
+        "gallery/instrumental-variables-variable-selection-priors.ipynb",
         "gallery/interrupted-time-series-causalpy-vs-causalimpact.ipynb",
     }
 

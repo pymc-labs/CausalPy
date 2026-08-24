@@ -396,10 +396,10 @@ def test_piecewise_its_ols_single_interruption():
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     assert isinstance(result, cp.PiecewiseITS)
-    assert result.score["unit_0_r2"] > 0.9  # Should fit well with low noise
+    assert result.result.score["unit_0_r2"] > 0.9  # Should fit well with low noise
     assert len(result.labels) == 4  # Intercept, time, step, ramp
 
 
@@ -513,11 +513,16 @@ def test_piecewise_its_ols_effect_consistency():
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
-    # Effect should equal fitted - counterfactual
-    expected_effect = np.squeeze(result.y_pred) - np.squeeze(result.y_counterfactual)
-    np.testing.assert_allclose(np.squeeze(result.effect), expected_effect)
+    # Effect should equal fitted - counterfactual on the post-intervention
+    # window, where both the fitted slice and the counterfactual are exposed
+    bundle = result.result
+    n_post = len(result.datapost)
+    expected_effect = bundle.predictions_pre.isel(obs_ind=slice(-n_post, None)).isel(
+        treated_units=0
+    ) - bundle.predictions_post.isel(treated_units=0)
+    np.testing.assert_allclose(bundle.impact_post, expected_effect)
 
 
 def test_piecewise_its_ols_cumulative_effect():
@@ -535,12 +540,12 @@ def test_piecewise_its_ols_cumulative_effect():
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
-    # Cumulative effect should be cumsum of effect
-    expected_cumulative = np.cumsum(np.squeeze(result.effect))
+    # Cumulative effect should be cumsum of the post-intervention effect
+    expected_cumulative = np.cumsum(np.squeeze(result.result.impact_post))
     np.testing.assert_allclose(
-        np.squeeze(result.cumulative_effect), expected_cumulative
+        np.squeeze(result.result.impact_post_cumulative), expected_cumulative
     )
 
 
@@ -552,7 +557,7 @@ def test_piecewise_its_ols_plot():
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
@@ -568,7 +573,7 @@ def test_piecewise_its_ols_get_plot_data():
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     plot_data = result.get_plot_data()
     assert isinstance(plot_data, pd.DataFrame)
@@ -588,7 +593,7 @@ def test_piecewise_its_ols_summary():
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Should not raise
     result.summary()
@@ -631,7 +636,7 @@ def test_piecewise_its_pymc_single_interruption(mock_pymc_sample):
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     assert isinstance(result, cp.PiecewiseITS)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
@@ -714,7 +719,7 @@ def test_piecewise_its_pymc_plot(mock_pymc_sample):
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
@@ -731,7 +736,7 @@ def test_piecewise_its_pymc_get_plot_data(mock_pymc_sample):
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     plot_data = result.get_plot_data()
     assert isinstance(plot_data, pd.DataFrame)
@@ -758,7 +763,7 @@ def test_piecewise_its_pymc_summary(mock_pymc_sample):
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Should not raise
     result.summary()
@@ -881,7 +886,7 @@ def test_piecewise_its_effect_summary_ols():
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # effect_summary should not raise an error
     summary = result.effect_summary()
@@ -923,7 +928,7 @@ def test_piecewise_its_effect_summary_pymc():
         model=cp.pymc_models.LinearRegression(
             sample_kwargs={"random_seed": 42, "progressbar": False, **sample_kwargs}
         ),
-    )
+    ).fit()
 
     # effect_summary should not raise an error
     summary = result.effect_summary()
@@ -974,21 +979,21 @@ def test_piecewise_its_post_impact_attributes():
         df,
         formula="y ~ 1 + t + step(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
-    # Check that post_impact and datapost are created
-    assert hasattr(result, "post_impact")
+    # Check that the post-intervention containers and datapost are created
+    assert hasattr(result.result, "impact_post")
     assert hasattr(result, "datapost")
-    assert hasattr(result, "post_pred")
+    assert hasattr(result.result, "predictions_post")
 
     # datapost should have 50 rows (t >= 50)
     assert len(result.datapost) == 50
 
     # post_impact should have same length as datapost
-    assert result.post_impact.sizes["obs_ind"] == len(result.datapost)
+    assert result.result.impact_post.sizes["obs_ind"] == len(result.datapost)
 
     # post_pred should have same length as datapost
-    assert result.post_pred.sizes["obs_ind"] == len(result.datapost)
+    assert result.result.predictions_post.sizes["obs_ind"] == len(result.datapost)
 
 
 # ==============================================================================
@@ -1057,7 +1062,7 @@ def test_piecewise_its_summary_with_round_to():
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Should not raise with explicit round_to
     result.summary(round_to=3)
@@ -1071,7 +1076,7 @@ def test_piecewise_its_plot_with_round_to():
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     fig, ax = result.plot(round_to=3)
     assert isinstance(fig, plt.Figure)
@@ -1092,7 +1097,7 @@ def test_piecewise_its_ols_multiple_interruptions_plot():
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50) + step(t, 100) + ramp(t, 100)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
@@ -1113,7 +1118,7 @@ def test_piecewise_its_datetime_plot():
         df,
         formula="y ~ 1 + step(date, '2020-02-20') + ramp(date, '2020-02-20')",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Plotting with datetime thresholds should work
     fig, ax = result.plot()
@@ -1130,7 +1135,7 @@ def test_piecewise_its_pymc_get_plot_data_custom_hdi(mock_pymc_sample):
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test with different hdi_prob
     plot_data = result.get_plot_data(hdi_prob=0.89)
@@ -1162,7 +1167,7 @@ def test_piecewise_its_pymc_multiple_interruptions_plot(mock_pymc_sample):
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50) + step(t, 100) + ramp(t, 100)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
@@ -1182,23 +1187,23 @@ def test_piecewise_its_pymc_post_impact_attributes(mock_pymc_sample):
         df,
         formula="y ~ 1 + t + step(t, 50)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
-    # Check attributes exist
-    assert hasattr(result, "post_impact")
+    # Check the post-intervention containers exist
+    assert hasattr(result.result, "impact_post")
     assert hasattr(result, "datapost")
-    assert hasattr(result, "post_pred")
+    assert hasattr(result.result, "predictions_post")
 
     # datapost should have 50 rows (t >= 50)
     assert len(result.datapost) == 50
 
-    assert result.post_pred.dims == (
+    assert result.result.predictions_post.dims == (
         "chain",
         "draw",
         "obs_ind",
         "treated_units",
     )
-    assert result.post_pred.sizes["obs_ind"] == len(result.datapost)
+    assert result.result.predictions_post.sizes["obs_ind"] == len(result.datapost)
 
 
 def test_piecewise_its_datetime_post_intervention_attributes():
@@ -1255,14 +1260,14 @@ def test_piecewise_its_counterfactual_zeros_interruption_terms():
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Pre-intervention: effect should be approximately 0
-    pre_effect = result.effect.isel(obs_ind=slice(0, 50))
+    pre_effect = result.result.impact_pre.isel(obs_ind=slice(0, 50))
     assert np.allclose(pre_effect, 0, atol=1e-10)
 
     # Post-intervention: effect should be non-zero
-    post_effect = result.effect.isel(obs_ind=slice(50, None))
+    post_effect = result.result.impact_pre.isel(obs_ind=slice(50, None))
     assert not np.allclose(post_effect, 0)
 
 
@@ -1310,10 +1315,10 @@ def test_piecewise_its_ols_various_effects(level_change, slope_change):
     if level_change == 0 and slope_change == 0:
         formula += " + step(t, 50)"
 
-    result = cp.PiecewiseITS(df, formula=formula, model=LinearRegression())
+    result = cp.PiecewiseITS(df, formula=formula, model=LinearRegression()).fit()
 
     assert isinstance(result, cp.PiecewiseITS)
-    assert result.score["unit_0_r2"] > 0.5  # Should have reasonable fit
+    assert result.result.score["unit_0_r2"] > 0.5  # Should have reasonable fit
 
 
 @pytest.mark.parametrize(
@@ -1404,10 +1409,10 @@ def test_piecewise_its_score_attribute_ols():
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
-    assert list(result.score.index) == ["unit_0_r2"]
-    assert 0 <= result.score["unit_0_r2"] <= 1
+    assert list(result.result.score.index) == ["unit_0_r2"]
+    assert 0 <= result.result.score["unit_0_r2"] <= 1
 
 
 def test_piecewise_its_ols_model_without_fit_intercept():
@@ -1478,10 +1483,10 @@ def test_piecewise_its_y_pred_shape():
         df,
         formula="y ~ 1 + t + step(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # y_pred should have same length as data
-    assert len(np.squeeze(result.y_pred)) == 100
+    assert len(np.squeeze(result.result.predictions_pre)) == 100
 
 
 def test_piecewise_its_effect_pre_intervention_zero():
@@ -1499,10 +1504,10 @@ def test_piecewise_its_effect_pre_intervention_zero():
         df,
         formula="y ~ 1 + t + step(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Effect before interruption should be zero
-    pre_effect = result.effect.isel(obs_ind=slice(0, 50))
+    pre_effect = result.result.impact_pre.isel(obs_ind=slice(0, 50))
     np.testing.assert_allclose(pre_effect, 0, atol=1e-10)
 
 
@@ -1514,13 +1519,14 @@ def test_piecewise_its_get_plot_data_stores_attribute():
         df,
         formula="y ~ 1 + t + step(t, 50)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     plot_df = result.get_plot_data()
 
-    # Should store in plot_data attribute
-    assert hasattr(result, "plot_data")
-    pd.testing.assert_frame_equal(result.plot_data, plot_df)
+    # plot_data is no longer cached on the experiment under the lazy
+    # lifecycle: bind the returned frame instead
+    assert isinstance(plot_df, pd.DataFrame)
+    assert "effect" in plot_df.columns
 
 
 def test_piecewise_its_step_variable_not_in_data():
@@ -1689,6 +1695,15 @@ def test_piecewise_plot_data_uses_hdi_for_skewed_draws(monkeypatch):
 
     y_pred_mu, y_cf_mu = [prediction_draws() for _ in range(2)]
     effect, cumulative_effect = [draws() for _ in range(2)]
+    from causalpy.experiments._results import CausalResult
+
+    bundle = CausalResult(
+        predictions_pre=y_pred_mu,
+        predictions_post=prediction_draws(),
+        impact_pre=effect,
+        impact_post=effect,
+        impact_post_cumulative=cumulative_effect,
+    )
     result = SimpleNamespace(
         time_col="time",
         outcome_variable_name="y",
@@ -1696,10 +1711,7 @@ def test_piecewise_plot_data_uses_hdi_for_skewed_draws(monkeypatch):
         design=xr.Dataset(
             {"y": xr.DataArray([[0.0], [0.0]], dims=["obs_ind", "treated_units"])}
         ),
-        y_pred=y_pred_mu,
-        y_counterfactual=y_cf_mu,
-        effect=effect,
-        cumulative_effect=cumulative_effect,
+        _require_bundle=lambda group: bundle,
     )
     from causalpy.experiments import piecewise_its as piecewise_module
 

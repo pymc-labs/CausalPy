@@ -35,6 +35,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
+from causalpy.experiments._results import DiscontinuityResult
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.custom_exceptions import (
     DataException,
@@ -48,7 +49,13 @@ from causalpy.plot_utils import (
     plot_posterior_over_x,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
-from causalpy.reporting import EffectSummary, _effect_summary_rd
+from causalpy.reporting import (
+    EffectSummary,
+    _compute_statistics_rd_ols,
+    _effect_summary_rd,
+    _generate_prose_rd_ols,
+    _generate_table_rd_ols,
+)
 from causalpy.utils import (
     _as_scalar,
     _is_variable_dummy_coded,
@@ -59,7 +66,7 @@ from causalpy.utils import (
 from .base import BaseExperiment
 
 
-class RegressionDiscontinuity(BaseExperiment):
+class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
     """
     A class to analyse sharp regression discontinuity experiments.
 
@@ -74,15 +81,15 @@ class RegressionDiscontinuity(BaseExperiment):
         A scalar threshold value at which the treatment is applied.
     model : PyMCModel, RegressorMixin, or None, default None
         A PyMC or sklearn model. Defaults to :class:`LinearRegression`.
+    bandwidth : float, default np.inf
+        Data outside of the bandwidth (relative to the discontinuity) is not
+        used to fit the model.
     running_variable_name : str, default "x"
         The name of the predictor variable that the treatment threshold is
         based upon.
     epsilon : float, default 0.001
         A small scalar value which determines how far above and below the
         treatment threshold to evaluate the causal impact.
-    bandwidth : float, default np.inf
-        Data outside of the bandwidth (relative to the discontinuity) is not
-        used to fit the model.
     donut_hole : float, default 0.0
         Observations within this distance from the treatment threshold are
         excluded from model fitting. Used as a robustness check when
@@ -92,6 +99,15 @@ class RegressionDiscontinuity(BaseExperiment):
 
     Notes
     -----
+    **Lazy lifecycle**
+
+    Construction only validates input and builds design matrices — nothing is
+    sampled. Call :meth:`fit` to run posterior inference (it returns ``self``,
+    so construction and fitting chain in one expression), and optionally
+    :meth:`sample_prior_predictive` first for prior predictive checks
+    (``plot(group="prior")``, ``effect_summary(group="prior")``). Results
+    live on ``exp.result`` / ``exp.prior_result``.
+
     **Estimate extraction**
 
     After fitting the regression on the selected bandwidth, the class predicts the conditional expectation immediately below the threshold with ``treated=0`` and immediately above it with ``treated=1``. ``discontinuity_at_threshold`` is the upper prediction minus the lower prediction, evaluated at ``threshold ± epsilon``. This is a local prediction contrast, not a population-standardized effect.
@@ -113,7 +129,7 @@ class RegressionDiscontinuity(BaseExperiment):
     ...         },
     ...     ),
     ...     treatment_threshold=0.5,
-    ... )
+    ... ).fit()
     """
 
     supports_ols = True
@@ -146,7 +162,7 @@ class RegressionDiscontinuity(BaseExperiment):
         self.input_validation()
         self._build_design_matrices()
         self._prepare_data()
-        self.algorithm()
+        self._prepare_prediction_grids()
 
     def _build_design_matrices(self) -> None:
         """Build design matrices from formula and data, applying bandwidth and donut hole filtering."""
@@ -198,20 +214,14 @@ class RegressionDiscontinuity(BaseExperiment):
         )
         del self._X_raw, self._y_raw
 
-    def algorithm(self) -> None:
-        """Run the experiment algorithm: fit model, predict, and calculate discontinuity."""
-        X = self.design["X"]
-        y = self.design["y"]
+    def _prepare_prediction_grids(self) -> None:
+        """Build the deterministic prediction grids consumed by plotting.
 
-        self._model_backend.fit(
-            X=X,
-            y=y,
-            coords=build_coords(self.labels, X.shape[0]),
-        )
-
-        self.score = self._model_backend.score(X=X, y=y)
-
-        # get the model predictions of the observed data
+        Draw-independent design-stage artifacts: the running-variable grid
+        behind ``result.predictions`` and the two threshold rows whose
+        expectation contrast defines the discontinuity. Computed once at
+        configure time — never re-assigned per draw group.
+        """
         if self.bandwidth is not np.inf:
             fmin = self.treatment_threshold - self.bandwidth
             fmax = self.treatment_threshold + self.bandwidth
@@ -225,11 +235,6 @@ class RegressionDiscontinuity(BaseExperiment):
         self.x_pred = pd.DataFrame(
             {self.running_variable_name: xi, "treated": self._is_treated(xi)}
         )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
-        self.pred = self._model_backend.predict(X=np.asarray(new_x))
-
-        # calculate discontinuity by evaluating the difference in model expectation on
-        # either side of the discontinuity
         # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above
         # (not below) the threshold
         self.x_discon = pd.DataFrame(
@@ -247,10 +252,48 @@ class RegressionDiscontinuity(BaseExperiment):
         # Preserve the design rows used for the threshold prediction contrast:
         # row 0 is below the threshold and row 1 is above it.
         self.x_discon_design = np.asarray(new_x)
-        self.pred_discon = self._model_backend.predict(X=np.asarray(new_x))
-        self.discontinuity_at_threshold = self.pred_discon.isel(
+
+    def _fit_inputs(self) -> tuple[Any, Any, dict[str, Any]]:
+        """Return the design matrices and coordinates for model build."""
+        X = self.design["X"]
+        return (
+            X,
+            self.design["y"],
+            build_coords(self.labels, X.shape[0]),
+        )
+
+    def _finalize(self, group: Literal["prior", "posterior"]) -> None:
+        """Compute the group's result bundle from its draws and assign it.
+
+        The body is the historical ``algorithm()`` with the draw group
+        threaded through prediction. Posterior fits score against the
+        observed data; prior draws are not scored (R² against observed
+        data is not informative under a prior).
+        """
+        X = self.design["X"]
+        y = self.design["y"]
+
+        # predictions over the running-variable grid built at configure time
+        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
+        predictions = self._model_backend.predict(X=np.asarray(new_x), group=group)
+
+        # discontinuity = difference in model expectation across the threshold,
+        # evaluated on the two threshold rows built at configure time
+        pred_discon = self._model_backend.predict(X=self.x_discon_design, group=group)
+        discontinuity_at_threshold = pred_discon.isel(
             obs_ind=1, treated_units=0
-        ) - self.pred_discon.isel(obs_ind=0, treated_units=0)
+        ) - pred_discon.isel(obs_ind=0, treated_units=0)
+
+        score = None
+        if group == "posterior":
+            score = self._model_backend.score(X=X, y=y)
+
+        bundle = DiscontinuityResult(
+            predictions=predictions,
+            discontinuity_at_threshold=discontinuity_at_threshold,
+            score=score,
+        )
+        self._assign_bundle(group, bundle)
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -315,10 +358,11 @@ class RegressionDiscontinuity(BaseExperiment):
         print(f"Donut hole: {self.donut_hole}")
         print(f"Observations used for fit: {len(self.fit_data)}")
         print("\nResults:")
+        bundle = self.result
         discontinuity = (
-            self.discontinuity_at_threshold
-            if has_posterior_draws(self.discontinuity_at_threshold)
-            else _as_scalar(self.discontinuity_at_threshold)
+            bundle.discontinuity_at_threshold
+            if has_posterior_draws(bundle.discontinuity_at_threshold)
+            else _as_scalar(bundle.discontinuity_at_threshold)
         )
         print(f"Discontinuity at threshold = {convert_to_string(discontinuity)}")
         print("\n")
@@ -327,6 +371,7 @@ class RegressionDiscontinuity(BaseExperiment):
     def plot(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
@@ -340,6 +385,12 @@ class RegressionDiscontinuity(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to plot. ``"prior"`` renders the reduced
+            prior-check figure — the prior-implied fit against the observed
+            data only — and requires :meth:`sample_prior_predictive`;
+            ``"posterior"`` (default) renders the full results figure and
+            requires :meth:`fit`.
         round_to : int, optional
             Number of decimals used to round numerical results in the figure
             title (e.g. the Bayesian :math:`R^2`). Defaults to 2. Use
@@ -386,6 +437,7 @@ class RegressionDiscontinuity(BaseExperiment):
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
+            group=group,
             round_to=round_to,
             ci_prob=ci_prob,
             kind=kind,
@@ -396,6 +448,8 @@ class RegressionDiscontinuity(BaseExperiment):
 
     def _plot(
         self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
@@ -408,6 +462,10 @@ class RegressionDiscontinuity(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}
+            ``"prior"`` renders the reduced single-panel prior-check figure
+            via :meth:`_plot_prior_checks`; ``"posterior"`` renders the full
+            results figure.
         round_to : int, optional
             Number of decimals used to round results. Defaults to 2. Use ``None``
             to return raw numbers.
@@ -427,7 +485,11 @@ class RegressionDiscontinuity(BaseExperiment):
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
-        with_uncertainty = has_posterior_draws(self.pred)
+        bundle = self._require_bundle(group)
+        if group == "prior":
+            return self._plot_prior_checks(bundle=bundle)
+
+        with_uncertainty = has_posterior_draws(bundle.predictions)
         has_exclusion = len(self.fit_data) < len(self.data)
         xcol = self.running_variable_name
         ycol = self.outcome_variable_name
@@ -457,9 +519,9 @@ class RegressionDiscontinuity(BaseExperiment):
         p = ggplot(points, aes(x=plot_x, y=plot_y, color=plot_series)) + geom_point()
 
         # create strings to compose title
-        r2 = format_r2_score(self.score, round_to=round_to, context="on fit data")
+        r2 = format_r2_score(bundle.score, round_to=round_to, context="on fit data")
         if with_uncertainty:
-            percentiles = self.discontinuity_at_threshold.quantile(
+            percentiles = bundle.discontinuity_at_threshold.quantile(
                 [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
             ).values
             ci = (
@@ -467,16 +529,16 @@ class RegressionDiscontinuity(BaseExperiment):
                 + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
             )
             discon = f"""
-            Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)},
+            Discontinuity at threshold = {round_num(bundle.discontinuity_at_threshold.mean(), round_to)},
             """
             title = r2 + "\n" + discon + ci
         else:
-            discon = f"Discontinuity at threshold = {round_num(_as_scalar(self.discontinuity_at_threshold), round_to)}"
+            discon = f"Discontinuity at threshold = {round_num(_as_scalar(bundle.discontinuity_at_threshold), round_to)}"
             title = r2 + "\n" + discon
             model_fit = pd.DataFrame(
                 {
                     plot_x: self.x_pred[xcol],
-                    plot_y: self.pred.isel(chain=0, draw=0, treated_units=0),
+                    plot_y: bundle.predictions.isel(chain=0, draw=0, treated_units=0),
                     plot_series: "model fit",
                 }
             )
@@ -528,7 +590,7 @@ class RegressionDiscontinuity(BaseExperiment):
             }
             plot_posterior_over_x(
                 self.x_pred[self.running_variable_name],
-                self.pred.isel(treated_units=0),
+                bundle.predictions.isel(treated_units=0),
                 ax=ax,
                 **style,
                 plot_hdi_kwargs={"color": "C1"},
@@ -560,9 +622,52 @@ class RegressionDiscontinuity(BaseExperiment):
         )
         return (fig, ax)
 
+    def _plot_prior_checks(
+        self, *, bundle: DiscontinuityResult
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Render the reduced prior-check figure.
+
+        A prior check answers whether the prior-implied fit is plausible
+        against the observed data, so a single panel suffices: the observed
+        scatter plus the prior-implied fit line and band over the
+        running-variable grid, with the treatment threshold marked.
+        """
+        xcol = self.running_variable_name
+        ycol = self.outcome_variable_name
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.plot(self.data[xcol], self.data[ycol], "k.", label="Observations")
+        style: _PosteriorPlotStyle = {
+            "ci_prob": HDI_PROB,
+            "kind": "ribbon",
+            "ci_kind": "hdi",
+            "num_samples": 50,
+        }
+        h_line, h_patch = plot_posterior_over_x(
+            self.x_pred[xcol],
+            bundle.predictions.isel(treated_units=0),
+            ax=ax,
+            **style,
+            plot_hdi_kwargs={"color": "C1"},
+        )
+        ax.axvline(
+            x=self.treatment_threshold,
+            ls="--",
+            lw=1.5,
+            color="r",
+            label="treatment threshold",
+        )
+        ax.legend(
+            handles=[(h_line, h_patch)],
+            labels=["Prior fit"],
+            fontsize=LEGEND_FONT_SIZE,
+        )
+        ax.set(title="Prior predictive check")
+        return fig, ax
+
     def effect_summary(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
         alpha: float = 0.05,
         min_effect: float | None = None,
@@ -572,6 +677,13 @@ class RegressionDiscontinuity(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to summarize. ``"prior"`` requires
+            :meth:`sample_prior_predictive` and produces prior-appropriate
+            prose — under a neutral prior, ``P(effect > 0)`` should sit near
+            0.5, so a tail probability far from 0.5 flags a design-matrix or
+            prior-specification problem rather than a causal finding.
+            ``"posterior"`` requires :meth:`fit`.
         direction : {"increase", "decrease", "two-sided"}, default="increase"
             Direction for tail probability calculation (PyMC only, ignored for OLS).
         alpha : float, default=0.05
@@ -584,9 +696,21 @@ class RegressionDiscontinuity(BaseExperiment):
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
-        return _effect_summary_rd(
-            self,
-            direction=direction,
-            alpha=alpha,
-            min_effect=min_effect,
-        )
+        # Resolve the group's bundle once; helpers consume containers.
+        bundle = self._require_bundle(group)
+        if has_posterior_draws(bundle.discontinuity_at_threshold):
+            summary = _effect_summary_rd(
+                bundle,
+                direction=direction,
+                alpha=alpha,
+                min_effect=min_effect,
+                group=group,
+            )
+        else:
+            # Point-estimate (OLS) backends: posterior-only path.
+            stats = _compute_statistics_rd_ols(self, alpha=alpha)
+            summary = EffectSummary(
+                table=_generate_table_rd_ols(stats),
+                text=_generate_prose_rd_ols(stats, alpha=alpha),
+            )
+        return summary
