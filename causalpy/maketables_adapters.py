@@ -95,6 +95,23 @@ def _safe_observation_count(experiment: Any) -> int | None:
     return None
 
 
+def _result_bundle_or_none(experiment: Any) -> Any:
+    """Return the experiment's posterior bundle, or ``None`` if unavailable.
+
+    ``BaseExperiment.result`` raises
+    :class:`~causalpy.custom_exceptions.GroupNotSampledException` before a
+    fit and ``NotImplementedError`` on experiments without bundles.
+    ``AttributeError`` is also tolerated because these adapters accept any
+    duck-typed experiment-like object (see ``_Stub`` in
+    ``test_maketables_plugin.py``), which may not expose ``result`` at all;
+    all three mean "no score to report", never an error worth surfacing.
+    """
+    try:
+        return experiment.result
+    except (GroupNotSampledException, NotImplementedError, AttributeError):
+        return None
+
+
 def _safe_r2_value(experiment: Any) -> float | None:
     """Best-effort model score extraction without assuming one score format.
 
@@ -102,13 +119,10 @@ def _safe_r2_value(experiment: Any) -> float | None:
     that have not been fitted (or that do not support result bundles) yield
     no score.
     """
-    try:
-        bundle = experiment.result
-    except (GroupNotSampledException, NotImplementedError, AttributeError):
-        return None
-    score_obj = getattr(bundle, "score", None)
+    score_obj = getattr(_result_bundle_or_none(experiment), "score", None)
     if score_obj is None:
         return None
+
     try:
         if isinstance(score_obj, pd.Series):
             r2_like = score_obj[[idx for idx in score_obj.index if "r2" in str(idx)]]
@@ -168,10 +182,7 @@ def _get_maketables_hdi_prob(experiment: Any) -> float:
     """
     hdi_prob = getattr(experiment, "_maketables_hdi_prob", None)
     if hdi_prob is None:
-        try:
-            bundle = experiment.result
-        except (GroupNotSampledException, NotImplementedError, AttributeError):
-            bundle = None
+        bundle = _result_bundle_or_none(experiment)
         if isinstance(bundle, StaggeredDifferenceInDifferencesResult):
             hdi_prob = bundle.hdi_prob
         else:
