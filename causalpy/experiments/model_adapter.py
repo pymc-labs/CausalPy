@@ -35,7 +35,7 @@ from causalpy.custom_exceptions import (
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import create_causalpy_compatible_class
-from causalpy.utils import round_num
+from causalpy.utils import _design_fingerprint, round_num
 
 BackendKind = Literal["pymc", "sklearn", "pymc-forecast"]
 
@@ -641,6 +641,7 @@ class SklearnModelAdapter(ModelAdapter):
         self._coeffs: np.ndarray | None = None
         self._treated_units: np.ndarray | None = None
         self._fit_inputs: tuple[Any, Any] | None = None
+        self._fit_fingerprint: tuple | None = None
         self._is_fitted: bool = False
 
     @property
@@ -690,8 +691,15 @@ class SklearnModelAdapter(ModelAdapter):
             Ignored for sklearn backends.
         """
         if self._fit_inputs is not None:
+            if _design_fingerprint(X, y) != self._fit_fingerprint:
+                raise RuntimeError(
+                    "This backend is already built with different inputs. "
+                    "Design matrices are recorded exactly once per instance; "
+                    "assign a fresh model instead of rebuilding."
+                )
             return
         self._fit_inputs = (X, y)
+        self._fit_fingerprint = _design_fingerprint(X, y)
 
     def sample_prior_predictive(self, **kwargs: Any) -> None:
         """Raise: point-estimate backends have no prior predictive phase.
@@ -982,6 +990,7 @@ class PyMCForecastAdapter(ModelAdapter):
     def __init__(self, model: PyMCForecastModel) -> None:
         self._model = model
         self._fit_inputs: tuple[Any, Any, dict[str, Any] | None] | None = None
+        self._fit_fingerprint: tuple | None = None
 
     @property
     def model(self) -> PyMCForecastModel:
@@ -1032,11 +1041,19 @@ class PyMCForecastAdapter(ModelAdapter):
             Coordinate metadata; forwarded to :meth:`fit`.
         """
         if self._fit_inputs is not None:
+            if _design_fingerprint(X, y) != self._fit_fingerprint:
+                raise RuntimeError(
+                    "This backend is already built with different inputs. "
+                    "Fit inputs are recorded exactly once per instance; "
+                    "assign a fresh model instead of rebuilding."
+                )
             return
         self._fit_inputs = (X, y, coords)
+        self._fit_fingerprint = _design_fingerprint(X, y)
 
     def sample_prior_predictive(self, **kwargs: Any) -> None:
         """Raise: the forecaster exposes no prior-drawing path upstream.
+
 
         Other Parameters
         ----------------

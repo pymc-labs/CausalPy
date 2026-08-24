@@ -315,14 +315,25 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
         inspectable (``pm.model_to_graphviz(exp.model)``,
         ``exp.model.basic_RVs``, merged priors) before any compute is spent.
 
+        The inputs are recomputed from the experiment's data on every call:
+        for an already-built graph they are verified against the build-time
+        fingerprint, so mutating ``exp.data`` and rebuilding raises
+        :class:`RuntimeError` instead of silently keeping a stale graph. The
+        documented reset path is assigning a fresh model instance.
+
         Returns
         -------
         Self
             The same experiment, for chaining.
+
+        Raises
+        ------
+        RuntimeError
+            If the graph exists and the experiment's data changed since it
+            was built.
         """
-        if not self._model_backend.is_built:
-            X, y, coords = self._fit_inputs()
-            self._model_backend.build(X=X, y=y, coords=coords)
+        X, y, coords = self._fit_inputs()
+        self._model_backend.build(X=X, y=y, coords=coords)
         return self
 
     def sample_prior_predictive(self, **kwargs: Any) -> Self:

@@ -1439,3 +1439,70 @@ class TestPriorIntegration:
         assert "beta" in model.priors
         beta_prior = model.priors["beta"]
         assert beta_prior.distribution == "Dirichlet"
+
+
+# ---------------------------------------------------------------------------
+# Third-pass review: pinned prior-phase defaults, clone carriage, rebuild guard
+# ---------------------------------------------------------------------------
+
+
+def test_default_prior_sample_kwargs_are_pinned():
+    """The documented default (draws=500 + posterior seed) is load-bearing."""
+    model = cp.pymc_models.LinearRegression(sample_kwargs={"random_seed": 7})
+    assert model.prior_sample_kwargs == {"draws": 500, "random_seed": 7}
+    explicit = cp.pymc_models.LinearRegression(prior_sample_kwargs={"draws": 42})
+    assert explicit.prior_sample_kwargs == {"draws": 42}
+
+
+def test_clone_carries_prior_sample_kwargs():
+    """_clone() must forward prior_sample_kwargs, not silently re-default."""
+    model = cp.pymc_models.LinearRegression(
+        sample_kwargs={"draws": 9},
+        prior_sample_kwargs={"draws": 123, "random_seed": 5},
+    )
+    cloned = model._clone()
+    assert cloned.prior_sample_kwargs == {"draws": 123, "random_seed": 5}
+    assert cloned.sample_kwargs == {"draws": 9}
+
+
+def test_clone_carries_prior_sample_kwargs_on_overriding_backends():
+    """The BBETS/StateSpace _clone overrides forward the setting too."""
+    from causalpy.tests.test_timeseries_model_coverage import MockComponent
+
+    bbets = cp.pymc_models.BayesianBasisExpansionTimeSeries(
+        trend_component=MockComponent(),
+        seasonality_component=MockComponent(),
+        sample_kwargs={"draws": 9},
+        prior_sample_kwargs={"draws": 321, "random_seed": 6},
+    )
+    assert bbets._clone().prior_sample_kwargs == {"draws": 321, "random_seed": 6}
+
+    ss = cp.pymc_models.StateSpaceTimeSeries(
+        sample_kwargs={"draws": 9},
+        prior_sample_kwargs={"draws": 321, "random_seed": 6},
+    )
+    assert ss._clone().prior_sample_kwargs == {"draws": 321, "random_seed": 6}
+
+
+def test_rebuild_with_same_inputs_is_noop_and_changed_inputs_raise():
+    """build() is idempotent for identical inputs and loud about changes."""
+    rng = np.random.default_rng(0)
+    X = xr.DataArray(
+        rng.normal(size=(10, 2)),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": np.arange(10), "coeffs": ["a", "b"]},
+    )
+    y = xr.DataArray(
+        rng.normal(size=(10, 1)),
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": np.arange(10), "treated_units": ["unit_0"]},
+    )
+    model = cp.pymc_models.LinearRegression()
+    model.build(X=X, y=y)
+    # Same inputs: idempotent no-op.
+    model.build(X=X, y=y)
+    assert model._built
+    # Same shape, different values: rejected instead of silently ignored.
+    changed = y * 1000.0
+    with pytest.raises(RuntimeError, match="already built with different inputs"):
+        model.build(X=X, y=changed)

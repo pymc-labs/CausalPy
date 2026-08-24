@@ -1093,3 +1093,39 @@ class TestTimeSeriesModelCloneIsUnfitted:
         assert cloned is not original
         assert cloned.idata is None
         assert original.idata is not None  # original is untouched
+
+
+def test_statespace_refit_overwrites_ppc_silently(monkeypatch):
+    """Refit assigns posterior_predictive explicitly: no raw PyMC warning."""
+    import warnings
+
+    import pymc as pm
+    import xarray as xr
+
+    ss = cp.pymc_models.StateSpaceTimeSeries(sample_kwargs={"draws": 3})
+    ss._built = True
+    ss.idata = xr.DataTree.from_dict({"posterior": xr.Dataset()})
+
+    monkeypatch.setattr(
+        pm,
+        "sample",
+        lambda **kwargs: xr.DataTree.from_dict({"posterior": xr.Dataset()}),
+    )
+
+    captured = {}
+
+    def fake_ppc(idata, **kwargs):
+        captured.update(kwargs)
+        return xr.DataTree.from_dict({"posterior_predictive": xr.Dataset()})
+
+    monkeypatch.setattr(pm, "sample_posterior_predictive", fake_ppc)
+    monkeypatch.setattr(ss, "_smooth", lambda: xr.DataTree())
+    monkeypatch.setattr(ss, "_prepare_idata", lambda: ss.idata)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        ss.sample_posterior()
+        ss.sample_posterior()  # refit path: group already exists
+
+    assert captured["extend_inferencedata"] is False
+    assert "posterior_predictive" in ss.idata.children

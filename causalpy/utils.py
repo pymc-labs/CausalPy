@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -28,6 +29,28 @@ if TYPE_CHECKING:
     from causalpy.experiments.synthetic_control import SyntheticControl
 
 from causalpy.constants import HDI_PROB
+
+
+def _design_fingerprint(*inputs: Any) -> tuple:
+    """Structural hash of build-time inputs (shapes, dtypes, raw bytes).
+
+    Inputs may be mappings of named arrays or array-likes. A second
+    ``build()`` whose fingerprint differs from the recorded one means the
+    caller is trying to reuse an immutable graph with different data, which
+    must fail loudly instead of being silently ignored.
+    """
+
+    def _digest(value: Any) -> Any:
+        if isinstance(value, dict):
+            return tuple(sorted((key, _digest(item)) for key, item in value.items()))
+        arr = np.ascontiguousarray(np.asarray(value))
+        return (
+            arr.shape,
+            str(arr.dtype),
+            hashlib.blake2b(arr.tobytes(), digest_size=16).hexdigest(),
+        )
+
+    return tuple(_digest(value) for value in inputs)
 
 
 def _as_scalar(value: Any) -> float:

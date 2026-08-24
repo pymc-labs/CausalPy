@@ -382,3 +382,30 @@ def test_exceptions_are_exported():
         "PriorPredictiveNotSupportedException",
     ):
         assert hasattr(cp, name), f"cp.{name} missing"
+
+
+def test_rebuild_after_design_mutation_raises_instead_of_stale_graph():
+    """exp.build() after the design data changed fails loudly.
+
+    The graph is built exactly once per instance; silently keeping a stale
+    graph while the inputs changed would be the worst of both worlds.
+    ``_fit_inputs()`` reads the design dataset, so mutating it is the
+    reachable path for post-build drift (mutating ``exp.data`` cannot reach
+    an already-materialized design).
+    """
+    from sklearn.linear_model import LinearRegression as SkLinearRegression
+
+    rng = np.random.default_rng(3)
+    n = 30
+    df = pd.DataFrame({"t": np.arange(n), "y": rng.normal(size=n)})
+    exp = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=20,
+        formula="y ~ 1 + t",
+        model=SkLinearRegression(),
+    )
+    exp.fit()
+
+    exp.pre_design["y"] = exp.pre_design["y"] * 1000.0
+    with pytest.raises(RuntimeError, match="already built with different inputs"):
+        exp.build()

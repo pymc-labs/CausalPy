@@ -28,7 +28,7 @@ from patsy import dmatrix
 from pymc_extras.prior import Prior
 
 from causalpy.custom_exceptions import GroupNotSampledException
-from causalpy.utils import _bayesian_r2_score
+from causalpy.utils import _bayesian_r2_score, _design_fingerprint
 from causalpy.variable_selection_priors import VariableSelectionPrior
 
 
@@ -269,7 +269,7 @@ class PyMCModel(pm.Model):
             posterior ``random_seed`` if ``None``.
         """
         super().__init__()
-        self.idata = None
+        self.idata: xr.DataTree | None = None
         self.sample_kwargs = sample_kwargs if sample_kwargs is not None else {}
         self.prior_sample_kwargs = (
             prior_sample_kwargs
@@ -285,6 +285,10 @@ class PyMCModel(pm.Model):
         #: Whether the PyMC graph has been constructed. A graph is built at
         #: most once per instance; re-sampling never rebuilds it.
         self._built = False
+        #: Fingerprint of the inputs the graph was built with, so a second
+        #: ``build()`` with different data fails loudly instead of being
+        #: silently ignored.
+        self._built_input_fingerprint: tuple | None = None
 
     def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
         """Create a fresh, unfitted copy with the same configuration.
@@ -397,6 +401,12 @@ class PyMCModel(pm.Model):
             Dictionary with coordinate names for named dimensions.
         """
         if self._built:
+            if _design_fingerprint(X, y) != self._built_input_fingerprint:
+                raise RuntimeError(
+                    "This model is already built with different inputs. The "
+                    "PyMC graph is built exactly once per instance; assign a "
+                    "fresh model instance instead of rebuilding."
+                )
             return
         mapping_inputs = isinstance(X, dict) and isinstance(y, dict)
         if mapping_inputs:
@@ -445,6 +455,7 @@ class PyMCModel(pm.Model):
         self._build_data_nodes: dict[str, np.ndarray] = (
             {} if mapping_inputs else {"X": np.asarray(X), "y": np.asarray(y)}
         )
+        self._built_input_fingerprint = _design_fingerprint(X, y)
         self._built = True
 
     def _rearm_fit_data(self) -> None:
@@ -1776,16 +1787,30 @@ class InstrumentalVariableRegression(PyMCModel):
             Hyperparameters for the variable-selection prior.
         binary_treatment : bool, default False
             Whether the treatment ``t`` is binary.
+
+        Raises
+        ------
+        RuntimeError
+            If the graph exists and the data arrays differ from those it was
+            built with.
         """
-        # Recorded before the built early-return so a refit can change the
+        # Recorded even on the built early-return so a refit can change the
         # ppc backend: the graph is immutable, but the sampling-time choice
         # is not, and refitting only became possible with the lazy lifecycle.
         self._iv_ppc_sampler = ppc_sampler
+        fingerprint = _design_fingerprint(X, Z, y, t)
         if self._built:
+            if fingerprint != self._built_input_fingerprint:
+                raise RuntimeError(
+                    "This model is already built with different inputs. The "
+                    "PyMC graph is built exactly once per instance; assign a "
+                    "fresh model instance instead of rebuilding."
+                )
             return
         self.build_model(
             X, Z, y, t, coords, priors, vs_prior_type, vs_hyperparams, binary_treatment
         )
+        self._built_input_fingerprint = fingerprint
         self._built = True
 
     def sample_posterior(self, **kwargs: Any) -> xr.DataTree:
@@ -3009,10 +3034,22 @@ class StateSpaceTimeSeries(PyMCModel):
             Target variable with dims ["obs_ind", "treated_units"]. Must have
             datetime coordinates on obs_ind.
         coords : dict, optional
-            Coordinates dictionary. Can contain "datetime_index" for backwards
-            compatibility.
+            Can contain "datetime_index" for backwards compatibility.
+
+        Raises
+        ------
+        RuntimeError
+            If the graph exists and the data arrays differ from those it was
+            built with.
         """
+        fingerprint = _design_fingerprint(X, y)
         if self._built:
+            if fingerprint != self._built_input_fingerprint:
+                raise RuntimeError(
+                    "This model is already built with different inputs. The "
+                    "PyMC graph is built exactly once per instance; assign a "
+                    "fresh model instance instead of rebuilding."
+                )
             return
         if y is None:
             raise ValueError("y must be provided for StateSpaceTimeSeries.build()")
@@ -3030,6 +3067,7 @@ class StateSpaceTimeSeries(PyMCModel):
             **(self._user_priors or {}),
         }
         self.build_model(X, y, coords)
+        self._built_input_fingerprint = fingerprint
         self._built = True
 
     def sample_posterior(self, **kwargs: Any) -> xr.DataTree:
@@ -3058,10 +3096,15 @@ class StateSpaceTimeSeries(PyMCModel):
                 self.idata["posterior"] = post["posterior"]
                 if "sample_stats" in post.children:
                     self.idata["sample_stats"] = post["sample_stats"]
-            pm.sample_posterior_predictive(
+            # Explicit assignment instead of extend_inferencedata=True: on a
+            # refit the group already exists and PyMC would emit a raw
+            # "groups already exist" UserWarning even though overwriting is
+            # exactly the intended semantics.
+            ppc = pm.sample_posterior_predictive(
                 self.idata,
-                extend_inferencedata=True,
+                extend_inferencedata=False,
             )
+        self.idata["posterior_predictive"] = ppc["posterior_predictive"]
         self.conditional_idata = self._smooth()
         return self._prepare_idata()
 
