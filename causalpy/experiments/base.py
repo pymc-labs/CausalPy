@@ -454,6 +454,19 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
         if group not in ("prior", "posterior"):
             raise ValueError(f"group must be 'prior' or 'posterior', got {group!r}")
         if not self._supports_results:
+            # Experiments without bundles still honor the requested group:
+            # "prior" keys off the backend's prior draws so a prior-only
+            # phase is readable without a fit, never silently treated as
+            # posterior (issue #1092: no smart inference of group).
+            if group == "prior":
+                if not self.has_prior_predictive:
+                    raise GroupNotSampledException(
+                        f"No prior predictive draws are available. Call "
+                        f"{type(self).__name__}.sample_prior_predictive() "
+                        "first.",
+                        group="prior",
+                    )
+                return None
             if not self.is_fitted:
                 raise GroupNotSampledException(
                     f"No posterior draws are available. Call "

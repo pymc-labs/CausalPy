@@ -543,10 +543,12 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         Parameters
         ----------
         group : {"prior", "posterior"}, default "posterior"
-            Accepted for API parity with the other experiments. A prior
-            phase is not implemented for ``PanelRegression``: the guard
-            treats every request as posterior, and only posterior draws
-            (after :meth:`fit`) are ever rendered.
+            Draw group to render. ``"posterior"`` (default) plots
+            coefficient draws after :meth:`fit`; ``"prior"`` plots the
+            coefficient draws implied by the prior phase and requires
+            :meth:`sample_prior_predictive` first — on backends without a
+            prior phase that call raises
+            :class:`~causalpy.custom_exceptions.PriorPredictiveNotSupportedException`.
         hdi_prob : float
             Probability mass of the highest density interval drawn around
             each posterior coefficient. Must be in ``(0, 1]``. Ignored for
@@ -588,14 +590,13 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         models render a bar plot of coefficient values.
 
         ``PanelRegression`` consumes no result bundle (``_supports_results``
-        is ``False``): the resolved bundle is always ``None`` and the draw
-        group is ignored — a prior phase is not implemented for this
-        experiment, so every request renders posterior draws.
+        is ``False``); the requested *group* selects which coefficient
+        draws are rendered instead of being guessed.
 
         Parameters
         ----------
         group : {"prior", "posterior"}, default "posterior"
-            Accepted for API parity; treated as posterior.
+            Draw group whose coefficient draws are rendered.
         hdi_prob : float, optional
             Probability mass of the highest density interval drawn around each
             posterior coefficient. Must be in ``(0, 1]``. Ignored for
@@ -607,11 +608,14 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         tuple[plt.Figure, plt.Axes]
             Figure and axes objects
         """
-        self._resolve_group("posterior")
-        return self._plot_coefficients_internal(hdi_prob=hdi_prob)
+        return self._plot_coefficients_internal(hdi_prob=hdi_prob, group=group)
 
     def _plot_coefficients_internal(
-        self, var_names: list[str] | None = None, hdi_prob: float = HDI_PROB
+        self,
+        var_names: list[str] | None = None,
+        hdi_prob: float = HDI_PROB,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
     ) -> tuple[plt.Figure, plt.Axes]:
         """Internal method to create coefficient plot.
 
@@ -624,13 +628,15 @@ class PanelRegression(BaseExperiment[ResultBundle]):
             Probability mass for the HDI interval when plotting Bayesian
             coefficients. Must be in (0, 1). Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group whose coefficients are rendered.
 
         Raises
         ------
         GroupNotSampledException
-            If the experiment has not been fitted yet.
+            If the requested draw group has not been sampled.
         """
-        self._resolve_group("posterior")
+        self._resolve_group(group)
         if not 0 < hdi_prob < 1:
             raise ValueError("hdi_prob must be between 0 and 1")
 
@@ -638,7 +644,9 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         if not coeff_names:
             raise ValueError("var_names must contain at least one coefficient")
 
-        coefficients = self._model_backend.coefficients().sel(coeffs=coeff_names)
+        coefficients = self._model_backend.coefficients(group=group).sel(
+            coeffs=coeff_names
+        )
         if "treated_units" in coefficients.dims:
             if coefficients.sizes["treated_units"] != 1:
                 raise ValueError(

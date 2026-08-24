@@ -323,6 +323,66 @@ def test_no_bundle_experiment_guard_names_fit():
     )
     with pytest.raises(GroupNotSampledException, match=r"fit\(\) first"):
         exp._resolve_group("posterior")
+    with pytest.raises(GroupNotSampledException, match=r"sample_prior_predictive"):
+        exp._resolve_group("prior")
+
+
+def _small_panel_data(seed: int = 0) -> pd.DataFrame:
+    units = [f"unit_{i}" for i in range(4)]
+    rows = []
+    rng = np.random.default_rng(seed)
+    for u_idx, unit in enumerate(units):
+        effect = float(rng.normal())
+        for t in range(6):
+            rows.append(
+                {
+                    "unit": unit,
+                    "time": t,
+                    "treatment": int(t >= 3 and u_idx < 2),
+                    "x1": float(rng.normal()),
+                    "y": effect + 0.1 * t + float(rng.normal()),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _panel_kwargs() -> dict:
+    return {
+        "formula": "y ~ C(unit) + C(time) + treatment + x1",
+        "unit_fe_variable": "unit",
+        "time_fe_variable": "time",
+        "fe_method": "dummies",
+    }
+
+
+@pytest.fixture(scope="session")
+def fitted_panel_pymc():
+    """PyMC-backed panel: fit() auto-fills the prior phase on this backend."""
+    return cp.PanelRegression(
+        data=_small_panel_data(seed=1), **_panel_kwargs(), model=_linear_model()
+    ).fit()
+
+
+def test_panel_prior_plot_renders_after_fit(fitted_panel_pymc):
+    """plot(group='prior') renders the auto-filled prior coefficient draws."""
+    fig, ax = fitted_panel_pymc.plot(group="prior", show=False)
+    assert fig is not None
+    # Default posterior rendering still works on the same experiment.
+    fig_post, _ = fitted_panel_pymc.plot(show=False)
+    assert fig_post is not None
+
+
+def test_panel_prior_plot_without_phase_raises():
+    """A backend without a prior phase refuses group='prior' explicitly."""
+    from sklearn.linear_model import LinearRegression as SkLinearRegression
+
+    exp = cp.PanelRegression(
+        data=_small_panel_data(seed=2),
+        **_panel_kwargs(),
+        model=SkLinearRegression(),
+    ).fit()
+    with pytest.raises(GroupNotSampledException, match=r"sample_prior_predictive\(\)"):
+        exp.plot(group="prior", show=False)
 
 
 def _iv_inputs(n: int = 60):
