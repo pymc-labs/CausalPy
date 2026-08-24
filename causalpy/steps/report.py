@@ -94,11 +94,25 @@ class GenerateReport:
 
         Experiments are lazy: ``plot()`` requires fitted state, so any
         guard raised by the experiment propagates to the caller instead of
-        being silently swallowed here.
+        being silently swallowed here. The only tolerated failure is
+        ``NotImplementedError`` — the documented contract of experiments
+        without a unified plot view (``InstrumentalVariable``,
+        ``InversePropensityWeighting``) — which degrades to a report
+        without an experiment figure rather than crashing report
+        generation.
         """
         import matplotlib.pyplot as plt
 
-        fig, _ = experiment.plot()
+        try:
+            fig, _ = experiment.plot()
+        except NotImplementedError as exc:
+            logger.debug(
+                "plot() not implemented for %s; omitting the experiment "
+                "figure from the report: %s",
+                type(experiment).__name__,
+                exc,
+            )
+            return []
         plots = [self._encode_figure(fig)]
         plt.close(fig)
         return plots

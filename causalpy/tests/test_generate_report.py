@@ -206,6 +206,21 @@ class TestGenerateReport:
         ):
             GenerateReport(include_plots=True).run(its_context)
 
+    def test_tolerates_stub_plot_experiments(self, its_context):
+        from unittest.mock import patch
+
+        # IV and IPW raise NotImplementedError by design; a report for
+        # them must degrade to "no pictures", not crash.
+        with patch.object(
+            type(its_context.experiment),
+            "plot",
+            side_effect=NotImplementedError("Plot method not implemented."),
+        ):
+            ctx = GenerateReport(include_plots=True).run(its_context)
+
+        assert "CausalPy Analysis Report" in ctx.report
+        assert "data:image/png;base64," not in ctx.report
+
 
 # ---------------------------------------------------------------------------
 # Pipeline integration
