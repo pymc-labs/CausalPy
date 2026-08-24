@@ -14,6 +14,7 @@
 """Instrumental variable regression."""
 
 import warnings  # noqa: I001
+from typing import Any, Literal, NoReturn, Self
 
 import numpy as np
 from patsy import PatsyError
@@ -28,11 +29,11 @@ from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.pymc_models import InstrumentalVariableRegression
 from causalpy.utils import round_num
 
+from ._results import ResultBundle
 from .base import BaseExperiment
-from typing import Any, Literal, NoReturn, Self
 
 
-class InstrumentalVariable(BaseExperiment):
+class InstrumentalVariable(BaseExperiment[ResultBundle]):
     """A class to analyse instrumental variable style experiments.
 
     Parameters

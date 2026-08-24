@@ -40,7 +40,9 @@ from causalpy.reporting import EffectSummary
 from .base import BaseExperiment
 
 
-class SyntheticDifferenceInDifferences(BaseExperiment):
+class SyntheticDifferenceInDifferences(
+    BaseExperiment[SyntheticDifferenceInDifferencesResult]
+):
     """Bayesian Synthetic Difference-in-Differences experiment.
 
     Combines the synthetic control method's unit weighting with
@@ -276,10 +278,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         bundle = self._build_reporting_objects(
             sc_all, T_pre, n_chains, n_draws, tau_posterior=tau_posterior
         )
-        if group == "prior":
-            self._prior_result = bundle
-        else:
-            self._result = bundle
+        self._assign_bundle(group, bundle)
 
     def _build_weight_fitter_inputs(
         self,
@@ -747,7 +746,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         ax : list of matplotlib.axes.Axes
             The three axes (counterfactual, impact, cumulative impact).
         """
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         if group == "prior":
             return self._plot_prior_checks(bundle=bundle)
 
@@ -1024,7 +1023,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             )
 
         # Resolve the group's bundle once; helpers consume containers.
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
 
         # Extract windowed impact data
         windowed_impact, window_coords = _extract_window(

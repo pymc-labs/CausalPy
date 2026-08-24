@@ -66,7 +66,9 @@ Two ways to take over:
 ```python
 model = cp.pymc_models.SoftmaxWeightedSumFitter(
     priors={
-        "beta_raw": Prior("Normal", mu=0, sigma=0.5, dims=["treated_units", "coeffs_raw"])
+        "beta_raw": Prior(
+            "Normal", mu=0, sigma=0.5, dims=["treated_units", "coeffs_raw"]
+        )
     }
 )
 ```

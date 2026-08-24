@@ -44,7 +44,7 @@ from causalpy.transforms import ramp, step  # noqa: F401
 from .base import BaseExperiment
 
 
-class PiecewiseITS(BaseExperiment):
+class PiecewiseITS(BaseExperiment[CausalResult]):
     """
     Piecewise Interrupted Time Series (Segmented Regression) experiment.
 
@@ -398,10 +398,7 @@ class PiecewiseITS(BaseExperiment):
             impact_post_cumulative=impact_post.cumsum(dim="obs_ind"),
             score=score,
         )
-        if group == "prior":
-            self._prior_result = bundle
-        else:
-            self._result = bundle
+        self._assign_bundle(group, bundle)
 
     def _create_post_intervention_attributes(self) -> None:
         """Derive the post-intervention window from configuration.
@@ -558,7 +555,7 @@ class PiecewiseITS(BaseExperiment):
         ax : list[plt.Axes]
             List of axes objects.
         """
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         if group == "prior":
             return self._plot_prior_checks(bundle=bundle)
 
@@ -787,7 +784,7 @@ class PiecewiseITS(BaseExperiment):
             DataFrame containing observed data, predictions, and effects.
             Not cached on the experiment.
         """
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         with_uncertainty = has_posterior_draws(bundle.predictions_pre)
         hdi_pct = int(round(hdi_prob * 100))
 
@@ -891,7 +888,7 @@ class PiecewiseITS(BaseExperiment):
             )
 
         # Resolve the group's bundle once; helpers consume containers.
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
 
         windowed_impact, window_coords = _extract_window(
             bundle.impact_post,

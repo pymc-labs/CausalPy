@@ -41,7 +41,9 @@ from causalpy.reporting import EffectSummary
 from .base import BaseExperiment
 
 
-class StaggeredDifferenceInDifferences(BaseExperiment):
+class StaggeredDifferenceInDifferences(
+    BaseExperiment[StaggeredDifferenceInDifferencesResult]
+):
     """A class to analyse data from staggered adoption Difference-in-Differences settings.
 
     This class implements the Borusyak, Jaravel, and Spiess (BJS, 2024)
@@ -524,10 +526,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             y_pred=y_pred,
             hdi_prob=hdi_prob,
         )
-        if group == "prior":
-            self._prior_result = bundle
-        else:
-            self._result = bundle
+        self._assign_bundle(group, bundle)
 
     def _aggregate_effects_bayesian(
         self,
@@ -966,7 +965,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         tuple[plt.Figure, list[plt.Axes]]
             Figure and axes objects.
         """
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         if group == "prior":
             return self._plot_prior_checks(bundle=bundle)
 
@@ -1505,7 +1504,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             Includes both pre-treatment (placebo) and post-treatment
             effects. Not cached on the experiment.
         """
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         # If there are no draws, or the requested hdi_prob matches what was
         # used during aggregation, return the pre-computed results
         stored_hdi_prob = bundle.hdi_prob
@@ -1633,7 +1632,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         """
         # Resolve the requested group's bundle; the helper reads ATT tables
         # from it and frames prior-group prose as a plausibility check.
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         from causalpy.reporting import _effect_summary_staggered_did
 
         return _effect_summary_staggered_did(

@@ -42,7 +42,7 @@ from causalpy.utils import _is_variable_dummy_coded, round_num
 from .base import BaseExperiment
 
 
-class PrePostNEGD(BaseExperiment):
+class PrePostNEGD(BaseExperiment[CoefficientResult]):
     """
     A class to analyse data from pretest/posttest designs.
 
@@ -222,10 +222,7 @@ class PrePostNEGD(BaseExperiment):
             ),
             score=None,
         )
-        if group == "prior":
-            self._prior_result = bundle
-        else:
-            self._result = bundle
+        self._assign_bundle(group, bundle)
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -393,7 +390,7 @@ class PrePostNEGD(BaseExperiment):
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(7, 9)``.
         """
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         if group == "prior":
             return self._plot_prior_checks(bundle=bundle)
 
@@ -559,7 +556,7 @@ class PrePostNEGD(BaseExperiment):
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         if not has_posterior_draws(bundle.scenario_control.prediction):
             # Unreachable via the constructor (supports_ols is False), but an
             # OLS backend must never reach the draw-based helper below.

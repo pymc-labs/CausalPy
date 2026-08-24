@@ -38,6 +38,7 @@ __all__ = [
     "DiscontinuityResult",
     "GroupComparisonScenario",
     "KinkResult",
+    "ResultBundle",
     "StaggeredDifferenceInDifferencesResult",
     "SyntheticDifferenceInDifferencesResult",
 ]
@@ -134,3 +135,16 @@ class StaggeredDifferenceInDifferencesResult:
     y_pred: xr.DataArray
     hdi_prob: float
     score: pd.Series | None = None
+
+
+#: Every bundle type the raising ``result`` / ``prior_result`` properties may
+#: return, one per experiment family. Experiments without bundles (IV, IPW,
+#: PanelRegression) never produce these.
+ResultBundle = (
+    CausalResult
+    | CoefficientResult
+    | DiscontinuityResult
+    | KinkResult
+    | StaggeredDifferenceInDifferencesResult
+    | SyntheticDifferenceInDifferencesResult
+)

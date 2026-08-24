@@ -461,7 +461,7 @@ def _detect_experiment_type(result):
         )
 
 
-def _apply_prior_grouping(text: str, group: str) -> str:
+def _apply_prior_grouping(text: str, group: Literal["prior", "posterior"]) -> str:
     """Frame prose as a prior plausibility statement for prior-group bundles."""
     if group == "prior":
         return f"Prior predictive check (not a causal estimate): {text}"

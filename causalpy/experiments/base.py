@@ -33,6 +33,7 @@ from causalpy.custom_exceptions import (
     GroupNotSampledException,
     PriorPredictiveNotSupportedException,
 )
+from causalpy.experiments._results import ResultBundle
 from causalpy.experiments.model_adapter import ModelAdapter, make_model_adapter
 from causalpy.maketables_adapters import coefficient_table, get_maketables_adapter
 from causalpy.pymc_forecast_models import PyMCForecastModel
@@ -101,7 +102,7 @@ def _apply_legend_kwargs(legend: Any, kwargs: dict[str, Any]) -> None:
         legend.set_title(kwargs["title"])
 
 
-class BaseExperiment(ABC):
+class BaseExperiment[ResultT: ResultBundle](ABC):
     """Base class for quasi experimental designs.
 
     Subclasses should set ``_default_model_class`` to a PyMC model class
@@ -195,8 +196,8 @@ class BaseExperiment(ABC):
         )
         self._model_backend = adapter
         self.model = adapter.model
-        self._result: Any | None = None
-        self._prior_result: Any | None = None
+        self._result: ResultT | None = None
+        self._prior_result: ResultT | None = None
 
     @property
     def model(self) -> PyMCModel | RegressorMixin | PyMCForecastModel:
@@ -269,7 +270,7 @@ class BaseExperiment(ABC):
         return self._model_backend.has_prior
 
     @property
-    def result(self) -> Any:
+    def result(self) -> ResultT:
         """Posterior-group result bundle; raises before :meth:`fit`."""
         if not self._supports_results:
             raise NotImplementedError(
@@ -285,7 +286,7 @@ class BaseExperiment(ABC):
         return self._result
 
     @property
-    def prior_result(self) -> Any:
+    def prior_result(self) -> ResultT:
         """Prior-group result bundle; raises before prior sampling."""
         if not self._supports_results:
             raise NotImplementedError(
@@ -404,19 +405,40 @@ class BaseExperiment(ABC):
         return self
 
     def _fit_inputs(self) -> tuple[Any, Any, dict[str, Any] | None]:
-        """Return ``(X, y, coords)`` handed to the backend at build time."""
+        """Return ``(X, y, coords)`` handed to the backend at build time.
+
+        Not ``@abstractmethod``: ``InstrumentalVariable`` and
+        ``InversePropensityWeighting`` legitimately bypass the standard
+        build/``_finalize`` pipeline and override the lifecycle verbs
+        instead. Ordinary subclasses must implement it (see
+        ``ARCHITECTURE.md``); a missing implementation still fails fast at
+        the first sampling call with a message naming what to implement.
+        """
         raise NotImplementedError(
             f"{type(self).__name__} must implement _fit_inputs() or override "
             "the lifecycle verbs."
         )
 
     def _finalize(self, group: Literal["prior", "posterior"]) -> None:
-        """Compute the group's result bundle from its draws and assign it."""
+        """Compute the group's result bundle from its draws and assign it
+        through :meth:`_assign_bundle`.
+
+        Not ``@abstractmethod`` for the same reason as :meth:`_fit_inputs`.
+        """
         raise NotImplementedError(
             f"{type(self).__name__} must implement _finalize(group)."
         )
 
-    def _resolve_group(self, group: str) -> Any:
+    def _assign_bundle(
+        self, group: Literal["prior", "posterior"], bundle: ResultT
+    ) -> None:
+        """Store *bundle* in the slot backing *group*'s raising property."""
+        if group == "prior":
+            self._prior_result = bundle
+        else:
+            self._result = bundle
+
+    def _resolve_group(self, group: Literal["prior", "posterior"]) -> ResultT | None:
         """Guard and resolve the read-method draw group.
 
         Raises :class:`~causalpy.custom_exceptions.GroupNotSampledException`
@@ -454,6 +476,17 @@ class BaseExperiment(ABC):
                 group="posterior",
             )
         return self._result
+
+    def _require_bundle(self, group: Literal["prior", "posterior"]) -> ResultT:
+        """Guard and return *group*'s bundle for bundle-backed readers.
+
+        :meth:`_resolve_group` yields ``None`` only on experiments without
+        result bundles, whose read methods never consume one — so a
+        ``None`` here is statically unreachable.
+        """
+        bundle = self._resolve_group(group)
+        assert bundle is not None
+        return bundle
 
     def print_coefficients(self, round_to: int | None = None) -> None:
         """Ask the model to print its posterior coefficients.

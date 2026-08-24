@@ -48,7 +48,7 @@ from causalpy.custom_exceptions import (
 )
 
 
-class RegressionKink(BaseExperiment):
+class RegressionKink(BaseExperiment[KinkResult]):
     """A class to analyse regression kink designs.
 
     Parameters
@@ -212,10 +212,7 @@ class RegressionKink(BaseExperiment):
             gradient_change=gradient_change,
             score=score,
         )
-        if group == "prior":
-            self._prior_result = bundle
-        else:
-            self._result = bundle
+        self._assign_bundle(group, bundle)
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -425,7 +422,7 @@ class RegressionKink(BaseExperiment):
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         if group == "prior":
             return self._plot_prior_checks(bundle=bundle)
 
@@ -560,7 +557,7 @@ class RegressionKink(BaseExperiment):
             Object with .table (DataFrame) and .text (str) attributes
         """
         # Resolve the group's bundle once; helpers consume containers.
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         # The helper applies the prior-plausibility prose prefix itself.
         return _effect_summary_rkink(
             bundle,

@@ -604,7 +604,7 @@ class PyMCModel(pm.Model):
         """
         raise TypeError(f"{type(self).__name__} does not support mapping-valued inputs")
 
-    def require_group(self, group: str) -> xr.Dataset:
+    def require_group(self, group: Literal["prior", "posterior"]) -> xr.Dataset:
         """Return the draws Dataset for *group* or raise an actionable error.
 
         Parameters
@@ -2425,7 +2425,12 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
         return time_for_trend, time_for_seasonality, X_for_pymc, num_obs
 
-    def build(self, X, y, coords=None):
+    def build(
+        self,
+        X: xr.DataArray,
+        y: xr.DataArray,
+        coords: dict[str, Any] | None = None,
+    ) -> None:
         """Construct the graph and record the time-feature data nodes.
 
         Parameters

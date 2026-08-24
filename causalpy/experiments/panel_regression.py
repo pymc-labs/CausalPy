@@ -34,10 +34,11 @@ from causalpy.plot_utils import _plot_interval_band
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 
+from ._results import ResultBundle
 from .base import BaseExperiment
 
 
-class PanelRegression(BaseExperiment):
+class PanelRegression(BaseExperiment[ResultBundle]):
     """Panel regression with fixed effects estimation.
 
     Enables panel-aware visualization and diagnostics, with support for both

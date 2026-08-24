@@ -66,7 +66,7 @@ from causalpy.utils import (
 from .base import BaseExperiment
 
 
-class RegressionDiscontinuity(BaseExperiment):
+class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
     """
     A class to analyse sharp regression discontinuity experiments.
 
@@ -283,10 +283,7 @@ class RegressionDiscontinuity(BaseExperiment):
             discontinuity_at_threshold=discontinuity_at_threshold,
             score=score,
         )
-        if group == "prior":
-            self._prior_result = bundle
-        else:
-            self._result = bundle
+        self._assign_bundle(group, bundle)
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -478,7 +475,7 @@ class RegressionDiscontinuity(BaseExperiment):
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         if group == "prior":
             return self._plot_prior_checks(bundle=bundle)
 
@@ -690,7 +687,7 @@ class RegressionDiscontinuity(BaseExperiment):
             Object with .table (DataFrame) and .text (str) attributes
         """
         # Resolve the group's bundle once; helpers consume containers.
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         if has_posterior_draws(bundle.discontinuity_at_threshold):
             summary = _effect_summary_rd(
                 bundle,

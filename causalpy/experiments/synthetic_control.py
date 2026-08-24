@@ -50,7 +50,7 @@ from causalpy.utils import check_convex_hull_violation
 from .base import BaseExperiment
 
 
-class SyntheticControl(BaseExperiment):
+class SyntheticControl(BaseExperiment[CausalResult]):
     """The class for the synthetic control experiment.
 
     Parameters
@@ -405,10 +405,7 @@ class SyntheticControl(BaseExperiment):
             impact_post_cumulative=impact_post_cumulative,
             score=score,
         )
-        if group == "prior":
-            self._prior_result = bundle
-        else:
-            self._result = bundle
+        self._assign_bundle(group, bundle)
 
     def input_validation(
         self, data: pd.DataFrame, treatment_time: int | float | pd.Timestamp
@@ -615,7 +612,7 @@ class SyntheticControl(BaseExperiment):
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         if group == "prior":
             return self._plot_prior_checks(bundle=bundle)
 
@@ -913,7 +910,7 @@ class SyntheticControl(BaseExperiment):
             Observed data with ``prediction`` and ``impact`` columns plus HDI
             bounds when draws are available. Not cached on the experiment.
         """
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         with_uncertainty = has_posterior_draws(bundle.predictions_pre)
         hdi_pct = int(round(hdi_prob * 100))
 
@@ -1050,7 +1047,7 @@ class SyntheticControl(BaseExperiment):
             )
 
         # Resolve the group's bundle once; helpers consume containers.
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
 
         windowed_impact, window_coords = _extract_window(
             bundle.impact_post,

@@ -658,8 +658,10 @@ def test_did_parameter_recovery(
         np,
     )
 
+    counterfactual_scenario = result.result.scenario_counterfactual
+    assert counterfactual_scenario is not None
     counterfactual_semantics = _assert_posterior_array_semantics(
-        result.result.scenario_counterfactual.prediction,
+        counterfactual_scenario.prediction,
         expected_dims=("chain", "draw", "obs_ind", "treated_units"),
         expected_name="mu",
     )

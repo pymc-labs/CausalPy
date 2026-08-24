@@ -54,7 +54,7 @@ from causalpy.utils import (
 from .base import BaseExperiment
 
 
-class DifferenceInDifferences(BaseExperiment):
+class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
     """A class to analyse data from Difference in Difference settings.
 
     .. note::
@@ -264,10 +264,7 @@ class DifferenceInDifferences(BaseExperiment):
             ),
             score=None,
         )
-        if group == "prior":
-            self._prior_result = bundle
-        else:
-            self._result = bundle
+        self._assign_bundle(group, bundle)
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -493,7 +490,7 @@ class DifferenceInDifferences(BaseExperiment):
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         if group == "prior":
             return self._plot_prior_checks(bundle=bundle)
 
@@ -786,7 +783,7 @@ class DifferenceInDifferences(BaseExperiment):
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         if has_posterior_draws(bundle.scenario_control.prediction):
             return _effect_summary_did(
                 bundle,

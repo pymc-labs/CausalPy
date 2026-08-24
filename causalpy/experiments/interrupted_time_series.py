@@ -48,7 +48,7 @@ from causalpy.utils import _as_scalar
 from .base import BaseExperiment
 
 
-class InterruptedTimeSeries(BaseExperiment):
+class InterruptedTimeSeries(BaseExperiment[CausalResult]):
     """
     The class for interrupted time series analysis.
 
@@ -243,10 +243,7 @@ class InterruptedTimeSeries(BaseExperiment):
             impact_post_cumulative=impact_post_cumulative,
             score=score,
         )
-        if group == "prior":
-            self._prior_result = bundle
-        else:
-            self._result = bundle
+        self._assign_bundle(group, bundle)
 
     def _period_slices(self, bundle: CausalResult) -> dict[str, Any]:
         """Split a bundle's post-period draws at ``treatment_end_time``.
@@ -701,7 +698,7 @@ class InterruptedTimeSeries(BaseExperiment):
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         if group == "prior":
             return self._plot_prior_checks(bundle=bundle)
 
@@ -1013,7 +1010,7 @@ class InterruptedTimeSeries(BaseExperiment):
             Observed data with ``prediction`` and ``impact`` columns plus HDI
             bounds when draws are available. Not cached on the experiment.
         """
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
         with_uncertainty = has_posterior_draws(bundle.predictions_pre)
         hdi_pct = int(round(hdi_prob * 100))
 
@@ -1323,7 +1320,7 @@ class InterruptedTimeSeries(BaseExperiment):
             if period == "comparison":
                 # Comparison period: delegate to subclass method
                 return self._comparison_period_summary(
-                    bundle=self._resolve_group(group),
+                    bundle=self._require_bundle(group),
                     direction=direction,
                     alpha=alpha,
                     cumulative=cumulative,
@@ -1346,7 +1343,7 @@ class InterruptedTimeSeries(BaseExperiment):
                 prefix = "Post-intervention"
 
         # Resolve the group's bundle once; helpers consume containers.
-        bundle = self._resolve_group(group)
+        bundle = self._require_bundle(group)
 
         # Extract windowed impact data
         windowed_impact, window_coords = _extract_window(

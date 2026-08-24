@@ -30,10 +30,11 @@ from causalpy.formula_utils import build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.pymc_models import PropensityScore
 
+from ._results import ResultBundle
 from .base import BaseExperiment
 
 
-class InversePropensityWeighting(BaseExperiment):
+class InversePropensityWeighting(BaseExperiment[ResultBundle]):
     """A class to analyse inverse propensity weighting experiments.
 
     Parameters
