@@ -221,7 +221,20 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
         self.instrument_variable_name = t.design_info.column_names[0]
 
     def build(self) -> Self:
-        """IV constructs its graph lazily inside model.fit; nothing to pre-build."""
+        """No-op: IV constructs its graph lazily inside the model's fit.
+
+        Deliberate exception to the "graph inspectable after ``build()``
+        acceptance criterion (issue #1092): ``InstrumentalVariableRegression``
+        fuses graph construction into its fused ``fit`` entry point, so
+        ``pm.model_to_graphviz(exp.model)`` only becomes meaningful *after*
+        :meth:`fit`. Splitting that model into separate build/sample phases
+        is tracked as the IV prior-capability follow-up on issue #1092.
+
+        Returns
+        -------
+        Self
+            The same experiment, for chaining.
+        """
         return self
 
     def fit(self, **kwargs: Any) -> Self:
