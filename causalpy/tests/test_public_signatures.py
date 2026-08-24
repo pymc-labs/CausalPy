@@ -522,7 +522,7 @@ _FORWARDER_EXEMPTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
     ),
     "causalpy.experiments.instrumental_variable.InstrumentalVariable.fit": (
         "kwargs",
-        ("Keyword arguments are forwarded to", "ppc_sampler"),
+        ("Sampler overrides forwarded to", "ppc_sampler"),
     ),
     "causalpy.pymc_models.InstrumentalVariableRegression.sample_posterior": (
         "kwargs",

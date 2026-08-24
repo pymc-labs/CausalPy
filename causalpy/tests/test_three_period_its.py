@@ -1105,7 +1105,7 @@ def test_get_plot_data_uses_hdi_for_skewed_impacts():
     result = SimpleNamespace(
         datapre=pd.DataFrame({"y": [0.0, 0.0]}, index=pre_index),
         datapost=pd.DataFrame({"y": [0.0, 0.0]}, index=post_index),
-        _resolve_group=lambda group: bundle,
+        _require_bundle=lambda group: bundle,
     )
 
     plot_data = InterruptedTimeSeries.get_plot_data(result)
@@ -1238,7 +1238,7 @@ def test_plot_forwards_ci_prob_to_all_singleton_hdi_markers(monkeypatch):
         probabilities.append(hdi_prob)
         return ax.plot([], [])[0]
 
-    stub._resolve_group = lambda group: bundle
+    stub._require_bundle = lambda group: bundle
     stub._draw_singleton_hdi_marker = fake_singleton_marker
 
     monkeypatch.setattr(its_module, "plot_posterior_over_x", fake_plot_posterior)
