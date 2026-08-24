@@ -840,7 +840,8 @@ def test_iv_fit_forwards_sampler_kwargs(monkeypatch, iv_data):
 
 
 def test_iv_refit_updates_ppc_sampler(monkeypatch, iv_data):
-    """A refit may change ppc_sampler even though the graph is immutable."""
+    """A refit may change ppc_sampler; an omitted one persists instead of
+    resetting to None and leaving predictive groups stale."""
     monkeypatch.setattr(
         pm,
         "sample",
@@ -867,8 +868,14 @@ def test_iv_refit_updates_ppc_sampler(monkeypatch, iv_data):
     with _warnings.catch_warnings():
         _warnings.simplefilter("ignore", UserWarning)
         exp.fit(ppc_sampler="pymc")
-    assert exp.model._iv_ppc_sampler == "pymc"
-    assert recorded == [None, "pymc"]
+        # Refit WITHOUT the kwarg: the previous choice must persist so the
+        # predictive groups are redrawn against the new posterior.
+        exp.fit(random_seed=99)
+        # ...and an explicit None still opts back out.
+        exp.fit(ppc_sampler=None)
+
+    assert exp.model._iv_ppc_sampler is None
+    assert recorded == [None, "pymc", "pymc", None]
 
 
 def test_iv_has_prior_predictive_requires_capability(monkeypatch, iv_data):

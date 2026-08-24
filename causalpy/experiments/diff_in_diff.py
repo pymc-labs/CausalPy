@@ -499,12 +499,9 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         x_pred_control = bundle.scenario_control.inputs
         x_pred_treatment = bundle.scenario_treated.inputs
 
-        # CoefficientResult.scenario_counterfactual is Optional, but DiD
-        # finalization always populates it; the guard keeps the typing honest.
         cf = bundle.scenario_counterfactual
-        if cf is not None:
-            y_pred_counterfactual = cf.prediction
-            x_pred_counterfactual = cf.inputs
+        y_pred_counterfactual = cf.prediction
+        x_pred_counterfactual = cf.inputs
 
         with_uncertainty = has_posterior_draws(y_pred_control)
         style: _PosteriorPlotStyle = {

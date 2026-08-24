@@ -479,6 +479,14 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
             # posterior (issue #1092: no smart inference of group).
             if group == "prior":
                 if not self.has_prior_predictive:
+                    if not self._model_backend.supports_prior_predictive:
+                        # Mirror what sample_prior_predictive() would raise,
+                        # instead of pointing the user at a call that cannot
+                        # succeed on this backend.
+                        raise PriorPredictiveNotSupportedException(
+                            f"The {type(self.model).__name__} backend does "
+                            "not support prior predictive sampling."
+                        )
                     raise GroupNotSampledException(
                         f"No prior predictive draws are available. Call "
                         f"{type(self).__name__}.sample_prior_predictive() "

@@ -252,7 +252,9 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
             :meth:`~causalpy.pymc_models.InstrumentalVariableRegression.sample_posterior`
             (e.g. ``draws=500``), and ``ppc_sampler="jax" | "pymc" | None``
             selecting the posterior-predictive backend at :meth:`fit` time.
-            The IV backend exposes no prior predictive phase, so
+            Omitting ``ppc_sampler`` on a refit keeps the previous choice,
+            so predictive groups are never left stale against a resampled
+            posterior. The IV backend exposes no prior predictive phase, so
             :meth:`sample_prior_predictive` raises
             :class:`~causalpy.custom_exceptions.PriorPredictiveNotSupportedException`.
         """
@@ -264,7 +266,12 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
                 UserWarning,
                 stacklevel=2,
             )
-        ppc_sampler = kwargs.pop("ppc_sampler", None)
+        # A refit that omits ppc_sampler keeps the previous choice: letting
+        # it fall back to None would leave posterior_predictive (and any
+        # prior-predictive groups from ppc_sampler="pymc") stale against the
+        # freshly resampled posterior.
+        previous_ppc = getattr(self.model, "_iv_ppc_sampler", None)
+        ppc_sampler = kwargs.pop("ppc_sampler", previous_ppc)
         self.model.build(  # type: ignore[call-arg,union-attr]
             X=self.X,
             Z=self.Z,

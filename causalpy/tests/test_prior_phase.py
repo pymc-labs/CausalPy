@@ -323,7 +323,7 @@ def test_no_bundle_experiment_guard_names_fit():
     )
     with pytest.raises(GroupNotSampledException, match=r"fit\(\) first"):
         exp._resolve_group("posterior")
-    with pytest.raises(GroupNotSampledException, match=r"sample_prior_predictive"):
+    with pytest.raises(PriorPredictiveNotSupportedException):
         exp._resolve_group("prior")
 
 
@@ -372,8 +372,12 @@ def test_panel_prior_plot_renders_after_fit(fitted_panel_pymc):
     assert fig_post is not None
 
 
-def test_panel_prior_plot_without_phase_raises():
-    """A backend without a prior phase refuses group='prior' explicitly."""
+def test_panel_prior_plot_without_capability_raises_capability_error():
+    """A backend without a prior phase refuses group='prior' immediately.
+
+    The base guard mirrors what sample_prior_predictive() would raise
+    instead of pointing the user at a call that cannot succeed.
+    """
     from sklearn.linear_model import LinearRegression as SkLinearRegression
 
     exp = cp.PanelRegression(
@@ -381,7 +385,9 @@ def test_panel_prior_plot_without_phase_raises():
         **_panel_kwargs(),
         model=SkLinearRegression(),
     ).fit()
-    with pytest.raises(GroupNotSampledException, match=r"sample_prior_predictive\(\)"):
+    with pytest.raises(
+        PriorPredictiveNotSupportedException, match="does not support prior"
+    ):
         exp.plot(group="prior", show=False)
 
 
