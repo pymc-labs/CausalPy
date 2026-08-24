@@ -326,16 +326,16 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
         only. Re-running overwrites the previous prior groups and
         ``prior_result`` without touching any posterior state.
 
-        Parameters
-        ----------
-        **kwargs
-            Forwarded to :func:`pymc.sample_prior_predictive`, overriding the
-            model's stored ``prior_sample_kwargs`` for this call only.
-
         Returns
         -------
         Self
             The same experiment, for chaining.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Forwarded to :func:`pymc.sample_prior_predictive`, overriding
+            the model's stored ``prior_sample_kwargs`` for this call only.
 
         Raises
         ------
@@ -372,18 +372,20 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
         Re-running overwrites posterior state only and warns; prior state is
         preserved.
 
-        Parameters
-        ----------
-        **kwargs
-            Forwarded to the posterior sampler, overriding the model's stored
-            ``sample_kwargs`` for this call only.
-
         Returns
         -------
         Self
             The same experiment, for chaining. This turns every pre-1.0 call
             site into a one-token migration:
             ``cp.InterruptedTimeSeries(...).fit()``.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Forwarded to the posterior sampler (:func:`pymc.sample` for
+            PyMC backends), overriding the model's stored ``sample_kwargs``
+            for this call only.
+
         """
         self.build()
         if self._model_backend.has_posterior:
