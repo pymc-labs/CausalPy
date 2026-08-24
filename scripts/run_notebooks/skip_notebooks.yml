@@ -5,6 +5,7 @@
 # Requires JAX which is not installed in the test environment.
 - gallery/instrumental-variables-pymc.ipynb
 - gallery/instrumental-variables-weak-instruments.ipynb
+- gallery/instrumental-variables-variable-selection-priors.ipynb
 
 # Requires the third-party `causalimpact` package (Google's library, used here
 # only for side-by-side comparison) which is not a CausalPy dependency and is
