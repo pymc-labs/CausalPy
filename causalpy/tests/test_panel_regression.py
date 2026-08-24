@@ -722,7 +722,9 @@ def test_panel_coefficient_plots_reject_multiple_outcomes(
         [coefficients, coefficients],
         dim=xr.IndexVariable("treated_units", ["north", "south"]),
     ).transpose("chain", "draw", "coeffs", "treated_units")
-    monkeypatch.setattr(result._model_backend, "coefficients", lambda: coefficients)
+    monkeypatch.setattr(
+        result._model_backend, "coefficients", lambda *, group="posterior": coefficients
+    )
 
     with pytest.raises(ValueError, match="exactly one outcome unit"):
         result.plot_coefficients()

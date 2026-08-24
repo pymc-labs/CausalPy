@@ -162,6 +162,7 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         self.input_validation()
         self._build_design_matrices()
         self._prepare_data()
+        self._prepare_prediction_grids()
 
     def _build_design_matrices(self) -> None:
         """Build design matrices from formula and data, applying bandwidth and donut hole filtering."""
@@ -213,6 +214,45 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         )
         del self._X_raw, self._y_raw
 
+    def _prepare_prediction_grids(self) -> None:
+        """Build the deterministic prediction grids consumed by plotting.
+
+        Draw-independent design-stage artifacts: the running-variable grid
+        behind ``result.predictions`` and the two threshold rows whose
+        expectation contrast defines the discontinuity. Computed once at
+        configure time — never re-assigned per draw group.
+        """
+        if self.bandwidth is not np.inf:
+            fmin = self.treatment_threshold - self.bandwidth
+            fmax = self.treatment_threshold + self.bandwidth
+            xi = np.linspace(fmin, fmax, 200)
+        else:
+            xi = np.linspace(
+                np.min(self.data[self.running_variable_name]),
+                np.max(self.data[self.running_variable_name]),
+                200,
+            )
+        self.x_pred = pd.DataFrame(
+            {self.running_variable_name: xi, "treated": self._is_treated(xi)}
+        )
+        # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above
+        # (not below) the threshold
+        self.x_discon = pd.DataFrame(
+            {
+                self.running_variable_name: np.array(
+                    [
+                        self.treatment_threshold - self.epsilon,
+                        self.treatment_threshold + self.epsilon,
+                    ]
+                ),
+                "treated": np.array([0, 1]),
+            }
+        )
+        (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
+        # Preserve the design rows used for the threshold prediction contrast:
+        # row 0 is below the threshold and row 1 is above it.
+        self.x_discon_design = np.asarray(new_x)
+
     def _fit_inputs(self) -> tuple[Any, Any, dict[str, Any]]:
         """Return the design matrices and coordinates for model build."""
         X = self.design["X"]
@@ -233,43 +273,13 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         X = self.design["X"]
         y = self.design["y"]
 
-        # get the model predictions over the running-variable grid
-        if self.bandwidth is not np.inf:
-            fmin = self.treatment_threshold - self.bandwidth
-            fmax = self.treatment_threshold + self.bandwidth
-            xi = np.linspace(fmin, fmax, 200)
-        else:
-            xi = np.linspace(
-                np.min(self.data[self.running_variable_name]),
-                np.max(self.data[self.running_variable_name]),
-                200,
-            )
-        self.x_pred = pd.DataFrame(
-            {self.running_variable_name: xi, "treated": self._is_treated(xi)}
-        )
+        # predictions over the running-variable grid built at configure time
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
         predictions = self._model_backend.predict(X=np.asarray(new_x), group=group)
 
-        # calculate discontinuity by evaluating the difference in model expectation on
-        # either side of the discontinuity
-        # NOTE: `"treated": np.array([0, 1])`` assumes treatment is applied above
-        # (not below) the threshold
-        self.x_discon = pd.DataFrame(
-            {
-                self.running_variable_name: np.array(
-                    [
-                        self.treatment_threshold - self.epsilon,
-                        self.treatment_threshold + self.epsilon,
-                    ]
-                ),
-                "treated": np.array([0, 1]),
-            }
-        )
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
-        # Preserve the design rows used for the threshold prediction contrast:
-        # row 0 is below the threshold and row 1 is above it.
-        self.x_discon_design = np.asarray(new_x)
-        pred_discon = self._model_backend.predict(X=np.asarray(new_x), group=group)
+        # discontinuity = difference in model expectation across the threshold,
+        # evaluated on the two threshold rows built at configure time
+        pred_discon = self._model_backend.predict(X=self.x_discon_design, group=group)
         discontinuity_at_threshold = pred_discon.isel(
             obs_ind=1, treated_units=0
         ) - pred_discon.isel(obs_ind=0, treated_units=0)

@@ -126,6 +126,7 @@ class RegressionKink(BaseExperiment[KinkResult]):
         self.input_validation()
         self._build_design_matrices()
         self._prepare_data()
+        self._prepare_prediction_grids()
 
     def _build_design_matrices(self) -> None:
         """Build design matrices from formula and data, applying bandwidth filtering."""
@@ -160,6 +161,27 @@ class RegressionKink(BaseExperiment[KinkResult]):
         )
         del self._X_raw, self._y_raw
 
+    def _prepare_prediction_grids(self) -> None:
+        """Build the deterministic running-variable grid used for plotting.
+
+        Draw-independent design-stage artifact behind
+        ``result.predictions``; computed once at configure time and never
+        re-assigned per draw group.
+        """
+        if self.bandwidth is not np.inf:
+            fmin = self.kink_point - self.bandwidth
+            fmax = self.kink_point + self.bandwidth
+            xi = np.linspace(fmin, fmax, 200)
+        else:
+            xi = np.linspace(
+                np.min(self.data[self.running_variable_name]),
+                np.max(self.data[self.running_variable_name]),
+                200,
+            )
+        self.x_pred = pd.DataFrame(
+            {self.running_variable_name: xi, "treated": self._is_treated(xi)}
+        )
+
     def _fit_inputs(self) -> tuple[Any, Any, dict[str, Any]]:
         """Return the design matrices and coordinates for model build."""
         X = self.design["X"]
@@ -180,20 +202,7 @@ class RegressionKink(BaseExperiment[KinkResult]):
         X = self.design["X"]
         y = self.design["y"]
 
-        # get the model predictions over the running-variable grid
-        if self.bandwidth is not np.inf:
-            fmin = self.kink_point - self.bandwidth
-            fmax = self.kink_point + self.bandwidth
-            xi = np.linspace(fmin, fmax, 200)
-        else:
-            xi = np.linspace(
-                np.min(self.data[self.running_variable_name]),
-                np.max(self.data[self.running_variable_name]),
-                200,
-            )
-        self.x_pred = pd.DataFrame(
-            {self.running_variable_name: xi, "treated": self._is_treated(xi)}
-        )
+        # predictions over the running-variable grid built at configure time
         (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
         predictions = self._model_backend.predict(X=np.asarray(new_x), group=group)
 

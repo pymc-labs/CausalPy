@@ -1777,12 +1777,15 @@ class InstrumentalVariableRegression(PyMCModel):
         binary_treatment : bool, default False
             Whether the treatment ``t`` is binary.
         """
+        # Recorded before the built early-return so a refit can change the
+        # ppc backend: the graph is immutable, but the sampling-time choice
+        # is not, and refitting only became possible with the lazy lifecycle.
+        self._iv_ppc_sampler = ppc_sampler
         if self._built:
             return
         self.build_model(
             X, Z, y, t, coords, priors, vs_prior_type, vs_hyperparams, binary_treatment
         )
-        self._iv_ppc_sampler = ppc_sampler
         self._built = True
 
     def sample_posterior(self, **kwargs: Any) -> xr.DataTree:

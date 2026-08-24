@@ -153,6 +153,8 @@ Draw-derived results moved off the experiment object into per-group bundles: `ex
 
 Re-running a phase overwrites only its own draws: a second `fit()` replaces the posterior (emitting a warning) and preserves prior state. Assigning a new model — also the documented way to revise priors, replacing the never-shipped `set_priors()` — resets all results, because graph identity is the model instance. Third-party experiment subclasses that overrode `algorithm()` must migrate to `_fit_inputs()` + `_finalize(group)`; see `ARCHITECTURE.md`.
 
+Additional removals and timing changes worth calling out: StaggeredDiD's documented `data_` frame is gone — its `att_group_time`/`att_event_time` tables and raw counterfactual draws live on the result bundle (`result.att_group_time`, `result.att_event_time`, `result.y_pred`), and the per-draw quantities it cached (`y_hat0`, `tau_hat`) are recomputed inside the aggregators. Validation that used to abort construction for a few backend/design combinations now runs at first build/fit instead, under the lazy lifecycle: `PrePostNEGD` and `SyntheticDifferenceInDifferences` with an OLS model construct fine and raise their `NotImplementedError` at `fit()` time rather than in `__init__`.
+
 ### Behaviour that intentionally did *not* change
 
 #### The ArviZ default-interval change is a no-op for CausalPy

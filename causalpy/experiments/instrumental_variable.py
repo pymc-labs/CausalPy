@@ -248,11 +248,12 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
         Other Parameters
         ----------------
         **kwargs
-            Keyword arguments are forwarded to
-            :meth:`~causalpy.pymc_models.InstrumentalVariableRegression.fit`
-            (e.g. ``ppc_sampler="jax"``); the posterior-predictive sampler
-            defaults to ``None`` as before. The IV backend exposes no prior
-            predictive phase, so :meth:`sample_prior_predictive` raises
+            Sampler overrides forwarded to
+            :meth:`~causalpy.pymc_models.InstrumentalVariableRegression.sample_posterior`
+            (e.g. ``draws=500``), and ``ppc_sampler="jax" | "pymc" | None``
+            selecting the posterior-predictive backend at :meth:`fit` time.
+            The IV backend exposes no prior predictive phase, so
+            :meth:`sample_prior_predictive` raises
             :class:`~causalpy.custom_exceptions.PriorPredictiveNotSupportedException`.
         """
         if self._model_backend.has_posterior:
@@ -263,18 +264,20 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
                 UserWarning,
                 stacklevel=2,
             )
-        self.model.fit(  # type: ignore[call-arg,union-attr]
+        ppc_sampler = kwargs.pop("ppc_sampler", None)
+        self.model.build(  # type: ignore[call-arg,union-attr]
             X=self.X,
             Z=self.Z,
             y=self.y,
             t=self.t,
             coords=self.coords,
             priors=self.priors,
+            ppc_sampler=ppc_sampler,
             vs_prior_type=self.vs_prior_type,
             vs_hyperparams=self.vs_hyperparams,
             binary_treatment=self.binary_treatment,
-            **kwargs,
         )
+        self.model.sample_posterior(**kwargs)  # type: ignore[union-attr]
         return self
 
     def input_validation(self) -> None:

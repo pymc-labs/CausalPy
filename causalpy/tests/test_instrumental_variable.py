@@ -809,3 +809,74 @@ def test_iv_with_risk_data(sample_kwargs):
     assert isinstance(result, cp.InstrumentalVariable)
     assert result.outcome_variable_name == "loggdp"
     assert result.instrument_variable_name == "risk"
+
+
+# =============================================================================
+# Lazy-lifecycle fit kwargs and refit behaviour (second-pass review)
+# =============================================================================
+
+
+def test_iv_fit_forwards_sampler_kwargs(monkeypatch, iv_data):
+    """exp.fit(draws=...) reaches pm.sample instead of raising TypeError."""
+    sampled_kwargs = {}
+
+    def sample(**kwargs):
+        sampled_kwargs.update(kwargs)
+        return az.InferenceData()
+
+    monkeypatch.setattr(pm, "sample", sample)
+
+    exp = cp.InstrumentalVariable(
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs={"draws": 7, "tune": 3, "progressbar": False}
+        ),
+        **iv_data,
+    )
+    exp.fit(draws=11)
+
+    assert sampled_kwargs["draws"] == 11
+    # stored sample_kwargs stay the per-instance defaults
+    assert exp.model.sample_kwargs["draws"] == 7
+
+
+def test_iv_refit_updates_ppc_sampler(monkeypatch, iv_data):
+    """A refit may change ppc_sampler even though the graph is immutable."""
+    monkeypatch.setattr(
+        pm,
+        "sample",
+        lambda **kwargs: xr.DataTree.from_dict({"posterior": xr.Dataset()}),
+    )
+    recorded = []
+    monkeypatch.setattr(
+        cp.pymc_models.InstrumentalVariableRegression,
+        "sample_predictive_distribution",
+        lambda self, *, ppc_sampler: recorded.append(ppc_sampler),
+    )
+
+    exp = cp.InstrumentalVariable(
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs={"draws": 5, "tune": 5, "progressbar": False}
+        ),
+        **iv_data,
+    )
+    exp.fit()
+    assert exp.model._iv_ppc_sampler is None
+
+    import warnings as _warnings
+
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("ignore", UserWarning)
+        exp.fit(ppc_sampler="pymc")
+    assert exp.model._iv_ppc_sampler == "pymc"
+    assert recorded == [None, "pymc"]
+
+
+def test_iv_has_prior_predictive_requires_capability(monkeypatch, iv_data):
+    """has_prior_predictive stays False on backends without a prior phase."""
+    exp = cp.InstrumentalVariable(model=None, **iv_data)
+    backend = exp._model_backend
+    assert backend.supports_prior_predictive is False
+    # Simulate a stray prior group on the backend draws: the capability gate
+    # must still keep the predicate False.
+    monkeypatch.setattr(type(backend), "has_prior", property(lambda self: True))
+    assert exp.has_prior_predictive is False

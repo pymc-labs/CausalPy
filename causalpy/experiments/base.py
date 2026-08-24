@@ -264,10 +264,16 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
 
     @property
     def has_prior_predictive(self) -> bool:
-        """Whether prior draws and the prior result bundle exist."""
+        """Whether the prior phase has run (draws, and bundle where kept)."""
         if self._supports_results:
             return self._prior_result is not None
-        return self._model_backend.has_prior
+        # Bundle-less experiments key off the backend's idata groups, but a
+        # backend that cannot run the phase at all must never report True —
+        # e.g. IV with ppc_sampler="pymc" incidentally writes a prior group.
+        return (
+            self._model_backend.supports_prior_predictive
+            and self._model_backend.has_prior
+        )
 
     @property
     def result(self) -> ResultT:

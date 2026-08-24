@@ -176,9 +176,11 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
 
         The body is the historical ``algorithm()`` prediction and contrast
         stage with the draw group threaded through prediction and
-        coefficient reads. The two scenario frames are deterministic
+        coefficient reads. The three scenario frames are deterministic
         functions of the data and formula; only their predictions carry
-        the requested draw group.
+        the requested draw group. The counterfactual scenario predicts the
+        treated group as if it had not been treated — the quantity a
+        non-equivalent-group design estimates against.
         """
         # Calculate the posterior predictive for the treatment and control for an
         # interpolated set of pretest values
@@ -207,6 +209,16 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             X=np.asarray(new_x_treated), group=group
         )
 
+        # counterfactual: the treated group as if untreated
+        x_pred_counterfactual = x_pred_treated.copy()
+        x_pred_counterfactual[self.group_variable_name] = np.zeros(self.pred_xi.shape)
+        (new_x_counterfactual,) = build_design_matrices(
+            [self._x_design_info], x_pred_counterfactual
+        )
+        pred_counterfactual = self._model_backend.predict(
+            X=np.asarray(new_x_counterfactual), group=group
+        )
+
         # Evaluate causal impact as equal to the treatment effect
         causal_impact = self._model_backend.coefficients(group=group).sel(
             coeffs=self._get_treatment_effect_coeff()
@@ -219,6 +231,9 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             ),
             scenario_treated=GroupComparisonScenario(
                 inputs=x_pred_treated, prediction=pred_treated
+            ),
+            scenario_counterfactual=GroupComparisonScenario(
+                inputs=x_pred_counterfactual, prediction=pred_counterfactual
             ),
             score=None,
         )

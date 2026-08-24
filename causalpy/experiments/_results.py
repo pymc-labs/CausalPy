@@ -99,7 +99,7 @@ class CoefficientResult:
     causal_impact: xr.DataArray
     scenario_control: GroupComparisonScenario
     scenario_treated: GroupComparisonScenario
-    scenario_counterfactual: GroupComparisonScenario | None = None
+    scenario_counterfactual: GroupComparisonScenario
     score: pd.Series | None = None
 
 

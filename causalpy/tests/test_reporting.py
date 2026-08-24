@@ -2109,6 +2109,7 @@ def test_detect_experiment_type_prepostnegd():
             causal_impact=None,
             scenario_control=None,
             scenario_treated=None,
+            scenario_counterfactual=None,
         )
 
     result = MockPrePostNEGD()

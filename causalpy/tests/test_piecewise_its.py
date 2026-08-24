@@ -1711,7 +1711,7 @@ def test_piecewise_plot_data_uses_hdi_for_skewed_draws(monkeypatch):
         design=xr.Dataset(
             {"y": xr.DataArray([[0.0], [0.0]], dims=["obs_ind", "treated_units"])}
         ),
-        _resolve_group=lambda group: bundle,
+        _require_bundle=lambda group: bundle,
     )
     from causalpy.experiments import piecewise_its as piecewise_module
 
