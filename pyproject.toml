@@ -106,6 +106,7 @@ docs = [
     "nbconvert",
     "Pillow",
     "PyYAML",
+    "sphinxext-opengraph",
     "sphinxext-rediraffe",
 ]
 lint = ["prek", "ruff", "mypy"]

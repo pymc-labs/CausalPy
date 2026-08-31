@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Recommended books and papers on causal inference and quasi-experimental methods, from introductory to advanced."
+---
+
 # Written resources on causal inference
 
 Below is a list of written resources (books, blog posts, etc.) that are useful for learning about causal inference.

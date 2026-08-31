@@ -1,3 +1,9 @@
+---
+myst:
+  html_meta:
+    description: "Quasi-experimental design notation: a compact way to describe interrupted time series, difference-in-differences, regression discontinuity and related designs."
+---
+
 # Quasi-experimental design notation
 
 This page provides a concise summary of the tabular notation used by {cite:t}`shadish_cook_cambell_2002` and {cite:t}`reichardt2019quasi`. This notation provides a compact description of various experimental designs. While it is possible to describe randomised designs using this notation, we focus purely on {term}`quasi-experimental<Quasi-experiment>` designs here, with non-random allocation (abbreviated as `NR`). Observations are denoted by $O$. Time proceeds from left to right, so observations made through time are labelled as $O_1$, $O_2$, etc. The treatment is denoted by `X`. Rows represent different groups of units. Remember, a unit is a person, place, or thing that is the subject of the study.

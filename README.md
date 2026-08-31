@@ -20,7 +20,7 @@
 
 <!-- docs-start -->
 
-# Causal Inference for Quasi-Experiments
+# Causal Inference for Quasi-Experiments in Python
 
 **Research-grade causal inference workflows** for quasi-experimental designs in Python.
 
