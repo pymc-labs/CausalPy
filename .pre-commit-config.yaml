@@ -30,7 +30,7 @@ repos:
       - id: check-case-conflict
       - id: mixed-line-ending
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.3
+    rev: v0.16.6
     hooks:
       # Run the linter
       - id: ruff
@@ -68,7 +68,7 @@ repos:
         files: ^causalpy/
         additional_dependencies: [numpy>=1.20, pandas-stubs]
   - repo: https://github.com/abravalheri/validate-pyproject
-    rev: v0.25
+    rev: '0.26'
     hooks:
       - id: validate-pyproject
   # Lint repository Markdown files (issue #899). Configuration lives in
@@ -86,7 +86,7 @@ repos:
   # Stay on 0.22.x until pyproject2conda fixes the 0.23.x CondaRequirement regression
   # (see check-environment-yml job in .github/workflows/ci.yml).
   - repo: https://github.com/usnistgov/pyproject2conda
-    rev: v0.23.1
+    rev: v0.23.2
     hooks:
       - id: pyproject2conda-yaml
         name: Sync environment.yml from pyproject.toml
