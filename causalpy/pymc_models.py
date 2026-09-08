@@ -252,7 +252,8 @@ class PyMCModel(pm.Model):
             case default priors are used.
         """
         super().__init__()
-        self.idata = None
+        # DECISION (#1127): declared Optional rather than left to inference. It was inferred as exactly ``None`` before, which is why ``fit`` returning it was reported as returning None.
+        self.idata: xr.DataTree | None = None
         self.sample_kwargs = sample_kwargs if sample_kwargs is not None else {}
         self._user_priors = priors
 
@@ -1668,17 +1669,20 @@ class PropensityScore(PyMCModel):
 
         self.build_model(X, t, coords, prior, noncentred)
         with self:
-            self.idata = pm.sample(**self.sample_kwargs)
-            if self.idata is not None:
-                self.idata = _extend_datatree_left(
-                    self.idata, pm.sample_prior_predictive(random_seed=random_seed)
+            # DECISION (#1127): the guarded block works on a local and assigns once at the end. Guarding ``self.idata`` in place left it Optional again after the branch rejoined, which is what made this return look nullable; the sibling fit methods that assign straight through already type-check. One consequence worth stating: if the predictive sampling below raises, ``self.idata`` keeps its previous value rather than holding a posterior with no predictive groups attached.
+            idata = pm.sample(**self.sample_kwargs)
+            # pm.sample's return type excludes None, so the guard's False side never runs.
+            if idata is not None:  # pragma: no branch
+                idata = _extend_datatree_left(
+                    idata, pm.sample_prior_predictive(random_seed=random_seed)
                 )
                 pm.sample_posterior_predictive(
-                    self.idata,
+                    idata,
                     progressbar=False,
                     random_seed=random_seed,
                     extend_inferencedata=True,
                 )
+            self.idata = idata
         return self.idata
 
     def fit_outcome_model(

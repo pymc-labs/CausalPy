@@ -118,7 +118,8 @@ class DifferenceInDifferences(BaseExperiment):
         model: PyMCModel | RegressorMixin | None = None,
     ) -> None:
         super().__init__(model=model)
-        self.causal_impact: xr.DataArray | float | None
+        # DECISION (#1127): no ``| None``. This is a bare annotation, so nothing ever assigns None; ``input_validation`` guarantees the interaction term that ``algorithm`` reads back, and reading before that already raises AttributeError rather than returning None.
+        self.causal_impact: xr.DataArray | float
         # to_pandas returns a copy, so index metadata is normalized on an owned frame rather than the caller's.
         pandas_data = to_pandas(data)
         pandas_data.index.name = "obs_ind"
@@ -593,7 +594,7 @@ class DifferenceInDifferences(BaseExperiment):
             "causal\nimpact",
             xy=(
                 arrow_x,
-                np.mean([y_pred_counterfactual_scalar, y_pred_treatment_scalar]),
+                float(np.mean([y_pred_counterfactual_scalar, y_pred_treatment_scalar])),
             ),
             xycoords="data",
             xytext=(5, 0),
@@ -614,11 +615,7 @@ class DifferenceInDifferences(BaseExperiment):
                 fontsize=LEGEND_FONT_SIZE,
             )
         else:
-            causal_impact_value = (
-                _as_scalar(self.causal_impact)
-                if self.causal_impact is not None
-                else 0.0
-            )
+            causal_impact_value = _as_scalar(self.causal_impact)
             ax.set(
                 xlim=[-0.05, 1.1],
                 xticks=[0, 1],

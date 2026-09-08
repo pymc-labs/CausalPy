@@ -501,7 +501,10 @@ class OperatingCharacteristics:
             figure, ax = plt.subplots(figsize=(8, 5))
             ax.set_title(title, fontweight="bold", fontsize=11)
         else:
-            figure = ax.get_figure()
+            parent_figure = ax.get_figure()
+            # DECISION (#1127): narrowing assert, the idiom already used in checks/convex_hull.py. get_figure is typed `Figure | SubFigure | None`; None only happens for an artist never added to a figure, and this function returns a Figure, so a SubFigure would be wrong here too.
+            assert isinstance(parent_figure, plt.Figure)
+            figure = parent_figure
             ax.set_title(title, fontweight="bold", fontsize=11)
         ax.fill_between(
             effects, 0, nondetection, color="#94a3b8", alpha=0.30, label="Non-detection"
