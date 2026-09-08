@@ -589,8 +589,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         ).groups
         att_gt_rows: list[dict] = []
         for key, idx in gt_groups.items():
-            g_val = key[0]  # type: ignore[index]
-            t_val = key[1]  # type: ignore[index]
+            g_val = key[0]
+            t_val = key[1]
             # Find positions in treated_indices
             positions = [np.where(treated_indices == i)[0][0] for i in idx]
             tau_gt = tau_draws_treated[:, :, positions].mean(axis=2)
@@ -1196,8 +1196,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             ["G", self.time_variable_name], observed=True
         ).groups
         for key, idx in gt_groups.items():
-            g_val = key[0]  # type: ignore[index]
-            t_val = key[1]  # type: ignore[index]
+            g_val = key[0]
+            t_val = key[1]
             positions = [np.where(self.data.index == i)[0][0] for i in idx]
             tau_gt = tau_draws_all[:, :, positions].mean(axis=2)
             att_gt_rows.append(

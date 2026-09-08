@@ -235,7 +235,8 @@ ignore_missing_imports = true
 warn_unused_configs = true
 # The allowlist is empty: the package type-checks clean. What could not be expressed in the type system is a handful of line-level ``type: ignore`` comments, each with the reasoning next to it.
 #
-# ``warn_unused_ignores`` would make those comments self-cleaning, and is worth turning on, but it currently reports 33 pre-existing unused ignores across 10 modules. Clearing those is its own change, not a rider on this one.
+# ``warn_unused_ignores`` keeps those comments self-cleaning: a fix that removes the underlying error now fails the check unless the now-unneeded ignore is deleted with it.
+warn_unused_ignores = true
 
 [tool.marimo.runtime]
 watcher_on_save = "autorun"

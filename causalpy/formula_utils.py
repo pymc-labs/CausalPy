@@ -96,7 +96,7 @@ def _normalize_patsy_data(data: pd.DataFrame) -> pd.DataFrame:
         # ``isetitem`` accepts a Series at runtime; pandas-stubs omits it.
         normalized_data.isetitem(
             position,
-            pd.Series(values, index=data.index, dtype=object),  # type: ignore[arg-type]
+            pd.Series(values, index=data.index, dtype=object),
         )
     return normalized_data
 

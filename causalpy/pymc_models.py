@@ -2120,7 +2120,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
         # Add coeffs coordinate if we have exogenous variables
         if self._exog_var_names:
-            model_coords["coeffs"] = self._exog_var_names  # type: ignore[assignment]
+            model_coords["coeffs"] = self._exog_var_names
 
         with self:
             self.add_coords(model_coords)

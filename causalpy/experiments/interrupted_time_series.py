@@ -274,13 +274,13 @@ class InterruptedTimeSeries(BaseExperiment):
             # Validate treatment_end_time > treatment_time
             # Type check: we've already validated both match the index type, so they're compatible
             # NOTE: Both treatment_time and treatment_end_time are INCLUSIVE (>=) in their respective periods
-            if treatment_end_time <= treatment_time:  # type: ignore[operator]
+            if treatment_end_time <= treatment_time:
                 raise ValueError(
                     f"treatment_end_time ({treatment_end_time}) must be greater than treatment_time ({treatment_time})"
                 )
             # Validate treatment_end_time is within data range
             # NOTE: treatment_end_time is INCLUSIVE, so it can equal data.index.max()
-            if treatment_end_time > data.index.max():  # type: ignore[operator]
+            if treatment_end_time > data.index.max():
                 raise ValueError(
                     f"treatment_end_time ({treatment_end_time}) is beyond the data range (max: {data.index.max()})"
                 )
