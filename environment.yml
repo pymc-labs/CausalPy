@@ -15,6 +15,7 @@ dependencies:
   - arviz<1.0,>=0.14.0
   - codespell
   - diff-cover
+  - formulaic
   - graphviz
   - ipython!=8.7.0
   - jinja2

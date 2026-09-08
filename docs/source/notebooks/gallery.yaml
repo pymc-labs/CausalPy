@@ -56,6 +56,9 @@ groups:
             notebook: difference-in-differences-banks-pymc
           - title: Staggered Difference-in-Differences
             notebook: staggered-difference-in-differences-pymc
+          - title: Hierarchical Difference-in-Differences
+            notebook: hierarchical-difference-in-differences-pymc
+            thumbnail: false
       - title: Interrupted Time Series
         intro: |
           A quasi-experimental design that uses time series methods to generate counterfactuals and estimate treatment effects. A series of observations are collected before and after a treatment, and the pre-treatment trend (or any time-series model) is used to predict what would have happened in the absence of treatment.
