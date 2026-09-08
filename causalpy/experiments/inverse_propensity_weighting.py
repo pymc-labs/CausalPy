@@ -83,6 +83,7 @@ class InversePropensityWeighting(BaseExperiment):
     supports_ols = False
     supports_bayes = True
     _default_model_class = PropensityScore
+    model: PropensityScore
 
     def __init__(
         self,
@@ -135,8 +136,7 @@ class InversePropensityWeighting(BaseExperiment):
         Delegates to ``self.model.fit`` with the covariate matrix ``self.X``,
         treatment vector ``self.t``, and coordinate metadata ``self.coords``.
         """
-        # DECISION (#1127): `arg-type` joins the `call-arg` ignore that was already here. Both come from the same cause: `self.model` is declared as the base model union, while this experiment requires `PropensityScore`, whose `fit` takes numpy arrays and the extra `t` argument. Narrowing the attribute is the real fix and would drop both codes, but that is a public type on the experiment classes. `warn_unused_ignores` will flag this line if that lands.
-        self.model.fit(X=self.X, t=self.t, coords=self.coords)  # type: ignore[call-arg,arg-type]
+        self.model.fit(X=self.X, t=self.t, coords=self.coords)
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness.
