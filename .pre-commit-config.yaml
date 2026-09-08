@@ -53,13 +53,7 @@ repos:
     hooks:
       - id: numpydoc-validation
         files: ^causalpy/(?!tests/|data/).*\.py$
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.3.0
-    hooks:
-      - id: mypy
-        args: [--ignore-missing-imports]
-        files: ^causalpy/
-        additional_dependencies: [numpy>=1.20, pandas-stubs]
+  # Type checking is not a hook (issue #1127). It ran here against an isolated env holding only numpy and pandas-stubs, so pymc, pytensor, arviz, patsy and sklearn were not present to analyse and the hook passed on code that fails a real check. It now runs as ``make typecheck`` in the project environment, from the test job in ci.yml.
   - repo: https://github.com/abravalheri/validate-pyproject
     rev: v0.25
     hooks:
