@@ -22,10 +22,10 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from causalpy._formula import parse_formula
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import DataException, FormulaException
 from causalpy.experiments.base import BaseExperiment
-from causalpy.formula import parse_formula
 from causalpy.pymc_models import HierarchicalLinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 

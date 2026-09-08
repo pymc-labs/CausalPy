@@ -11,7 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Formula parsing helpers for fixed and random-effect model matrices."""
+"""Internal formula parsing helpers for fixed and random-effect model matrices."""
 
 import re
 from collections import OrderedDict
@@ -21,6 +21,9 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+
+# Formulaic intentionally coexists with the existing Patsy pipeline; the
+# engine-neutral design protocol is tracked in #1094 (see also #386).
 from formulaic import Formula
 
 _RE_RANDOM_COMPONENT = re.compile(r"\(\s*([^|()]+?)\s*\|\s*([^|()]+?)\s*\)")
@@ -158,6 +161,48 @@ class MixedModelMatrices:
     def random_model_spec(self):
         """Random-effects model specification used for ``Z``."""
         return self.metadata["random_model_spec"]
+
+    def resolve_group_indices(self, data: pd.DataFrame) -> np.ndarray:
+        """Resolve each row's group value to its fitted group index.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            New data containing the fitted grouping variable.
+
+        Returns
+        -------
+        np.ndarray
+            Group indices aligned with the fitted group order.
+
+        Raises
+        ------
+        ValueError
+            If the grouping variable is unavailable or includes an unseen level.
+        """
+        group = self.metadata["group"]
+        grouping = group["variable"]
+        if not isinstance(grouping, str) or not grouping:
+            raise ValueError(
+                "Cannot resolve group indices from matrices without random effects."
+            )
+        if grouping not in data.columns:
+            raise ValueError(
+                f"Grouping variable '{grouping}' not found in new data. "
+                f"Available columns: {list(data.columns)}"
+            )
+
+        grouping_values = data[grouping]
+        group_idx = pd.Index(group["labels"]).get_indexer(grouping_values.astype(str))
+        unseen_labels = grouping_values[group_idx == -1].drop_duplicates().tolist()
+        if unseen_labels:
+            raise ValueError(
+                f"New data contains unseen group levels for '{grouping}': "
+                f"{unseen_labels}. Hierarchical prediction only supports groups "
+                "observed during fitting."
+            )
+
+        return group_idx.astype(np.int32, copy=False)
 
 
 @dataclass(frozen=True, slots=True)
