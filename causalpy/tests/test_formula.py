@@ -12,9 +12,10 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 import numpy as np
+import pandas as pd
 import pytest
 
-from causalpy.formula import Parser, parse_formula
+from causalpy._formula import Parser, parse_formula
 
 
 class TestParser:
@@ -186,3 +187,32 @@ class TestMixedModelMatrices:
         assert matrices.model_spec is matrices.metadata["model_spec"]
         assert matrices.metadata["model_spec"] is matrices.metadata["fixed_model_spec"]
         assert "group" in matrices.metadata
+
+    def test_new_data_rejects_unseen_group_levels(self, mixed_effect_model_data):
+        """Rejects prediction for groups without fitted random effects."""
+        matrices = parse_formula(
+            "y ~ 1 + x1 + (1 + x1 | store_id)", mixed_effect_model_data
+        )
+        new_data = mixed_effect_model_data.iloc[:2].copy()
+        new_data.loc[new_data.index[-1], "store_id"] = "new-store"
+
+        with pytest.raises(
+            ValueError,
+            match="unseen group levels.*new-store.*observed during fitting",
+        ):
+            matrices.resolve_group_indices(new_data)
+
+    def test_new_data_reuses_fitted_group_indices(self, mixed_effect_model_data):
+        """Keeps fitted group indices when known groups arrive in a new order."""
+        matrices = parse_formula(
+            "y ~ 1 + x1 + (1 + x1 | store_id)", mixed_effect_model_data
+        )
+        known_labels = matrices.metadata["group"]["labels"]
+        new_data = pd.DataFrame(
+            {"store_id": [known_labels[-1], known_labels[0], known_labels[-1]]}
+        )
+
+        np.testing.assert_array_equal(
+            matrices.resolve_group_indices(new_data),
+            np.asarray([len(known_labels) - 1, 0, len(known_labels) - 1]),
+        )
