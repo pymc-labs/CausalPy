@@ -131,12 +131,11 @@ class SyntheticControl(BaseExperiment):
         time_column: str | None = None,
     ) -> None:
         super().__init__(model=model)
-        # to_pandas_with_time_index returns a copy, so index metadata is
-        # normalized on an owned frame rather than the caller's.
-        data = to_pandas_with_time_index(data, time_column)
-        data.index.name = "obs_ind"
-        self.data = data
-        self.input_validation(data, treatment_time)
+        # to_pandas_with_time_index returns a copy, so index metadata is normalized on an owned frame rather than the caller's.
+        pandas_data = to_pandas_with_time_index(data, time_column)
+        pandas_data.index.name = "obs_ind"
+        self.data = pandas_data
+        self.input_validation(pandas_data, treatment_time)
         self.treatment_time = treatment_time
         self.control_units = control_units
         self.labels = control_units

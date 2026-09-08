@@ -221,14 +221,15 @@ def _interval_bound_values(
             dim=["chain", "draw"],
         )
     else:
-        lower, upper = _equal_tailed_interval(Y, ci_prob)
-        preserved_dims = list(lower.dims)
+        eti_lower, eti_upper = _equal_tailed_interval(Y, ci_prob)
+        preserved_dims = list(eti_lower.dims)
         if len(preserved_dims) != 1:
             msg = (
                 "Vector ETI bounds require exactly one preserved dimension; "
                 f"got {preserved_dims!r}"
             )
             raise ValueError(msg)
+        lower, upper = eti_lower.to_numpy(), eti_upper.to_numpy()
 
     lower_vals = np.asarray(lower, dtype=float).ravel()
     upper_vals = np.asarray(upper, dtype=float).ravel()

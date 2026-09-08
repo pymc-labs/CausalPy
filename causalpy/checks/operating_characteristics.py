@@ -555,7 +555,7 @@ class OperatingCharacteristics:
         )
         ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda value, _: f"{value:.0%}"))
         ax.legend(loc="lower right", fontsize=8, framealpha=0.9, edgecolor="#cbd5e1")
-        figure.tight_layout(rect=[0, 0, 1, 0.97] if has_prior else None)
+        figure.tight_layout(rect=(0, 0, 1, 0.97) if has_prior else None)
         return figure
 
 
