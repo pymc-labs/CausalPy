@@ -62,6 +62,7 @@ from plotnine import (
     theme_void,
 )
 
+from causalpy.checks._plot_helpers import draw_figure
 from causalpy.checks.base import CheckResult, clone_model
 from causalpy.checks.operating_characteristics import (
     AssuranceResult,
@@ -76,8 +77,6 @@ logger = logging.getLogger(__name__)
 
 MIN_FOLD_OBSERVATIONS = 3
 MAX_RANDOM_SELECTION_RETRIES = 16
-# Suptitle position, just above the figure box the panels fill.
-_SUPTITLE_Y = 1.02
 _DEFAULT_PLOT_TITLE = "Placebo-in-Time calibration"
 _DEFAULT_FIGSIZE = (7.0, 9.0)
 
@@ -1687,20 +1686,8 @@ class PlaceboInTime:
 
     @staticmethod
     def _draw(plot: Any, title: str, figsize: tuple[float, float]) -> Figure:
-        """Draw a plotnine plot or composition and stamp the suptitle on it.
-
-        ``ggplot.draw`` returns a plain matplotlib figure, which is what
-        ``CheckResult.figures`` holds and what ``GenerateReport`` embeds, so
-        nothing downstream needs to know a plot was built with plotnine.
-        """
-        figure = plot.draw()
-        figure.set_size_inches(*figsize)
-        # plotnine composes panels with its own layout engine, which ignores
-        # subplots_adjust, so the suptitle goes above the figure box and the
-        # tight bounding box used by savefig and the notebook backend grows
-        # to include it.
-        figure.suptitle(title, fontsize=11, fontweight="bold", y=_SUPTITLE_Y)
-        return figure
+        """Draw a plotnine plot or composition and stamp the suptitle on it."""
+        return draw_figure(plot, title, figsize)
 
     @staticmethod
     def _plot_missing_null(
