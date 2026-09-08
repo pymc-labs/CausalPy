@@ -2,6 +2,7 @@
 myst:
   html_meta:
     description: "Recommended books and papers on causal inference and quasi-experimental methods, from introductory to advanced."
+"og:description": "Recommended books and papers on causal inference and quasi-experimental methods, from introductory to advanced."
 ---
 
 # Written resources on causal inference

@@ -2,6 +2,7 @@
 myst:
   html_meta:
     description: "Causal estimands explained: ATE, ATT, LATE, and which estimand each quasi-experimental method in CausalPy identifies."
+"og:description": "Causal estimands explained: ATE, ATT, LATE, and which estimand each quasi-experimental method in CausalPy identifies."
 ---
 
 # Estimands in CausalPy

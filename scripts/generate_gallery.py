@@ -132,6 +132,7 @@ def render_index_md(yaml_path: Path = GALLERY_YAML) -> str:
                 "myst:",
                 "  html_meta:",
                 f'    description: "{description.strip()}"',
+                f'"og:description": "{description.strip()}"',
             ]
         )
     out.extend(

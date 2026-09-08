@@ -32,7 +32,7 @@ groups:
         cards:
           - title: Synthetic control with scikit-learn models
             notebook: synthetic-control-sklearn
-          - title: Bayesian Synthetic Control in Python
+          - title: Synthetic control with `pymc` models
             notebook: synthetic-control-pymc
           - title: The effects of Brexit
             notebook: synthetic-control-brexit-pymc
@@ -58,7 +58,7 @@ groups:
             notebook: difference-in-differences-pymc
           - title: Banking dataset with a `pymc` model
             notebook: difference-in-differences-banks-pymc
-          - title: Staggered Difference-in-Differences (DiD) in Python
+          - title: Staggered Difference-in-Differences with `pymc` models
             notebook: staggered-difference-in-differences-pymc
       - title: Interrupted Time Series
         intro: |
@@ -66,7 +66,7 @@ groups:
         cards:
           - title: Interrupted Time Series (ITS) with scikit-learn models
             notebook: interrupted-time-series-sklearn
-          - title: Bayesian Interrupted Time Series (ITS) Analysis in Python
+          - title: Interrupted Time Series (ITS) with `pymc` models
             notebook: interrupted-time-series-pymc
           - title: Interrupted Time Series for fixed-period interventions
             notebook: interrupted-time-series-post-intervention-analysis
@@ -127,7 +127,7 @@ groups:
         intro: |
           A method for estimating causal effects by weighting observations by the inverse of their probability of receiving treatment (propensity score). This helps adjust for confounding by creating a pseudo-population where treatment assignment is independent of observed covariates.
         cards:
-          - title: Inverse Propensity Score Weighting (IPW) in Python
+          - title: Inverse Propensity Score Weighting with `pymc`
             notebook: inverse-propensity-pymc
           - title: The Paradox of Propensity Scores in Bayesian Inference
             notebook: inverse-propensity-latent

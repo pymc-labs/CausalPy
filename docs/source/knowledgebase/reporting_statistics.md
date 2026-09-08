@@ -2,6 +2,7 @@
 myst:
   html_meta:
     description: "How to report Bayesian causal effect estimates: posterior means, credible intervals (HDI), ROPE, and Bayesian tail probabilities."
+"og:description": "How to report Bayesian causal effect estimates: posterior means, credible intervals (HDI), ROPE, and Bayesian tail probabilities."
 ---
 
 # Statistical Reporting in CausalPy

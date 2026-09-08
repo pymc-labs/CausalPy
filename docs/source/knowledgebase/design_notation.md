@@ -2,6 +2,7 @@
 myst:
   html_meta:
     description: "Quasi-experimental design notation: a compact way to describe interrupted time series, difference-in-differences, regression discontinuity and related designs."
+"og:description": "Quasi-experimental design notation: a compact way to describe interrupted time series, difference-in-differences, regression discontinuity and related designs."
 ---
 
 # Quasi-experimental design notation
