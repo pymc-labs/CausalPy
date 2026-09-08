@@ -831,6 +831,20 @@ class TestPlaceboInSpaceMspeRatio:
         assert any("second: p = 0.250" in text for text in texts)
         plt.close(fig)
 
+    def test_plot_skips_a_treated_unit_with_an_undefined_ratio(self):
+        """An unrankable treated unit gets no annotation, the other still does."""
+        result = _make_mspe_check_result(
+            baseline_ratios={"good": 5.0, "broken": np.nan}
+        )
+
+        with pytest.warns(UserWarning, match="undefined"):
+            fig = PlaceboInSpace.plot_mspe_ratio(result)
+
+        texts = _figure_texts(fig)
+        assert any("good: p = 0.250" in text for text in texts)
+        assert not any("broken: p" in text for text in texts)
+        plt.close(fig)
+
     def test_plot_can_suppress_the_pvalue(self):
         """``show_pvalue=False`` drops the annotation."""
         fig = PlaceboInSpace.plot_mspe_ratio(
