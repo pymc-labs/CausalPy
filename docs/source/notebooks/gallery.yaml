@@ -2,6 +2,10 @@
 # Regenerate with: python scripts/generate_gallery.py
 
 title: How-to
+description: >-
+  Example gallery of causal inference methods in Python: synthetic control,
+  difference-in-differences, interrupted time series, regression discontinuity,
+  instrumental variables, and inverse propensity weighting with CausalPy.
 intro: |
   On this page you can find a gallery of example notebooks that demonstrate the use of CausalPy.
 
@@ -54,7 +58,7 @@ groups:
             notebook: difference-in-differences-pymc
           - title: Banking dataset with a `pymc` model
             notebook: difference-in-differences-banks-pymc
-          - title: Staggered Difference-in-Differences
+          - title: Staggered Difference-in-Differences with `pymc` models
             notebook: staggered-difference-in-differences-pymc
       - title: Interrupted Time Series
         intro: |
@@ -62,7 +66,7 @@ groups:
         cards:
           - title: Interrupted Time Series (ITS) with scikit-learn models
             notebook: interrupted-time-series-sklearn
-          - title: Bayesian Interrupted Time Series
+          - title: Interrupted Time Series (ITS) with `pymc` models
             notebook: interrupted-time-series-pymc
           - title: Interrupted Time Series for fixed-period interventions
             notebook: interrupted-time-series-post-intervention-analysis

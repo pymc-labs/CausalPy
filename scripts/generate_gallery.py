@@ -125,15 +125,28 @@ def render_index_md(yaml_path: Path = GALLERY_YAML) -> str:
     out = [
         "---",
         "html_theme.sidebar_secondary.remove: true",
-        "---",
-        "",
-        GENERATED_BANNER.rstrip(),
-        "",
-        f"# {data['title']}",
-        "",
-        data["intro"].rstrip(),
-        "",
     ]
+    if description := data.get("description"):
+        out.extend(
+            [
+                "myst:",
+                "  html_meta:",
+                f'    description: "{description.strip()}"',
+                f'"og:description": "{description.strip()}"',
+            ]
+        )
+    out.extend(
+        [
+            "---",
+            "",
+            GENERATED_BANNER.rstrip(),
+            "",
+            f"# {data['title']}",
+            "",
+            data["intro"].rstrip(),
+            "",
+        ]
+    )
 
     for group in data.get("groups", []):
         out.append(f"## {group['title']}")
