@@ -29,6 +29,11 @@ from causalpy.checks.placebo_in_time import (
     PlaceboFoldResult,
     PlaceboInTime,
 )
+from causalpy.checks.power_analysis import (
+    LogisticFit,
+    PowerCurveResult,
+    power_analysis,
+)
 from causalpy.checks.pre_treatment_placebo import PreTreatmentPlaceboCheck
 from causalpy.checks.prior_sensitivity import PriorSensitivity
 from causalpy.steps.sensitivity import register_default_check
@@ -41,14 +46,17 @@ __all__ = [
     "ConvexHullCheck",
     "FalsificationResult",
     "LeaveOneOut",
+    "LogisticFit",
     "McCraryDensityTest",
     "OutcomeFalsification",
     "PersistenceCheck",
     "PlaceboFoldResult",
     "PlaceboInSpace",
     "PlaceboInTime",
+    "PowerCurveResult",
     "PreTreatmentPlaceboCheck",
     "PriorSensitivity",
+    "power_analysis",
 ]
 
 register_default_check(PlaceboInTime, PlaceboInTime.applicable_methods)
