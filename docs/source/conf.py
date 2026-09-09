@@ -129,6 +129,7 @@ rediraffe_redirects = {
     "notebooks/did_pymc": "notebooks/difference-in-differences-pymc",
     "notebooks/did_pymc_banks": "notebooks/difference-in-differences-banks-pymc",
     "notebooks/did_skl": "notebooks/difference-in-differences-sklearn",
+    "notebooks/event_study_pymc": "notebooks/event-study-pymc",
     "notebooks/geolift1": "notebooks/geolift-single-cell",
     "notebooks/inv_prop_latent": "notebooks/inverse-propensity-latent",
     "notebooks/inv_prop_pymc": "notebooks/inverse-propensity-pymc",

@@ -160,21 +160,28 @@ class InstrumentalVariable(BaseExperiment):
     def _build_design_matrices(self) -> None:
         """Build design matrices for outcome and instrument formulas."""
         try:
-            y, X = build_formula_matrices(self.formula, self.data)
+            y, X = build_formula_matrices(
+                self.formula, self.data, return_type="dataframe"
+            )
             t, Z = build_formula_matrices(
-                self.instruments_formula, self.instruments_data
+                self.instruments_formula,
+                self.instruments_data,
+                return_type="dataframe",
             )
         except PatsyError as err:
             raise DataException(f"Unable to evaluate IV formula: {err}") from err
-
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
+        # Filter data to rows that patsy kept (in case NaN values were dropped)
+        self.data = self.data.loc[X.index]
         self.labels = X.design_info.column_names
         self.y, self.X = np.asarray(y), np.asarray(X)
         self.outcome_variable_name = y.design_info.column_names[0]
 
         self._t_design_info = t.design_info
         self._z_design_info = Z.design_info
+        # Filter instruments_data to rows that patsy kept (in case NaN values were dropped)
+        self.instruments_data = self.instruments_data.loc[Z.index]
         self.labels_instruments = Z.design_info.column_names
         self.t, self.Z = np.asarray(t), np.asarray(Z)
         self.instrument_variable_name = t.design_info.column_names[0]

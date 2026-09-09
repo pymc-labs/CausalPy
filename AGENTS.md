@@ -36,6 +36,12 @@ See the [python-environment skill](.agents/skills/python-environment/SKILL.md) f
 
 ## Documentation
 
+- **Dual README files**: The project has two files that must be kept in sync:
+  - `README.md` (GitHub landing page)
+  - `docs/source/index.md` (documentation website homepage)
+
+  When adding major new features to the Features table or making other content changes, update **both files**. The Features table lists all quasi-experimental methods supported by CausalPy.
+- **Reporting statistics**: When adding new experiment types, update the "Experiment Support" table in `docs/source/knowledgebase/reporting_statistics.md` to document `effect_summary()` support status for the new experiment.
 - **Structure**: Notebooks (how-to examples) go in `docs/source/notebooks/`, knowledgebase (educational content) goes in `docs/source/knowledgebase/`
 - **Notebook naming**: Use lowercase hyphen-separated words with the full method name spelled out, then the dataset/variant token (if any), then the backend (`pymc` or `sklearn`). Pattern: `{method}[-{variant}]-{backend}.ipynb` (e.g., `difference-in-differences-pymc.ipynb`, `regression-discontinuity-drinking-sklearn.ipynb`, `synthetic-control-brexit-pymc.ipynb`). Prefer descriptive words over acronyms for SEO: `interrupted-time-series` over `its`, `regression-discontinuity` over `rd`, `synthetic-control` over `sc`, `instrumental-variables` over `iv`. When renaming an existing notebook, update `docs/source/notebooks/gallery.yaml`, run `make gallery`, add an entry to `rediraffe_redirects` in `docs/source/conf.py`, and never remove older redirect keys.
 - **MyST directives**: Use `:::{note}` and other MyST features for callouts and formatting

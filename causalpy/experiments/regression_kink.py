@@ -117,9 +117,16 @@ class RegressionKink(BaseExperiment):
                     UserWarning,
                     stacklevel=2,
                 )
-            y, X = build_formula_matrices(self.formula, filtered_data)
+            y, X = build_formula_matrices(
+                self.formula, filtered_data, return_type="dataframe"
+            )
+            filtered_data = filtered_data.loc[X.index]
+            self.data = filtered_data
         else:
-            y, X = build_formula_matrices(self.formula, self.data)
+            y, X = build_formula_matrices(
+                self.formula, self.data, return_type="dataframe"
+            )
+            self.data = self.data.loc[X.index]
 
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
