@@ -2703,6 +2703,13 @@ class StateSpaceTimeSeries(PyMCModel):
                 "coords must contain 'datetime_index' (pd.DatetimeIndex)."
             )
 
+        # Rebuilding an index from raw values drops its frequency, and
+        # pymc-extras warns about that on every fit and needs the frequency
+        # again to lay out the forecast index. Recover it where the
+        # observations are regularly spaced; leave it unset when they are not.
+        if datetime_index.freq is None:
+            datetime_index.freq = datetime_index.inferred_freq
+
         self._train_index = datetime_index
 
         # Instantiate components and build state-space object
@@ -2724,7 +2731,10 @@ class StateSpaceTimeSeries(PyMCModel):
             )
         # `mode` belongs on the state-space model itself; passing it to
         # `build_statespace_graph` is deprecated in pymc-extras.
-        self.ss_mod = combined.build(mode=self.mode)
+        # verbose=False suppresses the "Model Requirements" table pymc-extras
+        # prints on every build. It tells the reader which priors to declare,
+        # which this class does itself just below.
+        self.ss_mod = combined.build(mode=self.mode, verbose=False)
 
         # Build coordinates for the model
         coordinates = self.ss_mod.coords.copy()
