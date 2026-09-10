@@ -759,15 +759,24 @@ class TestStateSpaceTimeSeriesCoverage:
             )
 
     def test_vs_prior_beta_exog_precedence_warning(self):
-        """Passing both vs_prior_type and a beta_exog prior warns."""
+        """Passing both vs_prior_type and a beta_exog prior warns.
+
+        The warning must name the caller: ``pm.Model``'s metaclass calls
+        ``__init__``, so ``stacklevel=2`` would blame ``pymc/model/core.py``
+        instead of the line that passed both arguments.
+        """
         from pymc_extras.prior import Prior
 
-        with pytest.warns(UserWarning, match="variable selection prior takes"):
+        with pytest.warns(UserWarning, match="variable selection prior takes") as recs:
             cp.pymc_models.StateSpaceTimeSeries(
                 sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
                 vs_prior_type="spike_and_slab",
                 priors={"beta_exog": Prior("Normal", mu=0, sigma=1)},
             )
+
+        precedence = [rec for rec in recs if "takes precedence" in str(rec.message)]
+        assert len(precedence) == 1
+        assert precedence[0].filename == __file__
 
     def test_vs_helpers_require_configuration_and_fit(self):
         """Helper methods guard against missing config and missing fit."""
@@ -821,7 +830,7 @@ class TestStateSpaceTimeSeriesCoverage:
         incl = model.get_inclusion_probabilities()
         assert isinstance(incl, pd.DataFrame)
         assert list(incl.columns) == ["prob", "selected", "gamma_mean"]
-        assert len(incl) == 2
+        assert list(incl.index) == ["x1", "x2"]
 
     def test_vs_horseshoe_structure(self, sample_data, mock_pymc_sample):
         """Horseshoe on covariates: shrinkage factor table is well formed.
@@ -851,7 +860,7 @@ class TestStateSpaceTimeSeriesCoverage:
         assert "beta_exog" in model.idata.posterior
         shrink = model.get_shrinkage_factors()
         assert isinstance(shrink, pd.DataFrame)
-        assert len(shrink) == 2
+        assert list(shrink.index) == ["x1", "x2"]
 
         # Inclusion probabilities are a spike-and-slab concept
         with pytest.raises(ValueError, match="spike_and_slab"):
