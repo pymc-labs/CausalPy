@@ -23,7 +23,7 @@ cp.InterruptedTimeSeries(
 
 ## Model Guidance
 
-The default backend is `cp.pymc_models.LinearRegression`, and sklearn regressors are supported. Consider `BayesianBasisExpansionTimeSeries` or `StateSpaceTimeSeries` for more structured time-series models, but note these are experimental. Set priors in the outcome scale or standardize before fitting.
+The default backend is `cp.pymc_models.LinearRegression`, and sklearn regressors are supported. Consider `StateSpaceTimeSeries` for a structured time-series model with level, trend, seasonality and optional covariates. `BayesianBasisExpansionTimeSeries` is deprecated in favour of it. Set priors in the outcome scale or standardize before fitting.
 
 ## Example
 
