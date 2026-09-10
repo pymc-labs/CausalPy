@@ -2366,9 +2366,11 @@ class StateSpaceTimeSeries(PyMCModel):
     Parameters
     ----------
     level_order : int, optional
-        Order of the local level/trend component. Defaults to 2.
+        Order of the local level/trend component: 1 for a local level, 2 for a
+        local linear trend. Must be at least 1. Defaults to 2.
     seasonal_length : int, optional
-        Seasonal period (e.g., 12 for monthly data with annual seasonality). Defaults to 12.
+        Seasonal period (e.g., 12 for monthly data with annual seasonality). Must
+        be at least 2. Defaults to 12.
     trend_component : optional
         Custom state-space trend component. Must be a pymc-extras structural
         component (e.g. `pymc_extras.statespace.structural.LevelTrend`).
@@ -2473,12 +2475,23 @@ class StateSpaceTimeSeries(PyMCModel):
     ):
         super().__init__(sample_kwargs=sample_kwargs, priors=priors)
 
+        if trend_component is None and level_order < 1:
+            # LevelTrend needs at least the level state; order=0 fails with an
+            # obscure IndexError inside pymc-extras, and negative orders with
+            # "negative dimensions are not allowed"
+            raise ValueError(
+                "level_order must be at least 1 (1 for a local level, 2 for a "
+                "local linear trend)."
+            )
         if seasonality_component is None and seasonal_length < 2:
             # FrequencySeasonality needs at least one harmonic; season_length=1
             # fails with an obscure ZeroDivisionError inside pymc-extras
             raise ValueError(
-                "seasonal_length must be at least 2. For a model without "
-                "seasonality, pass a custom seasonality_component."
+                "seasonal_length must be at least 2, since the default "
+                "FrequencySeasonality component needs at least one harmonic. "
+                "The model always carries a seasonal component; pass "
+                "seasonality_component to swap the default for a different "
+                "pymc-extras component."
             )
         self._custom_trend_component = trend_component
         self._custom_seasonality_component = seasonality_component
