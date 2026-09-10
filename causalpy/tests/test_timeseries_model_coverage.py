@@ -331,8 +331,10 @@ class TestStateSpaceTimeSeriesCoverage:
         """The warning must be attributed to the caller, not to pymc.
 
         ``pm.Model``'s metaclass calls ``__init__``, so ``stacklevel=2`` blames
-        ``pymc/model/core.py``. Python then hides the warning from the user,
-        which makes the deprecation useless.
+        ``pymc/model/core.py``. A ``FutureWarning`` still prints from there,
+        but it points at a PyMC internal instead of the line the user has to
+        change, and the once-per-location dedup then collapses every call site
+        in a session into a single report.
         """
         with pytest.warns(FutureWarning) as records:
             cp.pymc_models.BayesianBasisExpansionTimeSeries(
@@ -682,8 +684,14 @@ class TestStateSpaceTimeSeriesCoverage:
             "treated_units",
         )
 
+    @pytest.mark.correctness
     def test_missing_y_values_handled(self, sample_data):
-        """The Kalman filter handles NaN in y; predictions stay finite."""
+        """The Kalman filter handles NaN in y; predictions stay finite.
+
+        Correctness-marked so it runs against real NUTS. The session-wide
+        `pm.sample` mock is never instantiated in that lane, and asserting
+        that a posterior is finite is meaningless against mocked prior draws.
+        """
         y_da = sample_data.copy()
         y_da[5, 0] = np.nan
         y_da[12, 0] = np.nan
@@ -703,11 +711,15 @@ class TestStateSpaceTimeSeriesCoverage:
         y_hat = idata.posterior_predictive["y_hat"]
         assert np.isfinite(y_hat.isel(obs_ind=[5, 12]).values).all()
 
-    def test_short_series(self):
-        """A short series (n=25) fits and predicts in sample."""
+    def test_short_series(self, mock_pymc_sample):
+        """A short series (n=25) fits and predicts in sample.
+
+        Shape only: the suite mocks `pm.sample`, so the posterior carries no
+        information about the fit.
+        """
         dates = pd.date_range(start="2020-01-01", periods=25, freq="D")
         y_da = xr.DataArray(
-            (10 + np.random.randn(25)).reshape(-1, 1),
+            (10 + np.random.default_rng(seed=42).normal(size=25)).reshape(-1, 1),
             dims=["obs_ind", "treated_units"],
             coords={"obs_ind": dates, "treated_units": ["unit_0"]},
         )
@@ -725,13 +737,33 @@ class TestStateSpaceTimeSeriesCoverage:
         pred = model.predict(X=None)
         assert pred.posterior_predictive["y_hat"].sizes["obs_ind"] == 25
 
+    @pytest.mark.parametrize("level_order", [0, -1])
+    def test_level_order_below_one_raises(self, level_order):
+        """level_order below 1 is rejected with a clear error.
+
+        Left to pymc-extras these fail at build time with `IndexError: index
+        -1 is out of bounds` and `negative dimensions are not allowed`.
+        """
+        with pytest.raises(ValueError, match="level_order must be at least 1"):
+            cp.pymc_models.StateSpaceTimeSeries(
+                level_order=level_order,
+                sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            )
+
     def test_seasonal_length_below_two_raises(self):
-        """seasonal_length=1 is rejected with a clear error."""
-        with pytest.raises(ValueError, match="seasonal_length must be at least 2"):
+        """seasonal_length=1 is rejected with a clear error.
+
+        The message must not offer a seasonality-free model: `build_model`
+        always adds a seasonal component, so there is no such path.
+        """
+        with pytest.raises(
+            ValueError, match="seasonal_length must be at least 2"
+        ) as err:
             cp.pymc_models.StateSpaceTimeSeries(
                 seasonal_length=1,
                 sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
             )
+        assert "always carries a seasonal component" in str(err.value)
 
     def test_integer_index_without_datetime_raises(self):
         """Integer obs_ind without a datetime_index fallback is rejected."""
@@ -748,8 +780,12 @@ class TestStateSpaceTimeSeriesCoverage:
         with pytest.raises(ValueError, match="must contain datetime values"):
             model.build_model(y=y_int)
 
-    def test_forecast_index_mismatch_warns(self, sample_data):
-        """Out-of-sample dates that break the training frequency warn."""
+    def test_forecast_index_mismatch_warns(self, sample_data, mock_pymc_sample):
+        """Out-of-sample dates that break the training frequency warn.
+
+        The warning is raised in `predict` from the index alone, so mocked
+        sampling is enough to exercise it.
+        """
         model = cp.pymc_models.StateSpaceTimeSeries(
             level_order=1,
             seasonal_length=7,
