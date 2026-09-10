@@ -307,14 +307,26 @@ class TestStateSpaceTimeSeriesCoverage:
         return y_da
 
     def test_graduated_model_emits_no_future_warning(self):
-        """StateSpaceTimeSeries is production, so it no longer warns."""
+        """StateSpaceTimeSeries is production, so it no longer warns.
+
+        Scoped to CausalPy's own warning rather than turning every
+        FutureWarning into an error: a dependency deprecating something
+        upstream is not a failure of this class.
+        """
         import warnings
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", FutureWarning)
+        with warnings.catch_warnings(record=True) as records:
+            warnings.simplefilter("always", FutureWarning)
             cp.pymc_models.StateSpaceTimeSeries(
                 sample_kwargs={"draws": 10, "tune": 10, "progressbar": False}
             )
+
+        ours = [
+            record
+            for record in records
+            if "StateSpaceTimeSeries" in str(record.message)
+        ]
+        assert ours == []
 
     def test_basis_expansion_model_is_deprecated(self):
         """BayesianBasisExpansionTimeSeries points users at the state-space model.
@@ -768,7 +780,7 @@ class TestStateSpaceTimeSeriesCoverage:
     def test_integer_index_without_datetime_raises(self):
         """Integer obs_ind without a datetime_index fallback is rejected."""
         y_int = xr.DataArray(
-            np.random.randn(30, 1),
+            np.random.default_rng(seed=42).normal(size=(30, 1)),
             dims=["obs_ind", "treated_units"],
             coords={"obs_ind": np.arange(30), "treated_units": ["unit_0"]},
         )
@@ -807,6 +819,108 @@ class TestStateSpaceTimeSeriesCoverage:
         )
         with pytest.warns(UserWarning, match="relabeled onto X's dates"):
             model.predict(X=X_gapped, out_of_sample=True)
+
+    def test_aligned_forecast_index_does_not_warn(self, sample_data, mock_pymc_sample):
+        """Dates that continue the training frequency must stay silent.
+
+        Without this, `test_forecast_index_mismatch_warns` would still pass if
+        the guard warned unconditionally.
+        """
+        import warnings
+
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+            },
+        )
+        model.fit(X=None, y=sample_data)
+
+        last = pd.Timestamp(sample_data.coords["obs_ind"].values[-1])
+        aligned = pd.date_range(last + pd.Timedelta(days=1), periods=5, freq="D")
+        X_aligned = xr.DataArray(
+            np.zeros((5, 0)),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": aligned, "coeffs": []},
+        )
+        with warnings.catch_warnings(record=True) as records:
+            warnings.simplefilter("always")
+            model.predict(X=X_aligned, out_of_sample=True)
+
+        assert [
+            r for r in records if "relabeled onto X's dates" in str(r.message)
+        ] == []
+
+    def test_training_index_frequency_is_recovered(self, sample_data, mock_pymc_sample):
+        """Regular observations keep their frequency on the training index.
+
+        Rebuilding a DatetimeIndex from raw values drops `freq`, which made
+        pymc-extras warn on every fit and lose the forecast index layout.
+        """
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        model.build_model(y=sample_data)
+
+        assert model._train_index.freq is not None
+        assert model._train_index.freq == pd.tseries.frequencies.to_offset("D")
+
+    def test_irregular_index_leaves_frequency_unset(self, mock_pymc_sample):
+        """Irregular observations have no frequency to recover.
+
+        The model must still build; only the forecast path needs a frequency.
+        """
+        dates = pd.DatetimeIndex(
+            ["2020-01-01", "2020-01-02", "2020-01-04", "2020-01-07", "2020-01-11"]
+        )
+        y_da = xr.DataArray(
+            np.random.default_rng(seed=42).normal(size=(len(dates), 1)),
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": dates, "treated_units": ["unit_0"]},
+        )
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=2,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        model.build_model(y=y_da)
+
+        assert model._train_index.freq is None
+
+    def test_many_covariates_structure(self, sample_data, mock_pymc_sample):
+        """Eight candidate covariates all reach the regression component.
+
+        #758 and #982 both list "many covariates" as an edge case. The
+        selection behaviour itself is gated in the correctness lane.
+        """
+        n = len(sample_data)
+        names = [f"x{i + 1}" for i in range(8)]
+        X = xr.DataArray(
+            np.random.default_rng(seed=42).normal(size=(n, 8)),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": sample_data.coords["obs_ind"], "coeffs": names},
+        )
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+            },
+            vs_prior_type="spike_and_slab",
+        )
+        model.fit(X=X, y=sample_data)
+
+        assert model._exog_names == names
+        assert list(model.get_inclusion_probabilities().index) == names
 
     def test_default_model_free_rvs(self, sample_data):
         """Lock the default model contract: same five RVs as before the
