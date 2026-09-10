@@ -139,7 +139,7 @@ removal of the workaround is tracked in CausalPy issue #1067.
 
 `BayesianBasisExpansionTimeSeries` is deprecated in favour of `StateSpaceTimeSeries`. The warning stays a `FutureWarning` rather than becoming a `DeprecationWarning`, so it keeps printing under the default filters, and its text now points at `StateSpaceTimeSeries`. It is also attributed to the calling line instead of to a PyMC internal, so it names the code that has to change and is deduplicated per call site. Removal is planned one minor release out.
 
-`StateSpaceTimeSeries` now raises `ValueError` when `seasonal_length` is below 2 and no custom `seasonality_component` is given. Previously this reached `pymc-extras` and failed there with an obscure `ZeroDivisionError`.
+`StateSpaceTimeSeries` now raises `ValueError` when `seasonal_length` is below 2 and no custom `seasonality_component` is given, and when `level_order` is below 1 and no custom `trend_component` is given. Both previously reached `pymc-extras` and failed there with an obscure `ZeroDivisionError` and `IndexError` respectively.
 
 ### Behaviour that intentionally did *not* change
 
