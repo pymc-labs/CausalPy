@@ -2391,10 +2391,12 @@ class StateSpaceTimeSeries(PyMCModel):
         Hyperparameters for the variable selection prior. See
         :class:`causalpy.variable_selection_priors.VariableSelectionPrior`.
         The defaults work without hand-tuning on roughly unit-scale data:
-        the horseshoe scales its global shrinkage from the data with an
-        expected model size of ``min(5, p / 2)`` (Piironen & Vehtari, 2017),
-        while spike-and-slab uses a ``Beta(2, 2)`` inclusion prior (prior
-        inclusion probability centered on 0.5, no expected-model-size knob).
+        the horseshoe sets its global shrinkage from an expected model size
+        of ``min(5, p / 2)`` and the sample size (Piironen & Vehtari, 2017),
+        holding the residual scale of that rule at 1, while spike-and-slab
+        uses a ``Beta(2, 2)`` inclusion prior (prior inclusion probability
+        centered on 0.5, no expected-model-size knob). Pass ``tau0`` in
+        ``vs_hyperparams`` when the residuals are not close to unit scale.
 
     Examples
     --------
@@ -2432,7 +2434,10 @@ class StateSpaceTimeSeries(PyMCModel):
     ...         formula="y ~ 0 + x1 + x2 + x3",
     ...         model=model,
     ...     )
-    >>> result.model.get_inclusion_probabilities().columns.tolist()
+    >>> inclusion = result.model.get_inclusion_probabilities()
+    >>> inclusion.index.tolist()
+    ['x1', 'x2', 'x3']
+    >>> inclusion.columns.tolist()
     ['prob', 'selected', 'gamma_mean']
     """
 
@@ -2487,7 +2492,9 @@ class StateSpaceTimeSeries(PyMCModel):
                     "given. The variable selection prior takes precedence for "
                     "beta_exog.",
                     UserWarning,
-                    stacklevel=2,
+                    # pm.Model's metaclass calls __init__, so level 2 lands on
+                    # pymc/model/core.py rather than on the caller.
+                    stacklevel=3,
                 )
         self._validate_and_initialize_components()
 
@@ -2865,6 +2872,16 @@ class StateSpaceTimeSeries(PyMCModel):
             raise RuntimeError("Model must be fit first.")
         return self.vs_prior, self.idata
 
+    def _label_by_regressor(self, table: pd.DataFrame) -> pd.DataFrame:
+        """Index a variable-selection table by regressor name.
+
+        The factory builds these tables from bare arrays, so the rows come
+        back positional. They follow the fit-time column order, which is what
+        `_exog_names` holds.
+        """
+        table.index = pd.Index(self._exog_names, name="coeffs")
+        return table
+
     def get_inclusion_probabilities(
         self, param_name: str = "beta_exog"
     ) -> pd.DataFrame:
@@ -2888,12 +2905,13 @@ class StateSpaceTimeSeries(PyMCModel):
         Returns
         -------
         pd.DataFrame
-            One row per regressor with columns "prob" (inclusion
-            probability), "selected" (probability above 0.5), and
-            "gamma_mean" (mean of the selection indicator).
+            One row per regressor, indexed by regressor name, with columns
+            "prob" (inclusion probability), "selected" (probability above
+            0.5), and "gamma_mean" (mean of the selection indicator).
         """
         vs_prior, idata = self._require_vs_diagnostics("inclusion probabilities")
-        return vs_prior.get_inclusion_probabilities(idata, param_name)
+        table = vs_prior.get_inclusion_probabilities(idata, param_name)
+        return self._label_by_regressor(table)
 
     def get_shrinkage_factors(self, param_name: str = "beta_exog") -> pd.DataFrame:
         """
@@ -2910,11 +2928,12 @@ class StateSpaceTimeSeries(PyMCModel):
         Returns
         -------
         pd.DataFrame
-            One row per regressor with the effective shrinkage applied to
-            its coefficient.
+            One row per regressor, indexed by regressor name, with the
+            effective shrinkage applied to its coefficient.
         """
         vs_prior, idata = self._require_vs_diagnostics("shrinkage factors")
-        return vs_prior.get_shrinkage_factors(idata, param_name)
+        table = vs_prior.get_shrinkage_factors(idata, param_name)
+        return self._label_by_regressor(table)
 
     def _forecast(
         self,

@@ -336,7 +336,7 @@ def test_its_with_state_space_variable_selection(mock_pymc_sample):
 
     incl = model.get_inclusion_probabilities()
     assert isinstance(incl, pd.DataFrame)
-    assert len(incl) == 3
+    assert list(incl.index) == ["x1", "x2", "x3"]
     assert ((incl["prob"] >= 0) & (incl["prob"] <= 1)).all()
 
     assert np.isfinite(result.post_impact.values).all()
@@ -388,16 +388,16 @@ def test_its_state_space_variable_selection_recovery():
         model=model,
     )
 
-    # Rows follow the formula column order: x1, x2 are in the DGP, x3-x6
-    # are noise. The attenuation documented in the class docstring pulls
-    # every inclusion probability toward the Beta(2, 2) prior mean of 0.5,
-    # so the gates are ranking and separation, not absolute levels.
+    # x1, x2 are in the DGP, x3-x6 are noise. The attenuation documented in
+    # the class docstring pulls every inclusion probability toward the
+    # Beta(2, 2) prior mean of 0.5, so the gates are ranking and separation,
+    # not absolute levels.
     # Calibration (seed 157, 2 chains, 400 draws/tune, target_accept 0.9):
     # relevant probs ~0.42-0.45, irrelevant ~0.23-0.25, worst-pair gap
     # 0.163, mean gap 0.187; the limits below keep roughly 2-3x headroom.
     incl = model.get_inclusion_probabilities()
-    relevant = incl["prob"].iloc[:2]
-    irrelevant = incl["prob"].iloc[2:]
+    relevant = incl["prob"][["x1", "x2"]]
+    irrelevant = incl["prob"][["x3", "x4", "x5", "x6"]]
     assert relevant.min() > irrelevant.max()
     assert relevant.min() - irrelevant.max() >= 0.05
     assert relevant.mean() - irrelevant.mean() >= 0.10
