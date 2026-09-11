@@ -2397,6 +2397,10 @@ class StateSpaceTimeSeries(PyMCModel):
         uses a ``Beta(2, 2)`` inclusion prior (prior inclusion probability
         centered on 0.5, no expected-model-size knob). Pass ``tau0`` in
         ``vs_hyperparams`` when the residuals are not close to unit scale.
+        The ``normal`` option is a plain ``Normal(0, 1)`` on each coefficient,
+        with no selection. That is much tighter than the ``Normal(0, 50)``
+        this class puts on ``beta_exog`` when no selection prior is set, so it
+        is not a drop-in stand-in for the default.
 
     Examples
     --------
