@@ -92,7 +92,8 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 - `SyntheticDifferenceInDifferencesWeightFitter` — SyntheticDifferenceInDifferences
 - `InstrumentalVariableRegression` — InstrumentalVariable
 - `PropensityScore` — InversePropensityWeighting
-- `BayesianBasisExpansionTimeSeries` / `StateSpaceTimeSeries` — ITS alternatives (experimental)
+- `StateSpaceTimeSeries` — BSTS for ITS: level/trend + seasonality, optional exogenous regressors with variable selection priors
+- `BayesianBasisExpansionTimeSeries` — deprecated, use `StateSpaceTimeSeries`
 
 ## Key Conventions
 

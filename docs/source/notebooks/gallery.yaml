@@ -64,6 +64,8 @@ groups:
             notebook: interrupted-time-series-sklearn
           - title: Bayesian Interrupted Time Series
             notebook: interrupted-time-series-pymc
+          - title: Bayesian structural time series with state space models
+            notebook: interrupted-time-series-bsts
           - title: Interrupted Time Series for fixed-period interventions
             notebook: interrupted-time-series-post-intervention-analysis
           - title: Excess deaths due to COVID-19

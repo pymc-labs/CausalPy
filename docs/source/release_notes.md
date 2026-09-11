@@ -133,6 +133,14 @@ upstream bug is tracked at
 [pymc-devs/pymc#8377](https://github.com/pymc-devs/pymc/issues/8377), and
 removal of the workaround is tracked in CausalPy issue #1067.
 
+#### The BSTS time-series models changed status
+
+`StateSpaceTimeSeries` is no longer experimental and no longer emits a `FutureWarning` on construction (`causalpy/pymc_models.py`; PR #1113). Code that suppressed or asserted on that warning needs updating. It also no longer prints the pymc-extras "Model Requirements" table when it builds, and it recovers the frequency of a regularly spaced index, which removes the "No frequency was specific on the data's DateTimeIndex" warning on every fit.
+
+`BayesianBasisExpansionTimeSeries` is deprecated in favour of `StateSpaceTimeSeries`. The warning stays a `FutureWarning` rather than becoming a `DeprecationWarning`, so it keeps printing under the default filters, and its text now points at `StateSpaceTimeSeries`. It is also attributed to the calling line instead of to a PyMC internal, so it names the code that has to change and is deduplicated per call site. Removal is planned one minor release out.
+
+`StateSpaceTimeSeries` now raises `ValueError` when `seasonal_length` is below 2 and no custom `seasonality_component` is given, and when `level_order` is below 1 and no custom `trend_component` is given. Both previously reached `pymc-extras` and failed there with an obscure `ZeroDivisionError` and `IndexError` respectively.
+
 ### Behaviour that intentionally did *not* change
 
 #### The ArviZ default-interval change is a no-op for CausalPy
