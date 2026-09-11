@@ -866,6 +866,47 @@ class TestStateSpaceTimeSeriesCoverage:
         with pytest.raises(ValueError, match="spike_and_slab"):
             model.get_inclusion_probabilities()
 
+    def test_vs_normal_structure(self, sample_data, mock_pymc_sample):
+        """Normal "selection" prior: a plain Normal on beta_exog, no selection.
+
+        Structure-only by design: the suite mocks pm.sample session-wide.
+        The factory builds neither the spike-and-slab indicators nor the
+        horseshoe scales for this option, so both diagnostics must refuse.
+        """
+        y_da = sample_data
+        n = len(y_da)
+        X = xr.DataArray(
+            np.random.default_rng(seed=42).normal(size=(n, 2)),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": y_da.coords["obs_ind"], "coeffs": ["x1", "x2"]},
+        )
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+            },
+            vs_prior_type="normal",
+        )
+        model.fit(X=X, y=y_da)
+
+        posterior = model.idata.posterior
+        assert "beta_exog" in posterior
+        assert list(posterior["beta_exog"].coords["state_exog"].values) == [
+            "x1",
+            "x2",
+        ]
+        assert "gamma_beta_exog" not in posterior
+        assert "tau_beta_exog" not in posterior
+
+        with pytest.raises(ValueError, match="spike_and_slab"):
+            model.get_inclusion_probabilities()
+        with pytest.raises(ValueError, match="horseshoe"):
+            model.get_shrinkage_factors()
+
     def test_vs_clone_preserves_config(self):
         """_clone carries the variable selection configuration."""
         model = cp.pymc_models.StateSpaceTimeSeries(
