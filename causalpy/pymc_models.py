@@ -2383,6 +2383,66 @@ class StateSpaceTimeSeries(PyMCModel):
         `default_priors`. The `P0` covariance is parameterized through its
         diagonal under the key `"P0_diag"`. Dims are resolved from the built
         state-space model, so priors do not need to declare them.
+    vs_prior_type : {"spike_and_slab", "horseshoe", "normal"}, optional
+        Variable selection prior for the exogenous regression coefficients.
+        Requires covariates. Takes precedence over a `beta_exog` entry in
+        `priors`.
+    vs_hyperparams : dict, optional
+        Hyperparameters for the variable selection prior. See
+        :class:`causalpy.variable_selection_priors.VariableSelectionPrior`.
+        The defaults work without hand-tuning on roughly unit-scale data:
+        the horseshoe sets its global shrinkage from an expected model size
+        of ``min(5, p / 2)`` and the sample size (Piironen & Vehtari, 2017),
+        holding the residual scale of that rule at 1, while spike-and-slab
+        uses a ``Beta(2, 2)`` inclusion prior (prior inclusion probability
+        centered on 0.5, no expected-model-size knob). Pass ``tau0`` in
+        ``vs_hyperparams`` when the residuals are not close to unit scale.
+        The ``normal`` option is a plain ``Normal(0, 1)`` on each coefficient,
+        with no selection. That is much tighter than the ``Normal(0, 50)``
+        this class puts on ``beta_exog`` when no selection prior is set, so it
+        is not a drop-in stand-in for the default.
+
+    Examples
+    --------
+    Covariate selection through :class:`causalpy.InterruptedTimeSeries`:
+    pass many candidate covariates in the formula and let the model select.
+
+    >>> import numpy as np
+    >>> import pandas as pd
+    >>> import causalpy as cp
+    >>> rng = np.random.default_rng(7)
+    >>> n = 60
+    >>> dates = pd.date_range(start="2023-01-01", periods=n, freq="D")
+    >>> X = rng.normal(size=(n, 3))
+    >>> y = 5 + 2.0 * X[:, 0] + rng.normal(0, 0.3, size=n)
+    >>> df = pd.DataFrame(
+    ...     {"y": y, "x1": X[:, 0], "x2": X[:, 1], "x3": X[:, 2]}, index=dates
+    ... )
+    >>> model = cp.pymc_models.StateSpaceTimeSeries(
+    ...     level_order=1,
+    ...     seasonal_length=7,
+    ...     sample_kwargs={
+    ...         "chains": 1,
+    ...         "draws": 10,
+    ...         "tune": 10,
+    ...         "progressbar": False,
+    ...     },
+    ...     vs_prior_type="spike_and_slab",
+    ... )
+    >>> import io
+    >>> from contextlib import redirect_stdout
+    >>> with redirect_stdout(io.StringIO()):  # silence the model-build table
+    ...     result = cp.InterruptedTimeSeries(
+    ...         data=df,
+    ...         treatment_time=dates[45],
+    ...         formula="y ~ 0 + x1 + x2 + x3",
+    ...         model=model,
+    ...     )
+    >>> inclusion = result.model.get_inclusion_probabilities()
+    >>> inclusion.index.tolist()
+    ['x1', 'x2', 'x3']
+    >>> inclusion.columns.tolist()
+    ['prob', 'selected', 'gamma_mean']
     """
 
     default_priors = {
@@ -2403,6 +2463,8 @@ class StateSpaceTimeSeries(PyMCModel):
         sample_kwargs: dict[str, Any] | None = None,
         mode: str | None = None,
         priors: dict[str, Prior] | None = None,
+        vs_prior_type: Literal["spike_and_slab", "horseshoe", "normal"] | None = None,
+        vs_hyperparams: dict[str, Any] | None = None,
     ):
         super().__init__(sample_kwargs=sample_kwargs, priors=priors)
 
@@ -2422,6 +2484,22 @@ class StateSpaceTimeSeries(PyMCModel):
         self._treated_units = ["unit_0"]
         self.ss_mod: Any = None
         self._exog_names: list[str] = []
+        self.vs_prior_type = vs_prior_type
+        self.vs_hyperparams = vs_hyperparams
+        self.vs_prior: VariableSelectionPrior | None = None
+        if vs_prior_type is not None:
+            # Validates the prior type eagerly
+            self.vs_prior = VariableSelectionPrior(vs_prior_type, vs_hyperparams or {})
+            if priors and "beta_exog" in priors:
+                warnings.warn(
+                    "Both vs_prior_type and a beta_exog entry in priors were "
+                    "given. The variable selection prior takes precedence for "
+                    "beta_exog.",
+                    UserWarning,
+                    # pm.Model's metaclass calls __init__, so level 2 lands on
+                    # pymc/model/core.py rather than on the caller.
+                    stacklevel=3,
+                )
         self._validate_and_initialize_components()
 
     def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
@@ -2438,6 +2516,8 @@ class StateSpaceTimeSeries(PyMCModel):
             sample_kwargs=dict(self.sample_kwargs),
             mode=self.mode,
             priors=self._user_priors if priors is None else priors,
+            vs_prior_type=self.vs_prior_type,
+            vs_hyperparams=self.vs_hyperparams,
         )
 
     def _validate_and_initialize_components(self):
@@ -2530,6 +2610,10 @@ class StateSpaceTimeSeries(PyMCModel):
                 )
         return names
 
+    def _exog_values(self, X: xr.DataArray) -> np.ndarray:
+        """Exogenous regressor values from X, in fit-time column order."""
+        return X.sel(coeffs=self._exog_names).values
+
     def build_model(
         self,
         X: xr.DataArray | None = None,
@@ -2609,6 +2693,12 @@ class StateSpaceTimeSeries(PyMCModel):
         season = self._get_seasonality_component()
         combined = trend + season
         self._exog_names = self._extract_exog_names(X)
+        if self.vs_prior is not None and not self._exog_names:
+            raise ValueError(
+                "vs_prior_type was set but the model has no exogenous "
+                "covariates. Pass covariates via X, e.g. with a "
+                "'y ~ 0 + x1 + x2' formula."
+            )
         if self._exog_names:
             from pymc_extras.statespace import structural as st
 
@@ -2661,6 +2751,13 @@ class StateSpaceTimeSeries(PyMCModel):
                     prior.dims = dims[0]
                     P0_diag = prior.create_variable("P0_diag")
                     pm.Deterministic("P0", pt.diag(P0_diag), dims=dims)
+                elif name == "beta_exog" and self.vs_prior is not None:
+                    self.vs_prior.create_prior(
+                        "beta_exog",
+                        n_params=len(self._exog_names),
+                        dims=dims,
+                        X=self._exog_values(X) if X is not None else None,
+                    )
                 else:
                     prior = deepcopy(self.priors[name])
                     prior.dims = dims
@@ -2676,7 +2773,7 @@ class StateSpaceTimeSeries(PyMCModel):
             df = pd.DataFrame({"y": y_values.flatten()}, index=datetime_index)
             if self._exog_names and X is not None:
                 # The state-space graph looks this variable up by name
-                pm.Data("data_exog", X.sel(coeffs=self._exog_names).values)
+                pm.Data("data_exog", self._exog_values(X))
             self.ss_mod.build_statespace_graph(df[["y"]])
 
     def fit(
@@ -2763,6 +2860,85 @@ class StateSpaceTimeSeries(PyMCModel):
             else conditional_idata
         )
 
+    def _require_vs_diagnostics(self, what: str) -> tuple[VariableSelectionPrior, Any]:
+        """Guard the variable-selection accessors.
+
+        Returns the prior and the fitted idata, raising the same errors both
+        accessors documented: ValueError when the model was not configured
+        with `vs_prior_type`, RuntimeError when it has not been fit.
+        """
+        if self.vs_prior is None:
+            raise ValueError(
+                "Model was not configured with vs_prior_type; there are no "
+                f"{what} to report."
+            )
+        if self.idata is None:
+            raise RuntimeError("Model must be fit first.")
+        return self.vs_prior, self.idata
+
+    def _label_by_regressor(self, table: pd.DataFrame) -> pd.DataFrame:
+        """Index a variable-selection table by regressor name.
+
+        The factory builds these tables from bare arrays, so the rows come
+        back positional. They follow the fit-time column order, which is what
+        `_exog_names` holds.
+        """
+        table.index = pd.Index(self._exog_names, name="coeffs")
+        return table
+
+    def get_inclusion_probabilities(
+        self, param_name: str = "beta_exog"
+    ) -> pd.DataFrame:
+        """
+        Posterior inclusion probabilities of the exogenous regressors.
+
+        Only available when the model was configured with
+        `vs_prior_type="spike_and_slab"` and has been fit.
+
+        Interpret the probabilities as a relative ranking of the candidate
+        regressors. The `beta_exog` point estimates shrink toward zero
+        under this prior (the state-space `P0` lets the regression states
+        drift from the parameter), but counterfactual forecasts use the
+        smoothed states and are not affected by that attenuation.
+
+        Parameters
+        ----------
+        param_name : str, optional
+            Name of the coefficient parameter. Defaults to "beta_exog".
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per regressor, indexed by regressor name, with columns
+            "prob" (inclusion probability), "selected" (probability above
+            0.5), and "gamma_mean" (mean of the selection indicator).
+        """
+        vs_prior, idata = self._require_vs_diagnostics("inclusion probabilities")
+        table = vs_prior.get_inclusion_probabilities(idata, param_name)
+        return self._label_by_regressor(table)
+
+    def get_shrinkage_factors(self, param_name: str = "beta_exog") -> pd.DataFrame:
+        """
+        Shrinkage factors of the exogenous regressors.
+
+        Only available when the model was configured with
+        `vs_prior_type="horseshoe"` and has been fit.
+
+        Parameters
+        ----------
+        param_name : str, optional
+            Name of the coefficient parameter. Defaults to "beta_exog".
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per regressor, indexed by regressor name, with the
+            effective shrinkage applied to its coefficient.
+        """
+        vs_prior, idata = self._require_vs_diagnostics("shrinkage factors")
+        table = vs_prior.get_shrinkage_factors(idata, param_name)
+        return self._label_by_regressor(table)
+
     def _forecast(
         self,
         start: pd.Timestamp,
@@ -2844,7 +3020,7 @@ class StateSpaceTimeSeries(PyMCModel):
                     raise ValueError(
                         f"X is missing exogenous columns used at fit time: {missing}."
                     )
-                scenario = X.sel(coeffs=self._exog_names).values
+                scenario = self._exog_values(X)
             last = self._train_index[-1]  # start forecasting after the last observed
             forecast_data = self._forecast(
                 start=last, periods=len(idx), scenario=scenario

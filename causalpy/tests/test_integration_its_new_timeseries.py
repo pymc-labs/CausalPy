@@ -288,3 +288,116 @@ def test_its_with_state_space_covariates():
     n_post = n - 80
     assert result.post_impact.sizes["obs_ind"] == n_post
     assert np.isfinite(result.post_impact.values).all()
+
+
+@pytest.mark.integration
+def test_its_with_state_space_variable_selection(mock_pymc_sample):
+    """ITS + StateSpaceTimeSeries with spike-and-slab covariate selection.
+
+    Structure-only assertions: the suite mocks pm.sample session-wide,
+    so posterior values come from the prior.
+    """
+    try:
+        from pymc_extras.statespace import structural  # noqa: F401
+    except ImportError:
+        pytest.skip("pymc-extras is required for StateSpaceTimeSeries tests")
+
+    rng = np.random.default_rng(seed=42)
+    n = 90
+    dates = pd.date_range(start="2020-01-01", periods=n, freq="D")
+    x1 = rng.normal(size=n)
+    x2 = rng.normal(size=n)
+    x3 = rng.normal(size=n)
+    y = 5 + 2.0 * x1 + rng.normal(0, 0.3, n)
+    df = pd.DataFrame({"y": y, "x1": x1, "x2": x2, "x3": x3}, index=dates)
+
+    model = cp.pymc_models.StateSpaceTimeSeries(
+        level_order=1,
+        seasonal_length=7,
+        sample_kwargs={
+            "chains": 1,
+            "draws": 50,
+            "tune": 50,
+            "progressbar": False,
+            "random_seed": 7,
+        },
+        vs_prior_type="spike_and_slab",
+    )
+
+    result = cp.InterruptedTimeSeries(
+        data=df,
+        treatment_time=dates[70],
+        formula="y ~ 0 + x1 + x2 + x3",
+        model=model,
+    )
+
+    assert "beta_exog" in result.idata.posterior
+    assert "gamma_beta_exog" in result.idata.posterior
+
+    incl = model.get_inclusion_probabilities()
+    assert isinstance(incl, pd.DataFrame)
+    assert list(incl.index) == ["x1", "x2", "x3"]
+    assert ((incl["prob"] >= 0) & (incl["prob"] <= 1)).all()
+
+    assert np.isfinite(result.post_impact.values).all()
+
+
+@pytest.mark.integration
+@pytest.mark.slow
+@pytest.mark.correctness
+def test_its_state_space_variable_selection_recovery():
+    """Irrelevant covariates shrink out under the spike-and-slab prior.
+
+    Real NUTS, no pm.sample mock: correctness-marked tests run in their own
+    lane (`make test-correctness`), where the session mock is never
+    instantiated. Selection is asserted through the inclusion-probability
+    ranking, not `beta_exog` point estimates, because the state-space `P0`
+    lets the regression states drift from the parameter, which attenuates
+    the point estimates without affecting the ranking.
+    """
+    try:
+        from pymc_extras.statespace import structural  # noqa: F401
+    except ImportError:
+        pytest.skip("pymc-extras is required for StateSpaceTimeSeries tests")
+
+    rng = np.random.default_rng(seed=157)
+    n = 120
+    dates = pd.date_range(start="2022-01-01", periods=n, freq="D")
+    X = rng.normal(size=(n, 6))
+    y = 3.0 + 2.0 * X[:, 0] - 1.5 * X[:, 1] + rng.normal(0, 0.3, size=n)
+    df = pd.DataFrame({"y": y, **{f"x{i + 1}": X[:, i] for i in range(6)}}, index=dates)
+
+    model = cp.pymc_models.StateSpaceTimeSeries(
+        level_order=1,
+        seasonal_length=7,
+        sample_kwargs={
+            "chains": 2,
+            "draws": 400,
+            "tune": 400,
+            "cores": 1,
+            "target_accept": 0.9,
+            "progressbar": False,
+            "random_seed": 157,
+        },
+        vs_prior_type="spike_and_slab",
+    )
+    cp.InterruptedTimeSeries(
+        data=df,
+        treatment_time=dates[100],
+        formula="y ~ 0 + x1 + x2 + x3 + x4 + x5 + x6",
+        model=model,
+    )
+
+    # x1, x2 are in the DGP, x3-x6 are noise. The attenuation documented in
+    # the class docstring pulls every inclusion probability toward the
+    # Beta(2, 2) prior mean of 0.5, so the gates are ranking and separation,
+    # not absolute levels.
+    # Calibration (seed 157, 2 chains, 400 draws/tune, target_accept 0.9):
+    # relevant probs ~0.42-0.45, irrelevant ~0.23-0.25, worst-pair gap
+    # 0.163, mean gap 0.187; the limits below keep roughly 2-3x headroom.
+    incl = model.get_inclusion_probabilities()
+    relevant = incl["prob"][["x1", "x2"]]
+    irrelevant = incl["prob"][["x3", "x4", "x5", "x6"]]
+    assert relevant.min() > irrelevant.max()
+    assert relevant.min() - irrelevant.max() >= 0.05
+    assert relevant.mean() - irrelevant.mean() >= 0.10
