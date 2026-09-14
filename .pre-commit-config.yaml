@@ -30,7 +30,7 @@ repos:
       - id: check-case-conflict
       - id: mixed-line-ending
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.6
+    rev: v0.16.7
     hooks:
       # Run the linter
       - id: ruff
@@ -75,7 +75,7 @@ repos:
   # ``[tool.pymarkdown]`` of pyproject.toml. Notebook Markdown cells and the
   # generated docs build are intentionally out of scope.
   - repo: https://github.com/jackdewinter/pymarkdown
-    rev: v0.9.39
+    rev: v0.9.40
     hooks:
       - id: pymarkdown
         args: [scan]
