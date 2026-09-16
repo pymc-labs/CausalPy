@@ -189,7 +189,7 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
     ) -> None:
         self._result: ResultT | None = None
         self._prior_result: ResultT | None = None
-        self.model = model
+        self._install_model(model)
 
     @property
     def model(self) -> PyMCModel | RegressorMixin | PyMCForecastModel:
@@ -204,15 +204,13 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
         return self._model_backend.model
 
     @model.setter
-    def model(
-        self, value: PyMCModel | RegressorMixin | PyMCForecastModel | None
-    ) -> None:
+    def model(self, value: PyMCModel | RegressorMixin | PyMCForecastModel) -> None:
         """Install *value* as the backend model and reset all lifecycle state.
 
         Parameters
         ----------
-        value : PyMCModel, RegressorMixin, PyMCForecastModel, or None
-            The new backend model instance, or ``None`` to create the default.
+        value : PyMCModel, RegressorMixin, or PyMCForecastModel
+            The new backend model instance.
 
         Raises
         ------
@@ -226,6 +224,12 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
         A successful swap clears all experiment result bundles. Validation
         happens before the swap, leaving existing state intact on failure.
         """
+        self._install_model(value)
+
+    def _install_model(
+        self, value: PyMCModel | RegressorMixin | PyMCForecastModel | None
+    ) -> None:
+        """Validate *value* (``None`` builds the default) and install it."""
         adapter = make_model_adapter(
             value,
             default_model_class=self._default_model_class,

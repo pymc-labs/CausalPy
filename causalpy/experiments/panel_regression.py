@@ -720,7 +720,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         # (idata mu vs sklearn predict); the branch is isolated here. Upgrade
         # path: store canonical in-sample predictions at fit time.
         if self._model_backend.is_bayesian:
-            mu = self._model_backend.require_idata()[group]["mu"]
+            mu = self._model_backend.require_idata()[group].dataset["mu"]
             columns["y_fitted"] = mu.mean(dim=["chain", "draw"]).values.flatten()
             columns["y_fitted_lower"] = mu.quantile(
                 0.025, dim=["chain", "draw"]
@@ -905,10 +905,14 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         # Get requested draws for HDI plotting (Bayesian only).
         if is_bayesian:
             idata = self._model_backend.require_idata()
-            mu = idata[group]["mu"]
+            mu = idata[group].dataset["mu"]
             if interval_type == "predictive":
                 predictive_group = f"{group}_predictive"
-                predictive = idata.children.get(predictive_group)
+                predictive = (
+                    idata[predictive_group].dataset
+                    if predictive_group in idata.children
+                    else None
+                )
                 if predictive is None or "y_hat" not in predictive:
                     raise ValueError(
                         f"interval_type='predictive' requires {group} predictive "
