@@ -47,7 +47,7 @@ result = cp.PiecewiseITS(
     data=df,
     formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
     model=cp.pymc_models.LinearRegression(sample_kwargs={"target_accept": 0.95}),
-)
+).fit()
 
 result.summary()
 summary = result.effect_summary(direction="increase")

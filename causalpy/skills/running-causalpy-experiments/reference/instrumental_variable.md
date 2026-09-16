@@ -60,7 +60,7 @@ result = cp.InstrumentalVariable(
         "eta": 2,
         "lkj_sd": 1,
     },
-)
+).fit()
 ```
 
 ## Interpretation Checks

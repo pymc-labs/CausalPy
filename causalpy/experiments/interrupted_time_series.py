@@ -1106,7 +1106,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         ...     model=cp.pymc_models.LinearRegression(
         ...         sample_kwargs={"random_seed": 42, "progressbar": False}
         ...     ),
-        ... )
+        ... ).fit()
         >>> persistence = result.analyze_persistence()  # doctest: +SKIP
         ... # Note: Results are automatically printed to console
         >>> persistence["persistence_ratio"]  # doctest: +SKIP

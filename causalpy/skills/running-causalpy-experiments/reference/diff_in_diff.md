@@ -39,7 +39,7 @@ result = cp.DifferenceInDifferences(
     time_variable_name="t",
     group_variable_name="group",
     model=cp.pymc_models.LinearRegression(sample_kwargs={"target_accept": 0.95}),
-)
+).fit()
 
 result.summary()
 summary = result.effect_summary(direction="increase")

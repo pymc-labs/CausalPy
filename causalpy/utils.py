@@ -463,7 +463,7 @@ def extract_lift_for_mmm(
             model=cp.pymc_models.WeightedSumFitter(
                 sample_kwargs={"progressbar": False}
             ),
-        )
+        ).fit()
 
         # Extract lift results for MMM calibration
         df_lift = cp.extract_lift_for_mmm(

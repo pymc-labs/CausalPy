@@ -38,7 +38,7 @@ result = cp.InversePropensityWeighting(
     outcome_variable="outcome",
     weighting_scheme="robust",
     model=cp.pymc_models.PropensityScore(sample_kwargs={"target_accept": 0.95}),
-)
+).fit()
 
 result.plot_ate()
 result.plot_balance_ecdf(covariate="age")

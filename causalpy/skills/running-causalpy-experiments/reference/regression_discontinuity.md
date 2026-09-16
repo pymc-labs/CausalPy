@@ -44,7 +44,7 @@ result = cp.RegressionDiscontinuity(
     running_variable_name="age",
     treatment_threshold=21,
     model=cp.pymc_models.LinearRegression(sample_kwargs={"target_accept": 0.95}),
-)
+).fit()
 
 result.summary()
 summary = result.effect_summary(direction="increase")

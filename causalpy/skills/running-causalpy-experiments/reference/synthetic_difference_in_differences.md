@@ -40,7 +40,7 @@ result = cp.SyntheticDifferenceInDifferences(
     model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
         sample_kwargs={"target_accept": 0.95}
     ),
-)
+).fit()
 
 result.summary()
 summary = result.effect_summary(direction="increase")
