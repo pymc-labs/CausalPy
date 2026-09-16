@@ -293,7 +293,7 @@ def test_reused_model_does_not_carry_auto_scaled_prior_into_opt_out(
         tt,
         control_units=["a", "b", "c"],
         treated_units=treated,
-        model=first.model,
+        model=first.model._clone(),
         auto_scale_sigma=False,
     ).fit()
     second_sigma = _sigma_prior(second)
