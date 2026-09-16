@@ -1185,6 +1185,35 @@ def test_comparison_period_summary_uses_shortest_hdi_bounds():
     )
 
 
+@pytest.mark.parametrize("draws", [1, 8])
+def test_prior_comparison_summary_is_a_plausibility_check(integer_data, draws):
+    """Both comparison prose branches must identify prior-only summaries."""
+    data, treatment_time, treatment_end_time = integer_data
+    experiment = cp.InterruptedTimeSeries(
+        data,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1 + t",
+    )
+    experiment.sample_prior_predictive(draws=draws, random_seed=42)
+
+    summary = experiment.effect_summary(group="prior", period="comparison")
+    impact = experiment.prior_result.impact_post
+    expected = [
+        impact.sel(obs_ind=slice(treatment_time, treatment_end_time - 1)).mean().item(),
+        impact.sel(obs_ind=slice(treatment_end_time, None)).mean().item(),
+    ]
+    np.testing.assert_allclose(
+        summary.table.loc[["intervention", "post_intervention"], "mean"], expected
+    )
+    assert not experiment.is_fitted
+    assert "prior" in summary.text.lower()
+    assert "not a causal estimate" in summary.text.lower()
+    assert "posterior" not in summary.text.lower()
+    if draws > 1:
+        assert "prior probability" in summary.text.lower()
+
+
 def test_plot_forwards_ci_prob_to_all_singleton_hdi_markers(monkeypatch):
     """All singleton overlays use the caller's HDI probability."""
     from types import SimpleNamespace

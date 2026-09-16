@@ -42,7 +42,7 @@ from causalpy.plot_utils import (
 )
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import LinearRegression, PyMCModel
-from causalpy.reporting import EffectSummary
+from causalpy.reporting import EffectSummary, _apply_prior_grouping
 from causalpy.utils import _as_scalar
 
 from .base import BaseExperiment
@@ -374,6 +374,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         cumulative: bool = True,
         relative: bool = True,
         min_effect: float | None = None,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
     ):
         """Generate comparative summary between intervention and post-intervention periods.
 
@@ -389,6 +391,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             Whether to include relative effect statistics
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only)
+        group : {"prior", "posterior"}, default="posterior"
+            Draw group being summarized; prior comparisons are plausibility checks.
 
         Returns
         -------
@@ -443,7 +447,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 f"({post_mean:.1f}, {hdi_pct}% HDI [{post_lower:.1f}, {post_upper:.1f}]) "
                 f"was {persistence_ratio_pct:.1f}% of the intervention effect "
                 f"({intervention_mean:.1f}, {hdi_pct}% HDI [{intervention_lower:.1f}, {intervention_upper:.1f}]), "
-                f"with a posterior probability of {prob_persisted:.2f} that some effect persisted "
+                f"with a {group} probability of {prob_persisted:.2f} that some effect persisted "
                 f"beyond the intervention period."
             )
 
@@ -524,7 +528,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                     f"({intervention_stats['avg']['mean']:.1f}, {ci_pct}% CI [{intervention_stats['avg']['ci_lower']:.1f}, {intervention_stats['avg']['ci_upper']:.1f}])."
                 )
 
-        return EffectSummary(table=table, text=text)
+        return EffectSummary(table=table, text=_apply_prior_grouping(text, group))
 
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
@@ -1325,6 +1329,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                     cumulative=cumulative,
                     relative=relative,
                     min_effect=min_effect,
+                    group=group,
                 )
 
             # For "intervention" or "post" periods, use _extract_window with tuple windows
