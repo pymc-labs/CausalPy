@@ -368,6 +368,7 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
     def plot(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
     ) -> None:
@@ -375,6 +376,8 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Reserved for the common read contract; this plot is not implemented.
         show : bool
             Reserved; ignored. Defaults to ``True``.
         legend_kwargs : dict, optional

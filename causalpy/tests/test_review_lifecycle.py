@@ -161,3 +161,13 @@ def test_panel_prior_consumers_reject_unsupported_backend():
         experiment.get_plot_data(group="prior")
     with pytest.raises(PriorPredictiveNotSupportedException):
         experiment.plot_trajectories(group="prior")
+
+
+@pytest.mark.parametrize(
+    "experiment_class", [cp.InstrumentalVariable, cp.InversePropensityWeighting]
+)
+@pytest.mark.parametrize("group", ["prior", "posterior"])
+def test_unified_plot_stubs_accept_draw_group(experiment_class, group):
+    experiment = object.__new__(experiment_class)
+    with pytest.raises(NotImplementedError):
+        experiment.plot(group=group)
