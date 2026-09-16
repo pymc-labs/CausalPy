@@ -155,6 +155,12 @@ Re-running a phase overwrites only its own draws: a second `fit()` replaces the 
 
 Additional removals and timing changes worth calling out: StaggeredDiD's documented `data_` frame is gone — its `att_group_time`/`att_event_time` tables and raw counterfactual draws live on the result bundle (`result.att_group_time`, `result.att_event_time`, `result.y_pred`), and the per-draw quantities it cached (`y_hat0`, `tau_hat`) are recomputed inside the aggregators. Under the lazy lifecycle, `SyntheticDifferenceInDifferences` with an OLS model constructs successfully and raises its `NotImplementedError` at `fit()` time rather than in `__init__`. `PrePostNEGD` still rejects OLS during construction.
 
+### New features
+
+#### `PlaceboInSpace` reports post/pre MSPE ratios
+
+`PlaceboInSpace.run()` adds `pre_mspe`, `post_mspe` and `mspe_ratio` columns to its table, one row per placebo unit, and records the treated units' own values in `metadata["baseline_mspe"]`. The ratio is the post/pre MSPE ratio of Abadie, Diamond and Hainmueller (2010), section 3.4. The new `PlaceboInSpace.plot_mspe_ratio(result)` draws every unit's ratio in rank order with the treated units highlighted and reports each treated unit's permutation p-value. The existing effect-summary columns are unchanged.
+
 ### Behaviour that intentionally did *not* change
 
 #### The ArviZ default-interval change is a no-op for CausalPy
