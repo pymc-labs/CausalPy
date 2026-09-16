@@ -2017,7 +2017,14 @@ class PropensityScore(PyMCModel):
             Reserved for future non-centred parameterisations of the
             coefficient prior. Currently informational only.
         """
+        fingerprint = _design_fingerprint(X, y)
         if self._built:
+            if fingerprint != self._built_input_fingerprint:
+                raise RuntimeError(
+                    "This model is already built with different inputs. The "
+                    "PyMC graph is built exactly once per instance; assign a "
+                    "fresh model instance instead of rebuilding."
+                )
             return
         self._n_treated_units = 1
         self.build_model(
@@ -2033,6 +2040,7 @@ class PropensityScore(PyMCModel):
             "X": np.asarray(X),
             "t": np.asarray(y).ravel(),
         }
+        self._built_input_fingerprint = fingerprint
         self._built = True
 
     def fit(  # type: ignore[override]
