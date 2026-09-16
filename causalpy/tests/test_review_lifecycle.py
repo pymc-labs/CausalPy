@@ -92,3 +92,36 @@ def test_sampled_model_assignment_preserves_both_experiments(mock_pymc_sample):
     assert original.prior_result is prior_before
     xr.testing.assert_identical(original.idata, original_draws)
     xr.testing.assert_identical(incoming.idata, incoming_draws)
+
+
+def make_panel(model=None, outcome_shift=0):
+    data = pd.DataFrame(
+        {
+            "unit": np.repeat(["a", "b"], 6),
+            "time": np.tile(np.arange(6), 2),
+            "x": np.tile([0, 1, 0, 1, 0, 1], 2),
+            "y": np.arange(12) + outcome_shift,
+        }
+    )
+    return cp.PanelRegression(
+        data,
+        formula="y ~ 1 + x",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        model=model
+        if model is not None
+        else cp.pymc_models.LinearRegression(
+            sample_kwargs={"draws": 5, "tune": 5, "chains": 1, "progressbar": False},
+            prior_sample_kwargs={"draws": 7, "random_seed": 12},
+        ),
+    )
+
+
+@pytest.mark.parametrize("phase", ["fit", "sample_prior_predictive"])
+def test_constructor_rejects_sampled_panel_model(phase, mock_pymc_sample):
+    first = make_panel()
+    getattr(first, phase)()
+    draws_before = first.idata.copy(deep=True)
+    with pytest.raises(ValueError, match="fresh model"):
+        make_panel(first.model, outcome_shift=100)
+    xr.testing.assert_identical(first.idata, draws_before)
