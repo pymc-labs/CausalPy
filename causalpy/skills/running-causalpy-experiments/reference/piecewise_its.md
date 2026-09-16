@@ -32,13 +32,22 @@ import causalpy as cp
 
 rng = np.random.default_rng(42)
 t = np.arange(100)
-df = pd.DataFrame({"t": t, "y": 1 + 0.05 * t + 2 * (t >= 50) + 0.03 * np.maximum(0, t - 50) + rng.normal(0, 0.2, len(t))})
+df = pd.DataFrame(
+    {
+        "t": t,
+        "y": 1
+        + 0.05 * t
+        + 2 * (t >= 50)
+        + 0.03 * np.maximum(0, t - 50)
+        + rng.normal(0, 0.2, len(t)),
+    }
+)
 
 result = cp.PiecewiseITS(
     data=df,
     formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
     model=cp.pymc_models.LinearRegression(sample_kwargs={"target_accept": 0.95}),
-)
+).fit()
 
 result.summary()
 summary = result.effect_summary(direction="increase")

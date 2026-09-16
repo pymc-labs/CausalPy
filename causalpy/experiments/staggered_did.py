@@ -30,17 +30,20 @@ from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import DataException, FormulaException
+from causalpy.experiments._results import StaggeredDifferenceInDifferencesResult
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
-from causalpy.plot_utils import has_posterior_draws
+from causalpy.plot_utils import has_posterior_draws, plot_posterior_over_x
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary
 
 from .base import BaseExperiment
 
 
-class StaggeredDifferenceInDifferences(BaseExperiment):
+class StaggeredDifferenceInDifferences(
+    BaseExperiment[StaggeredDifferenceInDifferencesResult]
+):
     """A class to analyse data from staggered adoption Difference-in-Differences settings.
 
     This class implements the Borusyak, Jaravel, and Spiess (BJS, 2024)
@@ -83,15 +86,16 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     Attributes
     ----------
-    data_ : pd.DataFrame
-        Augmented data with G (treatment time), event_time, y_hat0 (counterfactual),
-        and tau_hat (treatment effect) columns.
-    att_group_time_ : pd.DataFrame
-        Group-time ATT estimates: ATT(g, t) for each cohort g and calendar time t.
-        Includes an ``identified`` column; non-identified cells have ``NaN`` estimates.
-    att_event_time_ : pd.DataFrame
-        Event-time ATT estimates: ATT(e) for each event-time e = t - G.
-        Includes an ``identified`` column; non-identified cells have ``NaN`` estimates.
+    result : StaggeredDifferenceInDifferencesResult
+        Posterior result bundle, available after :meth:`fit`. Its
+        ``att_group_time`` and ``att_event_time`` DataFrames contain aggregated
+        estimates and an ``identified`` column; non-identified cells have
+        ``NaN`` estimates. ``y_pred`` holds counterfactual predictions and
+        ``hdi_prob`` records the interval probability used during aggregation.
+    prior_result : StaggeredDifferenceInDifferencesResult
+        Prior result bundle, available after :meth:`sample_prior_predictive`
+        (or :meth:`fit` with a prior-capable model). It exposes the same fields
+        as ``result``, computed from prior rather than posterior draws.
     non_identified_periods_ : set
         Calendar periods with no untreated observations.
     non_identified_cohorts_ : set
@@ -130,6 +134,13 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     Unit and observation counts in the summary output are computed without assuming
     balanced panels.
 
+    **Lazy lifecycle**
+
+    Construction only validates inputs and builds design matrices — no
+    sampling happens. Call :meth:`fit` to sample posterior draws and
+    populate :attr:`result`, or :meth:`sample_prior_predictive` to run a
+    prior predictive check (inspect it via ``plot(group="prior")``).
+
     References
     ----------
     Borusyak, K., Jaravel, X., & Spiess, J. (2024). Revisiting Event Study Designs:
@@ -155,7 +166,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     ...             "progressbar": False,
     ...         }
     ...     ),
-    ... )  # doctest: +SKIP
+    ... ).fit()  # doctest: +SKIP
     """
 
     supports_ols = True
@@ -210,22 +221,6 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         # Step 4: Build design matrices
         self._build_design_matrices()
-
-        self.algorithm()
-
-    def algorithm(self) -> None:
-        """Run the experiment algorithm: fit model, predict counterfactuals, and aggregate effects."""
-        # Step 5: Fit model on untreated observations
-        self._fit_model()
-
-        # Step 6: Predict counterfactuals for all observations
-        self._predict_counterfactuals()
-
-        # Step 7: Compute treatment effects
-        self._compute_treatment_effects()
-
-        # Step 8: Aggregate to group-time and event-time ATTs
-        self._aggregate_effects()
 
     def input_validation(self) -> None:
         """Validate the input data and parameters."""
@@ -460,10 +455,15 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         self.X_train = self.X_full[untreated_mask]
         self.y_train = self.y_full[untreated_mask]
 
-    def _fit_model(self) -> None:
-        """Fit the model on untreated observations only."""
+    def _fit_inputs(self) -> tuple[xr.DataArray, xr.DataArray, dict[str, Any]]:
+        """Return the untreated-subset design matrices and coordinates for build.
+
+        The model is built (and later sampled) on untreated observations
+        only: pre-treatment periods of eventually-treated units plus all
+        periods of never-treated units.
+        """
         n_train = self.X_train.shape[0]
-        X_train_xr = xr.DataArray(
+        X_train = xr.DataArray(
             self.X_train,
             dims=["obs_ind", "coeffs"],
             coords={
@@ -471,19 +471,25 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 "coeffs": self.labels,
             },
         )
-        y_train_xr = xr.DataArray(
+        y_train = xr.DataArray(
             self.y_train,
             dims=["obs_ind", "treated_units"],
             coords={"obs_ind": np.arange(n_train), "treated_units": ["unit_0"]},
         )
-        self._model_backend.fit(
-            X=X_train_xr,
-            y=y_train_xr,
-            coords=build_coords(self.labels, n_train),
-        )
+        return X_train, y_train, build_coords(self.labels, n_train)
 
-    def _predict_counterfactuals(self) -> None:
-        """Predict counterfactual outcomes for all observations."""
+    def _finalize(self, group: Literal["prior", "posterior"]) -> None:
+        """Compute the group's result bundle from its draws and assign it.
+
+        The base class samples the requested draw group before calling
+        this, so no fitting happens here. The body is the historical
+        predict-and-aggregate pipeline: predict counterfactual outcomes
+        for every observation conditioned on ``group``, aggregate the
+        resulting treatment effects into group-time and event-time ATT
+        tables, and store everything in a result bundle. Prior draws are
+        aggregated identically so prior plausibility checks can reuse the
+        same readers.
+        """
         n_full = self.X_full.shape[0]
         X_full_xr = xr.DataArray(
             self.X_full,
@@ -493,65 +499,51 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 "coeffs": self.labels,
             },
         )
-        self.y_pred = self._model_backend.predict(X=X_full_xr)
-        self.data["y_hat0"] = (
-            self.y_pred.mean(dim=["chain", "draw"]).isel(treated_units=0).values
-        )
+        y_pred = self._model_backend.predict(X=X_full_xr, group=group)
 
-    def _compute_treatment_effects(self) -> None:
-        """Compute treatment effects tau_hat = y - y_hat0 for treated observations."""
-        self.data["tau_hat"] = np.nan  # Initialize with NaN
-        treated_mask = ~self.data["_is_untreated"]
-        self.data.loc[treated_mask, "tau_hat"] = (
-            self._observed_outcome.loc[treated_mask]
-            - self.data.loc[treated_mask, "y_hat0"]
-        )
-
-        # Store augmented data
-        self.data_ = self.data.copy()
-
-    def _aggregate_effects(self) -> None:
-        """Aggregate effects to group-time and event-time ATTs.
-
-        This method aggregates individual treatment effects into:
-        1. Group-time ATTs: ATT(g, t) for each cohort g and calendar time t
-        2. Event-time ATTs: ATT(e) for each event-time e = t - G
-
-        For event-time ATTs, this includes both:
-
-        - Post-treatment effects (event_time >= 0): actual treatment effects
-        - Pre-treatment effects (event_time < 0): placebo/residual checks
-
-        Pre-treatment effects are computed as residuals (y - y_hat0) for
-        eventually-treated units before they receive treatment. These serve
-        as a placebo check - if the parallel trends assumption holds, they
-        should be centered around zero.
-        """
         treated_data = self.data[~self.data["_is_untreated"]].copy()
 
-        # Also get pre-treatment data for eventually-treated units (placebo check)
-        # These are observations where: G != never_treated_value AND event_time < 0
-        is_eventually_treated = self.data["G"] != self.never_treated_value
-        is_pre_treatment = self.data["event_time"] < 0
-        pretreatment_data = self.data[is_eventually_treated & is_pre_treatment].copy()
+        # Also get pre-treatment data for eventually-treated units (placebo
+        # check): G != never_treated_value AND event_time < 0
+        pretreatment_data = self.data.iloc[self._get_pretreatment_positions()].copy()
 
         # The two helpers compute genuinely different statistics: HDI bounds
         # need posterior draws, sample dispersion needs only point residuals.
-        if has_posterior_draws(self.y_pred):
-            self._aggregate_effects_bayesian(treated_data, pretreatment_data)
+        if has_posterior_draws(y_pred):
+            att_group_time, att_event_time, hdi_prob = self._aggregate_effects_bayesian(
+                y_pred=y_pred,
+                treated_data=treated_data,
+                pretreatment_data=pretreatment_data,
+            )
         else:
-            self._aggregate_effects_ols(treated_data, pretreatment_data)
+            att_group_time, att_event_time = self._aggregate_effects_ols(
+                y_pred=y_pred,
+                treated_data=treated_data,
+                pretreatment_data=pretreatment_data,
+            )
+            hdi_prob = float(HDI_PROB)
+
+        bundle = StaggeredDifferenceInDifferencesResult(
+            att_group_time=att_group_time,
+            att_event_time=att_event_time,
+            y_pred=y_pred,
+            hdi_prob=hdi_prob,
+        )
+        self._assign_bundle(group, bundle)
 
     def _aggregate_effects_bayesian(
         self,
+        y_pred: xr.DataArray,
         treated_data: pd.DataFrame,
         pretreatment_data: pd.DataFrame,
         hdi_prob: float = HDI_PROB,
-    ) -> None:
-        """Aggregate effects for Bayesian model with posterior uncertainty.
+    ) -> tuple[pd.DataFrame, pd.DataFrame, float]:
+        """Aggregate effects for a draw-carrying prediction container.
 
         Parameters
         ----------
+        y_pred : xr.DataArray
+            Counterfactual draws for every observation.
         treated_data : pd.DataFrame
             DataFrame containing only treated observations (event_time >= 0)
         pretreatment_data : pd.DataFrame
@@ -560,14 +552,18 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         hdi_prob : float, optional
             Probability mass for the HDI interval bounds. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+
+        Returns
+        -------
+        tuple[pd.DataFrame, pd.DataFrame, float]
+            The group-time ATT table, the event-time ATT table, and the HDI
+            probability used for the interval bounds.
         """
-        # Store the HDI probability used for interval computation
-        self.hdi_prob_ = hdi_prob
         lower_pct = (1 - hdi_prob) / 2 * 100
         upper_pct = (1 + hdi_prob) / 2 * 100
 
         # Get posterior draws for mu
-        mu_draws = self.y_pred.isel(treated_units=0)
+        mu_draws = y_pred.isel(treated_units=0)
 
         # Get observed y for all observations
         y_observed = self._observed_outcome.to_numpy()
@@ -586,13 +582,11 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         # --- Group-time ATTs (post-treatment only) ---
         gt_groups = treated_data.groupby(
             ["G", self.time_variable_name], observed=True
-        ).groups
+        ).indices
         att_gt_rows: list[dict] = []
-        for key, idx in gt_groups.items():
+        for key, positions in gt_groups.items():
             g_val = key[0]
             t_val = key[1]
-            # Find positions in treated_indices
-            positions = [np.where(treated_indices == i)[0][0] for i in idx]
             tau_gt = tau_draws_treated[:, :, positions].mean(axis=2)
             att_gt_rows.append(
                 {
@@ -603,19 +597,14 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                     "att_upper": float(np.percentile(tau_gt, upper_pct)),
                 }
             )
-        self.att_group_time_ = self._mark_non_identified_att_rows(
-            pd.DataFrame(att_gt_rows)
-        )
+        att_group_time = self._mark_non_identified_att_rows(pd.DataFrame(att_gt_rows))
 
         # --- Event-time ATTs (including pre-treatment placebo) ---
         att_et_rows: list[dict] = []
 
         # Pre-treatment placebo effects (event_time < 0)
         if len(pretreatment_data) > 0:
-            pretreat_indices = pretreatment_data.index.values
-            pretreat_idx_positions = np.array(
-                [np.where(self.data.index == idx)[0][0] for idx in pretreat_indices]
-            )
+            pretreat_idx_positions = self._get_pretreatment_positions()
             tau_draws_pretreat = tau_draws_all[:, :, pretreat_idx_positions]
             event_time_pretreat = np.asarray(pretreatment_data["event_time"].values)
 
@@ -669,23 +658,41 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 }
             )
 
-        self.att_event_time_ = self._mark_non_identified_att_rows(
-            pd.DataFrame(att_et_rows)
-        )
+        att_event_time = self._mark_non_identified_att_rows(pd.DataFrame(att_et_rows))
+
+        return att_group_time, att_event_time, hdi_prob
 
     def _aggregate_effects_ols(
-        self, treated_data: pd.DataFrame, pretreatment_data: pd.DataFrame
-    ) -> None:
-        """Aggregate effects for OLS model (point estimates only).
+        self,
+        y_pred: xr.DataArray,
+        treated_data: pd.DataFrame,
+        pretreatment_data: pd.DataFrame,
+    ) -> tuple[pd.DataFrame, pd.DataFrame]:
+        """Aggregate effects for an OLS model (point estimates only).
 
         Parameters
         ----------
+        y_pred : xr.DataArray
+            Point counterfactual predictions for every observation (with
+            singleton ``chain``/``draw`` dimensions).
         treated_data : pd.DataFrame
             DataFrame containing only treated observations (event_time >= 0)
         pretreatment_data : pd.DataFrame
             DataFrame containing pre-treatment observations from eventually-treated
             units (event_time < 0) for placebo check
+
+        Returns
+        -------
+        tuple[pd.DataFrame, pd.DataFrame]
+            The group-time ATT table and the event-time ATT table.
         """
+        # Point counterfactual predictions per observation; treatment
+        # effects are observed outcome minus prediction.
+        y_hat0 = y_pred.mean(dim=["chain", "draw"]).isel(treated_units=0).values
+        treated_positions = np.flatnonzero(~self.data["_is_untreated"].to_numpy())
+        tau_hat = self._observed_outcome.to_numpy() - y_hat0
+        treated_data["tau_hat"] = tau_hat[treated_positions]
+
         # --- Group-time ATTs (post-treatment only) ---
         att_gt = (
             treated_data.groupby(["G", self.time_variable_name], observed=True)[
@@ -695,16 +702,12 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             .reset_index()
         )
         att_gt.columns = ["cohort", "time", "att", "att_std", "n_obs"]
-        self.att_group_time_ = self._mark_non_identified_att_rows(att_gt)
+        att_group_time = self._mark_non_identified_att_rows(att_gt)
 
         # --- Event-time ATTs (including pre-treatment placebo) ---
         # Compute tau_hat for pre-treatment observations (residuals)
         if len(pretreatment_data) > 0:
-            pretreatment_data = pretreatment_data.copy()
-            pretreatment_data["tau_hat"] = (
-                self._observed_outcome.loc[pretreatment_data.index].to_numpy()
-                - pretreatment_data["y_hat0"].to_numpy()
-            )
+            pretreatment_data["tau_hat"] = tau_hat[self._get_pretreatment_positions()]
 
         # Combine pre-treatment and post-treatment for event-time aggregation
         event_data = pd.concat([pretreatment_data, treated_data], ignore_index=True)
@@ -723,7 +726,9 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         )
         att_et.columns = ["event_time", "att", "att_std", "n_obs"]
         att_et["event_time"] = att_et["event_time"].astype(int)
-        self.att_event_time_ = self._mark_non_identified_att_rows(att_et)
+        att_event_time = self._mark_non_identified_att_rows(att_et)
+
+        return att_group_time, att_event_time
 
     def summary(
         self, round_to: int | None = 2, include_group_time: bool = False
@@ -739,6 +744,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             ``ATT(g, t)`` table after the event-time estimates. Defaults to
             ``False``.
         """
+        bundle = self.result
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         print(f"Number of units: {self.data[self.unit_variable_name].nunique()}")
@@ -749,7 +755,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         ].nunique()
         print(f"Never-treated units: {n_never_treated}")
         print("\nEvent-time estimates:")
-        att_et = self.att_event_time_.copy()
+        att_et = bundle.att_event_time.copy()
         # Add indicator column for clarity
         att_et["type"] = att_et["event_time"].apply(
             lambda x: "placebo" if x < 0 else "ATT"
@@ -761,13 +767,14 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         print(att_et[cols].to_string(index=False))
         if include_group_time:
             print("\nGroup-time estimates:")
-            print(self.att_group_time_.to_string(index=False))
+            print(bundle.att_group_time.to_string(index=False))
         print("\nModel coefficients:")
         self.print_coefficients(round_to)
 
     def plot(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         hdi_prob: float | None = None,
         figsize: tuple[float, float] = (10, 6),
         show: bool = True,
@@ -777,15 +784,21 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to plot. ``"prior"`` renders a single-panel
+            prior predictive check — the observed aggregate outcome against
+            the prior-implied counterfactual — and requires
+            :meth:`sample_prior_predictive`; ``"posterior"`` (default)
+            renders the event study and requires :meth:`fit`. The two
+            groups intentionally return different axes layouts.
         hdi_prob : float, optional
-            Probability mass of the highest density interval shown by the
-            error bars. Unlike most other CausalPy experiments, ``hdi_prob``
-            for staggered DiD is fixed at fit time during effect aggregation
-            and the resulting bounds are cached on the instance. If
-            supplied here, the value must match the cached
-            :attr:`hdi_prob_`; otherwise a :class:`ValueError` is raised.
-            Pass ``None`` (the default) to plot using the cached value.
-            Ignored for OLS models.
+            Probability mass of the highest density interval. Posterior
+            event-study bounds are fixed during effect aggregation, so an
+            explicit value must match ``result.hdi_prob`` or a
+            :class:`ValueError` is raised. For ``group="prior"``, this controls
+            the counterfactual band computed at plot time. Pass ``None`` (the
+            default) to use the selected bundle's stored value. Ignored for
+            OLS models.
         figsize : tuple of (float, float)
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``(10, 6)``.
@@ -808,6 +821,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
+            group=group,
             hdi_prob=hdi_prob,
             figsize=figsize,
         )
@@ -815,6 +829,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     def plot_group_time(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         hdi_prob: float | None = None,
         layout: Literal["facet", "overlay"] = "facet",
         x_axis: Literal["event_time", "calendar_time"] = "event_time",
@@ -827,13 +842,19 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to plot. ``"prior"`` renders a single-panel
+            prior predictive check and requires
+            :meth:`sample_prior_predictive`; ``"posterior"`` (default)
+            renders the cohort trajectories and requires :meth:`fit`.
         hdi_prob : float, optional
-            Probability mass of the highest density interval shown by the
-            uncertainty bands. As with :meth:`plot`, Bayesian ``ATT(g, t)``
-            bounds are cached during effect aggregation. If supplied here, the
-            value must match the cached :attr:`hdi_prob_`; otherwise a
-            :class:`ValueError` is raised. Pass ``None`` (the default) to plot
-            using the cached value. Ignored for OLS models.
+            Probability mass of the highest density interval. Posterior
+            ``ATT(g, t)`` bounds are fixed during effect aggregation, so an
+            explicit value must match ``result.hdi_prob`` or a
+            :class:`ValueError` is raised. For ``group="prior"``, this controls
+            the counterfactual band computed at plot time. Pass ``None`` (the
+            default) to use the selected bundle's stored value. Ignored for
+            OLS models.
         layout : {"facet", "overlay"}
             Plot layout. ``"facet"`` draws one row per cohort and
             ``"overlay"`` draws all cohorts on a single axes. Defaults to
@@ -852,7 +873,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to a height scaled by
             the number of cohorts when ``layout="facet"`` and ``(10, 6)``
-            when ``layout="overlay"``.
+            when ``layout="overlay"``. For ``group="prior"``, the default
+            single-panel figure size is ``(10, 4)``.
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
@@ -874,6 +896,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
+            group=group,
             hdi_prob=hdi_prob,
             layout=layout,
             x_axis=x_axis,
@@ -884,6 +907,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def _plot(
         self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
         hdi_prob: float | None = None,
         figsize: tuple[float, float] | None = (10, 6),
         view: Literal["event_time", "group_time"] = "event_time",
@@ -894,19 +919,22 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot the event study or cohort trajectories.
 
+        Consumes the resolved group bundle injected by
+        :meth:`~causalpy.experiments.base.BaseExperiment._render_plot`.
+
         Parameters
         ----------
+        group : {"prior", "posterior"}
+            ``"prior"`` renders the reduced single-panel prior-check figure
+            via :meth:`_plot_prior_checks`; ``"posterior"`` renders the
+            event study or cohort trajectories.
         hdi_prob : float, optional
-            Probability mass of the highest density interval shown by the
-            error bars. Unlike most other CausalPy experiments, ``hdi_prob``
-            for ``StaggeredDiD`` is fixed at fit time during effect
-            aggregation (see ``_aggregate_effects_bayesian``) and the
-            resulting bounds are cached on the instance. If supplied here,
-            the value must match the cached
-            :attr:`~causalpy.experiments.staggered_did.StaggeredDiD.hdi_prob_`;
-            otherwise a :class:`ValueError` is raised. Pass ``None`` (the
-            default) to plot using the cached value. Ignored for
-            point-estimate models.
+            Probability mass of the highest density interval. Posterior
+            effect bounds are fixed during aggregation: an explicit value
+            must match ``bundle.hdi_prob`` or a :class:`ValueError` is raised.
+            Prior counterfactual bands are computed at plot time with the
+            requested probability. Pass ``None`` (the default) to use the
+            selected bundle's stored value. Ignored for point-estimate models.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(10, 6)``.
         view : {"event_time", "group_time"}, optional
@@ -928,18 +956,25 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         tuple[plt.Figure, list[plt.Axes]]
             Figure and axes objects.
         """
-        with_uncertainty = has_posterior_draws(self.y_pred)
-        if with_uncertainty and hdi_prob is not None and hdi_prob != self.hdi_prob_:
+        bundle = self._require_bundle(group)
+        if group == "prior":
+            return self._plot_prior_checks(
+                bundle=bundle, hdi_prob=hdi_prob, figsize=figsize
+            )
+
+        with_uncertainty = has_posterior_draws(bundle.y_pred)
+        if with_uncertainty and hdi_prob is not None and hdi_prob != bundle.hdi_prob:
             raise ValueError(
                 "StaggeredDiD HDI bounds are computed during effect "
-                "aggregation, not at plot time. The cached HDI probability "
-                f"is {self.hdi_prob_}, but plot() received hdi_prob="
+                "aggregation, not at plot time. The stored HDI probability "
+                f"is {bundle.hdi_prob}, but plot() received hdi_prob="
                 f"{hdi_prob}. To plot at a different HDI probability, "
                 "re-fit the experiment so that aggregation uses the desired "
-                "value, or omit hdi_prob to use the cached value."
+                "value, or omit hdi_prob to use the stored value."
             )
         if view == "group_time":
             return self._plot_group_time(
+                bundle=bundle,
                 figsize=figsize,
                 layout=layout,
                 x_axis=x_axis,
@@ -950,7 +985,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         fig, ax = plt.subplots(1, 1, figsize=figsize)
 
-        att_et = self.att_event_time_.copy()
+        att_et = bundle.att_event_time.copy()
 
         # Separate pre-treatment (placebo) and post-treatment (ATT)
         pre_treatment = att_et[att_et["event_time"] < 0]
@@ -972,7 +1007,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                     markersize=7,
                     color="gray",
                     alpha=0.7,
-                    label=f"Placebo estimate ({int(self.hdi_prob_ * 100)}% HDI)",
+                    label=f"Placebo estimate ({int(bundle.hdi_prob * 100)}% HDI)",
                 )
             else:
                 ax.scatter(
@@ -1014,7 +1049,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                     capthick=2,
                     markersize=8,
                     color="C0",
-                    label=f"ATT estimate ({int(self.hdi_prob_ * 100)}% HDI)",
+                    label=f"ATT estimate ({int(bundle.hdi_prob * 100)}% HDI)",
                 )
             else:
                 ax.scatter(
@@ -1066,8 +1101,70 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         return fig, [ax]
 
+    def _plot_prior_checks(
+        self,
+        *,
+        bundle: StaggeredDifferenceInDifferencesResult,
+        hdi_prob: float | None,
+        figsize: tuple[float, float] | None,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Render the reduced prior-check panel set.
+
+        The observed aggregate outcome (mean across units per calendar
+        period) is drawn against the prior-implied counterfactual.
+        Prior-implied bands are typically far wider than the data, so
+        impact-style panels are dropped rather than autoscaled into
+        uselessness — the question a prior check answers is whether the
+        prior counterfactual is plausible against the observed series, and
+        one panel suffices.
+        """
+        pred = bundle.y_pred.isel(treated_units=0)
+        obs_df = pd.DataFrame(
+            {
+                self.time_variable_name: self.data[self.time_variable_name].to_numpy(),
+                "y": self._observed_outcome.to_numpy(),
+            }
+        )
+        period_means = obs_df.groupby(self.time_variable_name, sort=True)["y"].mean()
+        periods = period_means.index.to_numpy()
+        time_vals = obs_df[self.time_variable_name].to_numpy()
+        agg_pred = xr.concat(
+            [
+                pred.isel(obs_ind=np.where(time_vals == p)[0]).mean("obs_ind")
+                for p in periods
+            ],
+            dim="obs_ind",
+        )
+
+        fig, ax = plt.subplots(
+            1, 1, figsize=figsize if figsize is not None else (10, 4)
+        )
+        h_line, h_patch = plot_posterior_over_x(
+            periods,
+            agg_pred,
+            ax=ax,
+            ci_prob=bundle.hdi_prob if hdi_prob is None else hdi_prob,
+            kind="ribbon",
+            ci_kind="hdi",
+            plot_hdi_kwargs={"color": "C0"},
+        )
+        ax.plot(periods, period_means.to_numpy(), "k.", label="Observations")
+        ax.set(
+            title="Prior predictive check",
+            xlabel=str(self.time_variable_name),
+            ylabel=self.outcome_variable_name,
+        )
+        ax.legend(
+            handles=[(h_line, h_patch)],
+            labels=["Prior counterfactual"],
+            fontsize=LEGEND_FONT_SIZE,
+        )
+        return fig, [ax]
+
     def _plot_group_time(
         self,
+        *,
+        bundle: StaggeredDifferenceInDifferencesResult,
         figsize: tuple[float, float] | None = None,
         layout: Literal["facet", "overlay"] = "facet",
         x_axis: Literal["event_time", "calendar_time"] = "event_time",
@@ -1075,7 +1172,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot cohort-time ``ATT(g, t)`` trajectories."""
         att_gt, x_col, x_label, y_label = self._get_group_time_plot_data(
-            x_axis=x_axis, include_placebo=include_placebo
+            bundle=bundle, x_axis=x_axis, include_placebo=include_placebo
         )
         cohort_groups = list(att_gt.groupby("cohort", observed=True, sort=True))
         sharex = x_axis == "event_time"
@@ -1132,6 +1229,8 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
     def _get_group_time_plot_data(
         self,
+        *,
+        bundle: StaggeredDifferenceInDifferencesResult,
         x_axis: Literal["event_time", "calendar_time"],
         include_placebo: bool,
     ) -> tuple[pd.DataFrame, str, str, str]:
@@ -1139,11 +1238,11 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         if x_axis not in {"event_time", "calendar_time"}:
             raise ValueError("x_axis must be 'event_time' or 'calendar_time'")
 
-        att_gt = self.att_group_time_.sort_values(["cohort", "time"]).copy()
+        att_gt = bundle.att_group_time.sort_values(["cohort", "time"]).copy()
         att_gt["type"] = "ATT"
         if include_placebo:
             att_gt = pd.concat(
-                [self._get_group_time_placebo_data(), att_gt],
+                [self._get_group_time_placebo_data(bundle=bundle), att_gt],
                 ignore_index=True,
                 sort=False,
             ).sort_values(["cohort", "time"])
@@ -1162,44 +1261,50 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             )
         return att_gt, "time", "Calendar Time", y_label
 
-    def _get_group_time_placebo_data(self) -> pd.DataFrame:
+    def _get_group_time_placebo_data(
+        self, *, bundle: StaggeredDifferenceInDifferencesResult
+    ) -> pd.DataFrame:
         """Return cohort-time placebo estimates for eventually-treated units.
 
         The two helpers compute genuinely different statistics: HDI bounds
         need posterior draws, sample dispersion needs only point residuals.
         """
-        if has_posterior_draws(self.y_pred):
-            return self._get_group_time_placebo_data_bayesian()
-        return self._get_group_time_placebo_data_ols()
+        if has_posterior_draws(bundle.y_pred):
+            return self._get_group_time_placebo_data_bayesian(bundle=bundle)
+        return self._get_group_time_placebo_data_ols(bundle=bundle)
 
-    def _get_group_time_placebo_observations(self) -> pd.DataFrame:
-        """Return pre-treatment observations for eventually-treated units."""
+    def _get_pretreatment_positions(self) -> np.ndarray:
+        """Return row positions of pre-treatment, eventually-treated observations."""
         is_eventually_treated = self.data["G"] != self.never_treated_value
         is_pre_treatment = self.data["event_time"] < 0
-        return self.data[is_eventually_treated & is_pre_treatment].copy()
+        return np.flatnonzero((is_eventually_treated & is_pre_treatment).to_numpy())
 
-    def _get_group_time_placebo_data_bayesian(self) -> pd.DataFrame:
+    def _get_group_time_placebo_data_bayesian(
+        self, *, bundle: StaggeredDifferenceInDifferencesResult
+    ) -> pd.DataFrame:
         """Return Bayesian cohort-time placebo estimates with HDI bounds."""
-        pretreatment_data = self._get_group_time_placebo_observations()
+        pretreatment_positions = self._get_pretreatment_positions()
+        pretreatment_data = self.data.iloc[pretreatment_positions]
         if len(pretreatment_data) == 0:
             return pd.DataFrame()
 
-        hdi_prob = getattr(self, "hdi_prob_", HDI_PROB)
+        hdi_prob = bundle.hdi_prob
         lower_pct = (1 - hdi_prob) / 2 * 100
         upper_pct = (1 + hdi_prob) / 2 * 100
-        mu_draws = self.y_pred.isel(treated_units=0)
+        mu_draws = bundle.y_pred.isel(treated_units=0)
         y_observed = self._observed_outcome.to_numpy()
-        tau_draws_all = y_observed - mu_draws.values
+        tau_draws_pretreat = (y_observed - mu_draws.values)[
+            :, :, pretreatment_positions
+        ]
 
         att_gt_rows: list[dict[str, Any]] = []
         gt_groups = pretreatment_data.groupby(
             ["G", self.time_variable_name], observed=True
-        ).groups
-        for key, idx in gt_groups.items():
+        ).indices
+        for key, positions in gt_groups.items():
             g_val = key[0]
             t_val = key[1]
-            positions = [np.where(self.data.index == i)[0][0] for i in idx]
-            tau_gt = tau_draws_all[:, :, positions].mean(axis=2)
+            tau_gt = tau_draws_pretreat[:, :, positions].mean(axis=2)
             att_gt_rows.append(
                 {
                     "cohort": g_val,
@@ -1213,15 +1318,18 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
             )
         return pd.DataFrame(att_gt_rows)
 
-    def _get_group_time_placebo_data_ols(self) -> pd.DataFrame:
+    def _get_group_time_placebo_data_ols(
+        self, *, bundle: StaggeredDifferenceInDifferencesResult
+    ) -> pd.DataFrame:
         """Return OLS cohort-time placebo residual estimates."""
-        pretreatment_data = self._get_group_time_placebo_observations()
+        positions = self._get_pretreatment_positions()
+        pretreatment_data = self.data.iloc[positions].copy()
         if len(pretreatment_data) == 0:
             return pd.DataFrame()
 
+        y_hat0 = bundle.y_pred.mean(dim=["chain", "draw"]).isel(treated_units=0).values
         pretreatment_data["tau_hat"] = (
-            self._observed_outcome.loc[pretreatment_data.index].to_numpy()
-            - pretreatment_data["y_hat0"].to_numpy()
+            self._observed_outcome.to_numpy()[positions] - y_hat0[positions]
         )
         att_gt = (
             pretreatment_data.groupby(["G", self.time_variable_name], observed=True)[
@@ -1367,39 +1475,50 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
                 label=label,
             )
 
-    def get_plot_data(self, *, hdi_prob: float = HDI_PROB) -> pd.DataFrame:
+    def get_plot_data(
+        self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+        hdi_prob: float = HDI_PROB,
+    ) -> pd.DataFrame:
         """Get event-time plotting data.
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to summarize. ``"prior"`` requires
+            :meth:`sample_prior_predictive`; ``"posterior"`` requires
+            :meth:`fit`.
         hdi_prob : float, optional
             Probability for HDI interval. Only used by models carrying
-            posterior draws; when it differs from the value cached at fit
-            time, the intervals are recomputed. Defaults to
+            draws; when it differs from the value stored on the result
+            bundle, the intervals are recomputed. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
 
         Returns
         -------
         pd.DataFrame
             DataFrame with ``event_time`` and ``att`` columns plus
-            ``att_lower`` / ``att_upper`` HDI bounds (posterior draws) or
-            ``att_std`` / ``n_obs`` dispersion columns (point estimates).
-            Includes both pre-treatment (placebo) and post-treatment effects.
+            ``att_lower`` / ``att_upper`` HDI bounds (draw-carrying models)
+            or ``att_std`` / ``n_obs`` dispersion columns (point estimates).
+            Includes both pre-treatment (placebo) and post-treatment
+            effects. Not cached on the experiment.
         """
-        # If there are no posterior draws, or the requested hdi_prob matches
-        # what was used during aggregation, return the pre-computed results
-        stored_hdi_prob = getattr(self, "hdi_prob_", HDI_PROB)
-        if not has_posterior_draws(self.y_pred) or np.isclose(
+        bundle = self._require_bundle(group)
+        # If there are no draws, or the requested hdi_prob matches what was
+        # used during aggregation, return the pre-computed results
+        stored_hdi_prob = bundle.hdi_prob
+        if not has_posterior_draws(bundle.y_pred) or np.isclose(
             hdi_prob, stored_hdi_prob
         ):
-            return self.att_event_time_.copy()
+            return bundle.att_event_time.copy()
 
         # Recompute intervals with the requested hdi_prob
         lower_pct = (1 - hdi_prob) / 2 * 100
         upper_pct = (1 + hdi_prob) / 2 * 100
 
-        # Get posterior draws for mu
-        mu_draws = self.y_pred.isel(treated_units=0)
+        # Get draws for mu
+        mu_draws = bundle.y_pred.isel(treated_units=0)
 
         # Get observed y for all observations
         y_observed = self._observed_outcome.to_numpy()
@@ -1410,15 +1529,10 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         att_et_rows: list[dict] = []
 
         # Pre-treatment placebo effects (eventually-treated units, event_time < 0)
-        is_eventually_treated = self.data["G"] != self.never_treated_value
-        is_pre_treatment = self.data["event_time"] < 0
-        pretreatment_data = self.data[is_eventually_treated & is_pre_treatment].copy()
+        pretreat_idx_positions = self._get_pretreatment_positions()
+        pretreatment_data = self.data.iloc[pretreat_idx_positions]
 
         if len(pretreatment_data) > 0:
-            pretreat_indices = pretreatment_data.index.values
-            pretreat_idx_positions = np.array(
-                [np.where(self.data.index == idx)[0][0] for idx in pretreat_indices]
-            )
             tau_draws_pretreat = tau_draws_all[:, :, pretreat_idx_positions]
             event_time_pretreat = np.asarray(pretreatment_data["event_time"].values)
 
@@ -1484,6 +1598,7 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
     def effect_summary(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
         alpha: float = 0.05,
         min_effect: float | None = None,
@@ -1493,6 +1608,11 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to summarize. ``"prior"`` requires
+            :meth:`sample_prior_predictive` and produces prior-appropriate
+            prose — a prior plausibility statement, not a causal estimate;
+            ``"posterior"`` requires :meth:`fit`.
         direction : {"increase", "decrease", "two-sided"}, default="increase"
             Direction for tail probability calculation (PyMC only, ignored for OLS).
         alpha : float, default=0.05
@@ -1505,10 +1625,15 @@ class StaggeredDifferenceInDifferences(BaseExperiment):
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
+        # Resolve the requested group's bundle; the helper reads ATT tables
+        # from it and frames prior-group prose as a plausibility check.
+        bundle = self._require_bundle(group)
         from causalpy.reporting import _effect_summary_staggered_did
 
         return _effect_summary_staggered_did(
             self,
+            bundle,
+            group=group,
             direction=direction,
             alpha=alpha,
             min_effect=min_effect,

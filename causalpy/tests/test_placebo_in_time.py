@@ -96,9 +96,15 @@ def _make_pymc_factory():
             treatment_time=treatment_time,
             formula="y ~ 1 + t",
             model=_make_pymc_model(),
-        )
+        ).fit()
 
     return factory
+
+
+def _fake_plot(*args, **kwargs):
+    """Return a throwaway figure so report rendering can encode it."""
+    fig, ax = plt.subplots()
+    return fig, ax
 
 
 def _make_fake_bayesian_experiment(
@@ -110,13 +116,16 @@ def _make_fake_bayesian_experiment(
         np.ones((1, 2, n_post, 1)),
         dims=("chain", "draw", "obs_ind", "treated_units"),
     )
-    return SimpleNamespace(
+    fake = SimpleNamespace(
         data=data,
         treatment_time=treatment_time,
         _model_backend=SimpleNamespace(supports_idata=True),
         model=SimpleNamespace(),
-        post_impact=post_impact,
+        result=SimpleNamespace(impact_post=post_impact),
+        plot=_fake_plot,
     )
+    fake.fit = lambda: fake
+    return fake
 
 
 def _fake_status_quo_result(
@@ -456,7 +465,7 @@ def test_extract_cumulative_impact(mock_pymc_sample):
         treatment_time=150,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     cumulative = PlaceboInTime._extract_cumulative_impact(experiment)
 
     assert isinstance(cumulative, xr.DataArray)
@@ -478,7 +487,7 @@ def test_run_produces_check_result(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -501,7 +510,7 @@ def test_run_produces_fold_results(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -528,7 +537,7 @@ def test_run_metadata_contains_null_distribution(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -558,7 +567,7 @@ def test_run_metadata_carries_design_configuration(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     prior_samples = np.random.default_rng(0).normal(90, 15, size=200)
     check = PlaceboInTime(
         n_folds=2,
@@ -594,7 +603,7 @@ def test_run_metadata_carries_defaults_when_unconfigured(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -617,7 +626,7 @@ def test_fold_treatment_times_are_shifted(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -637,7 +646,7 @@ def test_single_fold(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=1,
         experiment_factory=_make_pymc_factory(),
@@ -656,7 +665,7 @@ def test_no_mutable_state_on_check(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -676,7 +685,7 @@ def test_standalone_run_without_context(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -696,7 +705,7 @@ def test_standalone_no_factory_no_context_raises(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(n_folds=2, sample_kwargs=_FAST_HIERARCHICAL_KWARGS)
     with pytest.raises(RuntimeError, match="experiment_config"):
         check.run(experiment)
@@ -711,7 +720,7 @@ def test_run_with_context(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     ctx = PipelineContext(data=df)
     ctx.experiment = experiment
     ctx.experiment_config = {
@@ -735,7 +744,7 @@ def test_text_contains_hierarchical_summary(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -756,7 +765,7 @@ def test_fold_fitting_failure_is_skipped(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
 
     call_count = 0
 
@@ -771,7 +780,7 @@ def test_fold_fitting_failure_is_skipped(mock_pymc_sample):
             treatment_time=treatment_time,
             formula="y ~ 1 + t",
             model=_make_pymc_model(),
-        )
+        ).fit()
 
     check = PlaceboInTime(
         n_folds=2,
@@ -885,7 +894,7 @@ def _make_scaled_fake_experiment(
         treatment_time=treatment_time,
         _model_backend=SimpleNamespace(supports_idata=True),
         model=SimpleNamespace(),
-        post_impact=post_impact,
+        result=SimpleNamespace(impact_post=post_impact),
     )
 
 
@@ -1603,8 +1612,8 @@ def test_master_seed_makes_full_placebo_run_reproducible():
             first_fold.experiment.data, second_fold.experiment.data
         )
         xr.testing.assert_equal(
-            first_fold.experiment.post_impact,
-            second_fold.experiment.post_impact,
+            first_fold.experiment.result.impact_post,
+            second_fold.experiment.result.impact_post,
         )
     assert [
         fold.experiment.model.sample_kwargs["random_seed"] for fold in first_folds
@@ -1628,7 +1637,7 @@ def test_assurance_with_numpy_array(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -1672,7 +1681,7 @@ def test_assurance_with_rvs_object(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -1713,7 +1722,7 @@ def test_assurance_text_in_report(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -1737,7 +1746,7 @@ def test_no_assurance_without_prior(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -2369,7 +2378,7 @@ def test_run_random_selection(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         selection_method="random",
@@ -2650,7 +2659,7 @@ def test_run_populates_figures_by_default(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -2678,7 +2687,7 @@ def test_run_figure_is_not_registered_with_pyplot(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -2700,7 +2709,7 @@ def test_check_figure_reaches_the_generated_report(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -2727,7 +2736,7 @@ def test_run_metadata_carries_actual_cumulative_samples(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),
@@ -2740,8 +2749,8 @@ def test_run_metadata_carries_actual_cumulative_samples(mock_pymc_sample):
     assert samples.ndim == 1
     assert (
         samples.size
-        == experiment.post_impact.sizes["chain"]
-        * (experiment.post_impact.sizes["draw"])
+        == experiment.result.impact_post.sizes["chain"]
+        * (experiment.result.impact_post.sizes["draw"])
     )
 
 
@@ -2754,7 +2763,7 @@ def test_run_without_figures_leaves_figures_empty(mock_pymc_sample):
         treatment_time=1500,
         formula="y ~ 1 + t",
         model=_make_pymc_model(),
-    )
+    ).fit()
     check = PlaceboInTime(
         n_folds=2,
         experiment_factory=_make_pymc_factory(),

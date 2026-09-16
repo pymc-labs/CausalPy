@@ -57,7 +57,7 @@ result = cp.PanelRegression(
     time_fe_variable="time",
     fe_method="dummies",
     model=cp.pymc_models.LinearRegression(sample_kwargs={"target_accept": 0.95}),
-)
+).fit()
 
 result.summary()
 result.plot()

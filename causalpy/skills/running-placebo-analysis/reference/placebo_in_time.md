@@ -21,15 +21,15 @@ Use `PlaceboInTime` when you want to:
 
 ```python
 cp.checks.PlaceboInTime(
-    n_folds=3,                       # number of placebo folds
-    experiment_factory=None,         # (data, treatment_time) -> experiment
-    sample_kwargs=None,              # MCMC settings for hierarchical model
-    threshold=0.95,                  # P(outside null) cutoff for passed
-    prior_scale=1.0,                 # prior width multiplier
-    expected_effect_prior=None,      # distribution with .rvs() or numpy array
-    rope_half_width=None,            # ROPE half-width (required with prior)
-    n_design_replications=None,      # simulation reps for assurance
-    random_seed=None,                # RNG seed for assurance
+    n_folds=3,  # number of placebo folds
+    experiment_factory=None,  # (data, treatment_time) -> experiment
+    sample_kwargs=None,  # MCMC settings for hierarchical model
+    threshold=0.95,  # P(outside null) cutoff for passed
+    prior_scale=1.0,  # prior width multiplier
+    expected_effect_prior=None,  # distribution with .rvs() or numpy array
+    rope_half_width=None,  # ROPE half-width (required with prior)
+    n_design_replications=None,  # simulation reps for assurance
+    random_seed=None,  # RNG seed for assurance
 )
 ```
 
@@ -72,6 +72,7 @@ result = cp.InterruptedTimeSeries(
     ),
 )
 
+
 def my_factory(data, treatment_time):
     return cp.InterruptedTimeSeries(
         data=data,
@@ -81,6 +82,7 @@ def my_factory(data, treatment_time):
             sample_kwargs={"draws": 1000, "random_seed": 42}
         ),
     )
+
 
 check = cp.checks.PlaceboInTime(n_folds=4, experiment_factory=my_factory)
 placebo_result = check.run(experiment=result)
@@ -127,8 +129,13 @@ fig, ax = plt.subplots(figsize=(8, 6))
 
 for fr in fold_results:
     samples = fr.cumulative_impact_samples.values
-    ax.hist(samples, bins=30, alpha=0.5, density=True,
-            label=f"Fold {fr.fold} (mean={fr.fold_mean:.1f})")
+    ax.hist(
+        samples,
+        bins=30,
+        alpha=0.5,
+        density=True,
+        label=f"Fold {fr.fold} (mean={fr.fold_mean:.1f})",
+    )
 
 ax.hist(null_samples, bins=40, density=True, alpha=0.6, label="θ_new ~ N(μ, τ)")
 ax.legend()

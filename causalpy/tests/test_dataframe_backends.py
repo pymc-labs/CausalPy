@@ -100,14 +100,16 @@ def test_did_accepts_polars(did_data):
             time_variable_name="t",
             group_variable_name="group",
             model=LinearRegression(),
-        )
+        ).fit()
 
     from_pandas = build(did_data)
     from_polars = build(to_polars(did_data))
 
     assert_data_matches(from_pandas, from_polars)
     assert_positional_obs_ind(from_polars)
-    assert from_polars.causal_impact == pytest.approx(from_pandas.causal_impact)
+    assert from_polars.result.causal_impact == pytest.approx(
+        from_pandas.result.causal_impact
+    )
 
 
 def test_regression_discontinuity_accepts_polars(rd_data):
@@ -119,15 +121,15 @@ def test_regression_discontinuity_accepts_polars(rd_data):
             formula="y ~ 1 + x + treated",
             model=LinearRegression(),
             treatment_threshold=0.5,
-        )
+        ).fit()
 
     from_pandas = build(rd_data)
     from_polars = build(to_polars(rd_data))
 
     assert_data_matches(from_pandas, from_polars)
     assert_positional_obs_ind(from_polars)
-    assert np.asarray(from_polars.discontinuity_at_threshold).item() == pytest.approx(
-        np.asarray(from_pandas.discontinuity_at_threshold).item()
+    assert np.asarray(from_polars.result.discontinuity_at_threshold).item() == (
+        pytest.approx(np.asarray(from_pandas.result.discontinuity_at_threshold).item())
     )
 
 
@@ -267,7 +269,7 @@ def test_staggered_did_accepts_polars(mock_pymc_sample):
             treated_variable_name="treated",
             treatment_time_variable_name="treatment_time",
             model=LinearRegression(),
-        )
+        ).fit()
 
     from_pandas = build(data)
     from_polars = build(to_polars(data))
@@ -275,8 +277,8 @@ def test_staggered_did_accepts_polars(mock_pymc_sample):
     assert_data_matches(from_pandas, from_polars)
     assert_positional_obs_ind(from_polars)
     pd.testing.assert_frame_equal(
-        from_pandas.att_event_time_.reset_index(drop=True),
-        from_polars.att_event_time_.reset_index(drop=True),
+        from_pandas.result.att_event_time.reset_index(drop=True),
+        from_polars.result.att_event_time.reset_index(drop=True),
         check_dtype=False,
     )
 

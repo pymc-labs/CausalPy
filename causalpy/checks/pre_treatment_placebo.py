@@ -32,7 +32,8 @@ class PreTreatmentPlaceboCheck:
     """Check that pre-treatment event-study estimates are near zero.
 
     Wraps the pre-treatment placebo effects already computed by
-    ``StaggeredDifferenceInDifferences`` in ``att_event_time_``.
+    ``StaggeredDifferenceInDifferences`` in its result bundle
+    (``result.att_event_time``).
 
     Parameters
     ----------
@@ -61,10 +62,10 @@ class PreTreatmentPlaceboCheck:
                 "PreTreatmentPlaceboCheck requires a "
                 "StaggeredDifferenceInDifferences experiment."
             )
-        if not hasattr(experiment, "att_event_time_"):
+        if not experiment.is_fitted:
             raise ValueError(
-                "Experiment does not have att_event_time_. "
-                "Ensure the experiment has been fitted."
+                "Experiment has not been fitted. "
+                "Ensure fit() has been called before running this check."
             )
 
     def run(
@@ -82,7 +83,7 @@ class PreTreatmentPlaceboCheck:
             Pipeline context (unused; required by the check protocol).
         """
         sdid = experiment
-        att_et = sdid.att_event_time_  # type: ignore[attr-defined]
+        att_et = sdid.result.att_event_time
 
         pre_treatment = att_et[att_et["event_time"] < 0].copy()
 

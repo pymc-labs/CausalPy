@@ -40,7 +40,12 @@ rng = np.random.default_rng(42)
 x = np.linspace(-1, 1, 100)
 df = pd.DataFrame({"x": x})
 df["treated"] = (df["x"] >= kink_point).astype(int)
-df["y"] = 1 + 0.5 * df["x"] + 2 * (df["x"] - kink_point) * df["treated"] + rng.normal(0, 0.1, len(df))
+df["y"] = (
+    1
+    + 0.5 * df["x"]
+    + 2 * (df["x"] - kink_point) * df["treated"]
+    + rng.normal(0, 0.1, len(df))
+)
 
 result = cp.RegressionKink(
     data=df,
@@ -49,7 +54,7 @@ result = cp.RegressionKink(
     running_variable_name="x",
     bandwidth=1.0,
     model=cp.pymc_models.LinearRegression(sample_kwargs={"target_accept": 0.95}),
-)
+).fit()
 
 result.summary()
 summary = result.effect_summary(direction="increase")

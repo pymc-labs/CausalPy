@@ -39,7 +39,7 @@ def test_did(did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.DifferenceInDifferences)
     result.summary()
@@ -71,19 +71,19 @@ def test_did_causal_impact_order_independent_ols(did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
     result_post_first = cp.DifferenceInDifferences(
         data.copy(),
         formula="y ~ 1 + post_treatment*group",
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
-    assert result_group_first.causal_impact is not None
-    assert result_post_first.causal_impact is not None
-    assert result_group_first.causal_impact == pytest.approx(
-        result_post_first.causal_impact
+    assert result_group_first.result.causal_impact is not None
+    assert result_post_first.result.causal_impact is not None
+    assert result_group_first.result.causal_impact == pytest.approx(
+        result_post_first.result.causal_impact
     )
 
 
@@ -109,10 +109,10 @@ def test_rd_drinking():
         model=LinearRegression(),
         treatment_threshold=21,
         epsilon=0.001,
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
-    assert result.pred_discon.dims == (
+    assert result.result.predictions.dims == (
         "chain",
         "draw",
         "obs_ind",
@@ -123,7 +123,7 @@ def test_rd_drinking():
     )
     legacy_prediction = result.model.predict(np.asarray(discontinuity_design))
     expected = np.squeeze(legacy_prediction[1]) - np.squeeze(legacy_prediction[0])
-    assert np.asarray(result.discontinuity_at_threshold).item() == pytest.approx(
+    assert np.asarray(result.result.discontinuity_at_threshold).item() == pytest.approx(
         expected
     )
     result.summary()
@@ -152,7 +152,7 @@ def test_its(its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.InterruptedTimeSeries)
     result.summary()
@@ -191,7 +191,7 @@ def test_sc(sc_data):
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.skl_models.WeightedProportion(),
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.SyntheticControl)
     result.summary()
@@ -232,7 +232,7 @@ def test_sc_datetime_treatment_time_plot(geolift1_data):
         control_units=["Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus"],
         treated_units=["Denmark"],
         model=cp.skl_models.WeightedProportion(),
-    )
+    ).fit()
 
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
@@ -276,7 +276,7 @@ def test_rd_linear_main_effects(rd_data):
         model=LinearRegression(),
         treatment_threshold=0.5,
         epsilon=0.001,
-    )
+    ).fit()
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
     result.summary()
@@ -303,7 +303,7 @@ def test_rd_linear_main_effects_bandwidth(rd_data):
         treatment_threshold=0.5,
         epsilon=0.001,
         bandwidth=0.3,
-    )
+    ).fit()
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
     result.summary()
@@ -343,7 +343,7 @@ def test_rd_linear_main_effects_bandwidth_custom_running_variable():
         model=LinearRegression(),
         treatment_threshold=0.45,
         bandwidth=0.2,
-    )
+    ).fit()
 
     assert isinstance(result, cp.RegressionDiscontinuity)
     fig, ax = result.plot()
@@ -367,7 +367,7 @@ def test_rd_linear_with_interaction(rd_data):
         model=LinearRegression(),
         treatment_threshold=0.5,
         epsilon=0.001,
-    )
+    ).fit()
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
     result.summary()
@@ -393,7 +393,7 @@ def test_rd_linear_with_gaussian_process(rd_data):
         model=GaussianProcessRegressor(kernel=kernel),
         treatment_threshold=0.5,
         epsilon=0.001,
-    )
+    ).fit()
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
     fig, ax = result.plot()

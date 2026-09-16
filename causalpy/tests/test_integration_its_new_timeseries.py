@@ -55,7 +55,7 @@ def test_its_with_bsts_model():
         treatment_time=treatment_time,
         formula="y ~ 1",
         model=model,
-    )
+    ).fit()
 
     # Basic checks
     assert isinstance(result, cp.InterruptedTimeSeries)
@@ -122,7 +122,7 @@ def test_its_with_state_space_model():
         treatment_time=treatment_time,
         formula="y ~ 1",
         model=model,
-    )
+    ).fit()
 
     assert isinstance(result, cp.InterruptedTimeSeries)
     assert isinstance(result.idata, xr.DataTree)
@@ -272,7 +272,7 @@ def test_its_with_state_space_covariates():
             treatment_time=dates[80],
             formula="y ~ 1 + x1 + x2",
             model=model,
-        )
+        ).fit()
 
     # Covariates entered the model: beta_exog exists with the right coords.
     # No posterior-accuracy assertions here: the suite mocks pm.sample
@@ -286,5 +286,5 @@ def test_its_with_state_space_covariates():
 
     # Counterfactual and impact have the post-period shape and finite values
     n_post = n - 80
-    assert result.post_impact.sizes["obs_ind"] == n_post
-    assert np.isfinite(result.post_impact.values).all()
+    assert result.result.impact_post.sizes["obs_ind"] == n_post
+    assert np.isfinite(result.result.impact_post.values).all()

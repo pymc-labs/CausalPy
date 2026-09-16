@@ -44,7 +44,7 @@ result = cp.SyntheticControl(
     control_units=["a", "b", "c", "d", "e"],
     treated_units=["actual"],
     model=cp.pymc_models.WeightedSumFitter(sample_kwargs={"target_accept": 0.95}),
-)
+).fit()
 
 result.summary()
 summary = result.effect_summary(direction="increase")

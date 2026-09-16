@@ -192,7 +192,7 @@ class OutcomeFalsification:
         if "model" in kwargs and kwargs["model"] is not None:
             kwargs["model"] = clone_model(kwargs["model"])
 
-        return method(context.data, **kwargs)
+        return method(context.data, **kwargs).fit()
 
     @staticmethod
     def _extract_effect_stats(

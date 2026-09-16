@@ -218,8 +218,8 @@ def test_staggered_did_creates_float_event_times_without_mutating_input():
         model=LinearRegression(),
     )
 
-    assert pd.api.types.is_float_dtype(result.data_["event_time"])
-    assert result.data_.loc[result.data_["unit"] == 2, "event_time"].isna().all()
+    assert pd.api.types.is_float_dtype(result.data["event_time"])
+    assert result.data.loc[result.data["unit"] == 2, "event_time"].isna().all()
     pd.testing.assert_frame_equal(data, original)
 
 
@@ -256,15 +256,15 @@ def test_interrupted_time_series_predicts_with_string_extension_covariates():
         treatment_time=dates[6],
         formula="y ~ 1 + C(segment)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     assert result.pre_design["X"].sizes["obs_ind"] == 6
     assert result.post_design["X"].sizes["obs_ind"] == 6
     assert result.pre_design.indexes["obs_ind"].equals(
-        result.pre_pred.indexes["obs_ind"]
+        result.result.predictions_pre.indexes["obs_ind"]
     )
     assert result.post_design.indexes["obs_ind"].equals(
-        result.post_pred.indexes["obs_ind"]
+        result.result.predictions_post.indexes["obs_ind"]
     )
     pd.testing.assert_frame_equal(data, original)
 
@@ -284,15 +284,15 @@ def test_interrupted_time_series_preserves_timezone_aware_boundary_and_input():
         treatment_time=treatment_time,
         formula="y ~ 1",
         model=LinearRegression(),
-    )
+    ).fit()
 
     assert result.datapre.index.max() == dates[5]
     assert result.datapost.index.min() == treatment_time
     assert result.pre_design.indexes["obs_ind"].equals(
-        result.pre_pred.indexes["obs_ind"]
+        result.result.predictions_pre.indexes["obs_ind"]
     )
     assert result.post_design.indexes["obs_ind"].equals(
-        result.post_pred.indexes["obs_ind"]
+        result.result.predictions_post.indexes["obs_ind"]
     )
     pd.testing.assert_frame_equal(data, original)
 

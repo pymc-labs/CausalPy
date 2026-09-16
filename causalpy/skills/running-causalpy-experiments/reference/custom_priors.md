@@ -66,7 +66,9 @@ Two ways to take over:
 ```python
 model = cp.pymc_models.SoftmaxWeightedSumFitter(
     priors={
-        "beta_raw": Prior("Normal", mu=0, sigma=0.5, dims=["treated_units", "coeffs_raw"])
+        "beta_raw": Prior(
+            "Normal", mu=0, sigma=0.5, dims=["treated_units", "coeffs_raw"]
+        )
     }
 )
 ```
@@ -105,7 +107,7 @@ result = cp.InstrumentalVariable(
         "eta": 2,
         "lkj_sd": 1,
     },
-)
+).fit()
 ```
 
 For weak instruments or many instruments, consider variable-selection priors through `vs_prior_type` and `vs_hyperparams`, then report the sensitivity of the causal estimate to prior choices.

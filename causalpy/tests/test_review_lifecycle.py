@@ -1,0 +1,222 @@
+#   Copyright 2026 - 2026 The PyMC Labs Developers
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+"""Regression coverage for lazy lifecycle review findings."""
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import pytest
+import xarray as xr
+from sklearn.linear_model import LinearRegression
+
+import causalpy as cp
+from causalpy.custom_exceptions import (
+    GroupNotSampledException,
+    PriorPredictiveNotSupportedException,
+)
+
+
+def make_its(model=None):
+    data = pd.DataFrame({"t": np.arange(12), "y": np.arange(12) + 0.2})
+    return cp.InterruptedTimeSeries(
+        data,
+        treatment_time=8,
+        formula="y ~ 1 + t",
+        model=model
+        if model is not None
+        else cp.pymc_models.LinearRegression(
+            sample_kwargs={"draws": 5, "tune": 5, "chains": 1, "progressbar": False},
+            prior_sample_kwargs={"draws": 7, "random_seed": 12},
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "reader", ["prior_result", "plot", "get_plot_data", "effect_summary"]
+)
+def test_unsupported_prior_reads_raise_capability_error(reader):
+    experiment = make_its(LinearRegression(fit_intercept=False))
+    with pytest.raises(PriorPredictiveNotSupportedException):
+        if reader == "prior_result":
+            _ = experiment.prior_result
+        else:
+            getattr(experiment, reader)(group="prior")
+
+
+@pytest.mark.parametrize("bundleless", [False, True])
+def test_auto_prior_failure_invalidates_posterior(
+    monkeypatch, bundleless, mock_pymc_sample
+):
+    experiment = make_its()
+    if bundleless:
+        experiment._supports_results = False
+    failure = ValueError("invalid prior specification")
+
+    def fail_prior(**kwargs):
+        raise failure
+
+    monkeypatch.setattr(experiment, "sample_prior_predictive", fail_prior)
+    with pytest.raises(ValueError) as caught:
+        experiment.fit()
+    assert caught.value is failure
+    assert not experiment.is_fitted
+    assert "posterior" not in experiment.idata.children
+    with pytest.raises(GroupNotSampledException):
+        experiment.plot(show=False)
+
+
+def test_sampled_model_assignment_preserves_both_experiments(mock_pymc_sample):
+    original = make_its().fit()
+    incoming = make_its().fit()
+    model_before = original.model
+    result_before = original.result
+    prior_before = original.prior_result
+    original_draws = original.idata.copy(deep=True)
+    incoming_draws = incoming.idata.copy(deep=True)
+
+    with pytest.raises(ValueError, match="fresh model"):
+        original.model = incoming.model
+
+    assert original.model is model_before
+    assert original.result is result_before
+    assert original.prior_result is prior_before
+    xr.testing.assert_identical(original.idata, original_draws)
+    xr.testing.assert_identical(incoming.idata, incoming_draws)
+
+
+def make_panel(model=None, outcome_shift=0):
+    data = pd.DataFrame(
+        {
+            "unit": np.repeat(["a", "b"], 6),
+            "time": np.tile(np.arange(6), 2),
+            "x": np.tile([0, 1, 0, 1, 0, 1], 2),
+            "y": np.arange(12) + outcome_shift,
+        }
+    )
+    return cp.PanelRegression(
+        data,
+        formula="y ~ 1 + x",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        model=model
+        if model is not None
+        else cp.pymc_models.LinearRegression(
+            sample_kwargs={"draws": 5, "tune": 5, "chains": 1, "progressbar": False},
+            prior_sample_kwargs={"draws": 7, "random_seed": 12},
+        ),
+    )
+
+
+@pytest.mark.parametrize("phase", ["fit", "sample_prior_predictive"])
+def test_constructor_rejects_sampled_panel_model(phase, mock_pymc_sample):
+    first = make_panel()
+    getattr(first, phase)()
+    draws_before = first.idata.copy(deep=True)
+    with pytest.raises(ValueError, match="fresh model"):
+        make_panel(first.model, outcome_shift=100)
+    xr.testing.assert_identical(first.idata, draws_before)
+
+
+def test_panel_prior_consumers_use_requested_draws(mock_pymc_sample):
+    experiment = make_panel().sample_prior_predictive()
+    prior_expected = (
+        experiment.idata["prior"]["mu"].mean(("chain", "draw")).values.ravel()
+    )
+    np.testing.assert_allclose(
+        experiment.get_plot_data(group="prior")["y_fitted"], prior_expected
+    )
+    for interval_type in ("mean", "predictive"):
+        figure, axes = experiment.plot_trajectories(
+            units=["a"], group="prior", interval_type=interval_type
+        )
+        np.testing.assert_allclose(axes[0].lines[1].get_ydata(), prior_expected[:6])
+        plt.close(figure)
+
+    experiment.fit()
+    np.testing.assert_allclose(
+        experiment.get_plot_data(group="prior")["y_fitted"], prior_expected
+    )
+    posterior_expected = (
+        experiment.idata["posterior"]["mu"].mean(("chain", "draw")).values.ravel()
+    )
+    np.testing.assert_allclose(
+        experiment.get_plot_data()["y_fitted"], posterior_expected
+    )
+
+
+def test_panel_prior_consumers_reject_unsupported_backend():
+    experiment = make_panel(LinearRegression(fit_intercept=False))
+    with pytest.raises(PriorPredictiveNotSupportedException):
+        experiment.get_plot_data(group="prior")
+    with pytest.raises(PriorPredictiveNotSupportedException):
+        experiment.plot_trajectories(group="prior")
+
+
+@pytest.mark.parametrize(
+    "experiment_class", [cp.InstrumentalVariable, cp.InversePropensityWeighting]
+)
+@pytest.mark.parametrize("group", ["prior", "posterior"])
+def test_unified_plot_stubs_accept_draw_group(experiment_class, group):
+    experiment = object.__new__(experiment_class)
+    with pytest.raises(NotImplementedError):
+        experiment.plot(group=group)
+
+
+def test_maketables_stat_retains_unfitted_guard():
+    experiment = make_its()
+    with pytest.raises(GroupNotSampledException, match=r"fit\(\)"):
+        experiment.__maketables_stat__("r2")
+
+
+def test_maketables_etable_retains_lifecycle_error_and_fitted_values():
+    maketables = pytest.importorskip("maketables")
+    experiment = make_its(LinearRegression(fit_intercept=False))
+    with pytest.raises(GroupNotSampledException, match=r"fit\(\)"):
+        maketables.ETable(experiment)
+
+    experiment.fit()
+    table = maketables.ETable(experiment, coef_fmt="b:.2f")
+    assert table.df.loc[("coef", "t")].iloc[0] == "1.00"
+
+
+def test_maketables_extractor_leaves_other_plugins_untouched():
+    maketables = pytest.importorskip("maketables")
+
+    class OtherPlugin:
+        __maketables_coef_table__ = pd.DataFrame(
+            {"b": [2.5], "se": [0.1], "p": [0.01]}, index=["other"]
+        )
+
+    table = maketables.ETable(OtherPlugin(), coef_fmt="b:.2f", model_stats=[])
+    assert table.df.loc[("coef", "other")].iloc[0] == "2.50"
+
+
+def test_coefficient_adapter_works_without_optional_maketables(monkeypatch):
+    import builtins
+    import runpy
+
+    import causalpy.maketables_adapters as adapters
+
+    original_import = builtins.__import__
+
+    def without_maketables(name, *args, **kwargs):
+        if name == "maketables" or name.startswith("maketables."):
+            raise ImportError("maketables is not installed")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_maketables)
+    namespace = runpy.run_path(adapters.__file__)
+    experiment = make_its(LinearRegression(fit_intercept=False)).fit()
+    coefficients = namespace["coefficient_table"](experiment)
+    assert coefficients.loc["t", "b"] == pytest.approx(1)

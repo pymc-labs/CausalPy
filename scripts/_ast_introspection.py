@@ -28,6 +28,9 @@ class ExperimentMetadata:
 
 def _bases_include_base_experiment(node: ast.ClassDef) -> bool:
     for base in node.bases:
+        # Subscripted generics: class Foo(BaseExperiment[CausalResult]).
+        if isinstance(base, ast.Subscript):
+            base = base.value
         if isinstance(base, ast.Name) and base.id == "BaseExperiment":
             return True
         if isinstance(base, ast.Attribute) and base.attr == "BaseExperiment":

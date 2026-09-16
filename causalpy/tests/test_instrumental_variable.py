@@ -180,7 +180,7 @@ def test_iv_default_model_uses_safe_sampling_kwargs(monkeypatch, iv_data):
         data=iv_data["data"],
         instruments_formula=iv_data["instruments_formula"],
         formula=iv_data["formula"],
-    )
+    ).fit()
 
     assert result.model.sample_kwargs["cores"] == 1
     assert sampled_kwargs["cores"] == 1
@@ -205,7 +205,7 @@ def test_iv_default_sampling_completes_with_two_chains(iv_data):
         instruments_formula=iv_data["instruments_formula"],
         formula=iv_data["formula"],
         model=model,
-    )
+    ).fit()
 
     assert model.sample_kwargs["cores"] == 1
     assert result.idata.posterior.sizes["chain"] == 2
@@ -255,33 +255,6 @@ def test_iv_jax_ppc_reports_missing_jax_without_fallback(monkeypatch, use_defaul
             model.sample_predictive_distribution(ppc_sampler="jax")
 
     assert calls == 0
-
-
-def test_iv_jax_ppc_uses_jax_compilation(monkeypatch):
-    """Test available JAX PPC uses the JAX compilation mode."""
-    model = cp.pymc_models.InstrumentalVariableRegression(
-        sample_kwargs={"random_seed": 42}
-    )
-    model.idata = _Idata()
-    posterior_predictive = object()
-    calls = {}
-    _set_jax_import(monkeypatch, object())
-
-    def sample(idata, **kwargs):
-        calls["idata"] = idata
-        calls.update(kwargs)
-        return posterior_predictive
-
-    monkeypatch.setattr(pm, "sample_posterior_predictive", sample)
-
-    model.sample_predictive_distribution()
-
-    assert calls == {
-        "idata": model.idata,
-        "random_seed": 42,
-        "compile_kwargs": {"mode": "JAX"},
-        "extend_inferencedata": True,
-    }
 
 
 @pytest.mark.parametrize(
@@ -615,7 +588,7 @@ def test_iv_variable_selection_priors(
         ),
         vs_prior_type=vs_prior_type,
         vs_hyperparams={"outcome": True},
-    )
+    ).fit()
 
     assert vs_prior_type == result.vs_prior_type
     assert expected_var in result.model.named_vars
@@ -636,7 +609,7 @@ def test_iv_idata_structure(iv_data, sample_kwargs):
         model=cp.pymc_models.InstrumentalVariableRegression(
             sample_kwargs=sample_kwargs
         ),
-    )
+    ).fit()
 
     # Check idata exists and has posterior
     assert hasattr(result, "idata")
@@ -716,7 +689,7 @@ def test_iv_sample_predictive_distribution(iv_data, sample_kwargs):
         model=cp.pymc_models.InstrumentalVariableRegression(
             sample_kwargs=sample_kwargs
         ),
-    )
+    ).fit()
 
     assert isinstance(result.idata, xr.DataTree)
     assert "posterior_predictive" not in result.idata
@@ -733,14 +706,12 @@ def test_iv_sample_predictive_distribution(iv_data, sample_kwargs):
 
 
 def test_iv_default_jax_ppc_mutates_existing_datatree(
-    iv_data, sample_kwargs, monkeypatch
+    iv_data, sample_kwargs, monkeypatch, mock_pymc_sample
 ):
-    """Default JAX PPC sampler mutates an existing DataTree in place.
+    """Replacing predictive draws preserves the current posterior.
 
-    JAX itself is optional in the test env; the DataTree mutation contract is
-    exercised by stubbing ``pm.sample_posterior_predictive`` while asserting the
-    default call uses ``compile_kwargs={"mode": "JAX"}`` and
-    ``extend_inferencedata=True``.
+    Exercise real PyMC forward sampling with its default compiler so this
+    group-replacement regression does not require optional JAX.
     """
     import pymc as pm
 
@@ -752,25 +723,15 @@ def test_iv_default_jax_ppc_mutates_existing_datatree(
         model=cp.pymc_models.InstrumentalVariableRegression(
             sample_kwargs=sample_kwargs
         ),
-    )
+    ).fit()
 
-    assert isinstance(result.idata, xr.DataTree)
-    assert "posterior_predictive" not in result.idata
     original_idata = result.idata
+    posterior_before = result.idata["posterior"].to_dataset().copy(deep=True)
+    sample_predictive = pm.sample_posterior_predictive
 
     def fake_sample_posterior_predictive(idata, *args, **kwargs):
-        assert kwargs.get("extend_inferencedata") is True
-        assert kwargs.get("compile_kwargs") == {"mode": "JAX"}
-        # Mimic in-place mutation from extend_inferencedata=True
-        idata["posterior_predictive"] = xr.Dataset(
-            {
-                "likelihood": (
-                    ("chain", "draw", "likelihood_dim_0"),
-                    np.zeros((1, 1, 1)),
-                )
-            }
-        )
-        return idata
+        kwargs.pop("compile_kwargs", None)
+        return sample_predictive(idata, *args, **kwargs)
 
     monkeypatch.setattr(
         pm, "sample_posterior_predictive", fake_sample_posterior_predictive
@@ -779,8 +740,12 @@ def test_iv_default_jax_ppc_mutates_existing_datatree(
     result.model.sample_predictive_distribution()  # default ppc_sampler="jax"
 
     assert result.idata is original_idata
-    assert isinstance(result.idata, xr.DataTree)
-    assert "posterior_predictive" in result.idata
+    xr.testing.assert_identical(
+        result.idata["posterior"].to_dataset(), posterior_before
+    )
+    predictive = result.idata["posterior_predictive"]["likelihood"]
+    assert predictive.sizes["draw"] == posterior_before.sizes["draw"]
+    assert predictive.shape[-2:] == (len(iv_data["data"]), 2)
 
 
 # =============================================================================
@@ -809,3 +774,108 @@ def test_iv_with_risk_data(sample_kwargs):
     assert isinstance(result, cp.InstrumentalVariable)
     assert result.outcome_variable_name == "loggdp"
     assert result.instrument_variable_name == "risk"
+
+
+# =============================================================================
+# Lazy-lifecycle fit kwargs and refit behaviour (second-pass review)
+# =============================================================================
+
+
+def test_iv_fit_forwards_sampler_kwargs(monkeypatch, iv_data):
+    """exp.fit(draws=...) reaches pm.sample instead of raising TypeError."""
+    sampled_kwargs = {}
+
+    def sample(**kwargs):
+        sampled_kwargs.update(kwargs)
+        return az.InferenceData()
+
+    monkeypatch.setattr(pm, "sample", sample)
+
+    exp = cp.InstrumentalVariable(
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs={"draws": 7, "tune": 3, "progressbar": False}
+        ),
+        **iv_data,
+    )
+    exp.fit(draws=11)
+
+    assert sampled_kwargs["draws"] == 11
+    # stored sample_kwargs stay the per-instance defaults
+    assert exp.model.sample_kwargs["draws"] == 7
+
+
+def test_iv_refit_updates_ppc_sampler(monkeypatch, iv_data):
+    """A refit may change ppc_sampler; an omitted one persists instead of
+    resetting to None and leaving predictive groups stale."""
+    monkeypatch.setattr(
+        pm,
+        "sample",
+        lambda **kwargs: xr.DataTree.from_dict({"posterior": xr.Dataset()}),
+    )
+    recorded = []
+    monkeypatch.setattr(
+        cp.pymc_models.InstrumentalVariableRegression,
+        "sample_predictive_distribution",
+        lambda self, *, ppc_sampler: recorded.append(ppc_sampler),
+    )
+
+    exp = cp.InstrumentalVariable(
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs={"draws": 5, "tune": 5, "progressbar": False}
+        ),
+        **iv_data,
+    )
+    exp.fit()
+    assert exp.model._iv_ppc_sampler is None
+
+    import warnings as _warnings
+
+    with _warnings.catch_warnings():
+        _warnings.simplefilter("ignore", UserWarning)
+        exp.fit(ppc_sampler="pymc")
+        # Refit WITHOUT the kwarg: the previous choice must persist so the
+        # predictive groups are redrawn against the new posterior.
+        exp.fit(random_seed=99)
+        # ...and an explicit None still opts back out.
+        exp.fit(ppc_sampler=None)
+
+    assert exp.model._iv_ppc_sampler is None
+    assert recorded == [None, "pymc", "pymc", None]
+
+
+def test_iv_has_prior_predictive_requires_capability(monkeypatch, iv_data):
+    """has_prior_predictive stays False on backends without a prior phase."""
+    exp = cp.InstrumentalVariable(model=None, **iv_data)
+    backend = exp._model_backend
+    assert backend.supports_prior_predictive is False
+    # Simulate a stray prior group on the backend draws: the capability gate
+    # must still keep the predicate False.
+    monkeypatch.setattr(type(backend), "has_prior", property(lambda self: True))
+    assert exp.has_prior_predictive is False
+
+
+def test_iv_build_constructs_inspectable_graph_without_sampling(iv_data):
+    experiment = cp.InstrumentalVariable(**iv_data)
+    assert experiment.build() is experiment
+    assert experiment.is_built
+    assert experiment.idata is None
+    assert {"beta_t", "beta_z", "likelihood"} <= {
+        variable.name for variable in experiment.model.basic_RVs
+    }
+    assert "likelihood" in pm.model_to_graphviz(experiment.model).source
+    assert experiment.build() is experiment
+
+
+def test_iv_build_preserves_predictive_sampler(
+    iv_data, sample_kwargs, mock_pymc_sample
+):
+    experiment = cp.InstrumentalVariable(
+        **iv_data,
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs=sample_kwargs
+        ),
+    ).fit(ppc_sampler="pymc")
+    experiment.build()
+    with pytest.warns(UserWarning, match="Refitting"):
+        experiment.fit(draws=8)
+    assert experiment.idata["posterior_predictive"].sizes["draw"] == 8

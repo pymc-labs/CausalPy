@@ -67,12 +67,14 @@ class _RecordingBayesianBackend:
         X: object,
         coords: dict[str, object] | None,
         out_of_sample: bool,
+        group: str = "posterior",
     ) -> xr.DataTree:
         self.predict_calls.append(
             {
                 "X": X,
                 "coords": coords,
                 "out_of_sample": out_of_sample,
+                "group": group,
             }
         )
         return _prediction_tree()
@@ -369,7 +371,7 @@ def test_bayesian_adapters_delegate_only_named_prediction_controls(
     score = adapter.score(X, y, coords=coords)
 
     assert backend.predict_calls == [
-        {"X": X, "coords": coords, "out_of_sample": out_of_sample}
+        {"X": X, "coords": coords, "out_of_sample": out_of_sample, "group": "posterior"}
     ]
     assert backend.score_calls == [{"X": X, "y": y, "coords": coords}]
     assert prediction.dims == ("chain", "draw", "obs_ind", "treated_units")

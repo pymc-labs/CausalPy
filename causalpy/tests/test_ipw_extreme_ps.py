@@ -56,7 +56,7 @@ def ipw_result(mock_pymc_sample):
         outcome_variable="outcome",
         weighting_scheme="robust",
         model=cp.pymc_models.PropensityScore(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
 
 @pytest.fixture

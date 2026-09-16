@@ -13,9 +13,9 @@
 #   limitations under the License.
 """Internal adapters for optional maketables plugin support.
 
-This module intentionally does not import ``maketables``. It provides an internal
-adapter interface that BaseExperiment can delegate to when external tools inspect
-``__maketables_*`` attributes/methods.
+When ``maketables`` is installed, register a type-based extractor so discovery
+does not evaluate draw-dependent properties. Actual extraction still uses the
+``BaseExperiment.__maketables_*`` hooks and propagates lifecycle errors.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ import xarray as xr
 
 from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB
+from causalpy.experiments._results import StaggeredDifferenceInDifferencesResult
 from causalpy.experiments.model_adapter import ModelAdapter
 
 
@@ -93,11 +94,29 @@ def _safe_observation_count(experiment: Any) -> int | None:
     return None
 
 
+def _result_bundle_or_none(experiment: Any) -> Any:
+    """Return a posterior bundle, tolerating only unsupported bundle APIs.
+
+    Missing posterior draws are an actionable lifecycle error and must
+    propagate. ``NotImplementedError`` covers experiments without result
+    bundles; ``AttributeError`` covers duck-typed objects without ``result``.
+    """
+    try:
+        return experiment.result
+    except (NotImplementedError, AttributeError):
+        return None
+
+
 def _safe_r2_value(experiment: Any) -> float | None:
-    """Best-effort model score extraction without assuming one score format."""
-    score_obj = getattr(experiment, "score", None)
+    """Best-effort model score extraction without assuming one score format.
+
+    The score lives on the experiment's posterior result bundle. Experiments
+    without bundle support yield no score; unfitted experiments raise.
+    """
+    score_obj = getattr(_result_bundle_or_none(experiment), "score", None)
     if score_obj is None:
         return None
+
     try:
         if isinstance(score_obj, pd.Series):
             r2_like = score_obj[[idx for idx in score_obj.index if "r2" in str(idx)]]
@@ -151,12 +170,17 @@ def _get_maketables_hdi_prob(experiment: Any) -> float:
 
     Priority:
     1) explicit user override via BaseExperiment.set_maketables_options()
-    2) experiment-specific stored value (e.g. staggered_did hdi_prob_)
+    2) ``hdi_prob`` on the experiment's result bundle, but only for
+       :class:`~causalpy.experiments._results.StaggeredDifferenceInDifferencesResult`
     3) project-wide default :data:`causalpy.constants.HDI_PROB`
     """
     hdi_prob = getattr(experiment, "_maketables_hdi_prob", None)
     if hdi_prob is None:
-        hdi_prob = getattr(experiment, "hdi_prob_", HDI_PROB)
+        bundle = _result_bundle_or_none(experiment)
+        if isinstance(bundle, StaggeredDifferenceInDifferencesResult):
+            hdi_prob = bundle.hdi_prob
+        else:
+            hdi_prob = HDI_PROB
     if hdi_prob is None:
         hdi_prob = HDI_PROB
 
@@ -358,3 +382,22 @@ def get_maketables_adapter(model_adapter: ModelAdapter) -> MaketablesAdapter:
         return SklearnMaketablesAdapter()
     msg = f"Unsupported model backend for maketables export: {model_adapter.kind!r}"
     raise TypeError(msg)
+
+
+try:
+    from maketables.extractors import PluginExtractor, register_extractor
+except ImportError:
+    pass  # maketables is an optional dependency.
+else:
+
+    class _CausalPyExtractor(PluginExtractor):
+        """Recognize experiments without reading their draw-dependent hooks."""
+
+        def can_handle(self, model: Any) -> bool:
+            # Imported at discovery time to avoid the BaseExperiment ->
+            # maketables_adapters import cycle.
+            from causalpy.experiments.base import BaseExperiment
+
+            return isinstance(model, BaseExperiment)
+
+    register_extractor(_CausalPyExtractor())

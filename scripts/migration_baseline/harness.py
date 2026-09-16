@@ -1121,6 +1121,37 @@ def _verify_effect_table(
                 )
 
 
+def _lazy_fit(experiment: Any) -> Any:
+    """Run the posterior phase when the experiment uses the lazy lifecycle.
+
+    Pre-1.0 stacks sample in the constructor and expose ``idata`` immediately;
+    lazy-lifecycle stacks leave ``idata`` as ``None`` until ``fit()`` runs.
+    Branching on ``idata`` keeps one capture path working against both pinned
+    stacks and against the installed stack.
+
+    Lazy ``fit()`` also samples the optional prior phase first and finalises
+    it, and that intermediate forward pass perturbs the sampler enough to
+    flip the knife-edge DiD posterior into mass NUTS divergences (observed:
+    0 -> 238 divergent draws). Captures at the pinned stacks never ran a
+    prior phase, so marking the phase as already present keeps ``fit()``
+    posterior-only and the captured draws cross-stack comparable; every
+    capture series reads posterior state only.
+    """
+    if getattr(experiment, "idata", None) is not None:
+        return experiment
+    if getattr(experiment, "_supports_results", False):
+        # Sentinel prior state: has_prior_predictive turns True, so fit()
+        # skips its internal prior phase and only samples the posterior.
+        experiment._prior_result = object()
+    return experiment.fit()
+
+
+def _capture_bundle(experiment: Any) -> Any:
+    """Return the result bundle, or the eager experiment when it has none."""
+    bundle = getattr(experiment, "result", None)
+    return experiment if bundle is None else bundle
+
+
 def _capture_difference_in_differences(
     dependencies: dict[str, Any], sampling: SamplingProtocol
 ) -> dict[str, Any]:
@@ -1140,15 +1171,17 @@ def _capture_difference_in_differences(
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=dict(sample_kwargs)),
     )
+    result = _lazy_fit(result)
     quality = _sampling_quality(result.idata, np, sampling)
     effect_summary = result.effect_summary(alpha=EFFECT_SUMMARY_ALPHA)
     fitted_mu = result._model_backend.predict(result.design["X"])
     draw_wise_r2 = _draw_wise_r2(result.design["y"], fitted_mu, xr, np)
 
+    bundle = _capture_bundle(result)
     series = [
         _capture_series(
             "did.causal_impact",
-            _canonical_scalar_effect(result.causal_impact),
+            _canonical_scalar_effect(bundle.causal_impact),
             az,
             np,
             sampling,
@@ -1156,7 +1189,7 @@ def _capture_difference_in_differences(
         _capture_series("did.draw_wise_r2", draw_wise_r2, az, np, sampling),
         _capture_series(
             "did.counterfactual_mu",
-            result.y_pred_counterfactual,
+            bundle.scenario_counterfactual.prediction,
             az,
             np,
             sampling,
@@ -1212,15 +1245,19 @@ def _capture_synthetic_control(
         treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=dict(sample_kwargs)),
     )
+    result = _lazy_fit(result)
     quality = _sampling_quality(result.idata, np, sampling)
     effect_summary = result.effect_summary(
         alpha=EFFECT_SUMMARY_ALPHA,
         cumulative=True,
         relative=False,
     )
-    post_average_impact = result.post_impact.mean(dim="obs_ind")
-    post_cumulative_impact = result.post_impact_cumulative.isel(obs_ind=-1)
-    draw_wise_r2 = _draw_wise_r2(result.pre_design["treated"], result.pre_pred, xr, np)
+    bundle = _capture_bundle(result)
+    post_average_impact = bundle.impact_post.mean(dim="obs_ind")
+    post_cumulative_impact = bundle.impact_post_cumulative.isel(obs_ind=-1)
+    draw_wise_r2 = _draw_wise_r2(
+        result.pre_design["treated"], bundle.predictions_pre, xr, np
+    )
 
     series = [
         _capture_series(
@@ -1232,7 +1269,7 @@ def _capture_synthetic_control(
         _capture_series("sc.draw_wise_r2", draw_wise_r2, az, np, sampling),
         _capture_series(
             "sc.counterfactual_mu",
-            result.post_pred,
+            bundle.predictions_post,
             az,
             np,
             sampling,
