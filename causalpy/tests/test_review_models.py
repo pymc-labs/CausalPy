@@ -157,3 +157,24 @@ def test_refit_replaces_predictive_draws_without_raw_overwrite_warning(
     assert model.idata["posterior_predictive"].sizes["draw"] == 3
     assert not model.idata["posterior_predictive"].to_dataset().equals(before)
     assert not any("extend_inferencedata" in str(item.message) for item in caught)
+
+
+def test_iv_predictive_optout_drops_previous_posterior_predictions(
+    iv_inputs, small_sample_kwargs
+):
+    """An explicit predictive opt-out cannot expose draws from an earlier fit."""
+    model = InstrumentalVariableRegression(sample_kwargs=small_sample_kwargs)
+    model.fit(**iv_inputs, ppc_sampler="pymc")
+    assert model.idata["posterior_predictive"].sizes["draw"] == 2
+    prior = model.idata["prior"].to_dataset().copy(deep=True)
+    prior_predictive = model.idata["prior_predictive"].to_dataset().copy(deep=True)
+    previous_posterior = model.idata["posterior"].to_dataset().copy(deep=True)
+    model.sample_kwargs.update(draws=3, random_seed=19)
+    model.fit(**iv_inputs, ppc_sampler=None)
+    assert model.idata["posterior"].sizes["draw"] == 3
+    assert not model.idata["posterior"].to_dataset().equals(previous_posterior)
+    assert "posterior_predictive" not in model.idata.children
+    xr.testing.assert_identical(model.idata["prior"].to_dataset(), prior)
+    xr.testing.assert_identical(
+        model.idata["prior_predictive"].to_dataset(), prior_predictive
+    )

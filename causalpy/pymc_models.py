@@ -1860,6 +1860,15 @@ class InstrumentalVariableRegression(PyMCModel):
             if self.idata is None:
                 self.idata = post
             else:
+                # Predictions from the previous posterior are invalid even
+                # when this refit opts out of drawing their replacements.
+                for group in (
+                    "posterior_predictive",
+                    "predictions",
+                    "predictions_constant_data",
+                ):
+                    if group in self.idata.children:
+                        del self.idata[group]
                 self.idata["posterior"] = post["posterior"]
                 if "sample_stats" in post.children:
                     self.idata["sample_stats"] = post["sample_stats"]
