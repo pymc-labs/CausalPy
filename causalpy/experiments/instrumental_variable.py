@@ -134,6 +134,7 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
     supports_ols = False
     supports_bayes = True
     _default_model_class = InstrumentalVariableRegression
+    model: InstrumentalVariableRegression
 
     #: No grouped result bundles: fitted state keys off the backend's
     #: posterior draws; read methods inspect ``.idata`` directly.
@@ -168,10 +169,6 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
         self._build_design_matrices()
         self.input_validation()
 
-        # Store user-provided priors; data-informed defaults are derived
-        # below ONLY when the user supplied none (issue #1092).
-        self.priors = priors
-
         # Deterministic OLS/2SLS reference pre-step: pure point-estimate
         # regressions feeding summary() and the default priors. No sampling.
         self.get_naive_OLS_fit()
@@ -180,10 +177,10 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
         self.coords = COORDS
         # Only derive default priors (from the OLS/2SLS estimates above) if
         # user didn't provide custom priors; arithmetic only — no sampling.
-        if self.priors is None:
+        if priors is None:
             if self.binary_treatment:
                 # Different default priors for binary treatment
-                self.priors = {
+                priors = {
                     "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
                     "sigmas": [1, 1],
                     "sigma_U": 1.0,
@@ -191,12 +188,13 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
                 }
             else:
                 # Original continuous treatment priors
-                self.priors = {
+                priors = {
                     "mus": [self.ols_beta_first_params, self.ols_beta_second_params],
                     "sigmas": [1, 1],
                     "eta": 2,
                     "lkj_sd": 1,
                 }
+        self.priors = priors
 
     def _build_design_matrices(self) -> None:
         """Build design matrices for outcome and instrument formulas."""
@@ -272,7 +270,7 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
         # freshly resampled posterior.
         previous_ppc = getattr(self.model, "_iv_ppc_sampler", None)
         ppc_sampler = kwargs.pop("ppc_sampler", previous_ppc)
-        self.model.build(  # type: ignore[call-arg,union-attr]
+        self.model.build(
             X=self.X,
             Z=self.Z,
             y=self.y,
@@ -284,7 +282,7 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
             vs_hyperparams=self.vs_hyperparams,
             binary_treatment=self.binary_treatment,
         )
-        self.model.sample_posterior(**kwargs)  # type: ignore[union-attr]
+        self.model.sample_posterior(**kwargs)
         return self
 
     def input_validation(self) -> None:

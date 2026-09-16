@@ -195,11 +195,11 @@ class StaggeredDifferenceInDifferences(
         self.reference_event_time = reference_event_time
 
         # to_pandas returns a copy, so the caller's dataframe is left alone
-        data = to_pandas(data)
-        data.index.name = "obs_ind"
+        pandas_data = to_pandas(data)
+        pandas_data.index.name = "obs_ind"
 
         # Input validation
-        self.data = data
+        self.data = pandas_data
         self.input_validation()
 
         # Step 1: Compute treatment time G_i for each unit
@@ -582,8 +582,8 @@ class StaggeredDifferenceInDifferences(
         ).groups
         att_gt_rows: list[dict] = []
         for key, idx in gt_groups.items():
-            g_val = key[0]  # type: ignore[index]
-            t_val = key[1]  # type: ignore[index]
+            g_val = key[0]
+            t_val = key[1]
             # Find positions in treated_indices
             positions = [np.where(treated_indices == i)[0][0] for i in idx]
             tau_gt = tau_draws_treated[:, :, positions].mean(axis=2)
@@ -1300,8 +1300,8 @@ class StaggeredDifferenceInDifferences(
             ["G", self.time_variable_name], observed=True
         ).groups
         for key, idx in gt_groups.items():
-            g_val = key[0]  # type: ignore[index]
-            t_val = key[1]  # type: ignore[index]
+            g_val = key[0]
+            t_val = key[1]
             positions = [np.where(self.data.index == i)[0][0] for i in idx]
             tau_gt = tau_draws_all[:, :, positions].mean(axis=2)
             att_gt_rows.append(

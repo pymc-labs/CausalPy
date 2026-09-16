@@ -174,12 +174,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         super().__init__(model=model)
         self.pre_design: xr.Dataset
         self.post_design: xr.Dataset
-        # to_pandas_with_time_index returns a copy, so index metadata is
-        # normalized on an owned frame rather than the caller's.
-        data = to_pandas_with_time_index(data, time_column)
-        data.index.name = "obs_ind"
-        self.data = data
-        self.input_validation(data, treatment_time, treatment_end_time)
+        # to_pandas_with_time_index returns a copy, so index metadata is normalized on an owned frame rather than the caller's.
+        pandas_data = to_pandas_with_time_index(data, time_column)
+        pandas_data.index.name = "obs_ind"
+        self.data = pandas_data
+        self.input_validation(pandas_data, treatment_time, treatment_end_time)
         self.treatment_time = treatment_time
         self.treatment_end_time = treatment_end_time
         self.expt_type = "Pre-Post Fit"
@@ -189,7 +188,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
     def _fit_inputs(
         self,
-    ) -> tuple[xr.Dataset, xr.Dataset, dict[str, Any]]:
+    ) -> tuple[xr.DataArray, xr.DataArray, dict[str, Any]]:
         """Return the pre-period design matrices and coordinates for build."""
         pre_X = self.pre_design["X"]
         return (
@@ -340,13 +339,13 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             # Validate treatment_end_time > treatment_time
             # Type check: we've already validated both match the index type, so they're compatible
             # NOTE: Both treatment_time and treatment_end_time are INCLUSIVE (>=) in their respective periods
-            if treatment_end_time <= treatment_time:  # type: ignore[operator]
+            if treatment_end_time <= treatment_time:
                 raise ValueError(
                     f"treatment_end_time ({treatment_end_time}) must be greater than treatment_time ({treatment_time})"
                 )
             # Validate treatment_end_time is within data range
             # NOTE: treatment_end_time is INCLUSIVE, so it can equal data.index.max()
-            if treatment_end_time > data.index.max():  # type: ignore[operator]
+            if treatment_end_time > data.index.max():
                 raise ValueError(
                     f"treatment_end_time ({treatment_end_time}) is beyond the data range (max: {data.index.max()})"
                 )

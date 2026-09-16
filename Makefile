@@ -8,7 +8,7 @@ PACKAGE_DIR = causalpy
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: init setup lint check_lint check-exports check-architecture test test-correctness test-patch-cov uml gallery html cleandocs doctest run_notebooks_full help
+.PHONY: init setup lint check_lint typecheck check-exports check-architecture test test-correctness test-patch-cov uml gallery html cleandocs doctest run_notebooks_full help
 
 # Patch coverage must be measured against the branch the PR actually targets.
 # While the 1.0 transition branch exists, work branched from it targets it, not
@@ -51,6 +51,9 @@ lint: ## Run ruff linter and formatter
 check_lint: ## Check code formatting and linting without making changes
 	ruff check .
 	ruff format --diff --check .
+
+typecheck: ## Run mypy over causalpy (scope and per-module allowlist in pyproject.toml)
+	mypy
 
 check-exports: ## Verify public API export and documentation wiring
 	python scripts/check_public_exports.py --check

@@ -15,6 +15,7 @@
 
 import inspect
 import warnings
+from collections.abc import Iterable
 from copy import deepcopy
 from typing import Any, Literal
 
@@ -269,6 +270,7 @@ class PyMCModel(pm.Model):
             posterior ``random_seed`` if ``None``.
         """
         super().__init__()
+
         self.idata: xr.DataTree | None = None
         self.sample_kwargs = sample_kwargs if sample_kwargs is not None else {}
         self.prior_sample_kwargs = (
@@ -312,7 +314,10 @@ class PyMCModel(pm.Model):
         )
 
     def build_model(
-        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
+        self,
+        X: xr.DataArray | dict[str, xr.DataArray],
+        y: xr.DataArray | dict[str, xr.DataArray],
+        coords: dict[str, Any] | None,
     ) -> None:
         """Construct the PyMC model graph.
 
@@ -321,10 +326,10 @@ class PyMCModel(pm.Model):
 
         Parameters
         ----------
-        X : xarray.DataArray
-            Input features with dimensions ``["obs_ind", "coeffs"]``.
-        y : xarray.DataArray
-            Target variable with dimensions ``["obs_ind", "treated_units"]``.
+        X : xarray.DataArray or dict of str to xarray.DataArray
+            Input features, or component inputs for specialized mapping models.
+        y : xarray.DataArray or dict of str to xarray.DataArray
+            Target values, or component targets for specialized mapping models.
         coords : dict or None
             Mapping of named dimensions to coordinate labels for the
             underlying ``pm.Model``.
@@ -378,8 +383,8 @@ class PyMCModel(pm.Model):
 
     def build(
         self,
-        X: xr.DataArray,
-        y: xr.DataArray,
+        X: xr.DataArray | dict[str, xr.DataArray],
+        y: xr.DataArray | dict[str, xr.DataArray],
         coords: dict[str, Any] | None = None,
     ) -> None:
         """Construct the PyMC graph without sampling anything.
@@ -409,7 +414,8 @@ class PyMCModel(pm.Model):
                 )
             return
         mapping_inputs = isinstance(X, dict) and isinstance(y, dict)
-        if mapping_inputs:
+        coordinate_arrays: Iterable[xr.DataArray]
+        if isinstance(X, dict) and isinstance(y, dict):
             valid_mapping = all(
                 isinstance(value, xr.DataArray)
                 for data in (X, y)
@@ -420,24 +426,21 @@ class PyMCModel(pm.Model):
                     "Mapping inputs must be non-empty dictionaries mapping "
                     "strings to xarray.DataArray objects"
                 )
+            coordinate_arrays = X.values()
         elif not isinstance(X, xr.DataArray) or not isinstance(y, xr.DataArray):
             raise TypeError(
                 "X and y must both be xarray.DataArray objects (or both be "
                 "mappings); specialized mapping inputs must be built through "
                 "PyMCModelAdapter"
             )
+        else:
+            coordinate_arrays = (X, y)
+            self._n_treated_units = y.sizes.get("treated_units", 1)
 
         coords = {} if coords is None else coords.copy()
-        if mapping_inputs:
-            for data in X.values():
-                for dimension in data.dims:
-                    coords.setdefault(dimension, data.get_index(dimension))
-        else:
-            for data in (X, y):
-                for dimension in data.dims:
-                    coords.setdefault(dimension, data.get_index(dimension))
-        if not mapping_inputs:
-            self._n_treated_units = y.sizes.get("treated_units", 1)
+        for data in coordinate_arrays:
+            for dimension in data.dims:
+                coords.setdefault(str(dimension), data.get_index(dimension))
 
         # Merge the effective priors from scratch, exactly once per graph.
         # Precedence is defaults -> data-derived -> user.
@@ -636,7 +639,7 @@ class PyMCModel(pm.Model):
                 f"No {group!r} draws are available on this model. Call {call} first.",
                 group=group,
             )
-        return self.idata[group]
+        return self.idata.children[group].to_dataset()
 
     def predict(
         self,
@@ -782,7 +785,10 @@ class LinearRegression(PyMCModel):
     }
 
     def build_model(
-        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
+        self,
+        X: xr.DataArray | dict[str, xr.DataArray],
+        y: xr.DataArray | dict[str, xr.DataArray],
+        coords: dict[str, Any] | None,
     ) -> None:
         """
         Define the PyMC model.
@@ -1009,7 +1015,10 @@ class WeightedSumFitter(PyMCModel):
         return priors
 
     def build_model(
-        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
+        self,
+        X: xr.DataArray | dict[str, xr.DataArray],
+        y: xr.DataArray | dict[str, xr.DataArray],
+        coords: dict[str, Any] | None,
     ) -> None:
         """
         Define the PyMC model.
@@ -1199,7 +1208,10 @@ class SoftmaxWeightedSumFitter(PyMCModel):
         return priors
 
     def build_model(
-        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
+        self,
+        X: xr.DataArray | dict[str, xr.DataArray],
+        y: xr.DataArray | dict[str, xr.DataArray],
+        coords: dict[str, Any] | None,
     ) -> None:
         """
         Build the PyMC model with softmax-parameterized simplex weights.
@@ -1225,19 +1237,21 @@ class SoftmaxWeightedSumFitter(PyMCModel):
             self.add_coords(coords_with_raw)
 
             X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
-            y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
+            y_data = pm.Data("y", y, dims=["obs_ind", "treated_units"])
 
             beta = _softmax_simplex_weights(
                 name="beta",
                 prior=self.priors["beta_raw"],
-                n_rows=y.shape[1],
+                n_rows=y_data.shape[1],
                 dims=["treated_units", "coeffs"],
             )
 
             mu = pm.Deterministic(
                 "mu", pt.dot(X, beta.T), dims=["obs_ind", "treated_units"]
             )
-            self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
+            self.priors["y_hat"].create_likelihood_variable(
+                "y_hat", mu=mu, observed=y_data
+            )
 
 
 class SyntheticDifferenceInDifferencesWeightFitter(PyMCModel):
@@ -2455,8 +2469,8 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
     def build(
         self,
-        X: xr.DataArray,
-        y: xr.DataArray,
+        X: xr.DataArray | dict[str, xr.DataArray],
+        y: xr.DataArray | dict[str, xr.DataArray],
         coords: dict[str, Any] | None = None,
     ) -> None:
         """Construct the graph and record the time-feature data nodes.
@@ -2497,7 +2511,10 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         )
 
     def build_model(
-        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
+        self,
+        X: xr.DataArray | dict[str, xr.DataArray],
+        y: xr.DataArray | dict[str, xr.DataArray],
+        coords: dict[str, Any] | None,
     ) -> None:
         """
         Defines the PyMC model.
@@ -2513,6 +2530,10 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             Coordinates dictionary. Can contain "datetime_index" for backwards compatibility,
             but datetime is preferentially extracted from X.coords['obs_ind'].
         """
+        if isinstance(X, dict) or isinstance(y, dict):
+            raise TypeError(
+                "BayesianBasisExpansionTimeSeries requires DataArray inputs"
+            )
         # Prepare time features and validate X
         # This extracts datetime from X.coords['obs_ind'] and validates exog vars
         (
@@ -2530,7 +2551,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
         # Add coeffs coordinate if we have exogenous variables
         if self._exog_var_names:
-            model_coords["coeffs"] = self._exog_var_names  # type: ignore[assignment]
+            model_coords["coeffs"] = self._exog_var_names
 
         with self:
             self.add_coords(model_coords)
@@ -2862,8 +2883,8 @@ class StateSpaceTimeSeries(PyMCModel):
 
     def build_model(
         self,
-        X: xr.DataArray | None = None,
-        y: xr.DataArray | None = None,
+        X: xr.DataArray | dict[str, xr.DataArray] | None = None,
+        y: xr.DataArray | dict[str, xr.DataArray] | None = None,
         coords: dict[str, Any] | None = None,
     ) -> None:
         """
@@ -2882,6 +2903,8 @@ class StateSpaceTimeSeries(PyMCModel):
             Coordinates dictionary. Can contain "datetime_index" for backwards compatibility,
             but datetime is preferentially extracted from y.coords['obs_ind'].
         """
+        if isinstance(X, dict) or isinstance(y, dict):
+            raise TypeError("StateSpaceTimeSeries requires DataArray inputs")
         if y is None:
             raise ValueError(
                 "y must be provided for StateSpaceTimeSeries.build_model()"
@@ -3013,10 +3036,10 @@ class StateSpaceTimeSeries(PyMCModel):
     #: prior phase for this backend is tracked as a follow-up (issue #1092).
     supports_prior_predictive = False
 
-    def build(  # type: ignore[override]
+    def build(
         self,
-        X: xr.DataArray | None = None,
-        y: xr.DataArray | None = None,
+        X: xr.DataArray | dict[str, xr.DataArray] | None = None,
+        y: xr.DataArray | dict[str, xr.DataArray] | None = None,
         coords: dict[str, Any] | None = None,
     ) -> None:
         """Construct the state-space graph without sampling.
@@ -3051,13 +3074,15 @@ class StateSpaceTimeSeries(PyMCModel):
                     "fresh model instance instead of rebuilding."
                 )
             return
+        if isinstance(X, dict) or isinstance(y, dict):
+            raise TypeError("StateSpaceTimeSeries requires DataArray inputs")
         if y is None:
             raise ValueError("y must be provided for StateSpaceTimeSeries.build()")
         coords = {} if coords is None else coords.copy()
         for data in (X, y):
             if isinstance(data, xr.DataArray):
                 for dimension in data.dims:
-                    coords.setdefault(dimension, data.get_index(dimension))
+                    coords.setdefault(str(dimension), data.get_index(dimension))
 
         # Merge the effective priors from scratch, exactly once per graph.
         # Precedence is defaults -> data-derived -> user.
@@ -3110,8 +3135,8 @@ class StateSpaceTimeSeries(PyMCModel):
 
     def fit(
         self,
-        X: xr.DataArray | None = None,
-        y: xr.DataArray | None = None,
+        X: xr.DataArray | dict[str, xr.DataArray] | None = None,
+        y: xr.DataArray | dict[str, xr.DataArray] | None = None,
         coords: dict[str, Any] | None = None,
     ) -> xr.DataTree:
         """Build the graph if needed, then draw smoothed posterior samples.

@@ -82,6 +82,8 @@ forecast = [
 ]
 dev = [
     "prek",
+    # Pinned: a type checker that floats turns an untouched branch red whenever upstream ships new checks. Bump deliberately, with the allowlist in [tool.mypy] re-measured (issue #1127). TOML cannot share the value, so the same pin appears in the ``lint`` extra below and the two must be bumped together.
+    "mypy==2.3.0",
     "twine",
     "codespell",
     "nbformat",
@@ -114,7 +116,8 @@ docs = [
     "PyYAML",
     "sphinxext-rediraffe",
 ]
-lint = ["prek", "ruff", "mypy"]
+# The mypy pin here must match the one in the ``dev`` extra above; TOML cannot share the value, so bump both together.
+lint = ["prek", "ruff", "mypy==2.3.0"]
 test = [
     "pytest",
     "pytest-cov",
@@ -223,9 +226,17 @@ exclude_lines = [
     "@(abc\\.)?abstractmethod",
 ]
 
+# Type checking (issue #1127). ``files = "causalpy"`` recurses, so the subpackages are covered; the old ``causalpy/*.py`` glob did not and only reached the 18 top-level modules. ``make typecheck`` runs this from the project environment, where the real dependencies are importable, and CI runs the same target. ``ignore_missing_imports`` drops the untyped-third-party noise (pymc, patsy, arviz and friends ship no stubs).
 [tool.mypy]
-files = "causalpy/*.py"
+files = "causalpy"
 exclude = "build|dist|docs|notebooks|tests|setup.py"
+ignore_missing_imports = true
+# Report a per-module override that stops matching a real module, so a rename or a deletion does not leave a stale entry behind unnoticed. This warns rather than fails: mypy prints ``note: unused section(s)`` and still exits 0. There are no overrides left, and this keeps it that way if one is ever added and then outlives its module.
+warn_unused_configs = true
+# The allowlist is empty: the package type-checks clean. What could not be expressed in the type system is a handful of line-level ``type: ignore`` comments, each with the reasoning next to it.
+#
+# ``warn_unused_ignores`` keeps those comments self-cleaning: a fix that removes the underlying error now fails the check unless the now-unneeded ignore is deleted with it.
+warn_unused_ignores = true
 
 [tool.marimo.runtime]
 watcher_on_save = "autorun"

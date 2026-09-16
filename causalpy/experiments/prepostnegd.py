@@ -156,7 +156,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
 
     def _fit_inputs(
         self,
-    ) -> tuple[xr.Dataset, xr.Dataset, dict[str, Any]]:
+    ) -> tuple[xr.DataArray, xr.DataArray, dict[str, Any]]:
         """Return the design matrices and coordinates for build."""
         X = self.design["X"]
         # Backend-identity checks are justified here: capability validation
@@ -269,8 +269,8 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             rf"$CI_{{{HDI_PROB * 100:.0f}\%}}$"
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
         )
-        causal_impact = f"{round_num(causal_impact.mean(), round_to)}, "
-        return f"Causal impact = {causal_impact + ci}"
+        causal_impact_mean = f"{round_num(causal_impact.mean(), round_to)}, "
+        return f"Causal impact = {causal_impact_mean + ci}"
 
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.

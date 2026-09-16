@@ -91,7 +91,7 @@ class McCraryDensityTest:
         rd = experiment
         threshold = rd.treatment_threshold  # type: ignore[attr-defined]
         running_var = rd.running_variable_name  # type: ignore[attr-defined]
-        data = rd.data  # type: ignore[attr-defined]
+        data = rd.data
 
         x = data[running_var].values
         below = x[x < threshold]

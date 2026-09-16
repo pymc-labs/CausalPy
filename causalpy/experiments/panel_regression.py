@@ -209,11 +209,10 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     ) -> None:
         super().__init__(model=model)
 
-        # to_pandas returns a copy, so this rename lands on ours, not the
-        # caller's dataframe.
-        data = to_pandas(data)
-        data.index.name = "obs_ind"
-        self.data = data
+        # to_pandas returns a copy, so this rename lands on ours, not the caller's dataframe.
+        pandas_data = to_pandas(data)
+        pandas_data.index.name = "obs_ind"
+        self.data = pandas_data
         self.expt_type = "Panel Regression"
         self.formula = formula
         self.unit_fe_variable = unit_fe_variable
@@ -223,7 +222,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         # Store a copy of original data for recovering group means in demeaned
         # transformation.  Other experiment classes don't need this because
         # they don't demean the data before fitting.
-        self._original_data = data.copy()
+        self._original_data = pandas_data.copy()
 
         # Initialize storage for group means (used in demeaned transformation)
         self._group_means: dict[str, pd.DataFrame] = {}
@@ -232,8 +231,10 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         self.input_validation()
 
         # Store panel dimensions (after validation confirms columns exist)
-        self.n_units = data[unit_fe_variable].nunique()
-        self.n_periods = data[time_fe_variable].nunique() if time_fe_variable else None
+        self.n_units = pandas_data[unit_fe_variable].nunique()
+        self.n_periods = (
+            pandas_data[time_fe_variable].nunique() if time_fe_variable else None
+        )
         self._build_design_matrices()
         self._prepare_data()
 
@@ -921,11 +922,11 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         if units is not None:
             selected_units = units
         elif self.n_units <= n_sample:
-            selected_units = all_units  # type: ignore[assignment]
+            selected_units = all_units
         else:
             if select == "random":
                 rng = np.random.default_rng(42)
-                selected_units = rng.choice(all_units, size=n_sample, replace=False)  # type: ignore[assignment]
+                selected_units = rng.choice(all_units, size=n_sample, replace=False)
             elif select == "extreme":
                 # Select units with the largest and smallest mean outcomes
                 unit_means = self.data.groupby(self.unit_fe_variable, observed=True)[
@@ -1020,7 +1021,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
                 # OLS: get fitted values for this unit
                 y_fitted = np.squeeze(self.model.predict(self.design["X"]))[
                     sorted_obs_indices
-                ]  # type: ignore[union-attr]
+                ]
                 ax.plot(
                     sorted_time_vals,
                     y_fitted,

@@ -624,7 +624,7 @@ class PyMCModelAdapter(ModelAdapter):
                 f"No {group!r} draws are available on this model. Call {call} first.",
                 group=group,
             )
-        return _canonical_pymc_coefficients(idata[group])
+        return _canonical_pymc_coefficients(idata.children[group])
 
 
 class SklearnModelAdapter(ModelAdapter):

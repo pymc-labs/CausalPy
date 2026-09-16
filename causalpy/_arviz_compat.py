@@ -202,7 +202,9 @@ def hdi_bounds(
     ).squeeze(drop=True)
     remaining_dims = set(result.dims) - {"hdi"}
     if remaining_dims:
-        msg = f"Scalar HDI bounds require reduced draws; remaining dims={sorted(remaining_dims)!r}"
+        # Dimension names are Hashable in xarray's typing, so sort them as strings.
+        dim_names = sorted(str(dim) for dim in remaining_dims)
+        msg = f"Scalar HDI bounds require reduced draws; remaining dims={dim_names!r}"
         raise ValueError(msg)
     return float(result.sel(hdi="lower").item()), float(result.sel(hdi="higher").item())
 

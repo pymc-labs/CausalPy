@@ -81,7 +81,8 @@ Renamed or deleted how-to pages must keep a **permanent** entry in `rediraffe_re
 
 ## Code quality checks
 
-- **Before committing**: Use `prek run` during iterative edits and run `prek run --all-files` before committing to ensure all checks pass (linting, formatting, type checking)
+- **Before committing**: Use `prek run` during iterative edits and run `prek run --all-files` before committing to ensure all checks pass (linting, formatting)
+- **Type checking**: `mypy` is intentionally **not** in `prek` — it only says anything useful when the project dependencies are importable, and a hook environment does not have them (issue #1127). Run `$CONDA_EXE run -n CausalPy make typecheck`; CI runs the same target from the test job. Scope and the per-module allowlist live in `[tool.mypy]` in `pyproject.toml`.
 - **Patch coverage (milestones, not every commit)**: `make test-patch-cov` is intentionally **not** in `prek` — it runs the full test suite (~90s+) and needs the conda env. Run it at meaningful checkpoints when Python source or tests under `causalpy/` changed, not on every small commit:
   - A PR is ready for review, or you are about to push for CI
   - You finished a large or multi-file task touching production code

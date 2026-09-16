@@ -126,11 +126,10 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         model: PyMCModel | RegressorMixin | None = None,
     ) -> None:
         super().__init__(model=model)
-        # to_pandas returns a copy, so index metadata is normalized on an
-        # owned frame rather than the caller's.
-        data = to_pandas(data)
-        data.index.name = "obs_ind"
-        self.data = data
+        # to_pandas returns a copy, so index metadata is normalized on an owned frame rather than the caller's.
+        pandas_data = to_pandas(data)
+        pandas_data.index.name = "obs_ind"
+        self.data = pandas_data
         self.expt_type = "Difference in Differences"
         self.formula = formula
         self.time_variable_name = time_variable_name
@@ -162,7 +161,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
 
     def _fit_inputs(
         self,
-    ) -> tuple[xr.Dataset, xr.Dataset, dict[str, Any]]:
+    ) -> tuple[xr.DataArray, xr.DataArray, dict[str, Any]]:
         """Return the design matrices and coordinates for build."""
         X = self.design["X"]
         return (
@@ -566,7 +565,8 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
                     showmedians=False,
                     widths=0.2,
                 )
-                for pc in parts["bodies"]:
+                # violinplot types every entry as a single Collection, but the "bodies" entry is a list of them.
+                for pc in parts["bodies"]:  # type: ignore[attr-defined]
                     pc.set_facecolor("C0")
                     pc.set_edgecolor("None")
                     pc.set_alpha(0.5)
@@ -651,7 +651,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             "causal\nimpact",
             xy=(
                 arrow_x,
-                np.mean([y_pred_counterfactual_scalar, y_pred_treatment_scalar]),
+                float(np.mean([y_pred_counterfactual_scalar, y_pred_treatment_scalar])),
             ),
             xycoords="data",
             xytext=(5, 0),

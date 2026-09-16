@@ -102,12 +102,12 @@ class StepTransform:
         if self._is_datetime_like(x):
             self._is_datetime = True
             x_dt = pd.to_datetime(x)
-            x_min: pd.Timestamp = pd.Timestamp(x_dt.min())  # type: ignore[assignment]
+            x_min: pd.Timestamp = pd.Timestamp(x_dt.min())
             if self._origin is None:
                 self._origin = x_min
             else:
                 # Handle chunked data - keep the overall minimum
-                self._origin = min(self._origin, x_min)  # type: ignore[assignment]
+                self._origin = min(self._origin, x_min)
 
     def memorize_finish(self) -> None:
         """Called after all chunks processed - finalize state."""
@@ -149,7 +149,7 @@ class StepTransform:
             t_numeric = (threshold_dt - self._origin).total_seconds() / (24 * 3600)
         else:
             x_numeric = np.asarray(x, dtype=float)
-            t_numeric = float(threshold)  # type: ignore[arg-type]
+            t_numeric = float(threshold)
 
         return (x_numeric >= t_numeric).astype(float)
 
@@ -161,7 +161,7 @@ class StepTransform:
             return threshold
         else:
             # Assume it's something pandas can convert (str or numeric)
-            return pd.Timestamp(threshold)  # type: ignore[arg-type, return-value]
+            return pd.Timestamp(threshold)
 
 
 class RampTransform:
@@ -222,11 +222,11 @@ class RampTransform:
         if self._is_datetime_like(x):
             self._is_datetime = True
             x_dt = pd.to_datetime(x)
-            x_min: pd.Timestamp = pd.Timestamp(x_dt.min())  # type: ignore[assignment]
+            x_min: pd.Timestamp = pd.Timestamp(x_dt.min())
             if self._origin is None:
                 self._origin = x_min
             else:
-                self._origin = min(self._origin, x_min)  # type: ignore[assignment]
+                self._origin = min(self._origin, x_min)
 
     def memorize_finish(self) -> None:
         """Called after all chunks processed."""
@@ -269,7 +269,7 @@ class RampTransform:
             t_numeric = (threshold_dt - self._origin).total_seconds() / (24 * 3600)
         else:
             x_numeric = np.asarray(x, dtype=float)
-            t_numeric = float(threshold)  # type: ignore[arg-type]
+            t_numeric = float(threshold)
 
         return np.maximum(0.0, x_numeric - t_numeric)
 
@@ -281,7 +281,7 @@ class RampTransform:
             return threshold
         else:
             # Assume it's something pandas can convert (str or numeric)
-            return pd.Timestamp(threshold)  # type: ignore[arg-type, return-value]
+            return pd.Timestamp(threshold)
 
 
 class ElapsedDaysTransform:
@@ -326,9 +326,9 @@ class ElapsedDaysTransform:
 
 
 # Create callable stateful transforms for use in formulas
-step = patsy.stateful_transform(StepTransform)  # type: ignore[attr-defined]
-ramp = patsy.stateful_transform(RampTransform)  # type: ignore[attr-defined]
-elapsed = patsy.stateful_transform(ElapsedDaysTransform)  # type: ignore[attr-defined]
+step = patsy.stateful_transform(StepTransform)
+ramp = patsy.stateful_transform(RampTransform)
+elapsed = patsy.stateful_transform(ElapsedDaysTransform)
 
 __all__ = [
     "step",

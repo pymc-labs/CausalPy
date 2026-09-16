@@ -92,6 +92,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
     supports_ols = False
     supports_bayes = True
     _default_model_class = PropensityScore
+    model: PropensityScore
 
     #: No grouped result bundles: fitted state keys off the backend's
     #: posterior draws; read methods inspect ``.idata`` directly.
@@ -462,9 +463,9 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
             weighted_outcome_trt,
             n_ntrt,
             n_trt,
-        ) = self.make_overlap_adjustments(ps)  # type: ignore[assignment]
-        ntrt = np.sum(weighted_outcome_ntrt) / np.sum(n_ntrt)  # type: ignore[arg-type]
-        trt = np.sum(weighted_outcome_trt) / np.sum(n_trt)  # type: ignore[arg-type]
+        ) = self.make_overlap_adjustments(ps)
+        ntrt = np.sum(weighted_outcome_ntrt) / np.sum(n_ntrt)
+        trt = np.sum(weighted_outcome_trt) / np.sum(n_trt)
         ate = trt - ntrt
         return ate, trt, ntrt
 
@@ -492,7 +493,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
             weighted_outcome_trt,
             _n_ntrt,
             _n_trt,
-        ) = self.make_doubly_robust_adjustment(ps)  # type: ignore[assignment]
+        ) = self.make_doubly_robust_adjustment(ps)
         trt = np.mean(weighted_outcome_trt)
         ntrt = np.mean(weighted_outcome_ntrt)
         ate = trt - ntrt
@@ -693,8 +694,9 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         mosaic = """AAAAAA
                     BBBBCC"""
 
-        fig, axs = plt.subplot_mosaic(mosaic, figsize=(20, 13))
-        axs = [axs[k] for k in axs]
+        fig, mosaic_axes = plt.subplot_mosaic(mosaic, figsize=(20, 13))
+        # Keyed by mosaic label; the panels are used positionally from here on.
+        axs = [mosaic_axes[k] for k in mosaic_axes]
         axs[0].axvline(
             0.1, linestyle="--", label="Low Extreme Propensity Scores", color="black"
         )
