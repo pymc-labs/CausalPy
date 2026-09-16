@@ -226,3 +226,57 @@ def test_prior_sc_plot_overlays_requested_donors(multi_unit_prior_sc):
             np.testing.assert_allclose(line.get_ydata(), experiment.datapost[unit])
     finally:
         plt.close(fig)
+
+
+@pytest.mark.integration
+def test_sc_prior_and_posterior_results_use_their_own_draws():
+    time = np.arange(18)
+    data = pd.DataFrame(
+        {
+            "a": 1 + time / 10,
+            "b": 3 + np.sin(time / 3),
+        }
+    )
+    data["treated"] = 0.8 * data["a"] + 0.2 * data["b"] + 0.05 * np.cos(time)
+    model = cp.pymc_models.WeightedSumFitter(
+        sample_kwargs={
+            "draws": 9,
+            "tune": 15,
+            "chains": 1,
+            "cores": 1,
+            "progressbar": False,
+            "random_seed": 42,
+        },
+        prior_sample_kwargs={"draws": 13, "random_seed": 43},
+    )
+    experiment = cp.SyntheticControl(
+        data,
+        treatment_time=12,
+        control_units=["a", "b"],
+        treated_units=["treated"],
+        model=model,
+    ).fit()
+
+    for group, bundle, draw_count in (
+        ("prior", experiment.prior_result, 13),
+        ("posterior", experiment.result, 9),
+    ):
+        weights = experiment.idata[group]["beta"].transpose(
+            "chain", "draw", "treated_units", "coeffs"
+        )
+        for observed, prediction, impact in (
+            (experiment.datapre, bundle.predictions_pre, bundle.impact_pre),
+            (experiment.datapost, bundle.predictions_post, bundle.impact_post),
+        ):
+            assert prediction.sizes["draw"] == draw_count
+            expected = np.einsum(
+                "oc,sdtc->sdot", observed[["a", "b"]].to_numpy(), weights.values
+            )
+            np.testing.assert_allclose(
+                prediction.transpose("chain", "draw", "obs_ind", "treated_units"),
+                expected,
+            )
+            np.testing.assert_allclose(
+                impact.transpose("chain", "draw", "obs_ind", "treated_units"),
+                observed[["treated"]].to_numpy() - expected,
+            )
