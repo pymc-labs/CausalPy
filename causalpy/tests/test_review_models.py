@@ -15,8 +15,13 @@
 
 import numpy as np
 import pytest
+import xarray as xr
 
-from causalpy.pymc_models import InstrumentalVariableRegression, PropensityScore
+from causalpy.pymc_models import (
+    InstrumentalVariableRegression,
+    LinearRegression,
+    PropensityScore,
+)
 
 
 def test_iv_clone_preserves_configuration_without_sharing_sampler_settings():
@@ -58,3 +63,28 @@ def test_propensity_rebuild_rejects_changed_design(change):
         model.build(X, treatment, coords=coords)
     np.testing.assert_array_equal(model["X"].get_value(), np.arange(8).reshape(8, 1))
     np.testing.assert_array_equal(model["t"].get_value(), np.tile([0, 1], 4))
+
+
+@pytest.mark.parametrize("change", ["time", "labels", "dimension"])
+def test_rebuild_rejects_changed_xarray_coordinates(change):
+    """Equal numeric designs with different labeled axes are not interchangeable."""
+    X = xr.DataArray(
+        np.ones((4, 1)),
+        dims=["obs_ind", "coeffs"],
+        coords={
+            "obs_ind": np.arange("2020-01-01", "2020-01-05", dtype="datetime64[D]"),
+            "coeffs": np.array(["intercept"], dtype=object),
+        },
+    )
+    y = xr.DataArray(np.ones((4, 1)), dims=["obs_ind", "treated_units"])
+    model = LinearRegression()
+    model.build(X, y)
+    model.build(X.copy(deep=True), y.copy(deep=True))
+    if change == "time":
+        X = X.assign_coords(obs_ind=X.obs_ind + np.timedelta64(365, "D"))
+    elif change == "labels":
+        X = X.assign_coords(coeffs=np.array(["slope"], dtype=object))
+    else:
+        X = X.rename(coeffs="features")
+    with pytest.raises(RuntimeError, match="already built with different inputs"):
+        model.build(X, y)

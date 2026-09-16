@@ -32,7 +32,7 @@ from causalpy.constants import HDI_PROB
 
 
 def _design_fingerprint(*inputs: Any) -> tuple:
-    """Structural hash of build-time inputs (shapes, dtypes, raw bytes).
+    """Structural hash of build-time values, dimensions, and coordinates.
 
     Inputs may be mappings of named arrays or array-likes. A second
     ``build()`` whose fingerprint differs from the recorded one means the
@@ -41,13 +41,24 @@ def _design_fingerprint(*inputs: Any) -> tuple:
     """
 
     def _digest(value: Any) -> Any:
+        if isinstance(value, xr.DataArray):
+            return (
+                value.dims,
+                _digest(value.values),
+                tuple(
+                    (name, coord.dims, _digest(coord.values))
+                    for name, coord in sorted(value.coords.items())
+                ),
+            )
         if isinstance(value, dict):
             return tuple(sorted((key, _digest(item)) for key, item in value.items()))
         arr = np.ascontiguousarray(np.asarray(value))
+        # Object arrays store pointers, not label contents, in their raw bytes.
+        payload = repr(arr.tolist()).encode() if arr.dtype.hasobject else arr.tobytes()
         return (
             arr.shape,
             str(arr.dtype),
-            hashlib.blake2b(arr.tobytes(), digest_size=16).hexdigest(),
+            hashlib.blake2b(payload, digest_size=16).hexdigest(),
         )
 
     return tuple(_digest(value) for value in inputs)
