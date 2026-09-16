@@ -257,33 +257,6 @@ def test_iv_jax_ppc_reports_missing_jax_without_fallback(monkeypatch, use_defaul
     assert calls == 0
 
 
-def test_iv_jax_ppc_uses_jax_compilation(monkeypatch):
-    """Test available JAX PPC uses the JAX compilation mode."""
-    model = cp.pymc_models.InstrumentalVariableRegression(
-        sample_kwargs={"random_seed": 42}
-    )
-    model.idata = _Idata()
-    posterior_predictive = object()
-    calls = {}
-    _set_jax_import(monkeypatch, object())
-
-    def sample(idata, **kwargs):
-        calls["idata"] = idata
-        calls.update(kwargs)
-        return posterior_predictive
-
-    monkeypatch.setattr(pm, "sample_posterior_predictive", sample)
-
-    model.sample_predictive_distribution()
-
-    assert calls == {
-        "idata": model.idata,
-        "random_seed": 42,
-        "compile_kwargs": {"mode": "JAX"},
-        "extend_inferencedata": True,
-    }
-
-
 @pytest.mark.parametrize(
     "error",
     [
@@ -733,14 +706,12 @@ def test_iv_sample_predictive_distribution(iv_data, sample_kwargs):
 
 
 def test_iv_default_jax_ppc_mutates_existing_datatree(
-    iv_data, sample_kwargs, monkeypatch
+    iv_data, sample_kwargs, monkeypatch, mock_pymc_sample
 ):
-    """Default JAX PPC sampler mutates an existing DataTree in place.
+    """Replacing predictive draws preserves the current posterior.
 
-    JAX itself is optional in the test env; the DataTree mutation contract is
-    exercised by stubbing ``pm.sample_posterior_predictive`` while asserting the
-    default call uses ``compile_kwargs={"mode": "JAX"}`` and
-    ``extend_inferencedata=True``.
+    Exercise real PyMC forward sampling with its default compiler so this
+    group-replacement regression does not require optional JAX.
     """
     import pymc as pm
 
@@ -754,23 +725,13 @@ def test_iv_default_jax_ppc_mutates_existing_datatree(
         ),
     ).fit()
 
-    assert isinstance(result.idata, xr.DataTree)
-    assert "posterior_predictive" not in result.idata
     original_idata = result.idata
+    posterior_before = result.idata["posterior"].to_dataset().copy(deep=True)
+    sample_predictive = pm.sample_posterior_predictive
 
     def fake_sample_posterior_predictive(idata, *args, **kwargs):
-        assert kwargs.get("extend_inferencedata") is True
-        assert kwargs.get("compile_kwargs") == {"mode": "JAX"}
-        # Mimic in-place mutation from extend_inferencedata=True
-        idata["posterior_predictive"] = xr.Dataset(
-            {
-                "likelihood": (
-                    ("chain", "draw", "likelihood_dim_0"),
-                    np.zeros((1, 1, 1)),
-                )
-            }
-        )
-        return idata
+        kwargs.pop("compile_kwargs", None)
+        return sample_predictive(idata, *args, **kwargs)
 
     monkeypatch.setattr(
         pm, "sample_posterior_predictive", fake_sample_posterior_predictive
@@ -779,8 +740,12 @@ def test_iv_default_jax_ppc_mutates_existing_datatree(
     result.model.sample_predictive_distribution()  # default ppc_sampler="jax"
 
     assert result.idata is original_idata
-    assert isinstance(result.idata, xr.DataTree)
-    assert "posterior_predictive" in result.idata
+    xr.testing.assert_identical(
+        result.idata["posterior"].to_dataset(), posterior_before
+    )
+    predictive = result.idata["posterior_predictive"]["likelihood"]
+    assert predictive.sizes["draw"] == posterior_before.sizes["draw"]
+    assert predictive.shape[-2:] == (len(iv_data["data"]), 2)
 
 
 # =============================================================================

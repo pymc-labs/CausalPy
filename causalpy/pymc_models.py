@@ -558,13 +558,14 @@ class PyMCModel(pm.Model):
                 self.idata["posterior"] = post["posterior"]
                 if "sample_stats" in post.children:
                     self.idata["sample_stats"] = post["sample_stats"]
-            pm.sample_posterior_predictive(
+            predictive = pm.sample_posterior_predictive(
                 self.idata,
                 var_names=self._ppc_var_names(),
                 progressbar=self._ppc_progressbar(),
                 random_seed=random_seed,
-                extend_inferencedata=True,
+                extend_inferencedata=False,
             )
+            self.idata["posterior_predictive"] = predictive["posterior_predictive"]
         return self.idata
 
     def fit(
@@ -1748,22 +1749,24 @@ class InstrumentalVariableRegression(PyMCModel):
                         "ppc_sampler='pymc'."
                     ) from err
                 with self:
-                    pm.sample_posterior_predictive(
+                    predictive = pm.sample_posterior_predictive(
                         self.idata,
                         random_seed=random_seed,
                         compile_kwargs={"mode": "JAX"},
-                        extend_inferencedata=True,
+                        extend_inferencedata=False,
                     )
+                self.idata["posterior_predictive"] = predictive["posterior_predictive"]
         elif ppc_sampler == "pymc" and self.idata is not None:
             with self:
                 self.idata = _extend_datatree_left(
                     self.idata, pm.sample_prior_predictive(random_seed=random_seed)
                 )
-                pm.sample_posterior_predictive(
+                predictive = pm.sample_posterior_predictive(
                     self.idata,
                     random_seed=random_seed,
-                    extend_inferencedata=True,
+                    extend_inferencedata=False,
                 )
+            self.idata["posterior_predictive"] = predictive["posterior_predictive"]
 
     def build(  # type: ignore[override]
         self,

@@ -13,6 +13,8 @@
 #   limitations under the License.
 """Regression coverage for model lifecycle review findings."""
 
+import warnings
+
 import numpy as np
 import pytest
 import xarray as xr
@@ -88,3 +90,70 @@ def test_rebuild_rejects_changed_xarray_coordinates(change):
         X = X.rename(coeffs="features")
     with pytest.raises(RuntimeError, match="already built with different inputs"):
         model.build(X, y)
+
+
+@pytest.fixture
+def regression_inputs():
+    X = xr.DataArray(
+        np.arange(6, dtype=float).reshape(6, 1), dims=["obs_ind", "coeffs"]
+    )
+    y = xr.DataArray(
+        np.array([0.1, 1.2, 1.9, 3.1, 3.8, 5.2]).reshape(6, 1),
+        dims=["obs_ind", "treated_units"],
+    )
+    return X, y
+
+
+@pytest.fixture
+def iv_inputs():
+    treatment = np.array([0.2, 0.8, 1.3, 1.7, 2.1, 2.8])
+    return {
+        "X": np.column_stack([np.ones(6), treatment]),
+        "Z": np.column_stack([np.ones(6), np.arange(6)]),
+        "y": np.array([0.5, 1.0, 1.8, 1.9, 2.5, 3.0]),
+        "t": treatment,
+        "coords": {
+            "instruments": ["Intercept", "Z"],
+            "covariates": ["Intercept", "t"],
+        },
+        "priors": {
+            "mus": [[0.0, 0.0], [0.0, 0.0]],
+            "sigmas": [1.0, 1.0],
+            "eta": 2,
+            "lkj_sd": 1,
+        },
+    }
+
+
+@pytest.fixture
+def small_sample_kwargs():
+    return {
+        "draws": 2,
+        "tune": 5,
+        "chains": 1,
+        "cores": 1,
+        "random_seed": 12,
+        "progressbar": False,
+        "compute_convergence_checks": False,
+    }
+
+
+@pytest.mark.parametrize("backend", ["regression", "iv"])
+def test_refit_replaces_predictive_draws_without_raw_overwrite_warning(
+    backend, regression_inputs, iv_inputs, small_sample_kwargs
+):
+    """Posterior refits refresh predictive draws without leaking PyMC merge warnings."""
+    if backend == "iv":
+        model = InstrumentalVariableRegression(sample_kwargs=small_sample_kwargs)
+        model.build(**iv_inputs, ppc_sampler="pymc")
+    else:
+        model = LinearRegression(sample_kwargs=small_sample_kwargs)
+        model.build(*regression_inputs)
+    model.sample_posterior()
+    before = model.idata["posterior_predictive"].to_dataset().copy(deep=True)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        model.sample_posterior(draws=3, random_seed=19)
+    assert model.idata["posterior_predictive"].sizes["draw"] == 3
+    assert not model.idata["posterior_predictive"].to_dataset().equals(before)
+    assert not any("extend_inferencedata" in str(item.message) for item in caught)
