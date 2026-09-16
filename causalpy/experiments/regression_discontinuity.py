@@ -388,6 +388,7 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
             data only — and requires :meth:`sample_prior_predictive`;
             ``"posterior"`` (default) renders the full results figure and
             requires :meth:`fit`.
+            Uncertainty styling and ``figsize`` apply to both groups; ``round_to`` only affects posterior annotations.
         round_to : int, optional
             Number of decimals used to round numerical results in the figure
             title (e.g. the Bayesian :math:`R^2`). Defaults to 2. Use
@@ -483,8 +484,14 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
             (use matplotlib's default).
         """
         bundle = self._require_bundle(group)
+        style: _PosteriorPlotStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
         if group == "prior":
-            return self._plot_prior_checks(bundle=bundle)
+            return self._plot_prior_checks(bundle=bundle, style=style, figsize=figsize)
 
         with_uncertainty = has_posterior_draws(bundle.predictions)
         has_exclusion = len(self.fit_data) < len(self.data)
@@ -579,12 +586,6 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
 
         # Plot model fit to data
         if with_uncertainty:
-            style: _PosteriorPlotStyle = {
-                "ci_prob": ci_prob,
-                "kind": kind,
-                "ci_kind": ci_kind,
-                "num_samples": num_samples,
-            }
             plot_posterior_over_x(
                 self.x_pred[self.running_variable_name],
                 bundle.predictions.isel(treated_units=0),
@@ -620,7 +621,11 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         return (fig, ax)
 
     def _plot_prior_checks(
-        self, *, bundle: DiscontinuityResult
+        self,
+        *,
+        bundle: DiscontinuityResult,
+        style: _PosteriorPlotStyle,
+        figsize: tuple[float, float] | None,
     ) -> tuple[plt.Figure, plt.Axes]:
         """Render the reduced prior-check figure.
 
@@ -631,14 +636,8 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         """
         xcol = self.running_variable_name
         ycol = self.outcome_variable_name
-        fig, ax = plt.subplots(figsize=(7, 4))
+        fig, ax = plt.subplots(figsize=figsize)
         ax.plot(self.data[xcol], self.data[ycol], "k.", label="Observations")
-        style: _PosteriorPlotStyle = {
-            "ci_prob": HDI_PROB,
-            "kind": "ribbon",
-            "ci_kind": "hdi",
-            "num_samples": 50,
-        }
         h_line, h_patch = plot_posterior_over_x(
             self.x_pred[xcol],
             bundle.predictions.isel(treated_units=0),
@@ -654,7 +653,7 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
             label="treatment threshold",
         )
         ax.legend(
-            handles=[(h_line, h_patch)],
+            handles=[tuple(h_line) if isinstance(h_line, list) else (h_line, h_patch)],
             labels=["Prior fit"],
             fontsize=LEGEND_FONT_SIZE,
         )

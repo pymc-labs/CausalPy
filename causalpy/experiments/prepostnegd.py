@@ -311,6 +311,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             renders the full two-panel layout with the estimated treatment
             effect posterior and requires :meth:`fit`.
             The two groups intentionally return different axes layouts.
+            Uncertainty styling and ``figsize`` apply to both groups; ``round_to`` only affects posterior annotations.
         round_to : int, optional
             Number of decimals used to round numerical results in the figure.
             Defaults to ``None``, in which case 2 significant figures are
@@ -402,18 +403,18 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             Width and height of the figure in inches. Defaults to ``(7, 9)``.
         """
         bundle = self._require_bundle(group)
-        if group == "prior":
-            return self._plot_prior_checks(bundle=bundle)
-
-        pred_untreated = bundle.scenario_control.prediction
-        pred_treated = bundle.scenario_treated.prediction
-
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
             "num_samples": num_samples,
         }
+        if group == "prior":
+            return self._plot_prior_checks(bundle=bundle, style=style, figsize=figsize)
+
+        pred_untreated = bundle.scenario_control.prediction
+        pred_treated = bundle.scenario_treated.prediction
+
         fig, ax = plt.subplots(
             2, 1, figsize=figsize, gridspec_kw={"height_ratios": [3, 1]}
         )
@@ -472,7 +473,11 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
         return fig, ax
 
     def _plot_prior_checks(
-        self, *, bundle: CoefficientResult
+        self,
+        *,
+        bundle: CoefficientResult,
+        style: _PosteriorPlotStyle,
+        figsize: tuple[float, float],
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Render the reduced prior-check panel set.
 
@@ -482,14 +487,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
         prior-implied treated/untreated curves are plausible against the
         observed data — one panel suffices.
         """
-        style: _PosteriorPlotStyle = {
-            "ci_prob": HDI_PROB,
-            "kind": "ribbon",
-            "ci_kind": "hdi",
-            "num_samples": 50,
-        }
-
-        fig, ax = plt.subplots(figsize=(7, 4))
+        fig, ax = plt.subplots(figsize=figsize)
 
         # Plot raw data
         sns.scatterplot(
@@ -512,7 +510,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             plot_hdi_kwargs={"color": "C0"},
             label="Control group",
         )
-        handles = [(h_line, h_patch)]
+        handles = [tuple(h_line) if isinstance(h_line, list) else (h_line, h_patch)]
         labels = ["Control group"]
 
         # plot prior predictive of treated
@@ -524,7 +522,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             plot_hdi_kwargs={"color": "C1"},
             label="Treatment group",
         )
-        handles.append((h_line, h_patch))
+        handles.append(tuple(h_line) if isinstance(h_line, list) else (h_line, h_patch))
         labels.append("Treatment group")
 
         ax.legend(

@@ -394,6 +394,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             renders the full layout with the counterfactual and causal
             impact annotation and requires :meth:`fit`.
             The two groups intentionally return different axes layouts.
+            Uncertainty styling and ``figsize`` apply to both groups; ``round_to`` only affects posterior annotations.
         round_to : int, optional
             Number of decimals used to round numerical results in the figure
             title. Defaults to ``None``, in which case 2 significant figures
@@ -490,8 +491,14 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             (use matplotlib's default).
         """
         bundle = self._require_bundle(group)
+        style: _PosteriorPlotStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
         if group == "prior":
-            return self._plot_prior_checks(bundle=bundle)
+            return self._plot_prior_checks(bundle=bundle, style=style, figsize=figsize)
 
         y_pred_control = bundle.scenario_control.prediction
         y_pred_treatment = bundle.scenario_treated.prediction
@@ -503,12 +510,6 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         x_pred_counterfactual = cf.inputs
 
         with_uncertainty = has_posterior_draws(y_pred_control)
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
-        }
 
         fig, ax = plt.subplots(figsize=figsize)
 
@@ -683,7 +684,11 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         return fig, ax
 
     def _plot_prior_checks(
-        self, *, bundle: CoefficientResult
+        self,
+        *,
+        bundle: CoefficientResult,
+        style: _PosteriorPlotStyle,
+        figsize: tuple[float, float] | None,
     ) -> tuple[plt.Figure, plt.Axes]:
         """Render the reduced prior-check panel set.
 
@@ -693,14 +698,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         answers is whether the prior-implied group predictions are plausible
         against the observed series — one panel suffices.
         """
-        style: _PosteriorPlotStyle = {
-            "ci_prob": HDI_PROB,
-            "kind": "ribbon",
-            "ci_kind": "hdi",
-            "num_samples": 50,
-        }
-
-        fig, ax = plt.subplots(figsize=(7, 4))
+        fig, ax = plt.subplots(figsize=figsize)
 
         # Plot raw data
         sns.scatterplot(
@@ -723,7 +721,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             plot_hdi_kwargs={"color": "C0"},
             label="Control group",
         )
-        handles = [(h_line, h_patch)]
+        handles = [tuple(h_line) if isinstance(h_line, list) else (h_line, h_patch)]
         labels = ["Control group"]
 
         # Plot prior-implied model fit to treatment group
@@ -735,7 +733,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             plot_hdi_kwargs={"color": "C1"},
             label="Treatment group",
         )
-        handles.append((h_line, h_patch))
+        handles.append(tuple(h_line) if isinstance(h_line, list) else (h_line, h_patch))
         labels.append("Treatment group")
 
         ax.legend(

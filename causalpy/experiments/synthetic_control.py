@@ -502,6 +502,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             :meth:`sample_prior_predictive`; ``"posterior"`` (default)
             renders the full three-panel layout and requires :meth:`fit`.
             The two groups intentionally return different axes layouts.
+            Uncertainty styling, ``figsize``, and ``plot_predictors`` apply to both groups; ``round_to`` only affects posterior annotations.
         round_to : int, optional
             Number of decimals used to round numerical results in the figure
             title (e.g. the Bayesian :math:`R^2`). Defaults to ``None``,
@@ -612,6 +613,12 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
         bundle = self._require_bundle(group)
+        style: _PosteriorPlotStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
         # Get treated unit name - default to first unit if None
         treated_unit = (
             treated_unit if treated_unit is not None else self.treated_units[0]
@@ -622,16 +629,16 @@ class SyntheticControl(BaseExperiment[CausalResult]):
                 f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
             )
         if group == "prior":
-            return self._plot_prior_checks(bundle=bundle, treated_unit=treated_unit)
+            return self._plot_prior_checks(
+                bundle=bundle,
+                treated_unit=treated_unit,
+                style=style,
+                figsize=figsize,
+                plot_predictors=plot_predictors,
+            )
 
         counterfactual_label = "Counterfactual"
         with_uncertainty = has_posterior_draws(bundle.predictions_pre)
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
-        }
 
         pre_pred = bundle.predictions_pre.sel(treated_units=treated_unit)
         post_pred = bundle.predictions_post.sel(treated_units=treated_unit)
@@ -819,7 +826,13 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         return fig, ax
 
     def _plot_prior_checks(
-        self, *, bundle: CausalResult, treated_unit: str
+        self,
+        *,
+        bundle: CausalResult,
+        treated_unit: str,
+        style: _PosteriorPlotStyle,
+        figsize: tuple[float, float],
+        plot_predictors: bool,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Render the reduced prior-check panel set.
 
@@ -833,13 +846,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         pre_treated = self.pre_design["treated"].sel(treated_units=treated_unit)
         post_treated = self.post_design["treated"].sel(treated_units=treated_unit)
 
-        fig, ax = plt.subplots(1, 1, figsize=(7, 4))
-        style: _PosteriorPlotStyle = {
-            "ci_prob": HDI_PROB,
-            "kind": "ribbon",
-            "ci_kind": "hdi",
-            "num_samples": 50,
-        }
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
         h_line, h_patch = plot_posterior_over_x(
             self.datapre.index,
             pre_pred,
@@ -859,11 +866,26 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         treatment_time = self._convert_treatment_time_for_axis(ax, self.treatment_time)
         ax.axvline(x=treatment_time, ls="-", lw=3, color="r", zorder=1.5)
         ax.legend(
-            handles=[(h_line, h_patch)],
+            handles=[tuple(h_line) if isinstance(h_line, list) else (h_line, h_patch)],
             labels=["Prior counterfactual"],
             fontsize=LEGEND_FONT_SIZE,
         )
         ax.set(title="Prior predictive check")
+        if plot_predictors:
+            ax.plot(
+                self.datapre.index,
+                self.pre_design["control"],
+                "-",
+                c=[0.8, 0.8, 0.8],
+                zorder=1,
+            )
+            ax.plot(
+                self.datapost.index,
+                self.post_design["control"],
+                "-",
+                c=[0.8, 0.8, 0.8],
+                zorder=1,
+            )
 
         if isinstance(self.datapre.index, pd.DatetimeIndex):
             full_index = _combine_datetime_indices(

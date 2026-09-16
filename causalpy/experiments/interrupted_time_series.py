@@ -567,6 +567,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             :meth:`sample_prior_predictive`; ``"posterior"`` (default)
             renders the full three-panel layout and requires :meth:`fit`.
             The two groups intentionally return different axes layouts.
+            Uncertainty styling and ``figsize`` apply to both groups; ``round_to`` only affects posterior annotations.
         round_to : int, optional
             Number of decimals used to round numerical results in the figure
             title (e.g. the Bayesian :math:`R^2`). Defaults to 2. Use
@@ -702,20 +703,20 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
         bundle = self._require_bundle(group)
-        if group == "prior":
-            return self._plot_prior_checks(bundle=bundle)
-
-        counterfactual_label = "Counterfactual"
-        pre_pred_all = bundle.predictions_pre
-        post_pred_all = bundle.predictions_post
-        with_uncertainty = has_posterior_draws(pre_pred_all)
-        single_post_obs = len(self.datapost) <= 1
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
             "num_samples": num_samples,
         }
+        if group == "prior":
+            return self._plot_prior_checks(bundle=bundle, style=style, figsize=figsize)
+
+        counterfactual_label = "Counterfactual"
+        pre_pred_all = bundle.predictions_pre
+        post_pred_all = bundle.predictions_post
+        with_uncertainty = has_posterior_draws(pre_pred_all)
+        single_post_obs = len(self.datapost) <= 1
 
         pre_pred = pre_pred_all.isel(treated_units=0)
         post_pred = post_pred_all.isel(treated_units=0)
@@ -927,7 +928,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         return fig, ax
 
     def _plot_prior_checks(
-        self, *, bundle: CausalResult
+        self,
+        *,
+        bundle: CausalResult,
+        style: _PosteriorPlotStyle,
+        figsize: tuple[float, float],
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Render the reduced prior-check panel set.
 
@@ -941,13 +946,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         pre_y = self.pre_design["y"].isel(treated_units=0)
         post_y = self.post_design["y"].isel(treated_units=0)
 
-        fig, ax = plt.subplots(1, 1, figsize=(7, 4))
-        style: _PosteriorPlotStyle = {
-            "ci_prob": HDI_PROB,
-            "kind": "ribbon",
-            "ci_kind": "hdi",
-            "num_samples": 50,
-        }
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
         h_line, h_patch = plot_posterior_over_x(
             self.datapre.index,
             pre_pred,
@@ -968,7 +967,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         if self.treatment_end_time is not None:
             ax.axvline(x=self.treatment_end_time, ls=":", lw=1.5, color="k", zorder=1.5)
         ax.legend(
-            handles=[(h_line, h_patch)],
+            handles=[tuple(h_line) if isinstance(h_line, list) else (h_line, h_patch)],
             labels=["Prior counterfactual"],
             fontsize=LEGEND_FONT_SIZE,
         )

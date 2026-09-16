@@ -343,6 +343,7 @@ class RegressionKink(BaseExperiment[KinkResult]):
             data only — and requires :meth:`sample_prior_predictive`;
             ``"posterior"`` (default) renders the full results figure and
             requires :meth:`fit`.
+            Uncertainty styling and ``figsize`` apply to both groups; ``round_to`` only affects posterior annotations.
         round_to : int, optional
             Number of decimals used to round numerical results in the figure
             title (e.g. the Bayesian :math:`R^2`). Defaults to 2. Use
@@ -432,15 +433,15 @@ class RegressionKink(BaseExperiment[KinkResult]):
             (use matplotlib's default).
         """
         bundle = self._require_bundle(group)
-        if group == "prior":
-            return self._plot_prior_checks(bundle=bundle)
-
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
             "num_samples": num_samples,
         }
+        if group == "prior":
+            return self._plot_prior_checks(bundle=bundle, style=style, figsize=figsize)
+
         fig, ax = plt.subplots(figsize=figsize)
         # Plot raw data
         sns.scatterplot(
@@ -489,7 +490,13 @@ class RegressionKink(BaseExperiment[KinkResult]):
         )
         return fig, ax
 
-    def _plot_prior_checks(self, *, bundle: KinkResult) -> tuple[plt.Figure, plt.Axes]:
+    def _plot_prior_checks(
+        self,
+        *,
+        bundle: KinkResult,
+        style: _PosteriorPlotStyle,
+        figsize: tuple[float, float] | None,
+    ) -> tuple[plt.Figure, plt.Axes]:
         """Render the reduced prior-check figure.
 
         A prior check answers whether the prior-implied fit is plausible
@@ -497,13 +504,7 @@ class RegressionKink(BaseExperiment[KinkResult]):
         scatter plus the prior-implied fit line and band over the
         running-variable grid, with the kink point marked.
         """
-        style: _PosteriorPlotStyle = {
-            "ci_prob": HDI_PROB,
-            "kind": "ribbon",
-            "ci_kind": "hdi",
-            "num_samples": 50,
-        }
-        fig, ax = plt.subplots(figsize=(7, 4))
+        fig, ax = plt.subplots(figsize=figsize)
         sns.scatterplot(
             self.data,
             x=self.running_variable_name,
@@ -526,7 +527,7 @@ class RegressionKink(BaseExperiment[KinkResult]):
             label="treatment threshold",
         )
         ax.legend(
-            handles=[(h_line, h_patch)],
+            handles=[tuple(h_line) if isinstance(h_line, list) else (h_line, h_patch)],
             labels=["Prior fit"],
             fontsize=LEGEND_FONT_SIZE,
         )

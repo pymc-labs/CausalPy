@@ -458,6 +458,7 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
             (default) renders the full three-panel layout and requires
             :meth:`fit`. The two groups intentionally return different axes
             layouts.
+            Uncertainty styling and ``figsize`` apply to both groups; ``round_to`` only affects posterior annotations.
         round_to : int, optional
             Number of decimals used to round numerical results in the figure
             title. Defaults to 2. Use ``None`` to render raw numbers.
@@ -556,16 +557,16 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
             List of axes objects.
         """
         bundle = self._require_bundle(group)
-        if group == "prior":
-            return self._plot_prior_checks(bundle=bundle)
-
-        with_uncertainty = has_posterior_draws(bundle.predictions_pre)
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
             "num_samples": num_samples,
         }
+        if group == "prior":
+            return self._plot_prior_checks(bundle=bundle, style=style, figsize=figsize)
+
+        with_uncertainty = has_posterior_draws(bundle.predictions_pre)
         time_values = self.data[self.time_col].values
         y_pred_mu = bundle.predictions_pre.isel(treated_units=0)
         # No-intervention counterfactual over the FULL window, recovered
@@ -696,7 +697,11 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
         return fig, ax
 
     def _plot_prior_checks(
-        self, *, bundle: CausalResult
+        self,
+        *,
+        bundle: CausalResult,
+        style: _PosteriorPlotStyle,
+        figsize: tuple[float, float],
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Render the reduced prior-check panel set.
 
@@ -712,13 +717,7 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
         y_cf_mu = y_pred_mu - bundle.impact_pre
         time_values = self.data[self.time_col].values
 
-        fig, ax = plt.subplots(1, 1, figsize=(10, 4))
-        style: _PosteriorPlotStyle = {
-            "ci_prob": HDI_PROB,
-            "kind": "ribbon",
-            "ci_kind": "hdi",
-            "num_samples": 50,
-        }
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
         (h_obs,) = ax.plot(
             time_values,
             self.design["y"].isel(treated_units=0),
@@ -744,8 +743,12 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
         ax.legend(
             handles=[
                 h_obs,
-                (h_line_fit, h_patch_fit),
-                (h_line_cf, h_patch_cf),
+                tuple(h_line_fit)
+                if isinstance(h_line_fit, list)
+                else (h_line_fit, h_patch_fit),
+                tuple(h_line_cf)
+                if isinstance(h_line_cf, list)
+                else (h_line_cf, h_patch_cf),
             ],
             labels=["Observations", "Prior fitted", "Prior counterfactual"],
             fontsize=LEGEND_FONT_SIZE,

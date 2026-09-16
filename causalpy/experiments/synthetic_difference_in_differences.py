@@ -644,6 +644,7 @@ class SyntheticDifferenceInDifferences(
             :meth:`sample_prior_predictive`; ``"posterior"`` (default)
             renders the full three-panel layout and requires :meth:`fit`.
             The two groups intentionally return different axes layouts.
+            Uncertainty styling applies to both groups; ``round_to`` only affects posterior annotations.
         round_to : int, optional
             Number of decimals used to round the ATT in the title. Defaults to
             2. Use ``None`` for raw values.
@@ -746,15 +747,15 @@ class SyntheticDifferenceInDifferences(
             The three axes (counterfactual, impact, cumulative impact).
         """
         bundle = self._require_bundle(group)
-        if group == "prior":
-            return self._plot_prior_checks(bundle=bundle)
-
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
             "num_samples": num_samples,
         }
+        if group == "prior":
+            return self._plot_prior_checks(bundle=bundle, style=style)
+
         treated_unit = self.treated_units[0]
 
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
@@ -883,7 +884,10 @@ class SyntheticDifferenceInDifferences(
         return fig, ax
 
     def _plot_prior_checks(
-        self, *, bundle: SyntheticDifferenceInDifferencesResult
+        self,
+        *,
+        bundle: SyntheticDifferenceInDifferencesResult,
+        style: _PosteriorPlotStyle,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Render the reduced prior-check panel set.
 
@@ -897,12 +901,6 @@ class SyntheticDifferenceInDifferences(
         post_pred = bundle.predictions_post.sel(treated_units=treated_unit)
 
         fig, ax = plt.subplots(1, 1, figsize=(7, 4))
-        style: _PosteriorPlotStyle = {
-            "ci_prob": HDI_PROB,
-            "kind": "ribbon",
-            "ci_kind": "hdi",
-            "num_samples": 50,
-        }
 
         # Pre-intervention synthetic control fit
         h_line, h_patch = plot_posterior_over_x(
@@ -939,7 +937,7 @@ class SyntheticDifferenceInDifferences(
         treatment_time = self._convert_treatment_time_for_axis(ax, self.treatment_time)
         ax.axvline(x=treatment_time, ls="-", lw=3, color="r")
         ax.legend(
-            handles=[(h_line, h_patch)],
+            handles=[tuple(h_line) if isinstance(h_line, list) else (h_line, h_patch)],
             labels=["Prior counterfactual"],
         )
         ax.set(title="Prior predictive check")
