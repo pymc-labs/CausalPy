@@ -391,9 +391,10 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
         draws, then — when the backend supports a prior phase and no prior
         state exists yet — fills the prior groups and :attr:`prior_result` so
         ``idata`` is as complete as the historical eager fit produced. The
-        posterior runs FIRST because forward-sampling machinery conditions
-        through the graph's mutable data nodes; re-arming them for every
-        sampling call keeps each phase's draws computed from the right design.
+        posterior runs first to preserve the RNG stream of the historical
+        eager baseline and keep integration comparisons meaningful. Each
+        sampling phase re-arms the graph's mutable data nodes before drawing,
+        so design correctness does not depend on phase order.
         Standalone prior checks stay cheap: call
         :meth:`sample_prior_predictive` directly before :meth:`fit`.
         Re-running overwrites posterior state only and warns; prior state is
