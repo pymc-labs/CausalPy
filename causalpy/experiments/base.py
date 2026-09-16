@@ -187,17 +187,9 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
     def __init__(
         self, model: PyMCModel | RegressorMixin | PyMCForecastModel | None = None
     ) -> None:
-        adapter = make_model_adapter(
-            model,
-            default_model_class=self._default_model_class,
-            supports_bayes=self.supports_bayes,
-            supports_ols=self.supports_ols,
-            supports_pymc_forecast=self.supports_pymc_forecast,
-        )
-        self._model_backend = adapter
-        self.model = adapter.model
         self._result: ResultT | None = None
         self._prior_result: ResultT | None = None
+        self.model = model
 
     @property
     def model(self) -> PyMCModel | RegressorMixin | PyMCForecastModel:
@@ -212,13 +204,15 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
         return self._model_backend.model
 
     @model.setter
-    def model(self, value: PyMCModel | RegressorMixin | PyMCForecastModel) -> None:
+    def model(
+        self, value: PyMCModel | RegressorMixin | PyMCForecastModel | None
+    ) -> None:
         """Install *value* as the backend model and reset all lifecycle state.
 
         Parameters
         ----------
-        value : PyMCModel, RegressorMixin, or PyMCForecastModel
-            The new backend model instance.
+        value : PyMCModel, RegressorMixin, PyMCForecastModel, or None
+            The new backend model instance, or ``None`` to create the default.
 
         Raises
         ------
