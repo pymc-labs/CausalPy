@@ -86,11 +86,16 @@ class StaggeredDifferenceInDifferences(
 
     Attributes
     ----------
-    Aggregated estimates live on the result bundle exposed through
-    :attr:`result`: ``att_group_time`` and ``att_event_time`` DataFrames
-    (each including an ``identified`` column; non-identified cells have
-    ``NaN`` estimates), the raw counterfactual draws ``y_pred``, and the
-    ``hdi_prob`` used during effect aggregation.
+    result : StaggeredDifferenceInDifferencesResult
+        Posterior result bundle, available after :meth:`fit`. Its
+        ``att_group_time`` and ``att_event_time`` DataFrames contain aggregated
+        estimates and an ``identified`` column; non-identified cells have
+        ``NaN`` estimates. ``y_pred`` holds counterfactual predictions and
+        ``hdi_prob`` records the interval probability used during aggregation.
+    prior_result : StaggeredDifferenceInDifferencesResult
+        Prior result bundle, available after :meth:`sample_prior_predictive`
+        (or :meth:`fit` with a prior-capable model). It exposes the same fields
+        as ``result``, computed from prior rather than posterior draws.
     non_identified_periods_ : set
         Calendar periods with no untreated observations.
     non_identified_cohorts_ : set
