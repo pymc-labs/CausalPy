@@ -107,6 +107,7 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 | Topic | Detail |
 |-------|--------|
 | **Lazy fitting** | `__init__` never samples. Explicit `fit()` / `sample_prior_predictive()` run the phases; see Experiment Lifecycle. |
+| **HDI_PROB** | Project default is 0.94, not 0.95; CausalPy passes it explicitly rather than inheriting ArviZ defaults. |
 | **Formulas** | Patsy `dmatrices()` for design matrices; `build_design_matrices()` for counterfactual prediction. Bare datetime predictors are encoded as continuous elapsed days from the fitted origin; use `C(date)` for date fixed effects. `PiecewiseITS` uses `step()`/`ramp()` stateful transforms. |
 | **obs_ind** | All experiments set `data.index.name = "obs_ind"`. Canonical xarray/PyMC dimension name. |
 | **treated_units always 2D** | Even single-unit experiments use `treated_units=["unit_0"]`. Never pass 1D y to PyMC. |
