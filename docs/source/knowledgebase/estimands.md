@@ -1,3 +1,10 @@
+---
+myst:
+  html_meta:
+    description: "Causal estimands explained: ATE, ATT, LATE, and which estimand each quasi-experimental method in CausalPy identifies."
+"og:description": "Causal estimands explained: ATE, ATT, LATE, and which estimand each quasi-experimental method in CausalPy identifies."
+---
+
 # Estimands in CausalPy
 
 Understanding **what** a method estimates is just as important as knowing **how** to use it. This page introduces a framework for thinking about causal estimands and connects CausalPy's methods to this framework.

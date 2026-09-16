@@ -1,3 +1,10 @@
+---
+myst:
+  html_meta:
+    description: "How to report Bayesian causal effect estimates: posterior means, credible intervals (HDI), ROPE, and Bayesian tail probabilities."
+"og:description": "How to report Bayesian causal effect estimates: posterior means, credible intervals (HDI), ROPE, and Bayesian tail probabilities."
+---
+
 # Statistical Reporting in CausalPy
 
 This page explains the statistical concepts used in CausalPy's reporting layer. The reporting functions automatically compute and present statistics appropriate to your model type.

@@ -114,6 +114,7 @@ docs = [
     "nbconvert",
     "Pillow",
     "PyYAML",
+    "sphinxext-opengraph",
     "sphinxext-rediraffe",
 ]
 # The mypy pin here must match the one in the ``dev`` extra above; TOML cannot share the value, so bump both together.
