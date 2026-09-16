@@ -19,6 +19,7 @@ import numpy as np
 import pytest
 import xarray as xr
 
+from causalpy.experiments.model_adapter import PyMCModelAdapter
 from causalpy.pymc_models import (
     InstrumentalVariableRegression,
     LinearRegression,
@@ -177,4 +178,34 @@ def test_iv_predictive_optout_drops_previous_posterior_predictions(
     xr.testing.assert_identical(model.idata["prior"].to_dataset(), prior)
     xr.testing.assert_identical(
         model.idata["prior_predictive"].to_dataset(), prior_predictive
+    )
+
+
+def test_base_mapping_build_rejects_unsupported_model():
+    """Lazy adapter builds report unsupported mappings, not a missing attribute."""
+    data = {"unit": xr.DataArray([1.0], dims=["obs_ind"])}
+    with pytest.raises(TypeError, match="does not support mapping-valued inputs"):
+        PyMCModelAdapter(LinearRegression()).build(X=data, y=data)
+
+
+def test_custom_mapping_build_keeps_sampling_lazy(regression_inputs):
+    """Custom models can opt into the build hook without invoking eager fit."""
+
+    class MappingRegression(LinearRegression):
+        def build_mapping(self, X, y, coords=None):
+            self.build(X["unit"], y["unit"], coords=coords)
+
+        def fit_mapping(self, X, y, coords=None):
+            pytest.fail("A lazy build must not invoke the eager fit hook")
+
+    X, y = regression_inputs
+    model = MappingRegression(prior_sample_kwargs={"draws": 3, "random_seed": 7})
+    adapter = PyMCModelAdapter(model)
+    adapter.build(X={"unit": X}, y={"unit": y})
+    assert model.idata is None
+    adapter.sample_prior_predictive()
+    assert model.require_group("prior").sizes["draw"] == 3
+    np.testing.assert_allclose(
+        model.require_group("prior").mu,
+        np.einsum("ij,cdkj->cdik", X.values, model.require_group("prior").beta.values),
     )

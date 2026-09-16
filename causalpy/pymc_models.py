@@ -600,6 +600,30 @@ class PyMCModel(pm.Model):
         self.sample_prior_predictive()
         return self.sample_posterior()
 
+    def build_mapping(
+        self,
+        X: dict[str, xr.DataArray],
+        y: dict[str, xr.DataArray],
+        coords: dict[str, Any] | None = None,
+    ) -> None:
+        """Construct a specialized mapping-input graph without sampling.
+
+        Like :meth:`fit_mapping`, this hook requires an explicit subclass
+        implementation. Mapping models should validate their components and
+        delegate graph construction to :meth:`build`, without running their
+        eager ``fit_mapping`` implementation.
+
+        Parameters
+        ----------
+        X : dict of str to xarray.DataArray
+            Labeled predictor arrays for specialized model components.
+        y : dict of str to xarray.DataArray
+            Labeled target arrays for specialized model components.
+        coords : dict, optional
+            Coordinate metadata for the model.
+        """
+        raise TypeError(f"{type(self).__name__} does not support mapping-valued inputs")
+
     def fit_mapping(
         self,
         X: dict[str, xr.DataArray],
