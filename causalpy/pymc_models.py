@@ -1474,6 +1474,8 @@ class InstrumentalVariableRegression(PyMCModel):
         Keyword arguments forwarded to :func:`pymc.sample`.
     priors : dict, optional
         Prior configuration used by the model.
+    prior_sample_kwargs : dict, optional
+        Prior sampling configuration retained when cloning the model.
 
     Examples
     --------
@@ -1526,6 +1528,7 @@ class InstrumentalVariableRegression(PyMCModel):
         self,
         sample_kwargs: dict[str, Any] | None = None,
         priors: dict[str, Any] | None = None,
+        prior_sample_kwargs: dict[str, Any] | None = None,
     ) -> None:
         """Configure IV sampling defaults.
 
@@ -1535,12 +1538,16 @@ class InstrumentalVariableRegression(PyMCModel):
             Keyword arguments forwarded to :func:`pymc.sample`.
         priors : dict, optional
             Prior configuration passed to the base model.
+        prior_sample_kwargs : dict, optional
+            Prior sampling configuration retained when cloning the model.
         """
         kwargs = {} if sample_kwargs is None else dict(sample_kwargs)
         # TEMPORARY: avoid macOS arm64/Python 3.14 PyMC 6.0.1–6.2.0 IV fork-worker crashes (CausalPy #1044, https://github.com/pymc-devs/pymc/issues/8377); remove per #1067 only after the upstream fix is verified and the supported floor excludes this range.
         if kwargs.get("cores") is None:
             kwargs["cores"] = 1
-        super().__init__(sample_kwargs=kwargs, priors=priors)
+        super().__init__(
+            sample_kwargs=kwargs, priors=priors, prior_sample_kwargs=prior_sample_kwargs
+        )
 
     def build_model(  # type: ignore
         self,
