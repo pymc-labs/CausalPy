@@ -67,6 +67,20 @@ else:
         yield
 
 
+@pytest.fixture(scope="module")
+def real_pymc_sampling(mock_pymc_sample):
+    """Use genuine posterior draws regardless of which module ran first."""
+    import pymc as pm
+    import pymc.sampling.mcmc
+
+    patched = pm.sample
+    pm.sample = pymc.sampling.mcmc.sample
+    try:
+        yield
+    finally:
+        pm.sample = patched
+
+
 @pytest.fixture(scope="session")
 def did_data():
     """Synthetic difference-in-differences data."""

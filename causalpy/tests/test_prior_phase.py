@@ -36,19 +36,7 @@ from causalpy.data.simulate_data import (
 )
 from causalpy.experiments import model_adapter
 
-
-@pytest.fixture(scope="module", autouse=True)
-def real_pymc_sampling(mock_pymc_sample):
-    """Use genuine posterior draws regardless of which module ran first."""
-    import pymc as pm
-    import pymc.sampling.mcmc
-
-    patched = pm.sample
-    pm.sample = pymc.sampling.mcmc.sample
-    try:
-        yield
-    finally:
-        pm.sample = patched
+pytestmark = pytest.mark.usefixtures("real_pymc_sampling")
 
 
 SAMPLE_KWARGS = {

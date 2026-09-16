@@ -26,6 +26,8 @@ from causalpy.pymc_models import (
     PropensityScore,
 )
 
+pytestmark = pytest.mark.usefixtures("real_pymc_sampling")
+
 
 def test_iv_clone_preserves_configuration_without_sharing_sampler_settings():
     """Sensitivity checks can clone IV models and tune the clone independently."""
@@ -209,3 +211,57 @@ def test_custom_mapping_build_keeps_sampling_lazy(regression_inputs):
         model.require_group("prior").mu,
         np.einsum("ij,cdkj->cdik", X.values, model.require_group("prior").beta.values),
     )
+
+
+def test_sampler_overrides_rearm_training_data_and_isolate_draw_groups(
+    regression_inputs, small_sample_kwargs
+):
+    """Real draws honor per-call sizes and never mix prior and posterior values."""
+    X, y = regression_inputs
+    model = LinearRegression(
+        sample_kwargs=small_sample_kwargs,
+        prior_sample_kwargs={"draws": 5, "random_seed": 23},
+    )
+    model.build(X, y)
+    model.sample_posterior()
+    model.sample_prior_predictive()
+    assert model.require_group("posterior").sizes["draw"] == 2
+    assert model.require_group("prior").sizes["draw"] == 5
+    posterior = model.require_group("posterior").copy(deep=True)
+    posterior_predictive = (
+        model.idata["posterior_predictive"].to_dataset().copy(deep=True)
+    )
+
+    # Prediction leaves the graph armed with a different design and outcome
+    # placeholder. Prior resampling must restore both original training nodes.
+    model.predict(X.isel(obs_ind=slice(0, 2)) + 100, group="prior")
+    model.sample_prior_predictive(draws=7, random_seed=29)
+    prior = model.require_group("prior").copy(deep=True)
+    prior_predictive = model.idata["prior_predictive"].to_dataset().copy(deep=True)
+    assert prior.sizes["draw"] == 7
+    assert prior_predictive.sizes["draw"] == 7
+    assert prior.sizes["obs_ind"] == X.sizes["obs_ind"]
+    np.testing.assert_allclose(
+        prior.mu, np.einsum("ij,cdkj->cdik", X.values, prior.beta.values)
+    )
+    np.testing.assert_array_equal(model["y"].get_value(), y.values)
+    xr.testing.assert_identical(model.require_group("posterior"), posterior)
+    xr.testing.assert_identical(
+        model.idata["posterior_predictive"].to_dataset(), posterior_predictive
+    )
+
+    # Posterior overrides win over constructor settings for this call only,
+    # while the independent prior phase remains byte-for-byte unchanged.
+    model.sample_posterior(draws=3, random_seed=31)
+    posterior = model.require_group("posterior")
+    assert posterior.sizes["draw"] == 3
+    assert model.idata["posterior_predictive"].sizes["draw"] == 3
+    np.testing.assert_allclose(
+        posterior.mu, np.einsum("ij,cdkj->cdik", X.values, posterior.beta.values)
+    )
+    xr.testing.assert_identical(model.require_group("prior"), prior)
+    xr.testing.assert_identical(
+        model.idata["prior_predictive"].to_dataset(), prior_predictive
+    )
+    assert model.sample_kwargs["draws"] == 2
+    assert model.prior_sample_kwargs == {"draws": 5, "random_seed": 23}
