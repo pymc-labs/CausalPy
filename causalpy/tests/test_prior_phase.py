@@ -662,27 +662,6 @@ def test_rd_ols_effect_summary_via_helper(rd_data):
     assert isinstance(summary.text, str) and summary.text
 
 
-def test_rd_helper_requires_experiment_on_ols_path(fitted_rd):
-    """Singleton-draw bundles on the OLS path need the fitted experiment."""
-    import xarray as xr
-
-    from causalpy.reporting import _effect_summary_rd
-
-    n = fitted_rd.result.predictions.sizes["obs_ind"]
-    point = xr.DataArray(
-        np.zeros((1, 1, n)),
-        dims=("chain", "draw", "obs_ind"),
-        coords={"chain": [0], "draw": [0], "obs_ind": range(n)},
-    )
-    singleton = type(fitted_rd.result)(
-        predictions=point,
-        discontinuity_at_threshold=point.isel(obs_ind=0),
-        score=None,
-    )
-    with pytest.raises(TypeError, match="pass experiment=self"):
-        _effect_summary_rd(singleton)
-
-
 def test_extract_window_datetime_slice():
     """Slicing a datetime post index goes through the slice branch."""
     from causalpy.reporting import _extract_window

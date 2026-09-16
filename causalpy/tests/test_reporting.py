@@ -32,6 +32,52 @@ sample_kwargs = {
 }
 
 
+@pytest.mark.parametrize("experiment_name", ["rd", "did", "prepostnegd"])
+def test_single_draw_prior_summary_uses_bayesian_group(experiment_name, request):
+    """A prior-only singleton draw is summarized as Bayesian, never as OLS."""
+    model = cp.pymc_models.LinearRegression()
+    if experiment_name == "rd":
+        experiment = cp.RegressionDiscontinuity(
+            request.getfixturevalue("rd_data"),
+            formula="y ~ 1 + x + treated + x:treated",
+            treatment_threshold=0.5,
+            model=model,
+        )
+        effect_name = "discontinuity_at_threshold"
+        row = "discontinuity"
+    elif experiment_name == "did":
+        experiment = cp.DifferenceInDifferences(
+            request.getfixturevalue("did_data"),
+            formula="y ~ 1 + group * post_treatment",
+            time_variable_name="t",
+            group_variable_name="group",
+            model=model,
+        )
+        effect_name = "causal_impact"
+        row = "treatment_effect"
+    else:
+        experiment = cp.PrePostNEGD(
+            request.getfixturevalue("anova1_data"),
+            formula="post ~ 1 + C(group) + pre",
+            group_variable_name="group",
+            pretreatment_variable_name="pre",
+            model=model,
+        )
+        effect_name = "causal_impact"
+        row = "treatment_effect"
+
+    experiment.sample_prior_predictive(draws=1, random_seed=42)
+    effect = getattr(experiment.prior_result, effect_name).item()
+    summary = experiment.effect_summary(group="prior")
+
+    assert not experiment.is_fitted
+    np.testing.assert_allclose(
+        summary.table.loc[row, ["mean", "hdi_lower", "hdi_upper"]],
+        [effect, effect, effect],
+    )
+    assert summary.table.loc[row, "p_gt_0"] == float(effect > 0)
+
+
 @pytest.mark.integration
 def test_effect_summary_basic(mock_pymc_sample, its_data):
     """Test basic effect_summary functionality with ITS."""

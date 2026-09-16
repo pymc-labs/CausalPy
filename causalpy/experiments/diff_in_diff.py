@@ -781,7 +781,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             Object with .table (DataFrame) and .text (str) attributes
         """
         bundle = self._require_bundle(group)
-        if has_posterior_draws(bundle.scenario_control.prediction):
+        if self._model_backend.is_bayesian:
             return _effect_summary_did(
                 bundle,
                 direction=direction,

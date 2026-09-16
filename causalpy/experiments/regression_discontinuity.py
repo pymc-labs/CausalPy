@@ -51,10 +51,7 @@ from causalpy.plot_utils import (
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import (
     EffectSummary,
-    _compute_statistics_rd_ols,
     _effect_summary_rd,
-    _generate_prose_rd_ols,
-    _generate_table_rd_ols,
 )
 from causalpy.utils import (
     _as_scalar,
@@ -698,19 +695,11 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         """
         # Resolve the group's bundle once; helpers consume containers.
         bundle = self._require_bundle(group)
-        if has_posterior_draws(bundle.discontinuity_at_threshold):
-            summary = _effect_summary_rd(
-                bundle,
-                direction=direction,
-                alpha=alpha,
-                min_effect=min_effect,
-                group=group,
-            )
-        else:
-            # Point-estimate (OLS) backends: posterior-only path.
-            stats = _compute_statistics_rd_ols(self, alpha=alpha)
-            summary = EffectSummary(
-                table=_generate_table_rd_ols(stats),
-                text=_generate_prose_rd_ols(stats, alpha=alpha),
-            )
-        return summary
+        return _effect_summary_rd(
+            bundle,
+            experiment=self,
+            direction=direction,
+            alpha=alpha,
+            min_effect=min_effect,
+            group=group,
+        )

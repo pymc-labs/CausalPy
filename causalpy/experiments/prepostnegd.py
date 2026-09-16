@@ -31,7 +31,6 @@ from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
-    has_posterior_draws,
     plot_posterior_over_x,
     plot_scalar_posterior,
 )
@@ -569,7 +568,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             Object with .table (DataFrame) and .text (str) attributes
         """
         bundle = self._require_bundle(group)
-        if not has_posterior_draws(bundle.scenario_control.prediction):
+        if not self._model_backend.is_bayesian:
             # Unreachable via the constructor (supports_ols is False), but an
             # OLS backend must never reach the draw-based helper below.
             raise NotImplementedError("Not implemented for OLS model")

@@ -625,14 +625,14 @@ def _effect_summary_rd(
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
     alpha: float = 0.05,
     min_effect: float | None = None,
-    experiment=None,
+    experiment,
     group: Literal["prior", "posterior"] = "posterior",
 ):
     """Generate effect summary for Regression Discontinuity experiments."""
     discontinuity = bundle.discontinuity_at_threshold
 
-    if has_posterior_draws(discontinuity):
-        # Posterior draws present: use unified scalar functions
+    if experiment._model_backend.is_bayesian:
+        # Backend identity, not draw count, determines Bayesian uncertainty.
         hdi_prob = 1 - alpha
         stats = _compute_statistics_scalar(
             discontinuity, hdi_prob=hdi_prob, direction=direction, min_effect=min_effect
@@ -643,12 +643,6 @@ def _effect_summary_rd(
                 stats, "discontinuity at threshold", alpha=alpha, direction=direction
             ),
             group,
-        )
-    elif experiment is None:
-        raise TypeError(
-            "_effect_summary_rd() requires the fitted experiment on the OLS "
-            "path: pass experiment=self so residuals can be computed from "
-            "the fitted model."
         )
     else:
         # OLS model: calculate from model
