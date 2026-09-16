@@ -612,18 +612,6 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
         bundle = self._require_bundle(group)
-        if group == "prior":
-            return self._plot_prior_checks(bundle=bundle)
-
-        counterfactual_label = "Counterfactual"
-        with_uncertainty = has_posterior_draws(bundle.predictions_pre)
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
-        }
-
         # Get treated unit name - default to first unit if None
         treated_unit = (
             treated_unit if treated_unit is not None else self.treated_units[0]
@@ -633,6 +621,17 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             raise ValueError(
                 f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
             )
+        if group == "prior":
+            return self._plot_prior_checks(bundle=bundle, treated_unit=treated_unit)
+
+        counterfactual_label = "Counterfactual"
+        with_uncertainty = has_posterior_draws(bundle.predictions_pre)
+        style: _PosteriorPlotStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
 
         pre_pred = bundle.predictions_pre.sel(treated_units=treated_unit)
         post_pred = bundle.predictions_post.sel(treated_units=treated_unit)
@@ -820,7 +819,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         return fig, ax
 
     def _plot_prior_checks(
-        self, *, bundle: CausalResult
+        self, *, bundle: CausalResult, treated_unit: str
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Render the reduced prior-check panel set.
 
@@ -829,10 +828,10 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         The question a prior check answers is whether the prior counterfactual
         is plausible against the observed series — one panel suffices.
         """
-        pre_pred = bundle.predictions_pre.isel(treated_units=0)
-        post_pred = bundle.predictions_post.isel(treated_units=0)
-        pre_treated = self.pre_design["treated"].isel(treated_units=0)
-        post_treated = self.post_design["treated"].isel(treated_units=0)
+        pre_pred = bundle.predictions_pre.sel(treated_units=treated_unit)
+        post_pred = bundle.predictions_post.sel(treated_units=treated_unit)
+        pre_treated = self.pre_design["treated"].sel(treated_units=treated_unit)
+        post_treated = self.post_design["treated"].sel(treated_units=treated_unit)
 
         fig, ax = plt.subplots(1, 1, figsize=(7, 4))
         style: _PosteriorPlotStyle = {
