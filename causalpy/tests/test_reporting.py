@@ -2278,40 +2278,44 @@ def test_select_treated_unit_with_multiple_units():
     np.testing.assert_array_equal(result.values, np.array([3, 6, 9]))
 
 
-@pytest.mark.integration
-def test_extract_window_slice_with_step(mock_pymc_sample):
-    """Test _extract_window with slice having step parameter."""
-    # Create data with integer index
-    rng = np.random.default_rng(42)
-    n_pre = 50
-    n_post = 30
-    t_pre = np.arange(n_pre)
-    t_post = np.arange(n_pre, n_pre + n_post)
+@pytest.mark.parametrize(
+    "datetime_index, window, positions",
+    [
+        (False, slice(10, 16, 2), [0, 2, 4]),
+        (True, slice(None, None, 2), [0, 2, 4]),
+        (True, slice(0, 3), [0, 1, 2]),
+        (True, slice(-3, None), [3, 4, 5]),
+        (True, slice(None, None, -1), [5, 4, 3, 2, 1, 0]),
+        (True, slice("2020-02-01", "2020-06-01", 2), [1, 3, 5]),
+    ],
+)
+def test_extract_window_slice_with_step(datetime_index, window, positions):
+    """Window selection preserves bounds and steps in coordinates and values."""
+    import xarray as xr
 
-    y_pre = 10 + 0.5 * t_pre + rng.normal(0, 1, n_pre)
-    y_post = 15 + 0.5 * t_post + rng.normal(0, 1, n_post)
+    from causalpy.reporting import _extract_window
 
-    df = pd.DataFrame(
-        {
-            "y": np.concatenate([y_pre, y_post]),
-            "t": np.concatenate([t_pre, t_post]),
-        },
-        index=np.concatenate([t_pre, t_post]),
+    index = (
+        pd.date_range("2020-01-01", periods=6, freq="MS")
+        if datetime_index
+        else pd.Index(range(10, 16))
     )
+    impact = xr.DataArray(np.arange(6), dims=["obs_ind"], coords={"obs_ind": index})
+    selected, coordinates = _extract_window(impact, index, window)
+    pd.testing.assert_index_equal(coordinates, index[positions])
+    xr.testing.assert_equal(selected, impact.isel(obs_ind=positions))
 
-    treatment_time = 50
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
 
-    # Test with slice having step
-    stats = result.effect_summary(window=slice(50, 70, 2))  # Every other point
-    assert isinstance(stats, EffectSummary)
-    # Window should have approximately half the points
-    assert len(str(stats.text)) > 0
+def test_datetime_window_rejects_mixed_positional_and_label_bounds():
+    """Mixed slice semantics must not silently convert integers to timestamps."""
+    import xarray as xr
+
+    from causalpy.reporting import _extract_window
+
+    index = pd.date_range("2020-01-01", periods=6, freq="MS")
+    impact = xr.DataArray(np.arange(6), dims=["obs_ind"], coords={"obs_ind": index})
+    with pytest.raises(ValueError, match="cannot mix positional integer bounds"):
+        _extract_window(impact, index, slice(0, "2020-03-01"))
 
 
 @pytest.mark.integration

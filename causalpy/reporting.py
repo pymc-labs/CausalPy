@@ -709,7 +709,10 @@ def _extract_window(
     post_index : pd.Index
         Index of the post-treatment period (e.g. ``experiment.datapost.index``).
     window : str, tuple, or slice
-        Window specification: "post", (start, end) tuple, or slice object
+        Window specification: "post", inclusive (start, end) label tuple, or
+        slice. Datetime slices with integer bounds are positional (exclusive
+        stop); datetime label slices include both bounds. Slice steps are
+        applied after selection. Integer-index slices use an exclusive stop.
     treated_unit : str, optional
         For multi-unit experiments, specify which treated unit to analyze
 
@@ -745,20 +748,31 @@ def _extract_window(
             mask = (post_index >= start_val) & (post_index <= end_val)
             window_coords = post_index[mask]
     elif isinstance(window, slice):
-        # Handle slice object. Boolean-mask in both cases: pandas 3.x no
-        # longer accepts Timestamp/string-bounded slices on DatetimeIndex.
         if isinstance(post_index, pd.DatetimeIndex):
-            start = (
-                pd.Timestamp(window.start)
-                if window.start is not None
-                else post_index.min()
-            )
-            stop = (
-                pd.Timestamp(window.stop)
-                if window.stop is not None
-                else post_index.max()
-            )
-            window_coords = post_index[(post_index >= start) & (post_index <= stop)]
+            bounds = (window.start, window.stop)
+            if all(
+                bound is None or isinstance(bound, (int, np.integer))
+                for bound in bounds
+            ):
+                window_coords = post_index[window]
+            else:
+                if any(isinstance(bound, (int, np.integer)) for bound in bounds):
+                    raise ValueError(
+                        "Datetime window slices cannot mix positional integer bounds "
+                        "with datetime labels"
+                    )
+                start = (
+                    pd.Timestamp(window.start)
+                    if window.start is not None
+                    else post_index.min()
+                )
+                stop = (
+                    pd.Timestamp(window.stop)
+                    if window.stop is not None
+                    else post_index.max()
+                )
+                mask = (post_index >= start) & (post_index <= stop)
+                window_coords = post_index[mask][:: window.step]
         else:
             # For integer indices, convert slice to value-based filtering
             start_val = (
