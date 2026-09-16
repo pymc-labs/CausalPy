@@ -203,11 +203,11 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
     def model(self) -> PyMCModel | RegressorMixin | PyMCForecastModel:
         """The underlying model instance.
 
-        Assigning a new model is the documented reset: it swaps in the fresh
-        instance and clears ``idata``, ``result``, and ``prior_result``,
-        because graph identity *is* the model instance. Prior revision works
-        through assignment (``exp.model = Model(priors={...})``); there is no
-        ``set_priors()``.
+        Assigning a fresh model resets ``idata``, ``result``, and
+        ``prior_result`` because graph identity *is* the model instance.
+        Models already carrying inference data are rejected without changing
+        either experiment. Prior revision works through assignment
+        (``exp.model = Model(priors={...})``); there is no ``set_priors()``.
         """
         return self._model_backend.model
 
@@ -220,19 +220,31 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
         value : PyMCModel, RegressorMixin, or PyMCForecastModel
             The new backend model instance.
 
+        Raises
+        ------
+        ValueError
+            If the incoming model already carries inference data. Use a fresh
+            model instance so another experiment's draws are never reused or
+            cleared.
+
         Notes
         -----
-        The swap clears ``idata``, ``result``, and ``prior_result``: graph
-        identity is the model instance, so stale draws would be incoherent.
-        This assignment is the documented prior-revision mechanism.
+        A successful swap clears all experiment result bundles. Validation
+        happens before the swap, leaving existing state intact on failure.
         """
-        self._model_backend = make_model_adapter(
+        adapter = make_model_adapter(
             value,
             default_model_class=self._default_model_class,
             supports_bayes=self.supports_bayes,
             supports_ols=self.supports_ols,
             supports_pymc_forecast=self.supports_pymc_forecast,
         )
+        if adapter.idata is not None:
+            raise ValueError(
+                "The model already carries inference data. Pass a fresh model "
+                "instance instead of reusing a sampled model."
+            )
+        self._model_backend = adapter
         self._result = None
         self._prior_result = None
 

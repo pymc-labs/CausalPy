@@ -16,6 +16,7 @@
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
@@ -72,3 +73,22 @@ def test_auto_prior_failure_invalidates_posterior(
     assert "posterior" not in experiment.idata.children
     with pytest.raises(GroupNotSampledException):
         experiment.plot(show=False)
+
+
+def test_sampled_model_assignment_preserves_both_experiments(mock_pymc_sample):
+    original = make_its().fit()
+    incoming = make_its().fit()
+    model_before = original.model
+    result_before = original.result
+    prior_before = original.prior_result
+    original_draws = original.idata.copy(deep=True)
+    incoming_draws = incoming.idata.copy(deep=True)
+
+    with pytest.raises(ValueError, match="fresh model"):
+        original.model = incoming.model
+
+    assert original.model is model_before
+    assert original.result is result_before
+    assert original.prior_result is prior_before
+    xr.testing.assert_identical(original.idata, original_draws)
+    xr.testing.assert_identical(incoming.idata, incoming_draws)
