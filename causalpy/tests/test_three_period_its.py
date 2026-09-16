@@ -1119,19 +1119,22 @@ def test_get_plot_data_uses_hdi_for_skewed_impacts():
     assert not np.allclose(observed, eti)
 
 
-def test_comparison_period_summary_uses_frozen_hdi_bounds():
-    """Comparative-summary HDIs retain the ArviZ 0.22 94% baseline."""
+def test_comparison_period_summary_uses_shortest_hdi_bounds():
+    """Period means retain the shortest 94% interval, not equal-tailed bounds."""
     from types import SimpleNamespace
 
     import xarray as xr
 
     from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 
-    rng = np.random.default_rng(321)
+    # The unique shortest interval spans draws 0..94; the remaining five
+    # draws are distant outliers. Unequal observations exercise time averaging.
+    draws = np.concatenate([np.arange(95), np.arange(1000, 1005)])
 
-    def impact(coords):
+    def impact(coords, scale, offset):
+        means = scale * draws + offset
         return xr.DataArray(
-            rng.exponential(size=(2, 200, len(coords))),
+            np.stack([means - 1, means + 1], axis=-1)[None, ...],
             dims=["chain", "draw", "obs_ind"],
             coords={"obs_ind": coords},
         )
@@ -1139,21 +1142,21 @@ def test_comparison_period_summary_uses_frozen_hdi_bounds():
     from causalpy.experiments._results import CausalResult
 
     full_index = [0, 1, 2, 3]
-    # Same seeded draw sequence as the frozen expectations below: the
-    # intervention slice consumes the first draws, post the second.
-    full_impact = xr.concat([impact([0, 1]), impact([2, 3])], dim="obs_ind")
+    full_impact = xr.concat(
+        [impact([0, 1], 1, 0), impact([2, 3], 2, 10)], dim="obs_ind"
+    )
     bundle = CausalResult(
         predictions_pre=xr.DataArray(
-            np.zeros((2, 200, 0)),
+            np.zeros((1, 100, 0)),
             dims=["chain", "draw", "obs_ind"],
         ),
         predictions_post=xr.DataArray(
-            np.zeros((2, 200, len(full_index))),
+            np.zeros((1, 100, len(full_index))),
             dims=["chain", "draw", "obs_ind"],
             coords={"obs_ind": full_index},
         ),
         impact_pre=xr.DataArray(
-            np.zeros((2, 200, 0)),
+            np.zeros((1, 100, 0)),
             dims=["chain", "draw", "obs_ind"],
         ),
         impact_post=full_impact,
@@ -1167,12 +1170,18 @@ def test_comparison_period_summary_uses_frozen_hdi_bounds():
         stub, bundle
     )
 
-    InterruptedTimeSeries._comparison_period_summary(
+    summary = InterruptedTimeSeries._comparison_period_summary(
         stub,
         bundle,
         alpha=0.06,
         cumulative=False,
         relative=False,
+    )
+    np.testing.assert_allclose(
+        summary.table.loc[
+            ["intervention", "post_intervention"], ["hdi_lower", "hdi_upper"]
+        ],
+        [[0, 94], [10, 198]],
     )
 
 
