@@ -642,12 +642,12 @@ def test_public_forwarder_exemptions_are_narrowly_documented(
 
     documented_object = owner if qualified_name.endswith(".__init__") else callable_obj
     doc = inspect.getdoc(documented_object) or ""
-    # Every forwarder documents its kwargs contract under a uniform
-    # "Other Parameters" section (numpydoc); the per-entry fragments then
-    # pin each exact forwarding surface.
-    assert "Other Parameters" in doc, (
-        f"{qualified_name} must document its forwarding contract under an "
-        "'Other Parameters' section"
+    assert re.search(r"(?m)^Other Parameters\n-+\n", doc), (
+        f"{qualified_name} must document its forwarding contract under a "
+        "numpydoc 'Other Parameters' heading"
+    )
+    assert re.search(rf"(?m)^\*\*{re.escape(expected_parameter)}(?:\s*:.*)?$", doc), (
+        f"{qualified_name} must document **{expected_parameter} as a parameter"
     )
     for fragment in required_fragments:
         assert fragment in doc
