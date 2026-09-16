@@ -152,7 +152,7 @@ def test_maketables_stat_and_metadata_hooks(mock_pymc_sample):
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
     assert result.__maketables_stat__("N") is not None
     assert result.__maketables_stat__("unknown_key") is None

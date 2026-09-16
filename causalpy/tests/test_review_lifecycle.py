@@ -171,3 +171,52 @@ def test_unified_plot_stubs_accept_draw_group(experiment_class, group):
     experiment = object.__new__(experiment_class)
     with pytest.raises(NotImplementedError):
         experiment.plot(group=group)
+
+
+def test_maketables_stat_retains_unfitted_guard():
+    experiment = make_its()
+    with pytest.raises(GroupNotSampledException, match=r"fit\(\)"):
+        experiment.__maketables_stat__("r2")
+
+
+def test_maketables_etable_retains_lifecycle_error_and_fitted_values():
+    maketables = pytest.importorskip("maketables")
+    experiment = make_its(LinearRegression(fit_intercept=False))
+    with pytest.raises(GroupNotSampledException, match=r"fit\(\)"):
+        maketables.ETable(experiment)
+
+    experiment.fit()
+    table = maketables.ETable(experiment, coef_fmt="b:.2f")
+    assert table.df.loc[("coef", "t")].iloc[0] == "1.00"
+
+
+def test_maketables_extractor_leaves_other_plugins_untouched():
+    maketables = pytest.importorskip("maketables")
+
+    class OtherPlugin:
+        __maketables_coef_table__ = pd.DataFrame(
+            {"b": [2.5], "se": [0.1], "p": [0.01]}, index=["other"]
+        )
+
+    table = maketables.ETable(OtherPlugin(), coef_fmt="b:.2f", model_stats=[])
+    assert table.df.loc[("coef", "other")].iloc[0] == "2.50"
+
+
+def test_coefficient_adapter_works_without_optional_maketables(monkeypatch):
+    import builtins
+    import runpy
+
+    import causalpy.maketables_adapters as adapters
+
+    original_import = builtins.__import__
+
+    def without_maketables(name, *args, **kwargs):
+        if name == "maketables" or name.startswith("maketables."):
+            raise ImportError("maketables is not installed")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_maketables)
+    namespace = runpy.run_path(adapters.__file__)
+    experiment = make_its(LinearRegression(fit_intercept=False)).fit()
+    coefficients = namespace["coefficient_table"](experiment)
+    assert coefficients.loc["t", "b"] == pytest.approx(1)

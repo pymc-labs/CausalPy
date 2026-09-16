@@ -13,9 +13,9 @@
 #   limitations under the License.
 """Internal adapters for optional maketables plugin support.
 
-This module intentionally does not import ``maketables``. It provides an internal
-adapter interface that BaseExperiment can delegate to when external tools inspect
-``__maketables_*`` attributes/methods.
+When ``maketables`` is installed, register a type-based extractor so discovery
+does not evaluate draw-dependent properties. Actual extraction still uses the
+``BaseExperiment.__maketables_*`` hooks and propagates lifecycle errors.
 """
 
 from __future__ import annotations
@@ -28,7 +28,6 @@ import xarray as xr
 
 from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB
-from causalpy.custom_exceptions import GroupNotSampledException
 from causalpy.experiments._results import StaggeredDifferenceInDifferencesResult
 from causalpy.experiments.model_adapter import ModelAdapter
 
@@ -96,28 +95,23 @@ def _safe_observation_count(experiment: Any) -> int | None:
 
 
 def _result_bundle_or_none(experiment: Any) -> Any:
-    """Return the experiment's posterior bundle, or ``None`` if unavailable.
+    """Return a posterior bundle, tolerating only unsupported bundle APIs.
 
-    ``BaseExperiment.result`` raises
-    :class:`~causalpy.custom_exceptions.GroupNotSampledException` before a
-    fit and ``NotImplementedError`` on experiments without bundles.
-    ``AttributeError`` is also tolerated because these adapters accept any
-    duck-typed experiment-like object (see ``_Stub`` in
-    ``test_maketables_plugin.py``), which may not expose ``result`` at all;
-    all three mean "no score to report", never an error worth surfacing.
+    Missing posterior draws are an actionable lifecycle error and must
+    propagate. ``NotImplementedError`` covers experiments without result
+    bundles; ``AttributeError`` covers duck-typed objects without ``result``.
     """
     try:
         return experiment.result
-    except (GroupNotSampledException, NotImplementedError, AttributeError):
+    except (NotImplementedError, AttributeError):
         return None
 
 
 def _safe_r2_value(experiment: Any) -> float | None:
     """Best-effort model score extraction without assuming one score format.
 
-    The score lives on the experiment's posterior result bundle; experiments
-    that have not been fitted (or that do not support result bundles) yield
-    no score.
+    The score lives on the experiment's posterior result bundle. Experiments
+    without bundle support yield no score; unfitted experiments raise.
     """
     score_obj = getattr(_result_bundle_or_none(experiment), "score", None)
     if score_obj is None:
@@ -388,3 +382,22 @@ def get_maketables_adapter(model_adapter: ModelAdapter) -> MaketablesAdapter:
         return SklearnMaketablesAdapter()
     msg = f"Unsupported model backend for maketables export: {model_adapter.kind!r}"
     raise TypeError(msg)
+
+
+try:
+    from maketables.extractors import PluginExtractor, register_extractor
+except ImportError:
+    pass  # maketables is an optional dependency.
+else:
+
+    class _CausalPyExtractor(PluginExtractor):
+        """Recognize experiments without reading their draw-dependent hooks."""
+
+        def can_handle(self, model: Any) -> bool:
+            # Imported at discovery time to avoid the BaseExperiment ->
+            # maketables_adapters import cycle.
+            from causalpy.experiments.base import BaseExperiment
+
+            return isinstance(model, BaseExperiment)
+
+    register_extractor(_CausalPyExtractor())
