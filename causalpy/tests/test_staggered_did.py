@@ -179,6 +179,97 @@ def test_staggered_did_recovers_known_effect_sklearn():
         )
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize("backend", ["ols", "pymc"])
+def test_staggered_did_duplicate_index_matches_unique_index(backend):
+    """Long-panel row labels must not align or expand outcome/prediction rows."""
+    unique = (
+        generate_staggered_did_data(
+            n_units=6,
+            n_time_periods=6,
+            treatment_cohorts={2: 2, 4: 2},
+            seed=314,
+        )
+        .sample(frac=1, random_state=17)
+        .reset_index(drop=True)
+    )
+    unique["positive_y"] = np.exp(unique["y"] / 10)
+    duplicated = unique.copy()
+    duplicated.index = pd.Index(
+        [f"period-{time}" for time in duplicated["time"]], name="caller_index"
+    )
+    original = duplicated.copy(deep=True)
+
+    def fit(data):
+        if backend == "ols":
+            model = LinearRegression(fit_intercept=False)
+        else:
+            model = cp.pymc_models.LinearRegression(
+                sample_kwargs={
+                    "tune": 20,
+                    "draws": 20,
+                    "chains": 1,
+                    "cores": 1,
+                    "random_seed": 42,
+                    "progressbar": False,
+                    "compute_convergence_checks": False,
+                },
+                prior_sample_kwargs={"draws": 20, "random_seed": 42},
+            )
+        return cp.StaggeredDifferenceInDifferences(
+            data,
+            formula="np.log(positive_y) ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            model=model,
+        ).fit()
+
+    expected = fit(unique)
+    actual = fit(duplicated)
+    groups = ["posterior", "prior"] if backend == "pymc" else ["posterior"]
+    for group in groups:
+        expected_bundle = (
+            expected.result if group == "posterior" else expected.prior_result
+        )
+        actual_bundle = actual.result if group == "posterior" else actual.prior_result
+        pd.testing.assert_frame_equal(
+            actual_bundle.att_group_time, expected_bundle.att_group_time
+        )
+        pd.testing.assert_frame_equal(
+            actual_bundle.att_event_time, expected_bundle.att_event_time
+        )
+        # A non-default interval exercises the Bayesian recomputation path,
+        # including pre-treatment observations with repeated index labels.
+        pd.testing.assert_frame_equal(
+            actual.get_plot_data(group=group, hdi_prob=0.8),
+            expected.get_plot_data(group=group, hdi_prob=0.8),
+        )
+        pd.testing.assert_frame_equal(
+            actual._get_group_time_placebo_data(bundle=actual_bundle),
+            expected._get_group_time_placebo_data(bundle=expected_bundle),
+        )
+
+    figures = []
+    try:
+        expected_fig, expected_axes = expected.plot_group_time(show=False)
+        figures.append(expected_fig)
+        actual_fig, actual_axes = actual.plot_group_time(show=False)
+        figures.append(actual_fig)
+        for actual_ax, expected_ax in zip(actual_axes, expected_axes, strict=True):
+            for actual_line, expected_line in zip(
+                actual_ax.lines, expected_ax.lines, strict=True
+            ):
+                np.testing.assert_allclose(
+                    actual_line.get_xydata(), expected_line.get_xydata()
+                )
+    finally:
+        for figure in figures:
+            plt.close(figure)
+
+    pd.testing.assert_frame_equal(duplicated, original)
+    pd.testing.assert_index_equal(actual.data.index, original.index.rename("obs_ind"))
+
+
 # ==============================================================================
 # Unit Tests - Input Validation
 # ==============================================================================

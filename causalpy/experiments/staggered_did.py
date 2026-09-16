@@ -500,9 +500,7 @@ class StaggeredDifferenceInDifferences(
 
         # Also get pre-treatment data for eventually-treated units (placebo
         # check): G != never_treated_value AND event_time < 0
-        is_eventually_treated = self.data["G"] != self.never_treated_value
-        is_pre_treatment = self.data["event_time"] < 0
-        pretreatment_data = self.data[is_eventually_treated & is_pre_treatment].copy()
+        pretreatment_data = self.data.iloc[self._get_pretreatment_positions()].copy()
 
         # The two helpers compute genuinely different statistics: HDI bounds
         # need posterior draws, sample dispersion needs only point residuals.
@@ -579,13 +577,11 @@ class StaggeredDifferenceInDifferences(
         # --- Group-time ATTs (post-treatment only) ---
         gt_groups = treated_data.groupby(
             ["G", self.time_variable_name], observed=True
-        ).groups
+        ).indices
         att_gt_rows: list[dict] = []
-        for key, idx in gt_groups.items():
+        for key, positions in gt_groups.items():
             g_val = key[0]
             t_val = key[1]
-            # Find positions in treated_indices
-            positions = [np.where(treated_indices == i)[0][0] for i in idx]
             tau_gt = tau_draws_treated[:, :, positions].mean(axis=2)
             att_gt_rows.append(
                 {
@@ -603,10 +599,7 @@ class StaggeredDifferenceInDifferences(
 
         # Pre-treatment placebo effects (event_time < 0)
         if len(pretreatment_data) > 0:
-            pretreat_indices = pretreatment_data.index.values
-            pretreat_idx_positions = np.array(
-                [np.where(self.data.index == idx)[0][0] for idx in pretreat_indices]
-            )
+            pretreat_idx_positions = self._get_pretreatment_positions()
             tau_draws_pretreat = tau_draws_all[:, :, pretreat_idx_positions]
             event_time_pretreat = np.asarray(pretreatment_data["event_time"].values)
 
@@ -691,11 +684,9 @@ class StaggeredDifferenceInDifferences(
         # Point counterfactual predictions per observation; treatment
         # effects are observed outcome minus prediction.
         y_hat0 = y_pred.mean(dim=["chain", "draw"]).isel(treated_units=0).values
-        treated_positions = self.data.index.get_indexer(treated_data.index)
-        treated_data["tau_hat"] = (
-            self._observed_outcome.loc[treated_data.index].to_numpy()
-            - y_hat0[treated_positions]
-        )
+        treated_positions = np.flatnonzero(~self.data["_is_untreated"].to_numpy())
+        tau_hat = self._observed_outcome.to_numpy() - y_hat0
+        treated_data["tau_hat"] = tau_hat[treated_positions]
 
         # --- Group-time ATTs (post-treatment only) ---
         att_gt = (
@@ -711,11 +702,7 @@ class StaggeredDifferenceInDifferences(
         # --- Event-time ATTs (including pre-treatment placebo) ---
         # Compute tau_hat for pre-treatment observations (residuals)
         if len(pretreatment_data) > 0:
-            positions = self.data.index.get_indexer(pretreatment_data.index)
-            pretreatment_data["tau_hat"] = (
-                self._observed_outcome.loc[pretreatment_data.index].to_numpy()
-                - y_hat0[positions]
-            )
+            pretreatment_data["tau_hat"] = tau_hat[self._get_pretreatment_positions()]
 
         # Combine pre-treatment and post-treatment for event-time aggregation
         event_data = pd.concat([pretreatment_data, treated_data], ignore_index=True)
@@ -1274,17 +1261,18 @@ class StaggeredDifferenceInDifferences(
             return self._get_group_time_placebo_data_bayesian(bundle=bundle)
         return self._get_group_time_placebo_data_ols(bundle=bundle)
 
-    def _get_group_time_placebo_observations(self) -> pd.DataFrame:
-        """Return pre-treatment observations for eventually-treated units."""
+    def _get_pretreatment_positions(self) -> np.ndarray:
+        """Return row positions of pre-treatment, eventually-treated observations."""
         is_eventually_treated = self.data["G"] != self.never_treated_value
         is_pre_treatment = self.data["event_time"] < 0
-        return self.data[is_eventually_treated & is_pre_treatment].copy()
+        return np.flatnonzero((is_eventually_treated & is_pre_treatment).to_numpy())
 
     def _get_group_time_placebo_data_bayesian(
         self, *, bundle: StaggeredDifferenceInDifferencesResult
     ) -> pd.DataFrame:
         """Return Bayesian cohort-time placebo estimates with HDI bounds."""
-        pretreatment_data = self._get_group_time_placebo_observations()
+        pretreatment_positions = self._get_pretreatment_positions()
+        pretreatment_data = self.data.iloc[pretreatment_positions]
         if len(pretreatment_data) == 0:
             return pd.DataFrame()
 
@@ -1293,17 +1281,18 @@ class StaggeredDifferenceInDifferences(
         upper_pct = (1 + hdi_prob) / 2 * 100
         mu_draws = bundle.y_pred.isel(treated_units=0)
         y_observed = self._observed_outcome.to_numpy()
-        tau_draws_all = y_observed - mu_draws.values
+        tau_draws_pretreat = (y_observed - mu_draws.values)[
+            :, :, pretreatment_positions
+        ]
 
         att_gt_rows: list[dict[str, Any]] = []
         gt_groups = pretreatment_data.groupby(
             ["G", self.time_variable_name], observed=True
-        ).groups
-        for key, idx in gt_groups.items():
+        ).indices
+        for key, positions in gt_groups.items():
             g_val = key[0]
             t_val = key[1]
-            positions = [np.where(self.data.index == i)[0][0] for i in idx]
-            tau_gt = tau_draws_all[:, :, positions].mean(axis=2)
+            tau_gt = tau_draws_pretreat[:, :, positions].mean(axis=2)
             att_gt_rows.append(
                 {
                     "cohort": g_val,
@@ -1321,15 +1310,14 @@ class StaggeredDifferenceInDifferences(
         self, *, bundle: StaggeredDifferenceInDifferencesResult
     ) -> pd.DataFrame:
         """Return OLS cohort-time placebo residual estimates."""
-        pretreatment_data = self._get_group_time_placebo_observations()
+        positions = self._get_pretreatment_positions()
+        pretreatment_data = self.data.iloc[positions].copy()
         if len(pretreatment_data) == 0:
             return pd.DataFrame()
 
         y_hat0 = bundle.y_pred.mean(dim=["chain", "draw"]).isel(treated_units=0).values
-        positions = self.data.index.get_indexer(pretreatment_data.index)
         pretreatment_data["tau_hat"] = (
-            self._observed_outcome.loc[pretreatment_data.index].to_numpy()
-            - y_hat0[positions]
+            self._observed_outcome.to_numpy()[positions] - y_hat0[positions]
         )
         att_gt = (
             pretreatment_data.groupby(["G", self.time_variable_name], observed=True)[
@@ -1529,15 +1517,10 @@ class StaggeredDifferenceInDifferences(
         att_et_rows: list[dict] = []
 
         # Pre-treatment placebo effects (eventually-treated units, event_time < 0)
-        is_eventually_treated = self.data["G"] != self.never_treated_value
-        is_pre_treatment = self.data["event_time"] < 0
-        pretreatment_data = self.data[is_eventually_treated & is_pre_treatment].copy()
+        pretreat_idx_positions = self._get_pretreatment_positions()
+        pretreatment_data = self.data.iloc[pretreat_idx_positions]
 
         if len(pretreatment_data) > 0:
-            pretreat_indices = pretreatment_data.index.values
-            pretreat_idx_positions = np.array(
-                [np.where(self.data.index == idx)[0][0] for idx in pretreat_indices]
-            )
             tau_draws_pretreat = tau_draws_all[:, :, pretreat_idx_positions]
             event_time_pretreat = np.asarray(pretreatment_data["event_time"].values)
 
