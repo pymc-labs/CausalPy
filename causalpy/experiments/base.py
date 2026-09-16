@@ -259,7 +259,7 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
     @property
     def is_built(self) -> bool:
         """Whether the model graph / fit design exists (no draws implied)."""
-        return self._model_backend.is_built or self.is_fitted
+        return self._model_backend.is_built
 
     @property
     def is_fitted(self) -> bool:
