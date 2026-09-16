@@ -437,10 +437,9 @@ def test_generate_report_swallows_only_not_implemented():
 
 
 @pytest.mark.integration
-def test_iv_build_is_noop_and_refit_warns_and_overwrites():
-    """IV.build() returns self untouched; refitting warns then overwrites."""
+def test_iv_refit_warns_and_overwrites():
+    """Refitting IV warns then replaces the previous posterior."""
     iv_exp = cp.InstrumentalVariable(**_iv_inputs())
-    assert iv_exp.build() is iv_exp
 
     iv_exp.fit()
     n_draws = iv_exp.idata["posterior"].sizes["draw"]

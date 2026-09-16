@@ -219,20 +219,29 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
         self.instrument_variable_name = t.design_info.column_names[0]
 
     def build(self) -> Self:
-        """No-op: IV constructs its graph lazily inside the model's fit.
+        """Construct the IV graph without sampling.
 
-        Deliberate exception to the "graph inspectable after ``build()``
-        acceptance criterion (issue #1092): ``InstrumentalVariableRegression``
-        fuses graph construction into its fused ``fit`` entry point, so
-        ``pm.model_to_graphviz(exp.model)`` only becomes meaningful *after*
-        :meth:`fit`. Splitting that model into separate build/sample phases
-        is tracked as the IV prior-capability follow-up on issue #1092.
+        The graph and merged priors are inspectable before fitting. Repeated
+        calls validate the original design and preserve any posterior-predictive
+        sampler chosen by a previous fit.
 
         Returns
         -------
         Self
             The same experiment, for chaining.
         """
+        self.model.build(
+            X=self.X,
+            Z=self.Z,
+            y=self.y,
+            t=self.t,
+            coords=self.coords,
+            priors=self.priors,
+            ppc_sampler=getattr(self.model, "_iv_ppc_sampler", None),
+            vs_prior_type=self.vs_prior_type,
+            vs_hyperparams=self.vs_hyperparams,
+            binary_treatment=self.binary_treatment,
+        )
         return self
 
     def fit(self, **kwargs: Any) -> Self:

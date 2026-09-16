@@ -852,3 +852,30 @@ def test_iv_has_prior_predictive_requires_capability(monkeypatch, iv_data):
     # must still keep the predicate False.
     monkeypatch.setattr(type(backend), "has_prior", property(lambda self: True))
     assert exp.has_prior_predictive is False
+
+
+def test_iv_build_constructs_inspectable_graph_without_sampling(iv_data):
+    experiment = cp.InstrumentalVariable(**iv_data)
+    assert experiment.build() is experiment
+    assert experiment.is_built
+    assert experiment.idata is None
+    assert {"beta_t", "beta_z", "likelihood"} <= {
+        variable.name for variable in experiment.model.basic_RVs
+    }
+    assert "likelihood" in pm.model_to_graphviz(experiment.model).source
+    assert experiment.build() is experiment
+
+
+def test_iv_build_preserves_predictive_sampler(
+    iv_data, sample_kwargs, mock_pymc_sample
+):
+    experiment = cp.InstrumentalVariable(
+        **iv_data,
+        model=cp.pymc_models.InstrumentalVariableRegression(
+            sample_kwargs=sample_kwargs
+        ),
+    ).fit(ppc_sampler="pymc")
+    experiment.build()
+    with pytest.warns(UserWarning, match="Refitting"):
+        experiment.fit(draws=8)
+    assert experiment.idata["posterior_predictive"].sizes["draw"] == 8
