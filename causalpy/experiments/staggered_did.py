@@ -792,13 +792,13 @@ class StaggeredDifferenceInDifferences(
             renders the event study and requires :meth:`fit`. The two
             groups intentionally return different axes layouts.
         hdi_prob : float, optional
-            Probability mass of the highest density interval shown by the
-            error bars. Unlike most other CausalPy experiments, ``hdi_prob``
-            for staggered DiD is fixed during effect aggregation and stored
-            on the result bundle. If supplied here, the value must match
-            ``result.hdi_prob``; otherwise a :class:`ValueError` is raised.
-            Pass ``None`` (the default) to plot using the stored value.
-            Ignored for OLS models and for ``group="prior"``.
+            Probability mass of the highest density interval. Posterior
+            event-study bounds are fixed during effect aggregation, so an
+            explicit value must match ``result.hdi_prob`` or a
+            :class:`ValueError` is raised. For ``group="prior"``, this controls
+            the counterfactual band computed at plot time. Pass ``None`` (the
+            default) to use the selected bundle's stored value. Ignored for
+            OLS models.
         figsize : tuple of (float, float)
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``(10, 6)``.
@@ -848,13 +848,13 @@ class StaggeredDifferenceInDifferences(
             :meth:`sample_prior_predictive`; ``"posterior"`` (default)
             renders the cohort trajectories and requires :meth:`fit`.
         hdi_prob : float, optional
-            Probability mass of the highest density interval shown by the
-            uncertainty bands. As with :meth:`plot`, Bayesian ``ATT(g, t)``
-            bounds are computed during effect aggregation and stored on the
-            result bundle. If supplied here, the value must match
-            ``result.hdi_prob``; otherwise a :class:`ValueError` is raised.
-            Pass ``None`` (the default) to plot using the stored value.
-            Ignored for OLS models and for ``group="prior"``.
+            Probability mass of the highest density interval. Posterior
+            ``ATT(g, t)`` bounds are fixed during effect aggregation, so an
+            explicit value must match ``result.hdi_prob`` or a
+            :class:`ValueError` is raised. For ``group="prior"``, this controls
+            the counterfactual band computed at plot time. Pass ``None`` (the
+            default) to use the selected bundle's stored value. Ignored for
+            OLS models.
         layout : {"facet", "overlay"}
             Plot layout. ``"facet"`` draws one row per cohort and
             ``"overlay"`` draws all cohorts on a single axes. Defaults to
@@ -873,7 +873,8 @@ class StaggeredDifferenceInDifferences(
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to a height scaled by
             the number of cohorts when ``layout="facet"`` and ``(10, 6)``
-            when ``layout="overlay"``.
+            when ``layout="overlay"``. For ``group="prior"``, the default
+            single-panel figure size is ``(10, 4)``.
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
@@ -928,14 +929,12 @@ class StaggeredDifferenceInDifferences(
             via :meth:`_plot_prior_checks`; ``"posterior"`` renders the
             event study or cohort trajectories.
         hdi_prob : float, optional
-            Probability mass of the highest density interval shown by the
-            error bars. Unlike most other CausalPy experiments, ``hdi_prob``
-            for ``StaggeredDiD`` is fixed during effect aggregation (see
-            ``_aggregate_effects_bayesian``) and stored on the result
-            bundle. If supplied here, the value must match
-            ``bundle.hdi_prob``; otherwise a :class:`ValueError` is raised.
-            Pass ``None`` (the default) to plot using the stored value.
-            Ignored for point-estimate models.
+            Probability mass of the highest density interval. Posterior
+            effect bounds are fixed during aggregation: an explicit value
+            must match ``bundle.hdi_prob`` or a :class:`ValueError` is raised.
+            Prior counterfactual bands are computed at plot time with the
+            requested probability. Pass ``None`` (the default) to use the
+            selected bundle's stored value. Ignored for point-estimate models.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(10, 6)``.
         view : {"event_time", "group_time"}, optional
@@ -959,7 +958,9 @@ class StaggeredDifferenceInDifferences(
         """
         bundle = self._require_bundle(group)
         if group == "prior":
-            return self._plot_prior_checks(bundle=bundle)
+            return self._plot_prior_checks(
+                bundle=bundle, hdi_prob=hdi_prob, figsize=figsize
+            )
 
         with_uncertainty = has_posterior_draws(bundle.y_pred)
         if with_uncertainty and hdi_prob is not None and hdi_prob != bundle.hdi_prob:
@@ -1101,7 +1102,11 @@ class StaggeredDifferenceInDifferences(
         return fig, [ax]
 
     def _plot_prior_checks(
-        self, *, bundle: StaggeredDifferenceInDifferencesResult
+        self,
+        *,
+        bundle: StaggeredDifferenceInDifferencesResult,
+        hdi_prob: float | None,
+        figsize: tuple[float, float] | None,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Render the reduced prior-check panel set.
 
@@ -1131,12 +1136,14 @@ class StaggeredDifferenceInDifferences(
             dim="obs_ind",
         )
 
-        fig, ax = plt.subplots(1, 1, figsize=(10, 4))
+        fig, ax = plt.subplots(
+            1, 1, figsize=figsize if figsize is not None else (10, 4)
+        )
         h_line, h_patch = plot_posterior_over_x(
             periods,
             agg_pred,
             ax=ax,
-            ci_prob=bundle.hdi_prob,
+            ci_prob=bundle.hdi_prob if hdi_prob is None else hdi_prob,
             kind="ribbon",
             ci_kind="hdi",
             plot_hdi_kwargs={"color": "C0"},

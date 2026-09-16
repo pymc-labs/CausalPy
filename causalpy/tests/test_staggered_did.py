@@ -270,6 +270,45 @@ def test_staggered_did_duplicate_index_matches_unique_index(backend):
     pd.testing.assert_index_equal(actual.data.index, original.index.rename("obs_ind"))
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize("plot_method", ["plot", "plot_group_time"])
+def test_staggered_did_prior_plot_honors_probability_and_figsize(plot_method):
+    """Prior bands and figure dimensions respond to the public plot controls."""
+    data = generate_staggered_did_data(
+        n_units=4, n_time_periods=5, treatment_cohorts={2: 2}, seed=42
+    )
+    experiment = cp.StaggeredDifferenceInDifferences(
+        data,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        model=cp.pymc_models.LinearRegression(
+            prior_sample_kwargs={"draws": 40, "random_seed": 42}
+        ),
+    )
+    experiment.sample_prior_predictive()
+
+    widths = []
+    for probability in (0.9, 0.3):
+        fig, axes = getattr(experiment, plot_method)(
+            group="prior", hdi_prob=probability, figsize=(3, 2), show=False
+        )
+        try:
+            fig.canvas.draw()
+            np.testing.assert_allclose(fig.get_size_inches(), (3, 2))
+            vertices = axes[0].collections[0].get_paths()[0].vertices
+            widths.append(
+                [
+                    np.ptp(vertices[vertices[:, 0] == period, 1])
+                    for period in sorted(data["time"].unique())
+                ]
+            )
+        finally:
+            plt.close(fig)
+
+    assert np.all(np.asarray(widths[1]) < np.asarray(widths[0]))
+
+
 # ==============================================================================
 # Unit Tests - Input Validation
 # ==============================================================================
