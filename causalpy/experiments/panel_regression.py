@@ -688,25 +688,31 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         plt.tight_layout()
         return fig, ax
 
-    def get_plot_data(self) -> pd.DataFrame:
-        """Get plot data with fitted values.
+    def get_plot_data(
+        self, *, group: Literal["prior", "posterior"] = "posterior"
+    ) -> pd.DataFrame:
+        """Get plot data with expected values from the requested draw group.
 
         Bayesian models additionally return ``y_fitted_lower`` /
         ``y_fitted_upper`` 95% credible-interval columns.
 
+        Parameters
+        ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group used for expected outcomes and credible intervals.
 
         Returns
         -------
         pd.DataFrame
             DataFrame with fitted values (and credible intervals when the
-            model carries posterior draws).
+            model carries draws).
 
         Raises
         ------
         GroupNotSampledException
-            If the experiment has not been fitted yet.
+            If the requested draw group has not been sampled.
         """
-        self._resolve_group("posterior")
+        self._resolve_group(group)
         columns: dict[str, Any] = {"y_actual": self.design["y"].values.flatten()}
 
         # ponytail: PanelRegression stores no canonical prediction container,
@@ -714,8 +720,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         # (idata mu vs sklearn predict); the branch is isolated here. Upgrade
         # path: store canonical in-sample predictions at fit time.
         if self._model_backend.is_bayesian:
-            # PanelRegression is posterior-only; no group= phase.
-            mu = self._model_backend.require_idata().posterior["mu"]
+            mu = self._model_backend.require_idata()[group]["mu"]
             columns["y_fitted"] = mu.mean(dim=["chain", "draw"]).values.flatten()
             columns["y_fitted_lower"] = mu.quantile(
                 0.025, dim=["chain", "draw"]
@@ -836,6 +841,8 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         show_mean: bool = True,
         hdi_prob: float = HDI_PROB,
         interval_type: Literal["mean", "predictive"] = "mean",
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
     ) -> tuple[plt.Figure, np.ndarray]:
         """Plot unit-level time series trajectories.
 
@@ -863,9 +870,12 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         interval_type : {"mean", "predictive"}, default="mean"
             Which uncertainty interval to show for Bayesian models:
 
-            - "mean": HDI of posterior ``mu`` (uncertainty in expected value)
-            - "predictive": HDI of posterior predictive ``y_hat``
+            - "mean": HDI of the requested group's ``mu``
+              (uncertainty in expected value)
+            - "predictive": HDI of its predictive ``y_hat``
               (includes observation noise)
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group used for expected and predictive trajectories.
 
         Returns
         -------
@@ -877,9 +887,9 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         ValueError
             If time_fe_variable is not provided (cannot plot trajectories without time)
         GroupNotSampledException
-            If the experiment has not been fitted yet.
+            If the requested draw group has not been sampled.
         """
-        self._resolve_group("posterior")
+        self._resolve_group(group)
         if self.time_fe_variable is None:
             raise ValueError(
                 "plot_trajectories() requires time_fe_variable to be specified"
@@ -892,23 +902,19 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         # prediction container; see the ponytail note in get_plot_data).
         is_bayesian = self._model_backend.is_bayesian
 
-        # Get posterior for HDI plotting (Bayesian only)
+        # Get requested draws for HDI plotting (Bayesian only).
         if is_bayesian:
-            # PanelRegression is posterior-only; no group= phase.
             idata = self._model_backend.require_idata()
-            mu = idata.posterior["mu"]
+            mu = idata[group]["mu"]
             if interval_type == "predictive":
-                posterior_predictive = getattr(
-                    idata,
-                    "posterior_predictive",
-                    None,
-                )
-                if posterior_predictive is None or "y_hat" not in posterior_predictive:
+                predictive_group = f"{group}_predictive"
+                predictive = idata.children.get(predictive_group)
+                if predictive is None or "y_hat" not in predictive:
                     raise ValueError(
-                        "interval_type='predictive' requires posterior predictive "
-                        "samples ('y_hat') in idata.posterior_predictive"
+                        f"interval_type='predictive' requires {group} predictive "
+                        f"samples ('y_hat') in idata.{predictive_group}"
                     )
-                interval_source = posterior_predictive["y_hat"]
+                interval_source = predictive["y_hat"]
             else:
                 interval_source = mu
 
@@ -985,7 +991,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
             )
 
             if is_bayesian:
-                # Get posterior mu for this unit's observations in sorted order
+                # Get the requested mu draws for this unit's sorted observations.
                 # Squeeze out treated_units dimension
                 unit_mu = mu.isel(obs_ind=sorted_obs_indices.tolist())
                 if "treated_units" in unit_mu.dims:
@@ -1002,7 +1008,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
                     unit_mu.mean(dim=["chain", "draw"]).values,
                     "s--",
                     color="C1",
-                    label="Fitted",
+                    label="Prior expected" if group == "prior" else "Fitted",
                     alpha=0.7,
                 )
 

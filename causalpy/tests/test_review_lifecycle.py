@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Regression coverage for lazy lifecycle review findings."""
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
@@ -125,3 +126,38 @@ def test_constructor_rejects_sampled_panel_model(phase, mock_pymc_sample):
     with pytest.raises(ValueError, match="fresh model"):
         make_panel(first.model, outcome_shift=100)
     xr.testing.assert_identical(first.idata, draws_before)
+
+
+def test_panel_prior_consumers_use_requested_draws(mock_pymc_sample):
+    experiment = make_panel().sample_prior_predictive()
+    prior_expected = (
+        experiment.idata["prior"]["mu"].mean(("chain", "draw")).values.ravel()
+    )
+    np.testing.assert_allclose(
+        experiment.get_plot_data(group="prior")["y_fitted"], prior_expected
+    )
+    for interval_type in ("mean", "predictive"):
+        figure, axes = experiment.plot_trajectories(
+            units=["a"], group="prior", interval_type=interval_type
+        )
+        np.testing.assert_allclose(axes[0].lines[1].get_ydata(), prior_expected[:6])
+        plt.close(figure)
+
+    experiment.fit()
+    np.testing.assert_allclose(
+        experiment.get_plot_data(group="prior")["y_fitted"], prior_expected
+    )
+    posterior_expected = (
+        experiment.idata["posterior"]["mu"].mean(("chain", "draw")).values.ravel()
+    )
+    np.testing.assert_allclose(
+        experiment.get_plot_data()["y_fitted"], posterior_expected
+    )
+
+
+def test_panel_prior_consumers_reject_unsupported_backend():
+    experiment = make_panel(LinearRegression(fit_intercept=False))
+    with pytest.raises(PriorPredictiveNotSupportedException):
+        experiment.get_plot_data(group="prior")
+    with pytest.raises(PriorPredictiveNotSupportedException):
+        experiment.plot_trajectories(group="prior")
