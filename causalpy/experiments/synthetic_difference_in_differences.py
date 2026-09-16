@@ -972,10 +972,7 @@ class SyntheticDifferenceInDifferences(
         ----------
         group : {"prior", "posterior"}, default "posterior"
             Which draw group to summarize. ``"prior"`` requires
-            :meth:`sample_prior_predictive` and produces prior-appropriate
-            prose — under a neutral prior, ``P(effect > 0)`` should sit near
-            0.5, so a tail probability far from 0.5 flags a design-matrix or
-            prior-specification problem rather than a causal finding.
+            :meth:`sample_prior_predictive` and produces a plausibility check: assess whether the prior synthetic trajectory has a credible level and variation relative to the observed treated series. Prior impacts subtract that trajectory from observed outcomes, so their sign probabilities need not be near 0.5; they depend on the control panel and the ``omega0`` prior, rather than a symmetric contrast.
             ``"posterior"`` requires :meth:`fit`.
         window : str, tuple, or slice, default="post"
             Time window for analysis.
