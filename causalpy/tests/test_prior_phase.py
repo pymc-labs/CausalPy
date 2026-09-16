@@ -36,6 +36,21 @@ from causalpy.data.simulate_data import (
 )
 from causalpy.experiments import model_adapter
 
+
+@pytest.fixture(scope="module", autouse=True)
+def real_pymc_sampling(mock_pymc_sample):
+    """Use genuine posterior draws regardless of which module ran first."""
+    import pymc as pm
+    import pymc.sampling.mcmc
+
+    patched = pm.sample
+    pm.sample = pymc.sampling.mcmc.sample
+    try:
+        yield
+    finally:
+        pm.sample = patched
+
+
 SAMPLE_KWARGS = {
     "draws": 20,
     "tune": 20,
@@ -53,7 +68,7 @@ def _linear_model():
 
 
 # ---------------------------------------------------------------------------
-# Fitted-experiment factories: one tiny fit each, shared session-wide by the
+# Fitted-experiment factories: one tiny fit each, shared within this module by the
 # parametrized assertions below.
 # ---------------------------------------------------------------------------
 
@@ -167,52 +182,52 @@ def _make_staggered():
     ).fit()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def fitted_its(its_data):
     return _make_its(its_data)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def fitted_its_three_period(its_data):
     return _make_its_three_period(its_data)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def fitted_sc(sc_data):
     return _make_sc(sc_data)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def fitted_piecewise():
     return _make_piecewise()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def fitted_did(did_data):
     return _make_did(did_data)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def fitted_prepostnegd(anova1_data):
     return _make_prepostnegd(anova1_data)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def fitted_rd(rd_data):
     return _make_rd(rd_data)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def fitted_rk():
     return _make_rk()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def fitted_sdid():
     return _make_sdid()
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def fitted_staggered():
     return _make_staggered()
 
