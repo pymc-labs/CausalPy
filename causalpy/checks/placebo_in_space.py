@@ -22,12 +22,24 @@ spurious effects appear.
 from __future__ import annotations
 
 import logging
+import warnings
 from typing import Any, TypedDict
 
 import numpy as np
 import pandas as pd
 import xarray as xr
+from matplotlib.figure import Figure
+from plotnine import (
+    aes,
+    coord_flip,
+    geom_col,
+    geom_hline,
+    ggplot,
+    labs,
+    scale_fill_manual,
+)
 
+from causalpy.checks._plot_helpers import draw_figure
 from causalpy.checks.base import CheckResult, clone_model
 from causalpy.experiments._results import CausalResult
 from causalpy.experiments.base import BaseExperiment
@@ -35,6 +47,14 @@ from causalpy.experiments.synthetic_control import SyntheticControl
 from causalpy.pipeline import PipelineContext
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_PLOT_TITLE = "Placebo-in-space: post/pre MSPE ratio"
+_DEFAULT_FIGSIZE = (7.0, 8.0)
+_PLACEBO_ROLE = "Placebo"
+_TREATED_ROLE = "Treated"
+# Grey for the donor pool, red for the actual treated unit, matching the palette the other check figures use.
+_PLACEBO_COLOUR = "#94a3b8"
+_TREATED_COLOUR = "#E24A33"
 
 
 class _MspeStats(TypedDict):
@@ -75,6 +95,9 @@ def _mspe_stats(result: CausalResult, unit: str) -> _MspeStats:
       a unit that ranks above every unit with a defined finite ratio;
     - zero over zero is ``nan``, an undefined ratio;
     - a non-finite pre- or post-period error is ``nan`` as well.
+
+    :meth:`PlaceboInSpace.plot_mspe_ratio` keeps ``inf`` in the permutation
+    reference set and drops only ``nan``; the figure itself can draw neither.
     """
     pre = _mspe(result.impact_pre.sel(treated_units=unit))
     post = _mspe(result.impact_post.sel(treated_units=unit))
@@ -87,6 +110,29 @@ def _mspe_stats(result: CausalResult, unit: str) -> _MspeStats:
     else:
         ratio = float("nan")
     return {"pre_mspe": pre, "post_mspe": post, "mspe_ratio": ratio}
+
+
+def _permutation_pvalue(ratios: np.ndarray, treated_ratio: float) -> float:
+    """Share of units whose MSPE ratio is at least the treated unit's.
+
+    ``ratios`` is the reference set for one treated unit: the placebo units
+    plus that unit itself, and no other treated unit.  Because the treated
+    unit is in its own reference set, the smallest attainable value is
+    ``1 / n_units``: with a donor pool of 19, a treated unit that ranks
+    first gives ``p = 0.05``.
+    """
+    return float(np.mean(ratios >= treated_ratio))
+
+
+def _warn_left_out(units: pd.Series, kind: str, reason: str) -> None:
+    """Warn that ``units``, whose MSPE ratio is of ``kind``, are not drawn."""
+    warnings.warn(
+        f"Leaving {len(units)} unit(s) with {kind} post/pre MSPE ratio out of "
+        f"the figure: {', '.join(units.astype(str))}. {reason}",
+        UserWarning,
+        # Point at the caller of plot_mspe_ratio, not at this helper.
+        stacklevel=3,
+    )
 
 
 class PlaceboInSpace:
@@ -226,7 +272,8 @@ class PlaceboInSpace:
         if table is not None and "mspe_ratio" in table.columns:
             text += (
                 " The post/pre MSPE ratio in the `mspe_ratio` column is the "
-                "statistic to rank units by."
+                "statistic to rank units by; see "
+                "`PlaceboInSpace.plot_mspe_ratio`."
             )
 
         return CheckResult(
@@ -236,3 +283,159 @@ class PlaceboInSpace:
             text=text,
             metadata={"baseline_mspe": baseline_mspe},
         )
+
+    @staticmethod
+    def plot_mspe_ratio(
+        check_result: CheckResult,
+        *,
+        title: str = _DEFAULT_PLOT_TITLE,
+        figsize: tuple[float, float] = _DEFAULT_FIGSIZE,
+        show_pvalue: bool = True,
+    ) -> Figure:
+        """Plot the post/pre MSPE ratio of every unit, treated unit highlighted.
+
+        This is the inferential view recommended in Abadie, Diamond and
+        Hainmueller (2010), section 3.4 and Figure 8, and the ratio is theirs
+        unchanged:
+        mean squared prediction error after the intervention over mean squared
+        prediction error before it.  A unit with a large ratio tracks its
+        synthetic control closely before the intervention and diverges after
+        it, which is the signature of either a real effect or a structural
+        break.  Inference is the permutation rank of the treated unit's ratio
+        within the donor distribution, so the treated unit standing out is the
+        evidence, not the size of the ratio on its own.
+
+        Prefer this over the raw effect sizes in ``check_result.table``: a
+        donor whose pre-period fit is poor can show a large post-period
+        divergence without that meaning anything, and dividing by the
+        pre-period MSPE is what removes it.
+
+        With several actual treated units, each one is ranked against the
+        placebo units and itself only, never against the other treated units,
+        so one treated unit's p-value does not depend on the others.
+
+        The reference set is every unit whose ratio is defined, infinite ratios
+        included, so the reported p-value is conditional on the units that
+        fitted successfully.  Units with an undefined ratio, meaning a failed
+        placebo fit or a zero post-period error over a zero pre-period error,
+        are outside both the figure and the p-value.  Infinite ratios count
+        towards the p-value but cannot be drawn on a finite axis, so they are
+        left out of the bars alone.
+
+        Parameters
+        ----------
+        check_result : CheckResult
+            Result returned by :meth:`run`.  The bars come from its
+            ``mspe_ratio`` column and the highlighted unit(s) from
+            ``metadata["baseline_mspe"]``.
+        title : str, default "Placebo-in-space: post/pre MSPE ratio"
+            Figure suptitle.
+        figsize : tuple of float, default (7, 8)
+            Size of the drawn figure, in inches.
+        show_pvalue : bool, default True
+            Whether to report the permutation p-value of each treated unit as
+            a subtitle.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            The drawn figure.
+
+        Raises
+        ------
+        ValueError
+            If the result carries no ``mspe_ratio`` column, or if no unit has a
+            finite ratio to draw.
+
+        Warns
+        -----
+        UserWarning
+            If any unit has an undefined ratio, or a defined but infinite one,
+            and so cannot be drawn, or if ``show_pvalue`` is set but the
+            result has no treated-unit baseline to rank.
+        """
+        table = check_result.table
+        if table is None or "mspe_ratio" not in table.columns:
+            raise ValueError(
+                "Cannot plot: the CheckResult has no 'mspe_ratio' column. "
+                "This happens when no placebo fit succeeded, or when the "
+                "result predates MSPE reporting."
+            )
+
+        baseline: dict[str, _MspeStats] = check_result.metadata.get("baseline_mspe", {})
+        frame = pd.DataFrame(
+            {
+                "unit": list(table["placebo_treated"]) + list(baseline),
+                "mspe_ratio": list(table["mspe_ratio"])
+                + [stats["mspe_ratio"] for stats in baseline.values()],
+                "role": [_PLACEBO_ROLE] * len(table) + [_TREATED_ROLE] * len(baseline),
+            }
+        )
+
+        # An undefined ratio means the unit was never ranked at all: it is out of the figure and out of every reference set below.
+        defined = frame["mspe_ratio"].notna()
+        if not defined.all():
+            _warn_left_out(
+                frame.loc[~defined, "unit"],
+                "an undefined",
+                "A failed placebo fit, or a zero post-period error over a zero "
+                "pre-period error, leaves the ratio undefined. These units are "
+                "outside the reported p-value as well.",
+            )
+            frame = frame[defined]
+
+        # An infinite ratio is ranked, it just cannot be drawn on a finite axis, so it leaves the bars and stays in the reference set.
+        finite = np.isfinite(frame["mspe_ratio"])
+        if not finite.all():
+            _warn_left_out(
+                frame.loc[~finite, "unit"],
+                "an infinite",
+                "A positive post-period error over a zero pre-period error is a "
+                "defined infinite ratio, so these units still count towards the "
+                "reported p-value.",
+            )
+        plot_frame = frame[finite].copy()
+        if plot_frame.empty:
+            raise ValueError("Cannot plot: no unit has a finite MSPE ratio.")
+
+        # Ordering by ratio is what makes the figure readable: the treated unit's rank is the inference, so it has to be visible at a glance.
+        order = plot_frame.sort_values("mspe_ratio")["unit"].tolist()
+        plot_frame["unit"] = pd.Categorical(plot_frame["unit"], categories=order)
+
+        subtitle = ""
+        if show_pvalue and not baseline:
+            warnings.warn(
+                "No p-value to show: the result has no treated-unit MSPE in "
+                "metadata['baseline_mspe'], for example because the experiment "
+                "was not fitted.",
+                UserWarning,
+                stacklevel=2,
+            )
+        if show_pvalue and baseline:
+            # Reference set: the placebo pool plus the one treated unit ranked.
+            placebo_ratios = frame.loc[
+                frame["role"] == _PLACEBO_ROLE, "mspe_ratio"
+            ].to_numpy()
+            treated = frame[frame["role"] == _TREATED_ROLE]
+            annotations = [
+                f"{unit}: p = "
+                f"{_permutation_pvalue(np.append(placebo_ratios, ratio), ratio):.3f}"
+                for unit, ratio in zip(
+                    treated["unit"], treated["mspe_ratio"], strict=True
+                )
+            ]
+            if annotations:
+                # Named for Abadie, Diamond and Hainmueller because the effect-summary columns already carry an unrelated `p_value`, and the two sit side by side in the same CheckResult.
+                subtitle = "ADH permutation p-value. " + ", ".join(annotations)
+
+        plot = (
+            ggplot(plot_frame, aes("unit", "mspe_ratio", fill="role"))
+            + geom_col()
+            + geom_hline(yintercept=1.0, linetype="dashed", alpha=0.5)
+            + coord_flip()
+            + scale_fill_manual(
+                values={_PLACEBO_ROLE: _PLACEBO_COLOUR, _TREATED_ROLE: _TREATED_COLOUR}
+            )
+            + labs(x="", y="Post/pre MSPE ratio", fill="", subtitle=subtitle)
+        )
+        return draw_figure(plot, title, figsize)

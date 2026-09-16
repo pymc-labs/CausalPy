@@ -15,12 +15,18 @@
 
 from __future__ import annotations
 
+import warnings
 from unittest.mock import patch
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+from matplotlib.collections import PolyCollection
+from matplotlib.colors import to_hex
+from matplotlib.figure import Figure
+from matplotlib.text import Text
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
@@ -29,8 +35,11 @@ from causalpy.checks.base import Check, CheckResult
 from causalpy.checks.leave_one_out import LeaveOneOut
 from causalpy.checks.mccrary import McCraryDensityTest
 from causalpy.checks.placebo_in_space import (
+    _PLACEBO_COLOUR,
+    _TREATED_COLOUR,
     PlaceboInSpace,
     _mspe_stats,
+    _permutation_pvalue,
 )
 from causalpy.experiments._results import CausalResult
 from causalpy.experiments.regression_discontinuity import RegressionDiscontinuity
@@ -599,8 +608,58 @@ def _fake_result(pre_residuals, post_residuals, unit="actual"):
     )
 
 
+def _make_mspe_check_result(
+    ratios=(1.0, 2.0, 3.0),
+    baseline_ratios=None,
+    units=("a", "b", "c"),
+):
+    """Build a CheckResult with hand-set ratios, skipping the model fits.
+
+    ``baseline_ratios`` maps each actual treated unit to its ratio; pass an
+    empty mapping for a result with no treated baseline at all.
+    """
+    if baseline_ratios is None:
+        baseline_ratios = {"actual": 5.0}
+    baseline_mspe = {
+        unit: {"pre_mspe": 1.0, "post_mspe": ratio, "mspe_ratio": ratio}
+        for unit, ratio in baseline_ratios.items()
+    }
+    return CheckResult(
+        check_name="PlaceboInSpace",
+        table=pd.DataFrame(
+            {
+                "placebo_treated": list(units),
+                "pre_mspe": [1.0] * len(units),
+                "post_mspe": list(ratios),
+                "mspe_ratio": list(ratios),
+            }
+        ),
+        metadata={"baseline_mspe": baseline_mspe},
+    )
+
+
+def _figure_texts(fig):
+    """Collect every rendered string in a figure.
+
+    plotnine draws the subtitle and legend labels as free text artists rather
+    than through ``Axes.set_title``, so assertions read them from here.
+    """
+    return [text.get_text() for text in fig.findobj(Text)]
+
+
+def _bar_colours(fig):
+    """Face colours of the drawn bars, in plotted order."""
+    poly = next(c for c in fig.axes[0].collections if isinstance(c, PolyCollection))
+    return [to_hex(colour) for colour in poly.get_facecolor()]
+
+
+def _tick_labels(fig):
+    """Unit labels on the bar axis, in plotted order."""
+    return [t.get_text() for t in fig.axes[0].get_yticklabels()]
+
+
 class TestPlaceboInSpaceMspeRatio:
-    """Tests for the MSPE columns."""
+    """Tests for the MSPE columns and the ratio plot."""
 
     def test_mspe_stats_matches_hand_computed_errors(self):
         """The reported quantity is the MSPE ratio, not its square root.
@@ -706,3 +765,237 @@ class TestPlaceboInSpaceMspeRatio:
             pytest.raises(KeyError, match="broken"),
         ):
             _run_placebo_in_space()
+
+    def test_plot_accepts_a_treated_unit_listed_as_control(self):
+        """The unit appears once, as treated, so the plot does not see it twice."""
+        fig = PlaceboInSpace.plot_mspe_ratio(_run_placebo_in_space(treated=("a",)))
+
+        assert sorted(_tick_labels(fig)) == ["a", "b", "c"]
+        plt.close(fig)
+
+    def test_plot_accepts_the_result_of_a_real_run(self):
+        """run() and the plot agree on the contract, without a hand-built result.
+
+        Every other plot test builds its ``CheckResult`` directly, so this is
+        the only one that would catch the two drifting apart.
+        """
+        result = _run_placebo_in_space()
+
+        fig = PlaceboInSpace.plot_mspe_ratio(result)
+
+        labels = _tick_labels(fig)
+        assert set(labels) == {"a", "b", "c", "actual"}
+        treated_position = labels.index("actual")
+        assert _bar_colours(fig)[treated_position] == _TREATED_COLOUR.lower()
+        plt.close(fig)
+
+    def test_plot_drops_a_unit_whose_placebo_fit_failed(self):
+        """A failed fit leaves a NaN ratio, which the plot drops with a warning.
+
+        The undefined path has two origins and they reach it differently: a
+        zero post-period error over a zero pre-period error is set to NaN by
+        ``_mspe_stats``, while a failed fit never gets there and leaves the
+        column NaN.
+        """
+        result = _run_placebo_in_space(failing=("b",))
+
+        failed = result.table.loc[
+            result.table["error"].notna(), "placebo_treated"
+        ].tolist()
+        assert failed == ["b"]
+        assert result.table["mspe_ratio"].isna().sum() == 1
+
+        with pytest.warns(UserWarning, match="failed placebo fit"):
+            fig = PlaceboInSpace.plot_mspe_ratio(result)
+
+        assert "b" not in _tick_labels(fig)
+        plt.close(fig)
+
+    def test_plot_returns_a_figure(self):
+        """The plot draws one bar per unit, treated included."""
+        fig = PlaceboInSpace.plot_mspe_ratio(_make_mspe_check_result())
+
+        assert isinstance(fig, Figure)
+        assert _tick_labels(fig) == [
+            "a",
+            "b",
+            "c",
+            "actual",
+        ]
+        plt.close(fig)
+
+    def test_plot_controls_are_keyword_only(self):
+        """Only the result is positional, so the controls stay reorderable."""
+        with pytest.raises(TypeError):
+            PlaceboInSpace.plot_mspe_ratio(_make_mspe_check_result(), "California")
+
+    def test_plot_honours_title_and_figsize(self):
+        """The caller's title and size survive plotnine's layout pass."""
+        fig = PlaceboInSpace.plot_mspe_ratio(
+            _make_mspe_check_result(), title="California", figsize=(5.0, 4.0)
+        )
+
+        assert tuple(fig.get_size_inches()) == (5.0, 4.0)
+        assert "California" in _figure_texts(fig)
+        plt.close(fig)
+
+    def test_plot_highlights_the_treated_unit(self):
+        """The treated bar is drawn in the highlight colour, donors are not."""
+        fig = PlaceboInSpace.plot_mspe_ratio(_make_mspe_check_result())
+
+        colours = _bar_colours(fig)
+        # Bars follow the ratio ordering, so the treated unit (5.0) is last.
+        assert colours[-1] == _TREATED_COLOUR.lower()
+        assert set(colours[:-1]) == {_PLACEBO_COLOUR.lower()}
+        plt.close(fig)
+
+    def test_plot_orders_units_by_ratio(self):
+        """A treated unit in the middle of the pack is drawn there."""
+        fig = PlaceboInSpace.plot_mspe_ratio(
+            _make_mspe_check_result(ratios=(1.0, 4.0, 6.0))
+        )
+
+        assert _tick_labels(fig) == [
+            "a",
+            "b",
+            "actual",
+            "c",
+        ]
+        plt.close(fig)
+
+    def test_plot_reports_the_permutation_pvalue(self):
+        """The treated unit ranking first over 3 donors gives p = 1/4."""
+        fig = PlaceboInSpace.plot_mspe_ratio(_make_mspe_check_result())
+
+        assert any("actual: p = 0.250" in text for text in _figure_texts(fig))
+        plt.close(fig)
+
+    def test_plot_ranks_each_treated_unit_against_itself_only(self):
+        """One treated unit's p-value does not depend on the others.
+
+        With placebo ratios 1, 2 and 3, each of the two treated units beats
+        every donor, so both must report 1/4.  Ranking them within the whole
+        plotted frame instead would give 0.4 and 0.2.
+        """
+        result = _make_mspe_check_result(baseline_ratios={"first": 5.0, "second": 10.0})
+
+        fig = PlaceboInSpace.plot_mspe_ratio(result)
+
+        texts = _figure_texts(fig)
+        assert any("first: p = 0.250" in text for text in texts)
+        assert any("second: p = 0.250" in text for text in texts)
+        plt.close(fig)
+
+    def test_plot_skips_a_treated_unit_with_an_undefined_ratio(self):
+        """An unrankable treated unit gets no annotation, the other still does."""
+        result = _make_mspe_check_result(
+            baseline_ratios={"good": 5.0, "broken": np.nan}
+        )
+
+        with pytest.warns(UserWarning, match="undefined"):
+            fig = PlaceboInSpace.plot_mspe_ratio(result)
+
+        texts = _figure_texts(fig)
+        assert any("good: p = 0.250" in text for text in texts)
+        assert not any("broken: p" in text for text in texts)
+        plt.close(fig)
+
+    def test_plot_can_suppress_the_pvalue(self):
+        """``show_pvalue=False`` drops the annotation."""
+        fig = PlaceboInSpace.plot_mspe_ratio(
+            _make_mspe_check_result(), show_pvalue=False
+        )
+
+        assert not any("p = " in text for text in _figure_texts(fig))
+        plt.close(fig)
+
+    def test_plot_omits_the_pvalue_without_a_baseline(self):
+        """With no treated baseline the donors still plot, and the missing p-value warns."""
+        with pytest.warns(UserWarning, match="No p-value to show"):
+            fig = PlaceboInSpace.plot_mspe_ratio(
+                _make_mspe_check_result(baseline_ratios={})
+            )
+
+        assert _tick_labels(fig) == ["a", "b", "c"]
+        assert not any("p = " in text for text in _figure_texts(fig))
+        plt.close(fig)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            fig = PlaceboInSpace.plot_mspe_ratio(
+                _make_mspe_check_result(baseline_ratios={}), show_pvalue=False
+            )
+        plt.close(fig)
+
+    def test_plot_keeps_infinite_ratios_in_the_pvalue(self):
+        """An undrawable donor still outranks the treated unit.
+
+        Donor ``b`` has a defined infinite ratio, so the reference set is
+        1, inf, 3 plus the treated 5: two of the four are at least as large,
+        giving p = 0.5.  Dropping it from the denominator would report 1/3.
+        """
+        result = _make_mspe_check_result(ratios=(1.0, np.inf, 3.0))
+
+        with pytest.warns(UserWarning, match="infinite") as record:
+            fig = PlaceboInSpace.plot_mspe_ratio(result)
+
+        # The warning points at this call, not at the helper that raised it.
+        assert record[0].filename == __file__
+        assert _tick_labels(fig) == ["a", "c", "actual"]
+        assert any("actual: p = 0.500" in text for text in _figure_texts(fig))
+        plt.close(fig)
+
+    def test_plot_excludes_undefined_ratios_from_the_pvalue(self):
+        """An unranked donor leaves the denominator as well as the figure.
+
+        Donor ``b`` has an undefined ratio, so the reference set is 1 and 3
+        plus the treated 5, giving p = 1/3.
+        """
+        result = _make_mspe_check_result(ratios=(1.0, np.nan, 3.0))
+
+        with pytest.warns(UserWarning, match="undefined"):
+            fig = PlaceboInSpace.plot_mspe_ratio(result)
+
+        assert _tick_labels(fig) == [
+            "a",
+            "c",
+            "actual",
+        ]
+        assert any("actual: p = 0.333" in text for text in _figure_texts(fig))
+        plt.close(fig)
+
+    @pytest.mark.parametrize(
+        "table",
+        [
+            pytest.param(
+                pd.DataFrame({"placebo_treated": ["a"], "mean": [1.0]}),
+                id="predates-mspe-reporting",
+            ),
+            pytest.param(None, id="no-table"),
+        ],
+    )
+    def test_plot_raises_without_mspe_columns(self, table):
+        """A result with no `mspe_ratio` column has nothing to plot."""
+        result = CheckResult(check_name="PlaceboInSpace", table=table)
+
+        with pytest.raises(ValueError, match="mspe_ratio"):
+            PlaceboInSpace.plot_mspe_ratio(result)
+
+    def test_plot_raises_when_no_ratio_can_be_drawn(self):
+        """Dropping every unit leaves an empty figure, so raise instead."""
+        result = _make_mspe_check_result(
+            ratios=(np.inf, np.inf), baseline_ratios={}, units=("a", "b")
+        )
+
+        with (
+            pytest.warns(UserWarning, match="infinite"),
+            pytest.raises(ValueError, match="finite MSPE ratio"),
+        ):
+            PlaceboInSpace.plot_mspe_ratio(result)
+
+    def test_permutation_pvalue_counts_ties(self):
+        """Units tied with the treated unit count against it."""
+        ratios = np.array([1.0, 2.0, 2.0, 4.0])
+
+        assert _permutation_pvalue(ratios, 2.0) == pytest.approx(0.75)
+        assert _permutation_pvalue(ratios, 4.0) == pytest.approx(0.25)
