@@ -20,6 +20,7 @@ from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
 from causalpy.custom_exceptions import (
+    GroupNotSampledException,
     PriorPredictiveNotSupportedException,
 )
 
@@ -49,3 +50,25 @@ def test_unsupported_prior_reads_raise_capability_error(reader):
             _ = experiment.prior_result
         else:
             getattr(experiment, reader)(group="prior")
+
+
+@pytest.mark.parametrize("bundleless", [False, True])
+def test_auto_prior_failure_invalidates_posterior(
+    monkeypatch, bundleless, mock_pymc_sample
+):
+    experiment = make_its()
+    if bundleless:
+        experiment._supports_results = False
+    failure = ValueError("invalid prior specification")
+
+    def fail_prior(**kwargs):
+        raise failure
+
+    monkeypatch.setattr(experiment, "sample_prior_predictive", fail_prior)
+    with pytest.raises(ValueError) as caught:
+        experiment.fit()
+    assert caught.value is failure
+    assert not experiment.is_fitted
+    assert "posterior" not in experiment.idata.children
+    with pytest.raises(GroupNotSampledException):
+        experiment.plot(show=False)

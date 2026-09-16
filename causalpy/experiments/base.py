@@ -425,7 +425,24 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
             self._model_backend.supports_prior_predictive
             and not self.has_prior_predictive
         ):
-            self.sample_prior_predictive()
+            try:
+                self.sample_prior_predictive()
+            except Exception:
+                # A failed fit must not expose a successful posterior, including
+                # on bundle-less experiments whose state comes from idata.
+                self._result = None
+                idata = self.idata
+                if idata is not None:
+                    for name in (
+                        "posterior",
+                        "posterior_predictive",
+                        "predictions",
+                        "sample_stats",
+                        "log_likelihood",
+                    ):
+                        if name in idata.children:
+                            del idata[name]
+                raise
         return self
 
     def _fit_inputs(self) -> tuple[Any, Any, dict[str, Any] | None]:
