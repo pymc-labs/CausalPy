@@ -78,6 +78,61 @@ def test_single_draw_prior_summary_uses_bayesian_group(experiment_name, request)
     assert summary.table.loc[row, "p_gt_0"] == float(effect > 0)
 
 
+@pytest.mark.parametrize(
+    "summary_kind, direction",
+    [
+        ("did", "increase"),
+        ("did", "decrease"),
+        ("did", "two-sided"),
+        ("rd", "increase"),
+        ("rkink", "increase"),
+        ("timeseries", "increase"),
+    ],
+)
+def test_prior_summary_labels_probabilities_and_rope_mass(summary_kind, direction):
+    """Prior tail and ROPE probabilities must never be described as posterior."""
+    import xarray as xr
+
+    from causalpy.reporting import (
+        _effect_summary_did,
+        _effect_summary_rd,
+        _effect_summary_rkink,
+        _effect_summary_timeseries,
+    )
+
+    effect = xr.DataArray([[-2.0, 0.0, 2.0, 4.0]], dims=["chain", "draw"])
+    kwargs = {"group": "prior", "direction": direction, "min_effect": 1.0}
+    if summary_kind == "did":
+        summary = _effect_summary_did(SimpleNamespace(causal_impact=effect), **kwargs)
+    elif summary_kind == "rd":
+        summary = _effect_summary_rd(
+            SimpleNamespace(discontinuity_at_threshold=effect),
+            experiment=SimpleNamespace(
+                _model_backend=SimpleNamespace(is_bayesian=True)
+            ),
+            **kwargs,
+        )
+    elif summary_kind == "rkink":
+        summary = _effect_summary_rkink(
+            SimpleNamespace(gradient_change=effect), **kwargs
+        )
+    else:
+        impact = effect.expand_dims(obs_ind=[0, 1])
+        summary = _effect_summary_timeseries(
+            impact,
+            xr.ones_like(impact),
+            pd.Index([0, 1]),
+            cumulative=True,
+            relative=False,
+            **kwargs,
+        )
+
+    prose = summary.text.lower()
+    assert "posterior" not in prose
+    assert "prior" in prose.split("probability")[0]
+    assert prose.count("prior mass") == (2 if summary_kind == "timeseries" else 1)
+
+
 @pytest.mark.integration
 def test_effect_summary_basic(mock_pymc_sample, its_data):
     """Test basic effect_summary functionality with ITS."""

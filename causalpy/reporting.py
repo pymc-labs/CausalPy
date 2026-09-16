@@ -277,21 +277,25 @@ def _format_rope_bound(value: float) -> str:
     return repr(float(value)).removesuffix(".0")
 
 
-def _render_bayesian_decision(decision: _BayesianDecision, coverage: str) -> str:
+def _render_bayesian_decision(
+    decision: _BayesianDecision,
+    coverage: str,
+    group: Literal["prior", "posterior"] = "posterior",
+) -> str:
     """Render the decision-owned Bayesian tail and optional ROPE interpretation."""
     if decision.tail_label == "increase":
         parts = [
-            "The posterior probability of an increase is "
+            f"The {group} probability of an increase is "
             f"{_format_number(decision.tail_probability, 3)}."
         ]
     elif decision.tail_label == "decrease":
         parts = [
-            "The posterior probability of a decrease is "
+            f"The {group} probability of a decrease is "
             f"{_format_number(decision.tail_probability, 3)}."
         ]
     else:
         parts = [
-            "The two-sided tail probability is "
+            f"The {group} two-sided tail probability is "
             f"{_format_number(decision.tail_probability, 3)}."
         ]
 
@@ -325,7 +329,7 @@ def _render_bayesian_decision(decision: _BayesianDecision, coverage: str) -> str
     if below is None or inside is None or above is None:
         raise ValueError("An HDI/ROPE decision requires posterior ROPE masses.")
     parts.append(
-        f"Posterior mass is {_format_number(below, 3)} below, "
+        f"{group.capitalize()} mass is {_format_number(below, 3)} below, "
         f"{_format_number(inside, 3)} inside, and {_format_number(above, 3)} "
         "above the ROPE."
     )
@@ -426,6 +430,7 @@ def _generate_prose_scalar(
     effect_name: str,
     alpha: float = 0.05,
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
+    group: Literal["prior", "posterior"] = "posterior",
 ) -> str:
     """Generate prose summary for scalar effects."""
     hdi_coverage = _format_probability_as_percent(1 - alpha)
@@ -436,7 +441,7 @@ def _generate_prose_scalar(
     return (
         f"The {effect_name} was {_format_number(mean)} "
         f"({hdi_coverage} HDI [{_format_number(lower)}, {_format_number(upper)}]). "
-        f"{_render_bayesian_decision(decision, hdi_coverage)}"
+        f"{_render_bayesian_decision(decision, hdi_coverage, group=group)}"
     )
 
 
@@ -497,7 +502,11 @@ def _effect_summary_did(
     table = _generate_table_scalar(stats, index_name="treatment_effect")
     text = _apply_prior_grouping(
         _generate_prose_scalar(
-            stats, "average treatment effect", alpha=alpha, direction=direction
+            stats,
+            "average treatment effect",
+            alpha=alpha,
+            direction=direction,
+            group=group,
         ),
         group,
     )
@@ -640,7 +649,11 @@ def _effect_summary_rd(
         table = _generate_table_scalar(stats, index_name="discontinuity")
         text = _apply_prior_grouping(
             _generate_prose_scalar(
-                stats, "discontinuity at threshold", alpha=alpha, direction=direction
+                stats,
+                "discontinuity at threshold",
+                alpha=alpha,
+                direction=direction,
+                group=group,
             ),
             group,
         )
@@ -910,6 +923,7 @@ def _effect_summary_timeseries(
             observed_cum=obs_cum,
             counterfactual_cum=cf_cum if cumulative else None,
             experiment_type=experiment_type,
+            group=group,
         )
     else:
         impact_array = np.asarray(windowed_impact.isel(chain=0, draw=0))
@@ -1156,6 +1170,7 @@ def _generate_prose_detailed(
     observed_cum: float | None = None,
     counterfactual_cum: float | None = None,
     experiment_type: str | None = None,
+    group: Literal["prior", "posterior"] = "posterior",
 ):
     """Generate detailed multi-paragraph narrative report.
 
@@ -1190,6 +1205,8 @@ def _generate_prose_detailed(
     experiment_type : str, optional
         Type of experiment ("its", "sc", "piecewise_its") for tailored
         assumptions text
+    group : {"prior", "posterior"}, default="posterior"
+        Draw group used to label tail probabilities and ROPE masses.
 
     Returns
     -------
@@ -1274,12 +1291,12 @@ def _generate_prose_detailed(
             )
         paragraphs.append(para2)
 
-    # Paragraph 3: posterior summaries rendered from attached decisions.
-    credibility_parts = [_render_bayesian_decision(decision, hdi_coverage)]
+    # Paragraph 3: group-specific summaries rendered from attached decisions.
+    credibility_parts = [_render_bayesian_decision(decision, hdi_coverage, group=group)]
     if cumulative and "cum" in stats:
         credibility_parts.append(
             "For the cumulative effect, "
-            f"{_render_bayesian_decision(cumulative_decision, hdi_coverage)}"
+            f"{_render_bayesian_decision(cumulative_decision, hdi_coverage, group=group)}"
         )
 
     if relative and "relative_mean" in stats["avg"]:
@@ -1921,6 +1938,7 @@ def _effect_summary_rkink(
                 "change in gradient at the kink point",
                 alpha=alpha,
                 direction=direction,
+                group=group,
             ),
             group,
         )

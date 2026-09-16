@@ -1076,6 +1076,7 @@ class SyntheticDifferenceInDifferences(
             observed_cum=obs_cum,
             counterfactual_cum=cf_cum if cumulative else None,
             experiment_type="sc",
+            group=group,
         )
 
         return EffectSummary(table=table, text=text)
