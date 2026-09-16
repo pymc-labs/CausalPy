@@ -29,6 +29,7 @@ import xarray as xr
 
 from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB
+from causalpy.custom_exceptions import BadIndexException
 from causalpy.experiments.synthetic_difference_in_differences import (
     SyntheticDifferenceInDifferences,
 )
@@ -352,8 +353,29 @@ class TestBuildReportingObjects:
         np.testing.assert_allclose(bundle.impact_post.to_numpy()[..., 0], expected_post)
 
 
+def test_datetime_index_requires_timestamp_treatment_time(toy_panel):
+    data = toy_panel.data.set_axis(pd.date_range("2020-01-01", periods=5))
+    with pytest.raises(BadIndexException):
+        SyntheticDifferenceInDifferences(
+            data,
+            treatment_time=3,
+            control_units=toy_panel.control_units,
+            treated_units=toy_panel.treated_units,
+        )
+
+
+def test_int_index_rejects_timestamp_treatment_time(toy_panel):
+    with pytest.raises(BadIndexException):
+        SyntheticDifferenceInDifferences(
+            toy_panel.data,
+            treatment_time=pd.Timestamp("2020-01-04"),
+            control_units=toy_panel.control_units,
+            treated_units=toy_panel.treated_units,
+        )
+
+
 class TestInputValidation:
-    """Both ``BadIndexException`` branches in ``input_validation``."""
+    """Missing inference data fails before results can be consumed."""
 
     def test_extract_weight_posteriors_raises_when_idata_is_none(self):
         stub = _make_experiment_stub(model=SimpleNamespace(idata=None))
