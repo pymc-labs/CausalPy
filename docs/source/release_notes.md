@@ -155,6 +155,14 @@ Re-running a phase overwrites only its own draws: a second `fit()` replaces the 
 
 Additional removals and timing changes worth calling out: StaggeredDiD's documented `data_` frame is gone — its `att_group_time`/`att_event_time` tables and raw counterfactual draws live on the result bundle (`result.att_group_time`, `result.att_event_time`, `result.y_pred`), and the per-draw quantities it cached (`y_hat0`, `tau_hat`) are recomputed inside the aggregators. Under the lazy lifecycle, `SyntheticDifferenceInDifferences` with an OLS model constructs successfully and raises its `NotImplementedError` at `fit()` time rather than in `__init__`. `PrePostNEGD` still rejects OLS during construction.
 
+#### `StateSpaceTimeSeries` is no longer experimental
+
+`StateSpaceTimeSeries` is no longer experimental and no longer emits a `FutureWarning` on construction (`causalpy/pymc_models.py`; PR #1113). Code that suppressed or asserted on that warning needs updating. It also no longer prints the pymc-extras "Model Requirements" table when it builds, and it recovers the frequency of a regularly spaced index, which removes the "No frequency was specific on the data's DateTimeIndex" warning on every fit.
+
+`BayesianBasisExpansionTimeSeries` is unchanged: it stays experimental and keeps its `FutureWarning`.
+
+`StateSpaceTimeSeries` now raises `ValueError` when `seasonal_length` is below 2 and no custom `seasonality_component` is given, and when `level_order` is below 1 and no custom `trend_component` is given. Both previously reached `pymc-extras` and failed there with an obscure `ZeroDivisionError` and `IndexError` respectively.
+
 ### Behaviour that intentionally did *not* change
 
 #### The ArviZ default-interval change is a no-op for CausalPy

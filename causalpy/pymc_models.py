@@ -2753,9 +2753,11 @@ class StateSpaceTimeSeries(PyMCModel):
     Parameters
     ----------
     level_order : int, optional
-        Order of the local level/trend component. Defaults to 2.
+        Order of the local level/trend component: 1 for a local level, 2 for a
+        local linear trend. Must be at least 1. Defaults to 2.
     seasonal_length : int, optional
-        Seasonal period (e.g., 12 for monthly data with annual seasonality). Defaults to 12.
+        Seasonal period (e.g., 12 for monthly data with annual seasonality). Must
+        be at least 2. Defaults to 12.
     trend_component : optional
         Custom state-space trend component. Must be a pymc-extras structural
         component (e.g. `pymc_extras.statespace.structural.LevelTrend`).
@@ -2779,6 +2781,66 @@ class StateSpaceTimeSeries(PyMCModel):
         Kwargs passed to `pm.sample_prior_predictive` when the prior phase
         runs. Defaults to ``{"draws": 500}`` plus the posterior
         ``random_seed`` if ``None``.
+    vs_prior_type : {"spike_and_slab", "horseshoe", "normal"}, optional
+        Variable selection prior for the exogenous regression coefficients.
+        Requires covariates. Takes precedence over a `beta_exog` entry in
+        `priors`.
+    vs_hyperparams : dict, optional
+        Hyperparameters for the variable selection prior. See
+        :class:`causalpy.variable_selection_priors.VariableSelectionPrior`.
+        The defaults work without hand-tuning on roughly unit-scale data:
+        the horseshoe sets its global shrinkage from an expected model size
+        of ``min(5, p / 2)`` and the sample size (Piironen & Vehtari, 2017),
+        holding the residual scale of that rule at 1, while spike-and-slab
+        uses a ``Beta(2, 2)`` inclusion prior (prior inclusion probability
+        centered on 0.5, no expected-model-size knob). Pass ``tau0`` in
+        ``vs_hyperparams`` when the residuals are not close to unit scale.
+        The ``normal`` option is a plain ``Normal(0, 1)`` on each coefficient,
+        with no selection. That is much tighter than the ``Normal(0, 50)``
+        this class puts on ``beta_exog`` when no selection prior is set, so it
+        is not a drop-in stand-in for the default.
+
+    Examples
+    --------
+    Covariate selection through :class:`causalpy.InterruptedTimeSeries`:
+    pass many candidate covariates in the formula and let the model select.
+
+    >>> import numpy as np
+    >>> import pandas as pd
+    >>> import causalpy as cp
+    >>> rng = np.random.default_rng(7)
+    >>> n = 60
+    >>> dates = pd.date_range(start="2023-01-01", periods=n, freq="D")
+    >>> X = rng.normal(size=(n, 3))
+    >>> y = 5 + 2.0 * X[:, 0] + rng.normal(0, 0.3, size=n)
+    >>> df = pd.DataFrame(
+    ...     {"y": y, "x1": X[:, 0], "x2": X[:, 1], "x3": X[:, 2]}, index=dates
+    ... )
+    >>> model = cp.pymc_models.StateSpaceTimeSeries(
+    ...     level_order=1,
+    ...     seasonal_length=7,
+    ...     sample_kwargs={
+    ...         "chains": 1,
+    ...         "draws": 10,
+    ...         "tune": 10,
+    ...         "progressbar": False,
+    ...     },
+    ...     vs_prior_type="spike_and_slab",
+    ... )
+    >>> import io
+    >>> from contextlib import redirect_stdout
+    >>> with redirect_stdout(io.StringIO()):  # silence the model-build table
+    ...     result = cp.InterruptedTimeSeries(
+    ...         data=df,
+    ...         treatment_time=dates[45],
+    ...         formula="y ~ 0 + x1 + x2 + x3",
+    ...         model=model,
+    ...     ).fit()
+    >>> inclusion = result.model.get_inclusion_probabilities()
+    >>> inclusion.index.tolist()
+    ['x1', 'x2', 'x3']
+    >>> inclusion.columns.tolist()
+    ['prob', 'selected', 'gamma_mean']
     """
 
     default_priors = {
@@ -2800,6 +2862,8 @@ class StateSpaceTimeSeries(PyMCModel):
         mode: str | None = None,
         priors: dict[str, Prior] | None = None,
         prior_sample_kwargs: dict[str, Any] | None = None,
+        vs_prior_type: Literal["spike_and_slab", "horseshoe", "normal"] | None = None,
+        vs_hyperparams: dict[str, Any] | None = None,
     ):
         super().__init__(
             sample_kwargs=sample_kwargs,
@@ -2807,14 +2871,24 @@ class StateSpaceTimeSeries(PyMCModel):
             prior_sample_kwargs=prior_sample_kwargs,
         )
 
-        # Warn that this is experimental
-        warnings.warn(
-            "StateSpaceTimeSeries is experimental and its API may change in future versions. "
-            "Not recommended for production use.",
-            FutureWarning,
-            stacklevel=2,
-        )
-
+        if trend_component is None and level_order < 1:
+            # LevelTrend needs at least the level state; order=0 fails with an
+            # obscure IndexError inside pymc-extras, and negative orders with
+            # "negative dimensions are not allowed"
+            raise ValueError(
+                "level_order must be at least 1 (1 for a local level, 2 for a "
+                "local linear trend)."
+            )
+        if seasonality_component is None and seasonal_length < 2:
+            # FrequencySeasonality needs at least one harmonic; season_length=1
+            # fails with an obscure ZeroDivisionError inside pymc-extras
+            raise ValueError(
+                "seasonal_length must be at least 2, since the default "
+                "FrequencySeasonality component needs at least one harmonic. "
+                "The model always carries a seasonal component; pass "
+                "seasonality_component to swap the default for a different "
+                "pymc-extras component."
+            )
         self._custom_trend_component = trend_component
         self._custom_seasonality_component = seasonality_component
         self.level_order = level_order
@@ -2823,6 +2897,22 @@ class StateSpaceTimeSeries(PyMCModel):
         self._treated_units = ["unit_0"]
         self.ss_mod: Any = None
         self._exog_names: list[str] = []
+        self.vs_prior_type = vs_prior_type
+        self.vs_hyperparams = vs_hyperparams
+        self.vs_prior: VariableSelectionPrior | None = None
+        if vs_prior_type is not None:
+            # Validates the prior type eagerly
+            self.vs_prior = VariableSelectionPrior(vs_prior_type, vs_hyperparams or {})
+            if priors and "beta_exog" in priors:
+                warnings.warn(
+                    "Both vs_prior_type and a beta_exog entry in priors were "
+                    "given. The variable selection prior takes precedence for "
+                    "beta_exog.",
+                    UserWarning,
+                    # pm.Model's metaclass calls __init__, so level 2 lands on
+                    # pymc/model/core.py rather than on the caller.
+                    stacklevel=3,
+                )
         self._validate_and_initialize_components()
 
     def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
@@ -2840,6 +2930,8 @@ class StateSpaceTimeSeries(PyMCModel):
             prior_sample_kwargs=dict(self.prior_sample_kwargs),
             mode=self.mode,
             priors=self._user_priors if priors is None else priors,
+            vs_prior_type=self.vs_prior_type,
+            vs_hyperparams=self.vs_hyperparams,
         )
 
     def _validate_and_initialize_components(self):
@@ -2932,6 +3024,10 @@ class StateSpaceTimeSeries(PyMCModel):
                 )
         return names
 
+    def _exog_values(self, X: xr.DataArray) -> np.ndarray:
+        """Exogenous regressor values from X, in fit-time column order."""
+        return X.sel(coeffs=self._exog_names).values
+
     def build_model(
         self,
         X: xr.DataArray | dict[str, xr.DataArray] | None = None,
@@ -3006,6 +3102,13 @@ class StateSpaceTimeSeries(PyMCModel):
                 "coords must contain 'datetime_index' (pd.DatetimeIndex)."
             )
 
+        # Rebuilding an index from raw values drops its frequency, and
+        # pymc-extras warns about that on every fit and needs the frequency
+        # again to lay out the forecast index. Recover it where the
+        # observations are regularly spaced; leave it unset when they are not.
+        if datetime_index.freq is None:
+            datetime_index.freq = datetime_index.inferred_freq
+
         self._train_index = datetime_index
 
         # Instantiate components and build state-space object
@@ -3013,6 +3116,12 @@ class StateSpaceTimeSeries(PyMCModel):
         season = self._get_seasonality_component()
         combined = trend + season
         self._exog_names = self._extract_exog_names(X)
+        if self.vs_prior is not None and not self._exog_names:
+            raise ValueError(
+                "vs_prior_type was set but the model has no exogenous "
+                "covariates. Pass covariates via X, e.g. with a "
+                "'y ~ 0 + x1 + x2' formula."
+            )
         if self._exog_names:
             from pymc_extras.statespace import structural as st
 
@@ -3021,7 +3130,10 @@ class StateSpaceTimeSeries(PyMCModel):
             )
         # `mode` belongs on the state-space model itself; passing it to
         # `build_statespace_graph` is deprecated in pymc-extras.
-        self.ss_mod = combined.build(mode=self.mode)
+        # verbose=False suppresses the "Model Requirements" table pymc-extras
+        # prints on every build. It tells the reader which priors to declare,
+        # which this class does itself just below.
+        self.ss_mod = combined.build(mode=self.mode, verbose=False)
 
         # Build coordinates for the model
         coordinates = self.ss_mod.coords.copy()
@@ -3065,6 +3177,13 @@ class StateSpaceTimeSeries(PyMCModel):
                     prior.dims = dims[0]
                     P0_diag = prior.create_variable("P0_diag")
                     pm.Deterministic("P0", pt.diag(P0_diag), dims=dims)
+                elif name == "beta_exog" and self.vs_prior is not None:
+                    self.vs_prior.create_prior(
+                        "beta_exog",
+                        n_params=len(self._exog_names),
+                        dims=dims,
+                        X=self._exog_values(X) if X is not None else None,
+                    )
                 else:
                     prior = deepcopy(self.priors[name])
                     prior.dims = dims
@@ -3080,7 +3199,7 @@ class StateSpaceTimeSeries(PyMCModel):
             df = pd.DataFrame({"y": y_values.flatten()}, index=datetime_index)
             if self._exog_names and X is not None:
                 # The state-space graph looks this variable up by name
-                pm.Data("data_exog", X.sel(coeffs=self._exog_names).values)
+                pm.Data("data_exog", self._exog_values(X))
             self.ss_mod.build_statespace_graph(df[["y"]])
 
     #: The Kalman smoothing/forecast path has no prior equivalent yet; a
@@ -3258,6 +3377,85 @@ class StateSpaceTimeSeries(PyMCModel):
             else conditional_idata
         )
 
+    def _require_vs_diagnostics(self, what: str) -> tuple[VariableSelectionPrior, Any]:
+        """Guard the variable-selection accessors.
+
+        Returns the prior and the fitted idata, raising the same errors both
+        accessors documented: ValueError when the model was not configured
+        with `vs_prior_type`, RuntimeError when it has not been fit.
+        """
+        if self.vs_prior is None:
+            raise ValueError(
+                "Model was not configured with vs_prior_type; there are no "
+                f"{what} to report."
+            )
+        if self.idata is None:
+            raise RuntimeError("Model must be fit first.")
+        return self.vs_prior, self.idata
+
+    def _label_by_regressor(self, table: pd.DataFrame) -> pd.DataFrame:
+        """Index a variable-selection table by regressor name.
+
+        The factory builds these tables from bare arrays, so the rows come
+        back positional. They follow the fit-time column order, which is what
+        `_exog_names` holds.
+        """
+        table.index = pd.Index(self._exog_names, name="coeffs")
+        return table
+
+    def get_inclusion_probabilities(
+        self, param_name: str = "beta_exog"
+    ) -> pd.DataFrame:
+        """
+        Posterior inclusion probabilities of the exogenous regressors.
+
+        Only available when the model was configured with
+        `vs_prior_type="spike_and_slab"` and has been fit.
+
+        Interpret the probabilities as a relative ranking of the candidate
+        regressors. The `beta_exog` point estimates shrink toward zero
+        under this prior (the state-space `P0` lets the regression states
+        drift from the parameter), but counterfactual forecasts use the
+        smoothed states and are not affected by that attenuation.
+
+        Parameters
+        ----------
+        param_name : str, optional
+            Name of the coefficient parameter. Defaults to "beta_exog".
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per regressor, indexed by regressor name, with columns
+            "prob" (inclusion probability), "selected" (probability above
+            0.5), and "gamma_mean" (mean of the selection indicator).
+        """
+        vs_prior, idata = self._require_vs_diagnostics("inclusion probabilities")
+        table = vs_prior.get_inclusion_probabilities(idata, param_name)
+        return self._label_by_regressor(table)
+
+    def get_shrinkage_factors(self, param_name: str = "beta_exog") -> pd.DataFrame:
+        """
+        Shrinkage factors of the exogenous regressors.
+
+        Only available when the model was configured with
+        `vs_prior_type="horseshoe"` and has been fit.
+
+        Parameters
+        ----------
+        param_name : str, optional
+            Name of the coefficient parameter. Defaults to "beta_exog".
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per regressor, indexed by regressor name, with the
+            effective shrinkage applied to its coefficient.
+        """
+        vs_prior, idata = self._require_vs_diagnostics("shrinkage factors")
+        table = vs_prior.get_shrinkage_factors(idata, param_name)
+        return self._label_by_regressor(table)
+
     def _forecast(
         self,
         start: pd.Timestamp,
@@ -3351,7 +3549,7 @@ class StateSpaceTimeSeries(PyMCModel):
                     raise ValueError(
                         f"X is missing exogenous columns used at fit time: {missing}."
                     )
-                scenario = X.sel(coeffs=self._exog_names).values
+                scenario = self._exog_values(X)
             last = self._train_index[-1]  # start forecasting after the last observed
             forecast_data = self._forecast(
                 start=last, periods=len(idx), scenario=scenario
@@ -3361,6 +3559,20 @@ class StateSpaceTimeSeries(PyMCModel):
             # Rename 'time' to 'obs_ind' to match CausalPy conventions
             if "time" in forecast_copy.dims:
                 forecast_copy = forecast_copy.rename({"time": "obs_ind"})
+
+            # The forecast generates its own future index from the training
+            # frequency; results are then relabeled with X's dates. Warn when
+            # the two disagree, since values map positionally.
+            forecast_idx = pd.DatetimeIndex(forecast_copy.coords["obs_ind"].values)
+            if not forecast_idx.equals(idx):
+                warnings.warn(
+                    "The dates in X do not match the forecast index generated "
+                    "from the training data frequency. Forecast values are "
+                    "relabeled onto X's dates by position; check that the "
+                    "post-period dates continue the training frequency.",
+                    UserWarning,
+                    stacklevel=2,
+                )
 
             # Extract the forecasted observed data and add treated_units dimension
             y_hat = forecast_copy["forecast_observed"].isel(observed_state=0)
@@ -3390,6 +3602,11 @@ class StateSpaceTimeSeries(PyMCModel):
     ) -> pd.Series:
         """
         Score the Bayesian R^2 given inputs X and outputs y.
+
+        In-sample predictions come from the Kalman smoother, which conditions
+        on the observed y, so this R^2 reads higher than for models that
+        predict from covariates alone. Compare scores only within
+        state-space models.
 
         Parameters
         ----------

@@ -100,7 +100,8 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 - `SyntheticDifferenceInDifferencesWeightFitter` — SyntheticDifferenceInDifferences
 - `InstrumentalVariableRegression` — InstrumentalVariable
 - `PropensityScore` — InversePropensityWeighting
-- `BayesianBasisExpansionTimeSeries` / `StateSpaceTimeSeries` — ITS alternatives (experimental)
+- `StateSpaceTimeSeries` — BSTS for ITS: level/trend + seasonality, optional exogenous regressors with variable selection priors
+- `BayesianBasisExpansionTimeSeries` — ITS alternative (experimental)
 
 ## Key Conventions
 
