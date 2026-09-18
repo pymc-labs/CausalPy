@@ -132,6 +132,13 @@ This is the broadest check in the current API, but it is only available for PyMC
 
 Raw effect sizes are hard to compare across units the synthetic control fits with differing accuracy, so the check also reports each unit's mean squared prediction error in the `pre_mspe`, `post_mspe` and `mspe_ratio` columns, with the treated unit's own figures in `metadata["baseline_mspe"]`. The ratio is the statistic recommended in section 3.4 and Figure 8 of {cite:t}`abadie2010synthetic`, unchanged, so its values are directly comparable to the ones published there: a large value means a unit tracks its synthetic control closely before the intervention and diverges after it. `PlaceboInSpace.plot_mspe_ratio(result)` draws every unit's ratio in rank order with the treated unit highlighted, and reports the permutation p-value, which is the share of units whose ratio is at least as large as the treated unit's. Each treated unit is ranked against the placebo units and itself, never against the other treated units, and the p-value is conditional on the units that fitted successfully: a unit with an undefined ratio is outside both the figure and the p-value, while a unit with an infinite ratio counts towards the p-value but cannot be drawn.
 
+The design of the check follows {cite:t}`abadie2010synthetic`, with four differences that are CausalPy choices:
+
+- The actual treated unit is never a donor in the placebo fits. The paper moves California into the donor pool for its placebo runs.
+- The residuals are averaged over the posterior first and then squared, so each MSPE is one number, not a posterior distribution.
+- With more than one treated unit, each one is ranked only against the placebo units and itself. The paper has a single treated unit.
+- A zero pre-period MSPE with a positive post-period MSPE gives an infinite ratio, which stays in the ranking. Zero over zero, or a missing MSPE, gives an undefined ratio, which is left out.
+
 ### {doc}`BandwidthSensitivity <../api/generated/causalpy.checks.bandwidth.BandwidthSensitivity>`
 
 `BandwidthSensitivity` re-fits RD or RKink models across a sequence of bandwidths. Because bandwidth choice drives the bias-variance trade-off in local designs, a result that flips across plausible bandwidths should be treated cautiously {cite:p}`imbens2008regression,lee2010regression`.
