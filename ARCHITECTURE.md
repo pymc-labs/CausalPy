@@ -101,7 +101,7 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 - `InstrumentalVariableRegression` — InstrumentalVariable
 - `PropensityScore` — InversePropensityWeighting
 - `StateSpaceTimeSeries` — BSTS for ITS: level/trend + seasonality, optional exogenous regressors with variable selection priors
-- `BayesianBasisExpansionTimeSeries` — deprecated, use `StateSpaceTimeSeries`
+- `BayesianBasisExpansionTimeSeries` — ITS alternative (experimental)
 
 ## Key Conventions
 

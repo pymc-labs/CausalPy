@@ -328,38 +328,18 @@ class TestStateSpaceTimeSeriesCoverage:
         ]
         assert ours == []
 
-    def test_basis_expansion_model_is_deprecated(self):
-        """BayesianBasisExpansionTimeSeries points users at the state-space model.
+    def test_basis_expansion_model_stays_experimental(self):
+        """BayesianBasisExpansionTimeSeries keeps its experimental warning.
 
         The warning fires before any component is built, so this does not need
         pymc-marketing.
         """
-        with pytest.warns(FutureWarning, match="Use StateSpaceTimeSeries instead"):
+        with pytest.warns(FutureWarning, match="is experimental") as records:
             cp.pymc_models.BayesianBasisExpansionTimeSeries(
                 sample_kwargs={"draws": 10, "tune": 10, "progressbar": False}
             )
 
-    def test_basis_expansion_deprecation_names_the_caller(self):
-        """The warning must be attributed to the caller, not to pymc.
-
-        ``pm.Model``'s metaclass calls ``__init__``, so ``stacklevel=2`` blames
-        ``pymc/model/core.py``. A ``FutureWarning`` still prints from there,
-        but it points at a PyMC internal instead of the line the user has to
-        change, and the once-per-location dedup then collapses every call site
-        in a session into a single report.
-        """
-        with pytest.warns(FutureWarning) as records:
-            cp.pymc_models.BayesianBasisExpansionTimeSeries(
-                sample_kwargs={"draws": 10, "tune": 10, "progressbar": False}
-            )
-
-        deprecations = [
-            record
-            for record in records
-            if "BayesianBasisExpansionTimeSeries is deprecated" in str(record.message)
-        ]
-        assert len(deprecations) == 1
-        assert deprecations[0].filename == __file__
+        assert not any("deprecated" in str(record.message) for record in records)
 
     def test_custom_trend_component_wrong_type(self):
         """Test validation error when custom trend component is not a
