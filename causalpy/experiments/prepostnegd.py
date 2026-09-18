@@ -94,6 +94,11 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
     ==================Pretest/posttest Nonequivalent Group Design===================
     Formula: post ~ 1 + C(group) + pre
     <BLANKLINE>
+    Group-level descriptive stats:
+     group   n pre_mean post_mean
+         0  96       10        10
+         1 104       12        14
+    <BLANKLINE>
     Results:
     Causal impact = 2, $CI_{94%}$[2, 2]
     Model coefficients:
@@ -271,6 +276,35 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
         causal_impact_mean = f"{round_num(causal_impact.mean(), round_to)}, "
         return f"Causal impact = {causal_impact_mean + ci}"
 
+    def _group_level_summary_stats(self, round_to: int | None = None) -> pd.DataFrame:
+        """Compute group-level sample sizes and pre/post means.
+
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round the means. Use ``None`` to
+            return raw numbers.
+
+        Returns
+        -------
+        pandas.DataFrame
+            One row per group level with columns ``n``, ``pre_mean``, and
+            ``post_mean``.
+        """
+        summary_df = (
+            self.data.groupby(self.group_variable_name)
+            .agg(
+                n=(self.group_variable_name, "size"),
+                pre_mean=(self.pretreatment_variable_name, "mean"),
+                post_mean=(self.outcome_variable_name, "mean"),
+            )
+            .reset_index()
+        )
+        if round_to is not None:
+            for col in ["pre_mean", "post_mean"]:
+                summary_df[col] = summary_df[col].map(lambda x: round_num(x, round_to))
+        return summary_df
+
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
@@ -282,6 +316,8 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
         """
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
+        print("\nGroup-level descriptive stats:")
+        print(self._group_level_summary_stats(round_to).to_string(index=False))
         print("\nResults:")
         print(self._causal_impact_summary_stat(round_to))
         self.print_coefficients(round_to)
