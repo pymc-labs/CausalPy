@@ -27,6 +27,7 @@ docs/source/_static/thumbnails/
 .github/issue_comments/
 .github/issue_summaries/
 
+# Scratch folder for temporary files (notification summaries, etc.)
 # Local scratch space (not tracked)
 .scratch/
 coverage.xml
