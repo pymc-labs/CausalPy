@@ -103,8 +103,18 @@ extensions = [
     "sphinx_design",
     "sphinx_sitemap",
     "sphinx_togglebutton",
+    "sphinxext.opengraph",
     "sphinxext.rediraffe",
 ]
+
+# -- Social cards and meta descriptions (sphinxext-opengraph) ----------------
+# Generates og:* tags plus a <meta name="description"> for every page. Pages
+# can override the description via MyST front matter (myst: html_meta:).
+ogp_site_url = "https://causalpy.readthedocs.io/en/stable/"
+ogp_site_name = "CausalPy documentation"
+ogp_image = "https://causalpy.readthedocs.io/en/stable/_static/logo.png"
+ogp_enable_meta_description = True
+ogp_description_length = 200
 
 # -- Redirects for renamed how-to notebooks (issue #840) --------------------
 # Permanent map of old Sphinx docnames -> current docnames. sphinxext-rediraffe
@@ -239,7 +249,7 @@ sitemap_url_scheme = f"{{lang}}{rtd_version}/{{link}}"
 html_theme = "labs_sphinx_theme"
 html_static_path = ["_static"]
 html_css_files = ["gallery.css"]
-html_extra_path = ["robots.txt"]
+html_extra_path = ["robots.txt", "llms.txt"]
 html_favicon = "_static/favicon_logo.png"
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
@@ -258,7 +268,10 @@ html_context = {
     "github_version": "main",
     "doc_path": "docs/source/",
     "default_mode": "light",
-    "baseurl": "https://causalpy.readthedocs.io/",
+    # No trailing slash: the theme's layout.html builds the canonical URL as
+    # "{baseurl}/{language}/stable/{pagename}.html". A trailing slash here
+    # produced broken canonicals ("https://causalpy.readthedocs.io//en/...").
+    "baseurl": "https://causalpy.readthedocs.io",
 }
 
 # -- Options for autodoc ----------------------------------------------------
