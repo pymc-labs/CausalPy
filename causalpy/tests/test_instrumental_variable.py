@@ -377,6 +377,9 @@ def test_iv_variable_selection_priors(
     iv_data, sample_kwargs, vs_prior_type, expected_var
 ):
     """Test that variable selection priors create expected model variables."""
+    vs_hyperparams = {"outcome": True}
+    if vs_prior_type == "spike_and_slab":
+        vs_hyperparams.update({"expected_num_nonzero": 1, "pi_concentration": 4})
     result = cp.InstrumentalVariable(
         instruments_data=iv_data["instruments_data"],
         data=iv_data["data"],
@@ -386,11 +389,17 @@ def test_iv_variable_selection_priors(
             sample_kwargs=sample_kwargs
         ),
         vs_prior_type=vs_prior_type,
-        vs_hyperparams={"outcome": True},
+        vs_hyperparams=vs_hyperparams,
     )
 
     assert vs_prior_type == result.vs_prior_type
     assert expected_var in result.model.named_vars
+    if vs_prior_type == "spike_and_slab":
+        prior = result.model.vs_prior_treatment._prior_instance
+        n_instruments = len(result.model.coords["instruments"])
+        expected_pi = 1 / n_instruments
+        assert prior.pi_alpha == pytest.approx(expected_pi * 4)
+        assert prior.pi_beta == pytest.approx((1 - expected_pi) * 4)
 
 
 # =============================================================================
