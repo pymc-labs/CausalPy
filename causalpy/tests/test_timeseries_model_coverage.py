@@ -739,6 +739,186 @@ class TestStateSpaceTimeSeriesCoverage:
         with pytest.raises(ValueError, match="missing exogenous columns"):
             model.predict(X=X_bad, out_of_sample=True)
 
+    def test_vs_prior_without_covariates_raises(self, sample_data):
+        """vs_prior_type without covariates is a configuration error."""
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            vs_prior_type="spike_and_slab",
+        )
+        with pytest.raises(ValueError, match="no exogenous covariates"):
+            model.build_model(y=sample_data)
+
+    def test_vs_prior_invalid_type(self):
+        """Unknown vs_prior_type fails at construction."""
+        with pytest.raises(ValueError, match="Unknown prior_type"):
+            cp.pymc_models.StateSpaceTimeSeries(
+                sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+                vs_prior_type="lasso",  # type: ignore[arg-type]
+            )
+
+    def test_vs_prior_beta_exog_precedence_warning(self):
+        """Passing both vs_prior_type and a beta_exog prior warns.
+
+        The warning must name the caller: ``pm.Model``'s metaclass calls
+        ``__init__``, so ``stacklevel=2`` would blame ``pymc/model/core.py``
+        instead of the line that passed both arguments.
+        """
+        from pymc_extras.prior import Prior
+
+        with pytest.warns(UserWarning, match="variable selection prior takes") as recs:
+            cp.pymc_models.StateSpaceTimeSeries(
+                sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+                vs_prior_type="spike_and_slab",
+                priors={"beta_exog": Prior("Normal", mu=0, sigma=1)},
+            )
+
+        precedence = [rec for rec in recs if "takes precedence" in str(rec.message)]
+        assert len(precedence) == 1
+        assert precedence[0].filename == __file__
+
+    def test_vs_helpers_require_configuration_and_fit(self):
+        """Helper methods guard against missing config and missing fit."""
+        plain = cp.pymc_models.StateSpaceTimeSeries(
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        with pytest.raises(ValueError, match="not configured with vs_prior_type"):
+            plain.get_inclusion_probabilities()
+        with pytest.raises(ValueError, match="not configured with vs_prior_type"):
+            plain.get_shrinkage_factors()
+
+        unfit = cp.pymc_models.StateSpaceTimeSeries(
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            vs_prior_type="spike_and_slab",
+        )
+        with pytest.raises(RuntimeError, match="must be fit first"):
+            unfit.get_inclusion_probabilities()
+        with pytest.raises(RuntimeError, match="must be fit first"):
+            unfit.get_shrinkage_factors()
+
+    def test_vs_spike_and_slab_structure(self, sample_data, mock_pymc_sample):
+        """Spike-and-slab on covariates: selection variables in the
+        posterior and a well-formed inclusion-probability table.
+
+        Structure-only by design: the suite mocks pm.sample session-wide,
+        so posterior values are prior draws.
+        """
+        y_da = sample_data
+        n = len(y_da)
+        X = xr.DataArray(
+            np.random.randn(n, 2),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": y_da.coords["obs_ind"], "coeffs": ["x1", "x2"]},
+        )
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+            },
+            vs_prior_type="spike_and_slab",
+        )
+        model.fit(X=X, y=y_da)
+
+        assert "beta_exog" in model.idata.posterior
+        assert "gamma_beta_exog" in model.idata.posterior
+
+        incl = model.get_inclusion_probabilities()
+        assert isinstance(incl, pd.DataFrame)
+        assert list(incl.columns) == ["prob", "selected", "gamma_mean"]
+        assert list(incl.index) == ["x1", "x2"]
+
+    def test_vs_horseshoe_structure(self, sample_data, mock_pymc_sample):
+        """Horseshoe on covariates: shrinkage factor table is well formed.
+
+        Structure-only by design: the suite mocks pm.sample session-wide.
+        """
+        y_da = sample_data
+        n = len(y_da)
+        X = xr.DataArray(
+            np.random.randn(n, 2),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": y_da.coords["obs_ind"], "coeffs": ["x1", "x2"]},
+        )
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+            },
+            vs_prior_type="horseshoe",
+        )
+        model.fit(X=X, y=y_da)
+
+        assert "beta_exog" in model.idata.posterior
+        shrink = model.get_shrinkage_factors()
+        assert isinstance(shrink, pd.DataFrame)
+        assert list(shrink.index) == ["x1", "x2"]
+
+        # Inclusion probabilities are a spike-and-slab concept
+        with pytest.raises(ValueError, match="spike_and_slab"):
+            model.get_inclusion_probabilities()
+
+    def test_vs_normal_structure(self, sample_data, mock_pymc_sample):
+        """Normal "selection" prior: a plain Normal on beta_exog, no selection.
+
+        Structure-only by design: the suite mocks pm.sample session-wide.
+        The factory builds neither the spike-and-slab indicators nor the
+        horseshoe scales for this option, so both diagnostics must refuse.
+        """
+        y_da = sample_data
+        n = len(y_da)
+        X = xr.DataArray(
+            np.random.default_rng(seed=42).normal(size=(n, 2)),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": y_da.coords["obs_ind"], "coeffs": ["x1", "x2"]},
+        )
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+            },
+            vs_prior_type="normal",
+        )
+        model.fit(X=X, y=y_da)
+
+        posterior = model.idata.posterior
+        assert "beta_exog" in posterior
+        assert list(posterior["beta_exog"].coords["state_exog"].values) == [
+            "x1",
+            "x2",
+        ]
+        assert "gamma_beta_exog" not in posterior
+        assert "tau_beta_exog" not in posterior
+
+        with pytest.raises(ValueError, match="spike_and_slab"):
+            model.get_inclusion_probabilities()
+        with pytest.raises(ValueError, match="horseshoe"):
+            model.get_shrinkage_factors()
+
+    def test_vs_clone_preserves_config(self):
+        """_clone carries the variable selection configuration."""
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            vs_prior_type="horseshoe",
+            vs_hyperparams={"nu": 5},
+        )
+        clone = model._clone()
+        assert clone.vs_prior_type == "horseshoe"
+        assert clone.vs_hyperparams == {"nu": 5}
+        assert clone.vs_prior is not None
+
     def test_clone_preserves_config(self):
         """Test that _clone carries over the full model configuration."""
         from pymc_extras.prior import Prior
