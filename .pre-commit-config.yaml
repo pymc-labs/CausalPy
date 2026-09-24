@@ -69,8 +69,10 @@ repos:
         files: \.md$
         exclude: ^(docs/_build/|\.scratch/|docs/source/notebooks/index\.md)$
   # Regenerate environment.yml from pyproject.toml when deps change (run on commit; review diff).
-  # Dev env uses python>=3.12; conda-only deps (make, pip, pymc-bart, marimo[mcp]) are in args.
-  # The rev here is the single source of truth for the pin: the check-environment-yml job in
+  # Dev env uses python>=3.12; conda-only deps (make, pip, pymc-bart) are in args. marimo[mcp]
+  # and pymc-forecast route to the pip section via [tool.pyproject2conda.dependencies].
+  # environment.yml is the conda *alternative* to the canonical uv.lock (see CONTRIBUTING.md);
+  # the rev here is the single source of truth for the pin: the check-environment-yml job in
   # .github/workflows/ci.yml runs this same hook rather than re-declaring the version.
   - repo: https://github.com/usnistgov/pyproject2conda
     rev: v0.23.2
@@ -96,10 +98,16 @@ repos:
           - pip
           - -d
           - pymc-bart
-          - -r
-          - "marimo[mcp]"
   - repo: local
     hooks:
+      # Keep the committed uv.lock in sync with pyproject.toml (declaration source
+      # of truth). uv must be installed locally; CI runs the same check.
+      - id: uv-lock-check
+        name: Check uv.lock is in sync with pyproject.toml
+        entry: uv lock --check
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|uv\.lock)$
       - id: validate-notebooks
         name: Validate notebooks
         entry: python scripts/validate_notebooks.py

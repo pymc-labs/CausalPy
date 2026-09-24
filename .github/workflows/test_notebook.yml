@@ -62,18 +62,26 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
         with:
-          python-version: "3.12"
+          enable-cache: true
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y graphviz
 
       - name: Install dependencies
+        # This lane intentionally does NOT use `uv sync --locked`: the docs-only
+        # PyMC-Marketing transition snapshot pinned in docs/requirements.txt
+        # (pymc-extras<0.15, pymc<6.3, pytensor<3.3) conflicts with the floors
+        # uv.lock resolves for the rest of the project. `uv venv` + `uv pip
+        # install` mirrors today's unlocked pip install sequence instead:
+        # docs/requirements.txt first, then the project's test+docs extras,
+        # both unlocked so the final resolution matches (not uv.lock).
         run: |
-          pip install --upgrade pip
-          pip install -r docs/requirements.txt
-          pip install -e ".[test,docs]"
+          uv venv --python 3.12
+          uv pip install -r docs/requirements.txt
+          uv pip install -e ".[test,docs]"
 
       - name: Run notebooks
         env:
@@ -92,4 +100,4 @@ jobs:
           if [[ -n "$NOTEBOOK_EXCLUDE_TWO" ]]; then
             args+=(--exclude-pattern "$NOTEBOOK_EXCLUDE_TWO")
           fi
-          python scripts/run_notebooks/runner.py "${args[@]}"
+          uv run --no-sync python scripts/run_notebooks/runner.py "${args[@]}"
