@@ -461,8 +461,8 @@ def _detect_experiment_type(result):
     else:
         raise ValueError(
             "Unknown experiment type. Result must have 'discontinuity_at_threshold' (RD), "
-            "'gradient_change' (Regression Kink), 'att_event_time_' (Staggered DiD), "
-            "'causal_impact' (DiD/ANCOVA), or 'post_impact' (ITS/Synthetic Control) attribute."
+            "'gradient_change' (Regression Kink), 'att_event_time' (Staggered DiD), "
+            "'causal_impact' (DiD/ANCOVA), or 'impact_post' (ITS/Synthetic Control) attribute."
         )
 
 
