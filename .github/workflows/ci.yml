@@ -30,6 +30,15 @@ jobs:
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
+      - name: Install uv
+        # The local `uv-lock-check` pre-commit hook shells out to `uv lock
+        # --check`, so `uv` must be on PATH for this job (hosted pre-commit.ci
+        # cannot install arbitrary tools, so that hook is skipped there via
+        # the `ci.skip` list in .pre-commit-config.yaml; the dedicated
+        # `uv-lock-check` CI job covers it in that case).
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
       - name: Run prek on changed files in PRs
         if: github.event_name == 'pull_request'
         uses: j178/prek-action@4e14d07f9231acabce116ccfca13b13dd9755ece # v3.0.0
@@ -138,7 +147,7 @@ jobs:
       - name: Fingerprint the resolved PyTensor C-cache runtime
         id: pytensor-c-cache-fingerprint
         run: |
-          uv run python - <<'PY'
+          uv run --no-sync python - <<'PY'
           import hashlib
           import json
           import os
@@ -222,14 +231,14 @@ jobs:
       - name: Show environment
         run: |
           uv pip list
-          uv run python -c "import pymc, pytensor; print('pymc', pymc.__version__); print('blas_ldflags=', pytensor.config.blas__ldflags)"
+          uv run --no-sync python -c "import pymc, pytensor; print('pymc', pymc.__version__); print('blas_ldflags=', pytensor.config.blas__ldflags)"
       - name: Check the resolved pandas matches the matrix leg
         # Guards against a stale lock or a solver backtrack quietly giving this
         # leg the wrong pandas, which would make the 2.3 leg meaningless.
         env:
           EXPECTED_PANDAS: ${{ matrix.pandas-version }}
         run: |
-          uv run python - <<'PY'
+          uv run --no-sync python - <<'PY'
           import os
           import pandas as pd
 
@@ -247,7 +256,7 @@ jobs:
           PY
       - name: Type check
         # Runs here rather than in prek because mypy only says anything useful when the real dependencies are importable, and the pre-commit env has none of them (issue #1127). Scope and the per-module allowlist that keeps this green live in [tool.mypy] in pyproject.toml.
-        run: uv run make typecheck
+        run: uv run --no-sync make typecheck
       - name: Run doctests
         # -p causalpy.tests.doctest_sampling loads the plugin that mocks
         # pm.sample for doctests (an autouse fixture in causalpy/tests/conftest.py
@@ -255,16 +264,16 @@ jobs:
         # leg fast if a doctest ever reaches the real MCMC sampler. The old
         # --config-file=causalpy/tests/conftest.py pointed pytest's rootdir at
         # causalpy/tests (a .py file carries no ini config), so it is dropped.
-        run: uv run pytest --doctest-modules -p causalpy.tests.doctest_sampling --ignore=causalpy/tests/ causalpy/ --no-cov
+        run: uv run --no-sync pytest --doctest-modules -p causalpy.tests.doctest_sampling --ignore=causalpy/tests/ causalpy/ --no-cov
       - name: Run extra tests
-        run: uv run pytest docs/source/.codespell/test_notebook_to_markdown.py --no-cov
+        run: uv run --no-sync pytest docs/source/.codespell/test_notebook_to_markdown.py --no-cov
       - name: Run statistical correctness tests
         # CI restores a warm C cache only after these exact reproducibility tests; the manual migration baseline keeps a cold compiledir per capture for its exact raw-draw gate.
         env:
           PYTENSOR_FLAGS: base_compiledir=${{ runner.temp }}/pytensor-correctness
         run: |
-          uv run python -c "import pytensor; print('base_compiledir=', pytensor.config.base_compiledir); print('compiledir=', pytensor.config.compiledir)"
-          uv run pytest -o addopts='' -m correctness --cov=causalpy --cov-report= --cov-fail-under=0 --no-cov-on-fail
+          uv run --no-sync python -c "import pytensor; print('base_compiledir=', pytensor.config.base_compiledir); print('compiledir=', pytensor.config.compiledir)"
+          uv run --no-sync pytest -o addopts='' -m correctness --cov=causalpy --cov-report= --cov-fail-under=0 --no-cov-on-fail
       - name: Restore the PyTensor C-module cache
         id: pytensor-cmodules-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -276,7 +285,7 @@ jobs:
         if: steps.pytensor-cmodules-cache.outputs.cache-hit != 'true'
         run: rm -rf ~/.pytensor/compiledir_*
       - name: Run tests
-        run: uv run pytest --cov-append --cov-report=xml --no-cov-on-fail
+        run: uv run --no-sync pytest --cov-append --cov-report=xml --no-cov-on-fail
       - name: Save the PyTensor C-module cache
         if: steps.pytensor-cmodules-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -286,8 +295,8 @@ jobs:
             pytensor-cmodules-v2-${{ runner.os }}-${{ runner.arch }}-py${{ matrix.python-version }}-pandas${{ matrix.pandas-version }}-lock${{ hashFiles('uv.lock') }}-src${{ hashFiles('causalpy/**/*.py', 'pyproject.toml') }}-runtime${{ steps.pytensor-c-cache-fingerprint.outputs.digest }}
       - name: Check codespell for notebooks
         run: |
-          uv run python ./docs/source/.codespell/notebook_to_markdown.py --tempdir tmp_markdown
-          uv run codespell
+          uv run --no-sync python ./docs/source/.codespell/notebook_to_markdown.py --tempdir tmp_markdown
+          uv run --no-sync codespell
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
         with:

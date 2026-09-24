@@ -1,5 +1,11 @@
 ci:
   autofix_prs: false
+  # Hosted pre-commit.ci cannot install arbitrary tools, so the `uv-lock-check`
+  # hook (language: system, shells out to `uv lock --check`) is not runnable
+  # there. It still runs locally via `prek run --all-files` and in the
+  # dedicated `uv-lock-check` GitHub Actions job (.github/workflows/ci.yml),
+  # both of which install/have `uv` on PATH.
+  skip: [uv-lock-check]
 
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks

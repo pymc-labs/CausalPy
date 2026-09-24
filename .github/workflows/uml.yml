@@ -33,14 +33,16 @@ jobs:
           sudo apt-get update && sudo apt-get install -y graphviz
 
       - name: Verify pylint and pyreverse
+        # --no-sync: a bare `uv run` re-syncs to the project's default groups/
+        # extras, which would drop the `--extra docs` packages installed above.
         run: |
           uv pip show pylint
-          uv run which pyreverse
-          uv run pyreverse --version
+          uv run --no-sync which pyreverse
+          uv run --no-sync pyreverse --version
 
       - name: Update the UML Diagrams
         run: |
-          uv run make uml
+          uv run --no-sync make uml
 
       - name: Create PR for changes
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
