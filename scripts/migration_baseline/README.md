@@ -1,5 +1,7 @@
 # PyMC Migration Baseline Harness
 
+**This harness remains conda-based and is out of scope for the uv migration (issue #1174).** It needs two incompatible PyMC/PyTensor/ArviZ stacks in separate conda prefixes simultaneously, which a single `uv.lock` cannot express; see the [Host requirements](#host-requirements) section below. uv is the default developer environment and CI resolver everywhere else in the project (see `CONTRIBUTING.md`), but this permanent harness is a deliberate, documented exception.
+
 This permanent harness produces reproducible evidence for the PyMC 5 → PyMC 6 migration at the only two revisions that may be attributed to that migration: PyMC 5 reference `79c0a87072fd4653bfaed1eb085f965594c7f03a` and PyMC 6 migration candidate `c83194a38373b815a90582e7969e995c4db52da2`. It rejects every other source revision so later features are investigated as separate changes rather than mislabeled migration drift.
 
 The candidate was the head of the `pymc6_and_pymcmarketing1_migration` integration branch when it was pinned, so the evidence describes the tree proposed for `main`. It is deliberately not the harness checkout: run `scripts/migration_baseline/harness.py` from its own committed checkout, whose `HEAD` differs from both sampled revisions.

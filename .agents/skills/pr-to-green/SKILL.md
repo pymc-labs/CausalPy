@@ -18,8 +18,9 @@ This skill provides a deterministic maintainer workflow for taking an in-flight 
 
 - Confirm branch and remotes before making git changes
 - Preserve user/unrelated local modifications; never discard unknown work
-- Use CausalPy environment commands:
-  - `$CONDA_EXE run -n CausalPy <command>`
+- Use CausalPy environment commands (uv is the default; see `.agents/skills/python-environment/SKILL.md` for the conda fallback):
+  - `uv run <command>` (default), e.g. `uv run pytest`, `uv run make test-patch-cov`
+  - `$CONDA_EXE run -n CausalPy <command>` (conda fallback, only when `uv` is unavailable)
 - For PyMC/PyTensor/matplotlib imports and test commands, request full permissions as needed
 
 ## PR number entrypoint (manual invocation)

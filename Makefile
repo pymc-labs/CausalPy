@@ -8,7 +8,7 @@ PACKAGE_DIR = causalpy
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: init setup lint check_lint typecheck check-exports check-architecture test test-correctness test-patch-cov uml gallery html cleandocs doctest run_notebooks_full help
+.PHONY: init setup setup-conda lint check_lint typecheck check-exports check-architecture test test-correctness test-patch-cov uml gallery html cleandocs doctest run_notebooks_full help
 
 # Patch coverage must be measured against the branch the PR actually targets.
 # While the 1.0 transition branch exists, work branched from it targets it, not
@@ -38,11 +38,16 @@ DIFF_COVER_EXCLUDE ?= $(CURDIR)/$(PACKAGE_DIR)/tests/*
 init: ## Install the package in editable mode
 	python -m pip install -e . --no-deps
 
-setup: ## Set up complete dev environment (run inside CausalPy env, e.g. conda run -n CausalPy make setup)
+setup: ## Set up complete dev environment with uv (default; see CONTRIBUTING.md for the conda alternative)
+	uv sync --locked --extra dev --extra docs --extra test --extra lint
+	uv run prek install -f
+	@echo "Development environment ready! Run commands with 'uv run <command>', e.g. 'uv run make test'."
+
+setup-conda: ## Set up dev environment inside an already-active conda/micromamba env (alternative to 'setup')
 	python -m pip install --no-deps -e .
 	python -m pip install -e '.[dev,docs,test,lint]'
 	prek install -f
-	@echo "Development environment ready!"
+	@echo "Conda development environment ready!"
 
 lint: ## Run ruff linter and formatter
 	ruff check --fix .

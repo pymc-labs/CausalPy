@@ -26,7 +26,7 @@ When invoked:
 
 CausalPy-specific requirements:
 
-- Respect AGENTS.md conventions: CausalPy env via `$CONDA_EXE run -n CausalPy <command>`.
+- Respect AGENTS.md conventions: CausalPy env via `uv run <command>` (default), or `$CONDA_EXE run -n CausalPy <command>` on the conda fallback.
 - For commands importing PyMC/PyTensor/matplotlib or running pytest/doctest, explicitly note full permission requirements.
 - Prefer targeted reruns before full suite reruns.
 - If behavior changed, require proper pytest updates under `causalpy/tests/` (no throwaway scripts).

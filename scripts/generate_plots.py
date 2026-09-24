@@ -11,9 +11,9 @@ gate for plot refactors: capture a baseline before the refactor, re-run with
 a new tag after, and diff the images (``cmp`` for pixel equivalence, or eyeball
 the pairs when a deliberate change is expected)::
 
-    $CONDA_EXE run -n CausalPy python scripts/generate_plots.py --tag baseline
+    uv run python scripts/generate_plots.py --tag baseline
     # ... refactor ...
-    $CONDA_EXE run -n CausalPy python scripts/generate_plots.py --tag after
+    uv run python scripts/generate_plots.py --tag after
     for f in .scratch/plot_validation/*_baseline.png; do
         cmp "$f" "${f%_baseline.png}_after.png" && echo "OK $f"
     done

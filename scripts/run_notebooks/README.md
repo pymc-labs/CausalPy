@@ -17,11 +17,24 @@ The notebook runner mirrors the CI setup and expects a full docs/test environmen
 
 1. **Install Python dependencies**
 
+   Default (uv):
+
+   ```bash
+   uv sync --locked --extra test --extra docs
+   ```
+
+   Note: CI's notebook workflow additionally installs the docs-only PyMC-Marketing
+   transition snapshot from `docs/requirements.txt` first via `uv pip install`
+   (unlocked — its pins conflict with `uv.lock`'s floors). See
+   `.github/workflows/test_notebook.yml`.
+
+   Alternative (conda/micromamba environment, or plain pip):
+
    ```bash
    pip install -e ".[test,docs]"
    ```
 
-   This brings in Papermill, Jupyter, nbclient, and notebook-related dependencies.
+   Either way, this brings in Papermill, Jupyter, nbclient, and notebook-related dependencies.
 
 2. **Install Graphviz (system dependency)**
 
