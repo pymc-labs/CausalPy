@@ -1,0 +1,14 @@
+causalpy/tests/test_deprecated_design_aliases.py
+  h_d36ca8649a0e95 14,18,24,52-123,135-142,157-159,161-163,179-212,214-220,223-226,228-231,247-248,264-265,282-289,295-296
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "9c64d3d596272a05c210d5d06a818cb205d223eb",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}

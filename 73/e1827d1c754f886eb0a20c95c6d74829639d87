@@ -1,0 +1,19 @@
+causalpy/tests/test_pandas_compat.py
+  s_c5e0308edcbe07::t_9c16a522775d7f 16-17,26,29-32,289-528
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "73e1827d1c754f886eb0a20c95c6d74829639d87",
+  "prompts": {},
+  "sessions": {
+    "s_c5e0308edcbe07": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6fe20fe0-185d-4455-beee-b78ff9524806",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Daimon <daimon@pymc-labs.com>"
+    }
+  }
+}

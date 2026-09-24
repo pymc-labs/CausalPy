@@ -1,0 +1,19 @@
+.github/workflows/ci.yml
+  s_5b5d3983763000::t_a33a13ea048d63 109-111
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "7c60a99383b16e71895e4959dfd95825e293eae3",
+  "prompts": {},
+  "sessions": {
+    "s_5b5d3983763000": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "578e8f29-255c-40ba-baba-d19f2d601ba0",
+        "model": "unknown"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+causalpy/version.py
+  h_d36ca8649a0e95 16
+docs/source/release_notes.md
+  h_d36ca8649a0e95 191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "707bf7a2c67f759903d71489dfc1655cfab09906",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}

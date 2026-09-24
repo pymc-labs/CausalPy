@@ -1,0 +1,23 @@
+README.md
+  s_afaa8501218b5e::t_54ac668a8ed3d9 63-72
+docs/source/index.md
+  s_afaa8501218b5e::t_cc11a9c4850c25 17
+docs/source/release_notes.md
+  s_afaa8501218b5e::t_dea6b3a0ad573e 1-185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "d874406024e000245d9b8a0d57751f1ddd67333b",
+  "prompts": {},
+  "sessions": {
+    "s_afaa8501218b5e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "652558d1-e179-48e7-aba6-1144ab910cb9",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "daimon-pymclabs <daimon@pymc-labs.com>"
+    }
+  }
+}

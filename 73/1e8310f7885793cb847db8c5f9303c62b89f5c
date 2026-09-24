@@ -1,0 +1,19 @@
+docs/source/release_notes.md
+  s_3e4ad62d2ab040::t_356d32ac9b62d9 26-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "731e8310f7885793cb847db8c5f9303c62b89f5c",
+  "prompts": {},
+  "sessions": {
+    "s_3e4ad62d2ab040": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3bd7f594-8e5e-4d6a-b19a-d57fe79f50ef",
+        "model": "unknown"
+      },
+      "human_author": "daimon-pymclabs <daimon@pymc-labs.com>"
+    }
+  }
+}

@@ -1,0 +1,14 @@
+Makefile
+  h_d36ca8649a0e95 13-31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "03c2499fa93dc8db25627c9706bc88aef4df42c2",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}

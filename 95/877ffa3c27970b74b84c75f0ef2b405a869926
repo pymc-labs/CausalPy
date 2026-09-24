@@ -1,0 +1,18 @@
+causalpy/experiments/regression_discontinuity.py
+  h_d36ca8649a0e95 235-237
+causalpy/reporting.py
+  h_d36ca8649a0e95 1612-1622,1624-1651
+causalpy/tests/test_reporting.py
+  h_d36ca8649a0e95 480,487,492,494,498-508,510,512,514-520,522-529,531-532,534-552,1665-1666,1672,1677,1679-1680,1683-1737,1739-1740
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "95877ffa3c27970b74b84c75f0ef2b405a869926",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}

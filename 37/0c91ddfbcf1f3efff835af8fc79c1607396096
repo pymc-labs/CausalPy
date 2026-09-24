@@ -1,0 +1,16 @@
+.github/workflows/ci.yml
+  h_d36ca8649a0e95 120-215,253-268,271-277
+scripts/migration_baseline/README.md
+  h_d36ca8649a0e95 61-62,88,91,94,97,100
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "370c91ddfbcf1f3efff835af8fc79c1607396096",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}

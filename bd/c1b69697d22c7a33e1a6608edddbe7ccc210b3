@@ -1,0 +1,19 @@
+scripts/migration_baseline/harness.py
+  s_317ba8c24a2479::t_471f41b7fca05f 313,787,811,879,1539-1544,1549-1554,1587,1590-1591,1913,1965,2308
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "bdc1b69697d22c7a33e1a6608edddbe7ccc210b3",
+  "prompts": {},
+  "sessions": {
+    "s_317ba8c24a2479": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "34e325f7-88e0-4ece-b306-d270a6874895",
+        "model": "claude-opus-5"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}

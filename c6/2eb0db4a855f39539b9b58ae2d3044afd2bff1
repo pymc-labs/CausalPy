@@ -1,0 +1,19 @@
+.agents/skills/_shared/pr_triage/labels.py
+  s_2c78a04ec1dcaf::t_51519b2c22a3ac 106-130,140-153,156,175-177,179,181-196,277,343
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "c62eb0db4a855f39539b9b58ae2d3044afd2bff1",
+  "prompts": {},
+  "sessions": {
+    "s_2c78a04ec1dcaf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "28402f4f-bde8-4352-a4ad-da49e15e0f40",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "daimon-pymclabs <daimon@pymc-labs.com>"
+    }
+  }
+}
