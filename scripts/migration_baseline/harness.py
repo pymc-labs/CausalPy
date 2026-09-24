@@ -47,7 +47,7 @@ SCENARIO_VERSION = 2
 # capture is run, and then discard evidence captured at the superseded pin rather
 # than mixing the two batches.
 PYMC5_COMMIT = "79c0a87072fd4653bfaed1eb085f965594c7f03a"
-PYMC6_COMMIT = "c83194a38373b815a90582e7969e995c4db52da2"
+PYMC6_COMMIT = "2782800194ee6bf49c4ab14d84f5ec7ec66b7f34"
 STACK_COMMITS = {"pymc5": PYMC5_COMMIT, "pymc6": PYMC6_COMMIT}
 _COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
