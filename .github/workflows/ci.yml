@@ -141,8 +141,10 @@ jobs:
         # --locked fails instead of silently re-resolving if uv.lock drifts
         # from pyproject.toml. Pandas major version comes from the matrix leg's
         # conflicting dependency group (see pyproject.toml `[tool.uv] conflicts`).
+        # `dev` is included alongside `test` because the Type check step below
+        # needs mypy, which lives in `dev` (and `lint`), not `test`.
         run: >-
-          uv sync --locked --extra test --python ${{ matrix.python-version }}
+          uv sync --locked --extra test --extra dev --python ${{ matrix.python-version }}
           --group ${{ matrix.pandas-group }}
       - name: Fingerprint the resolved PyTensor C-cache runtime
         id: pytensor-c-cache-fingerprint
