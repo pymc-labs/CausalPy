@@ -7,7 +7,7 @@ This is the permanent attachment structure for #1048. It is not evidence by itse
 ## Scope and attribution
 
 - Reference checkout: `79c0a87072fd4653bfaed1eb085f965594c7f03a` in the PyMC 5 environment.
-- Candidate checkout: `c83194a38373b815a90582e7969e995c4db52da2` in the PyMC 6 migration environment.
+- Candidate checkout: `143e823ad1167da59686d51a11f8e6d97b1d0361` in the PyMC 6 migration environment.
 - Both sampled checkouts and the executing harness checkout had an empty `git status --porcelain` before CausalPy import. The committed harness implementation checkout is not a sampled candidate checkout.
 - Attribution statement: this evidence covers only the fixed migration delta. Any behavior on a later source commit is a separate feature comparison and must not be described as migration drift.
 
