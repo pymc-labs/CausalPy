@@ -53,7 +53,7 @@ def test_saturated_did_interaction_equals_four_mean_contrast():
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(fit_intercept=False),
-    )
-    impact = float(np.asarray(result.causal_impact).reshape(-1)[0])
+    ).fit()
+    impact = float(np.asarray(result.result.causal_impact).reshape(-1)[0])
     np.testing.assert_allclose(impact, four_mean, atol=1e-12)
     assert four_mean == 4.0
