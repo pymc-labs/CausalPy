@@ -55,6 +55,7 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 | `InterruptedTimeSeries` | ITS | OLS + Bayes | 3-period design via `treatment_end_time` |
 | `PiecewiseITS` | Segmented ITS | OLS + Bayes | Fits full series; `step()`/`ramp()` transforms |
 | `DifferenceInDifferences` | DiD | OLS + Bayes | Effect from interaction coefficient |
+| `HierarchicalDifferenceInDifferences` | Hierarchical DiD | Bayes only | Random effects via mixed-model formula |
 | `StaggeredDifferenceInDifferences` | Staggered DiD | OLS + Bayes | Fits untreated obs only |
 | `SyntheticControl` | SC | OLS + Bayes | Multi-unit; control/treated unit lists, no formula |
 | `SyntheticDifferenceInDifferences` | SDiD | OLS + Bayes | Tau computed analytically from weight posteriors |
