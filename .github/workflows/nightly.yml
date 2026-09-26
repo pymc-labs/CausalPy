@@ -1,0 +1,89 @@
+name: nightly
+
+# Heavy tests kept off the PR critical path: `nightly`-marked tests (including the doctests listed in causalpy/tests/doctest_sampling.py NIGHTLY_DOCTESTS). ci.yml deselects them via the default pytest addopts. This workflow also reruns every `correctness` test with a cold compiledir, including the `nightly` ones that ci.yml skips.
+#
+# GitHub only runs `schedule` from the default branch, so the cron fires on main. Until the PyMC 6 migration branch merges into main, pushes to that branch run this workflow instead so its heavy tests still run after every merge. Drop the `push` trigger once the branch has merged.
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+  push:
+    branches: [pymc6_and_pymcmarketing1_migration]
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  # Bursts of merges only need the newest push tested, but a manual dispatch must not cancel an in-flight scheduled run.
+  cancel-in-progress: ${{ github.event_name == 'push' }}
+
+jobs:
+  heavy-tests:
+    name: Heavy tests (Python ${{ matrix.python-version }}, pandas ${{ matrix.pandas-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Same legs as the ci.yml test job, so the correctness tests keep running on every supported combination.
+        include:
+          - python-version: "3.12"
+            pandas-version: "3.x"
+            pandas-group: "pandas3"
+          - python-version: "3.14"
+            pandas-version: "3.x"
+            pandas-group: "pandas3"
+          - python-version: "3.12"
+            pandas-version: "2.3"
+            pandas-group: "pandas2"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Security: do not set to true — prevents credential leakage (GitHub Advanced Security).
+          persist-credentials: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+      - name: Install Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+      - name: Sync dependencies
+        run: >-
+          uv sync --locked --extra test --python ${{ matrix.python-version }}
+          --group ${{ matrix.pandas-group }}
+      - name: Run nightly doctests
+        run: uv run --no-sync pytest --doctest-modules -p causalpy.tests.doctest_sampling --ignore=causalpy/tests/ causalpy/ --no-cov -m nightly
+      - name: Run nightly tests
+        run: uv run --no-sync pytest --no-cov -m "nightly and not correctness"
+      - name: Run statistical correctness tests
+        # A cold, job-local compiledir keeps these exact reproducibility tests independent of any cached C modules.
+        env:
+          PYTENSOR_FLAGS: base_compiledir=${{ runner.temp }}/pytensor-correctness
+        run: |
+          uv run --no-sync python -c "import pytensor; print('base_compiledir=', pytensor.config.base_compiledir); print('compiledir=', pytensor.config.compiledir)"
+          uv run --no-sync pytest -o addopts='' -m correctness --no-cov
+
+  report-failure:
+    # Nobody watches scheduled runs, so a failure opens (or comments on) a tracking issue.
+    needs: heavy-tests
+    if: failure() && github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the nightly failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Nightly heavy tests failing"
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          body="The nightly heavy tests failed on \`${GITHUB_REF_NAME}\` at ${GITHUB_SHA} (${GITHUB_EVENT_NAME}): ${run_url}"
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"${title}\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
