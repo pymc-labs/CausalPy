@@ -5,29 +5,29 @@ resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
     "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.14' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
     "python_full_version >= '3.15' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.14' and sys_platform == 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.13' and sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version == '3.14.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version == '3.14.*' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.14' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.14' and sys_platform == 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.13' and sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version < '3.14' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
 ]
 conflicts = [[
@@ -61,14 +61,14 @@ name = "aiohttp"
 version = "3.14.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "aiohappyeyeballs", marker = "python_full_version < '3.14' or (python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2') or (python_full_version >= '3.15' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "aiosignal", marker = "python_full_version < '3.14' or (python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2') or (python_full_version >= '3.15' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "attrs", marker = "python_full_version < '3.14' or (python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2') or (python_full_version >= '3.15' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "frozenlist", marker = "python_full_version < '3.14' or (python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2') or (python_full_version >= '3.15' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "multidict", marker = "python_full_version < '3.14' or (python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2') or (python_full_version >= '3.15' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "propcache", marker = "python_full_version < '3.14' or (python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2') or (python_full_version >= '3.15' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "aiohappyeyeballs", marker = "(python_full_version < '3.13' and sys_platform != 'emscripten') or (python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "aiosignal", marker = "(python_full_version < '3.13' and sys_platform != 'emscripten') or (python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "attrs", marker = "(python_full_version < '3.13' and sys_platform != 'emscripten') or (python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "frozenlist", marker = "(python_full_version < '3.13' and sys_platform != 'emscripten') or (python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "multidict", marker = "(python_full_version < '3.13' and sys_platform != 'emscripten') or (python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "propcache", marker = "(python_full_version < '3.13' and sys_platform != 'emscripten') or (python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
     { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "yarl", marker = "python_full_version < '3.14' or (python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2') or (python_full_version >= '3.15' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "yarl", marker = "(python_full_version < '3.13' and sys_platform != 'emscripten') or (python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/58/d9/22ce5786ac0c1653ae8b6c23bded02c1686d11f0dbb45b31ce128e0df985/aiohttp-3.14.3.tar.gz", hash = "sha256:9491196535a88924a60afd5b5f434b5b203b6cc616250878dbdb223a8f7844bc", size = 7971213, upload-time = "2026-07-23T01:57:27.037Z" }
 wheels = [
@@ -161,7 +161,7 @@ name = "aiosignal"
 version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "frozenlist", marker = "python_full_version < '3.14' or (python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2') or (python_full_version >= '3.15' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "frozenlist", marker = "(python_full_version < '3.13' and sys_platform != 'emscripten') or (python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
     { name = "typing-extensions", marker = "python_full_version < '3.13' or (extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/61/62/06741b579156360248d1ec624842ad0edf697050bbaf7c3e46394e106ad1/aiosignal-1.4.0.tar.gz", hash = "sha256:f47eecd9468083c2029cc99945502cb7708b082c232f9aca65da147157b251c7", size = 25007, upload-time = "2025-07-03T22:54:43.528Z" }
@@ -544,6 +544,7 @@ test = [
     { name = "pymc-forecast", extra = ["extras"] },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "pytest-xdist" },
 ]
 
 [package.dev-dependencies]
@@ -601,6 +602,7 @@ requires-dist = [
     { name = "pytensor", specifier = ">=3,<4" },
     { name = "pytest", marker = "extra == 'test'" },
     { name = "pytest-cov", marker = "extra == 'test'" },
+    { name = "pytest-xdist", marker = "extra == 'test'" },
     { name = "pyyaml", marker = "extra == 'dev'" },
     { name = "pyyaml", marker = "extra == 'docs'" },
     { name = "ruff", marker = "extra == 'lint'" },
@@ -1265,6 +1267,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/ea/8d/a7121ffe5f402dc015277d2d31eb82d2187334503a011c18f2e78ecbb9b2/entrypoints-0.4.tar.gz", hash = "sha256:b706eddaa9218a19ebcd67b56818f05bb27589b1ca9e8d797b74affad4ccacd4", size = 13974, upload-time = "2022-02-02T21:30:28.172Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/35/a8/365059bbcd4572cbc41de17fd5b682be5868b218c3c5479071865cab9078/entrypoints-0.4-py3-none-any.whl", hash = "sha256:f174b5ff827504fd3cd97cc3f8649f3693f51538c7e4bdf3ef002c8429d42f9f", size = 5294, upload-time = "2022-02-02T21:30:26.024Z" },
+]
+
+[[package]]
+name = "execnet"
+version = "2.1.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bf/89/780e11f9588d9e7128a3f87788354c7946a9cbb1401ad38a48c4db9a4f07/execnet-2.1.2.tar.gz", hash = "sha256:63d83bfdd9a23e35b9c6a3261412324f964c2ec8dcd8d3c6916ee9373e0befcd", size = 166622, upload-time = "2025-11-12T09:56:37.75Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ab/84/02fc1827e8cdded4aa65baef11296a9bbe595c474f0d6d758af082d849fd/execnet-2.1.2-py3-none-any.whl", hash = "sha256:67fba928dd5a544b783f6056f449e5e3931a5c378b128bc18501f7ea79e296ec", size = 40708, upload-time = "2025-11-12T09:56:36.333Z" },
 ]
 
 [[package]]
@@ -3304,9 +3315,9 @@ version = "2.3.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
     "python_full_version >= '3.15'",
-    "python_full_version < '3.14' and sys_platform == 'emscripten'",
     "python_full_version == '3.14.*'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten'",
+    "python_full_version < '3.14' and sys_platform == 'emscripten'",
     "python_full_version < '3.13' and sys_platform != 'emscripten'",
 ]
 dependencies = [
@@ -3364,14 +3375,14 @@ resolution-markers = [
     "python_full_version == '3.14.*' and sys_platform == 'emscripten'",
     "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version < '3.14' and sys_platform == 'emscripten'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
-    { name = "numpy" },
-    { name = "python-dateutil" },
+    { name = "numpy", marker = "extra == 'group-8-causalpy-pandas3' or extra != 'group-8-causalpy-pandas2'" },
+    { name = "python-dateutil", marker = "extra == 'group-8-causalpy-pandas3' or extra != 'group-8-causalpy-pandas2'" },
     { name = "tzdata", marker = "(sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2') or (sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2') or (extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e2/17/d7b106e05bfa642e8694451e7d3d759c6a241c5386a5d962e4f66c047e06/pandas-3.0.6.tar.gz", hash = "sha256:66b07ef7315a31bfe1089cd3d71a7de781c9dca986762d0b4fe7c0ef17465d10", size = 4667686, upload-time = "2026-09-17T23:23:18.345Z" }
@@ -3492,7 +3503,7 @@ name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "ptyprocess" },
+    { name = "ptyprocess", marker = "(python_full_version >= '3.14' and sys_platform == 'emscripten' and extra == 'group-8-causalpy-pandas2') or (sys_platform != 'emscripten' and sys_platform != 'win32') or (sys_platform == 'win32' and extra == 'group-8-causalpy-pandas2') or (sys_platform == 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/42/92/cc564bf6381ff43ce1f4d06852fc19a2f11d180f23dc32d9588bee2f149d/pexpect-4.9.0.tar.gz", hash = "sha256:ee7d41123f3c9911050ea2c2dac107568dc43b2d3b0c7557a33212c398ead30f", size = 166450, upload-time = "2023-11-25T09:07:26.339Z" }
 wheels = [
@@ -4244,6 +4255,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b1/51/a849f96e117386044471c8ec2bd6cfebacda285da9525c9106aeb28da671/pytest_cov-7.1.0.tar.gz", hash = "sha256:30674f2b5f6351aa09702a9c8c364f6a01c27aae0c1366ae8016160d1efc56b2", size = 55592, upload-time = "2026-03-21T20:11:16.284Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9d/7a/d968e294073affff457b041c2be9868a40c1c71f4a35fcc1e45e5493067b/pytest_cov-7.1.0-py3-none-any.whl", hash = "sha256:a0461110b7865f9a271aa1b51e516c9a95de9d696734a2f71e3e78f46e1d4678", size = 22876, upload-time = "2026-03-21T20:11:14.438Z" },
+]
+
+[[package]]
+name = "pytest-xdist"
+version = "3.8.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "execnet" },
+    { name = "pytest" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/78/b4/439b179d1ff526791eb921115fca8e44e596a13efeda518b9d845a619450/pytest_xdist-3.8.0.tar.gz", hash = "sha256:7e578125ec9bc6050861aa93f2d59f1d8d085595d6551c2c90b6f4fad8d3a9f1", size = 88069, upload-time = "2025-07-01T13:30:59.346Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/31/d4e37e9e550c2b92a9cbc2e4d0b7420a27224968580b5a447f420847c975/pytest_xdist-3.8.0-py3-none-any.whl", hash = "sha256:202ca578cfeb7370784a8c33d6d05bc6e13b4f25b5053c30a152269fd10f0b88", size = 46396, upload-time = "2025-07-01T13:30:56.632Z" },
 ]
 
 [[package]]
@@ -5144,26 +5168,26 @@ resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
     "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
     "python_full_version >= '3.15' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.13' and sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version == '3.14.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version == '3.14.*' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.13' and sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
 ]
 dependencies = [
@@ -5684,9 +5708,9 @@ name = "yarl"
 version = "1.25.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "idna", marker = "python_full_version < '3.14' or (python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2') or (python_full_version >= '3.15' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "multidict", marker = "python_full_version < '3.14' or (python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2') or (python_full_version >= '3.15' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "propcache", marker = "python_full_version < '3.14' or (python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2') or (python_full_version >= '3.15' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "idna", marker = "(python_full_version < '3.13' and sys_platform != 'emscripten') or (python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "multidict", marker = "(python_full_version < '3.13' and sys_platform != 'emscripten') or (python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "propcache", marker = "(python_full_version < '3.13' and sys_platform != 'emscripten') or (python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/75/16/e8be8e2fb175bbf41a0680381a319f1199fae256588241a2ac8677eafb49/yarl-1.25.1.tar.gz", hash = "sha256:03dd38de09bc213e9a8b29761eec33ee1d5318dac0e49d8af36e4d27830e23a7", size = 246245, upload-time = "2026-09-15T19:35:02.264Z" }
 wheels = [

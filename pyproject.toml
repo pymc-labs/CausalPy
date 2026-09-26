@@ -124,6 +124,7 @@ lint = ["prek", "ruff", "mypy==2.3.0"]
 test = [
     "pytest",
     "pytest-cov",
+    "pytest-xdist",
     "diff-cover",
     "codespell",
     "nbformat",
