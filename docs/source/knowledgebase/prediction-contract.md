@@ -7,7 +7,7 @@ Gaussian models with an identity link make the linear predictor, conditional exp
 ## Three prediction quantities
 
 | Quantity | Typical name in CausalPy | Scale | Includes observation noise? | Used for impact? |
-|----------|-------------------------|-------|----------------------------|------------------|
+| --- | --- | --- | --- | --- |
 | Linear predictor / latent state | model-specific (e.g. ``eta``) | Link scale | No | No |
 | Conditional expected outcome | ``mu`` | Outcome / response scale | No | **Yes** |
 | Posterior predictive draw | ``y_hat`` | Outcome scale | Yes | No (by default) |
@@ -21,7 +21,7 @@ Posterior transformations for nonlinear models must be applied **draw by draw** 
 Every Bayesian backend that participates in impact calculation must expose outcome-scale conditional expectations through ``mu`` in the object returned by ``predict()``:
 
 | Backend | ``mu`` semantics today | Notes |
-|---------|------------------------|-------|
+| --- | --- | --- |
 | Native :class:`~causalpy.pymc_models.PyMCModel` subclasses (e.g. ``LinearRegression``) | ``Deterministic`` named ``mu`` in the PyMC graph | Identity-link Gaussian models satisfy the contract by construction. Custom subclasses must inverse-link before naming the node ``mu``. See {doc}`custom_pymc_models`. |
 | :class:`~causalpy.pymc_models.StateSpaceTimeSeries` | ``mu`` aliases the smoothed expected observation | Gaussian observation model; ``mu`` and ``y_hat`` coincide up to naming. |
 | :class:`~causalpy.pymc_forecast_models.PyMCForecastModel` | Upstream ``mu`` / ``mu_future`` latent passed to ``pymc_forecast.predict()`` | CausalPy treats these as outcome-scale expectations. For linked GLMs, pass the inverse-linked expectation as the latent until upstream exposes a dedicated expected-observation output (`pymc-forecast#52 <https://github.com/pymc-labs/pymc-forecast/issues/52>`_). ``StatespaceForecaster`` is rejected because upstream does not yet expose a separate noise-free expectation (`pymc-forecast#50 <https://github.com/pymc-labs/pymc-forecast/issues/50>`_). |

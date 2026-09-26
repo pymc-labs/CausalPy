@@ -3,7 +3,7 @@
 Use this as a routing-time gate before handing off to `running-causalpy-experiments`. It is not a replacement for method-specific execution guidance.
 
 | Experiment | Data topology | Backend support | Standard outputs | Routing caution |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `InterruptedTimeSeries` | Single outcome time series | Bayesian and sklearn/OLS | `summary()`, `effect_summary()`, `plot()` | Pre-period forecast counterfactual; use `PiecewiseITS` for explicit full-series level/slope changes. |
 | `PiecewiseITS` | Single outcome time series with `step()` or `ramp()` terms | Bayesian and sklearn/OLS | `summary()`, `effect_summary()`, `plot()` | Known interruptions only; not changepoint discovery. |
 | `DifferenceInDifferences` | Long treated/control pre/post data with common intervention timing | Bayesian and sklearn/OLS | `summary()`, `effect_summary()`, `plot()` | Not for staggered adoption. |

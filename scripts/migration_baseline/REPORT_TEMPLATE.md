@@ -59,7 +59,7 @@ Mutual mean-in-94%-HDI containment is diagnostic only. It must appear in the met
 Include the generated metric table for the following contracts:
 
 | Scenario | Contract | Required output |
-|---|---|---|
+| --- | --- | --- |
 | Difference-in-Differences | Public effect summary | Semantic table equality with unrounded treatment-effect mean and explicit 0.94 HDI |
 | Difference-in-Differences | In-sample fit | Draw-wise R² derived from conditional expected `mu` |
 | Difference-in-Differences | Counterfactual | Treated-post `mu` summaries with exact coordinate equality |

@@ -5,7 +5,7 @@ Use this guide as a lookup appendix after reading [Decision tree](decision_tree.
 ## Time-Series Designs
 
 | Situation | CausalPy class | Data shape | Main assumption | Common alternative |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | One outcome series, one intervention time, forecast counterfactual from pre-period | `InterruptedTimeSeries` | DataFrame indexed by time or with a time column | Pre-intervention trend model remains valid absent treatment | `PiecewiseITS` when estimating explicit level/slope changes in the full series |
 | Treated series plus one or more comparison/control series used as predictors, with a known intervention time | `InterruptedTimeSeries` as CITS | DataFrame indexed by time with treated outcome and comparison series columns | Comparison series account for common shocks and would track the treated series absent treatment | `SyntheticControl` when constrained donor weighting is the design target |
 | Known level or slope changes, possibly multiple interruptions | `PiecewiseITS` | Single time series with time variable used in `step()` / `ramp()` formula terms | Functional form captures untreated trend plus intervention changes | `InterruptedTimeSeries` when the goal is pre-period forecasting |
@@ -15,7 +15,7 @@ Use this guide as a lookup appendix after reading [Decision tree](decision_tree.
 ## Panel And Group Designs
 
 | Situation | CausalPy class | Data shape | Main assumption | Common alternative |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | One treated group and one control group before/after treatment | `DifferenceInDifferences` | Long panel or repeated group-time observations with treatment and post indicators | Parallel trends between treated and control groups | `StaggeredDifferenceInDifferences` for staggered adoption |
 | Units adopt treatment at different times | `StaggeredDifferenceInDifferences` | Long unit-time panel with treatment timing | Parallel trends, no anticipation, absorbing treatment | `PanelRegression` only for coefficient-level fixed-effects regression, not as a DiD substitute |
 | Fixed-effects regression is the analysis target | `PanelRegression` | Long panel with unit identifiers and optional time identifiers | Fixed effects control relevant unit/time confounding | DiD variants when treatment timing is central; report as adjusted association unless assignment supports causal language |
@@ -24,7 +24,7 @@ Use this guide as a lookup appendix after reading [Decision tree](decision_tree.
 ## Threshold And Cross-Sectional Designs
 
 | Situation | CausalPy class | Data shape | Main assumption | Common alternative |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | Treatment switches sharply at a cutoff in a running variable | `RegressionDiscontinuity` | Cross-section or repeated observations with running variable and threshold | Units near cutoff are comparable and cannot precisely manipulate assignment | `RegressionKink` when slope changes rather than treatment level; fuzzy RD is not directly implemented |
 | Treatment intensity changes slope at a threshold | `RegressionKink` | Cross-section or repeated observations with running variable and kink point | Smooth potential outcomes around the kink absent treatment-intensity change | `RegressionDiscontinuity` for jump discontinuities |
 | Endogenous treatment with valid instrument | `InstrumentalVariable` | DataFrame for outcome/treatment covariates plus instruments | Instrument relevance, exclusion, and no unblocked instrument-outcome path | `InversePropensityWeighting` if treatment is confounded but not instrumented |

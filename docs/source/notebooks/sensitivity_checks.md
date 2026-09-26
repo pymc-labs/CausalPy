@@ -59,7 +59,7 @@ cp.SensitivityAnalysis(
 ## Quick reference
 
 | Check | Applies to | Registered as default? | Main question |
-|-------|------------|------------------------|---------------|
+| --- | --- | --- | --- |
 | {doc}`PlaceboInTime <../api/generated/causalpy.checks.placebo_in_time.PlaceboInTime>` | ITS, SC (PyMC models) | Yes, for ITS and SC | Do pseudo-interventions in the pre-period also produce "effects"? |
 | {doc}`PriorSensitivity <../api/generated/causalpy.checks.prior_sensitivity.PriorSensitivity>` | ITS, DiD, SC, Staggered DiD, RD, RKink, PrePostNEGD, IPW, IV (PyMC models) | No | Do conclusions change materially under reasonable prior alternatives? |
 | {doc}`PersistenceCheck <../api/generated/causalpy.checks.persistence.PersistenceCheck>` | Three-period ITS designs | No | Does the effect remain after the intervention ends? |

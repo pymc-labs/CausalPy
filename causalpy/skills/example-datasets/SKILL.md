@@ -18,7 +18,7 @@ df = cp.load_data("did")
 ## Available Datasets
 
 | Key | Typical use | Description |
-|---|---|---|
+| --- | --- | --- |
 | `"did"` | Difference-in-differences | Synthetic DiD example data |
 | `"banks"` | Difference-in-differences | Historic banking closures data |
 | `"its"` | Interrupted time series | Seasonal synthetic ITS data |

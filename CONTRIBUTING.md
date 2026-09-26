@@ -60,7 +60,7 @@ There are 4 main ways of contributing to the CausalPy project (in ascending orde
 3. Fixing outstanding issues (bugs) with the existing codebase. They range from low-level software bugs to higher-level design problems.
 4. Adding new or improved functionality to the existing codebase.
 
-Items 2-4 require setting up a local development environment, see [Local development steps](#Local-development-steps) for more information.
+Items 2-4 require setting up a local development environment, see [Local development steps](#local-development-steps) for more information.
 
 ## Opening issues
 
@@ -290,7 +290,7 @@ When adding a new example notebook to the documentation gallery:
 
 - Notebook files are validated by prek using `nbformat` schema checks plus docs notebook conventions (`validate-notebooks`). Run `prek run --all-files` before pushing to catch malformed `.ipynb` files and docs navigation issues early.
 
-- If you have changed the documentation, you should [build the docs locally](#Building-the-documentation-locally) and check that the changes look correct.
+- If you have changed the documentation, you should [build the docs locally](#building-the-documentation-locally) and check that the changes look correct.
 
 - If notebook validation fails (`validate-notebooks`), use this recovery loop: (1) reopen and save or re-run the notebook in a notebook-aware editor for schema errors; for docs convention errors, follow the validator message, (2) if it still fails, restore the notebook from `main` and reapply only the intended edits with notebook-aware tooling, (3) rerun `prek run --all-files`, and (4) for docs notebook changes run `uv run make html` (or `conda run -n CausalPy make html` on the conda alternative) before pushing.
 
@@ -379,7 +379,7 @@ Contributions are welcome from the community. This section describes how contrib
 ### Pathway overview
 
 | Level | GitHub permission | Typical scope | Primary focus |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Community participant | N/A | Participate via issues, discussions, and PRs from forks | Reporting, ideas, fixes, docs, examples, tests |
 | Triager | Triage | Manage issues/PRs (no write) | Labels, reproductions, routing, housekeeping |
 | Collaborator | Write | Contribute directly to branches | Regular PRs, reviews, maintenance |

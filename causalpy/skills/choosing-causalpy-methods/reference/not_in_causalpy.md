@@ -5,7 +5,7 @@ Use this reference when the user's question is causal but none of the implemente
 ## Common Not-Implemented Routes
 
 | User need | Why no CausalPy experiment fits | Closest partial fit, if any |
-|---|---|---|
+| --- | --- | --- |
 | Propensity-score matching, coarsened exact matching, Mahalanobis matching, or genetic matching | CausalPy has inverse propensity weighting, not matching estimators. | `InversePropensityWeighting` only if weighting is acceptable and treatment is binary with overlap. |
 | Fuzzy regression discontinuity | `RegressionDiscontinuity` is for sharp RD where treatment assignment changes at the cutoff. | `InstrumentalVariable` may be useful only if the cutoff indicator can be defended as an instrument and the user accepts an IV framing. |
 | Continuous or dose-response treatment without a kink design | IPW requires binary treatment, and `RegressionKink` only covers a slope change at a known threshold. | External dose-response, generalized propensity score, or outcome-regression workflows. |
