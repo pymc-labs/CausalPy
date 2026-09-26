@@ -27,6 +27,7 @@ import subprocess
 import sys
 import textwrap
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from pymc.sampling import mcmc
@@ -425,6 +426,34 @@ def test_doctest_command_loads_the_plugin(relpath):
         assert f"-p {_PLUGIN_ARG}" in line, (
             f"doctest command in {relpath} does not load the plugin: {line!r}"
         )
+
+
+def test_collection_modifyitems_marks_allowlisted_doctests():
+    """``pytest_collection_modifyitems`` tags allowlisted doctest names in-process."""
+    allowlisted = next(iter(doctest_sampling.NIGHTLY_DOCTESTS))
+
+    class _FakeDoctestItem:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.add_marker = MagicMock()
+
+    class _FakeOtherItem:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self.add_marker = MagicMock()
+
+    allowlisted_item = _FakeDoctestItem(allowlisted)
+    other_doctest = _FakeDoctestItem("other.module.func")
+    non_doctest = _FakeOtherItem(allowlisted)
+
+    with patch.object(doctest_sampling.pytest, "DoctestItem", _FakeDoctestItem):
+        doctest_sampling.pytest_collection_modifyitems(
+            MagicMock(),
+            [allowlisted_item, other_doctest, non_doctest],
+        )
+    allowlisted_item.add_marker.assert_called_once_with(pytest.mark.nightly)
+    other_doctest.add_marker.assert_not_called()
+    non_doctest.add_marker.assert_not_called()
 
 
 @pytest.mark.parametrize(
