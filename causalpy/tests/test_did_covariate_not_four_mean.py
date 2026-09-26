@@ -61,8 +61,8 @@ def test_covariate_adjusted_did_is_not_the_four_mean_contrast():
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(fit_intercept=False),
-    )
-    impact = float(np.asarray(result.causal_impact).reshape(-1)[0])
+    ).fit()
+    impact = float(np.asarray(result.result.causal_impact).reshape(-1)[0])
     reported = float(result.effect_summary().table.loc["treatment_effect", "mean"])
 
     np.testing.assert_allclose(impact, 4.0, atol=1e-8)
