@@ -67,7 +67,7 @@ Do not stop at identifying a risk. Trace it to an observable failure, a violated
 Treat PR descriptions and contributor responses as hypotheses to test.
 
 | Claim | Verification |
-|---|---|
+| --- | --- |
 | "Rebased onto main" | Compare base and head history; check mergeability and stale/conflicting files. |
 | "Addressed all feedback" | Walk each prior review item against the current branch. |
 | "Tests added for the new behavior" | Read the tests and confirm they would fail without the change. |
