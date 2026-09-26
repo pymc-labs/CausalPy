@@ -238,7 +238,7 @@ def test_state_space_predict_and_score():
 
 @pytest.mark.integration
 @pytest.mark.slow
-def test_its_with_state_space_covariates():
+def test_its_with_state_space_covariates(mock_pymc_sample):
     """ITS + StateSpaceTimeSeries with exogenous covariates end to end."""
     try:
         from pymc_extras.statespace import structural  # noqa: F401
@@ -276,9 +276,11 @@ def test_its_with_state_space_covariates():
         ).fit()
 
     # Covariates entered the model: beta_exog exists with the right coords.
-    # No posterior-accuracy assertions here: the suite mocks pm.sample
-    # session-wide (see conftest mock_pymc_sample), so draws come from the
-    # prior. Numerical recovery is exercised outside the test suite.
+    # No posterior-accuracy assertions here: mock_pymc_sample replaces
+    # pm.sample, so draws come from the prior. The fixture is requested
+    # explicitly so the mock also applies when this slow test runs in its
+    # own process (make test-slow / nightly). Numerical recovery is
+    # exercised outside the test suite.
     assert "beta_exog" in result.idata.posterior
     assert list(result.idata.posterior["beta_exog"].coords["state_exog"].values) == [
         "x1",
