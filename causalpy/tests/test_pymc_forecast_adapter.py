@@ -14,6 +14,9 @@
 """Tests for the pymc-forecast model-provider adapter behind
 InterruptedTimeSeries (issue #1013)."""
 
+import sys
+from importlib.metadata import version
+
 import matplotlib
 
 matplotlib.use("Agg")
@@ -30,7 +33,7 @@ from causalpy.experiments.model_adapter import (
     PyMCForecastAdapter,
     make_model_adapter,
 )
-from causalpy.pymc_forecast_models import PyMCForecastModel
+from causalpy.pymc_forecast_models import PyMCForecastModel, _import_pymc_forecast
 
 pymc_forecast = pytest.importorskip("pymc_forecast")
 
@@ -61,6 +64,13 @@ sample_kwargs = {
     "draws": 500,
     "tune": 1000,
     "chains": 2,
+}
+
+fast_sample_kwargs = {
+    "draws": 100,
+    "tune": 100,
+    "chains": 2,
+    "progressbar": False,
 }
 
 TRUE_EFFECT = 2.0
@@ -117,6 +127,16 @@ def make_forecast_model():
     )
 
 
+def make_fast_forecast_model():
+    """Small HMC schedule for forecast-placebo control-flow tests."""
+    return PyMCForecastModel(
+        linear_model,
+        forecaster_kwargs=dict(fast_sample_kwargs),
+        num_samples=50,
+        random_seed=42,
+    )
+
+
 @pytest.fixture(scope="module")
 def forecast_result(its_data):
     df, treatment_time = its_data
@@ -125,7 +145,7 @@ def forecast_result(its_data):
         treatment_time,
         formula="y ~ 1 + t",
         model=make_forecast_model(),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -138,18 +158,17 @@ def pymc_result(its_data):
         model=cp.pymc_models.LinearRegression(
             sample_kwargs={**sample_kwargs, "progressbar": False, "random_seed": 42}
         ),
-    )
+    ).fit()
 
 
 @pytest.mark.integration
 class TestRoundTripAgainstPyMCBackend:
-    """Fit pre / forecast post-as-untreated / calculate_impact on draw-level
-    samples, checked against the existing native PyMC path."""
+    """Fit pre / forecast post-as-untreated / compare canonical draw-level impacts by subtracting posterior ``mu`` from observed outcomes."""
 
     def test_output_contract_matches_pymc_backend(self, forecast_result, pymc_result):
         """Draw-level posterior-predictive output mirrors the native backend."""
         for result in (forecast_result, pymc_result):
-            mu = result.post_pred
+            mu = result.result.predictions_post
             assert mu.dims == ("chain", "draw", "obs_ind", "treated_units")
             assert list(mu.coords["treated_units"].values) == ["unit_0"]
             pd.testing.assert_index_equal(
@@ -161,31 +180,50 @@ class TestRoundTripAgainstPyMCBackend:
     def test_impact_recovers_true_effect(self, forecast_result, pymc_result):
         """Both backends recover the simulated level shift at the draw level."""
         for result in (forecast_result, pymc_result):
-            impact = result.post_impact
+            impact = result.result.impact_post
             assert set(impact.dims) == {"chain", "draw", "obs_ind"}
             assert impact.dims[-1] == "obs_ind"
             mean_impact = float(impact.mean(("chain", "draw")).mean())
             assert mean_impact == pytest.approx(TRUE_EFFECT, abs=0.5)
         forecast_mean = float(
-            forecast_result.post_impact.mean(("chain", "draw")).mean()
+            forecast_result.result.impact_post.mean(("chain", "draw")).mean()
         )
-        pymc_mean = float(pymc_result.post_impact.mean(("chain", "draw")).mean())
+        pymc_mean = float(pymc_result.result.impact_post.mean(("chain", "draw")).mean())
         assert forecast_mean == pytest.approx(pymc_mean, abs=0.5)
 
     def test_cumulative_impact(self, forecast_result):
-        cum = forecast_result.post_impact_cumulative
+        cum = forecast_result.result.impact_post_cumulative
         assert "obs_ind" in cum.dims
         last = float(cum.isel(obs_ind=-1).mean(("chain", "draw")).squeeze())
         n_post = len(forecast_result.datapost)
         assert last == pytest.approx(TRUE_EFFECT * n_post, rel=0.4)
 
     def test_score_matches_pymc_shape(self, forecast_result, pymc_result):
-        assert list(forecast_result.score.index) == list(pymc_result.score.index)
-        assert forecast_result.score["unit_0_r2"] > 0.7
+        assert list(forecast_result.result.score.index) == list(
+            pymc_result.result.score.index
+        )
+        assert forecast_result.result.score["unit_0_r2"] > 0.7
 
     def test_plot_and_summaries_smoke(self, forecast_result, capsys):
         fig, ax = forecast_result.plot(show=False)
         assert len(ax) == 3
+        forecast_result.summary()
+        assert "Model parameters:" in capsys.readouterr().out
+        summary = forecast_result.effect_summary()
+        assert len(summary.text) > 0
+        plot_df = forecast_result.get_plot_data()
+        assert {"prediction", "impact"}.issubset(plot_df.columns)
+
+    def test_summaries_and_plot_data_without_plotting(
+        self, forecast_result, capsys, monkeypatch
+    ):
+        """Forecast summary and plot-data contracts remain observable when
+        generic plotting is unavailable."""
+
+        def fail_if_plot_called(*args, **kwargs):
+            raise AssertionError("summary helpers must not call plot()")
+
+        monkeypatch.setattr(forecast_result, "plot", fail_if_plot_called)
         forecast_result.summary()
         assert "Model parameters:" in capsys.readouterr().out
         summary = forecast_result.effect_summary()
@@ -202,8 +240,16 @@ class TestRoundTripAgainstPyMCBackend:
         """mu carries the upstream noise-free latent (mu/mu_future), so it is
         strictly narrower than the posterior predictive y_hat."""
         for X, mu, out_of_sample in (
-            (forecast_result.pre_design["X"], forecast_result.pre_pred, False),
-            (forecast_result.post_design["X"], forecast_result.post_pred, True),
+            (
+                forecast_result.pre_design["X"],
+                forecast_result.result.predictions_pre,
+                False,
+            ),
+            (
+                forecast_result.post_design["X"],
+                forecast_result.result.predictions_post,
+                True,
+            ),
         ):
             full_prediction = forecast_result.model.predict(
                 X, out_of_sample=out_of_sample
@@ -213,9 +259,14 @@ class TestRoundTripAgainstPyMCBackend:
             y_hat_spread = float(y_hat.std(("chain", "draw")).mean())
             assert mu_spread < y_hat_spread
         # impact is computed from mu, i.e. excludes observation noise
-        impact_spread = float(forecast_result.post_impact.std(("chain", "draw")).mean())
+        impact_spread = float(
+            forecast_result.result.impact_post.std(("chain", "draw")).mean()
+        )
         assert impact_spread == pytest.approx(
-            float(forecast_result.post_pred.std(("chain", "draw")).mean()), rel=1e-6
+            float(
+                forecast_result.result.predictions_post.std(("chain", "draw")).mean()
+            ),
+            rel=1e-6,
         )
 
     def test_predictions_are_draw_coherent(self, forecast_result):
@@ -226,8 +277,16 @@ class TestRoundTripAgainstPyMCBackend:
         model = forecast_result.model
         posterior = forecast_result.idata.posterior
         for X, pred, out_of_sample in (
-            (forecast_result.pre_design["X"], forecast_result.pre_pred, False),
-            (forecast_result.post_design["X"], forecast_result.post_pred, True),
+            (
+                forecast_result.pre_design["X"],
+                forecast_result.result.predictions_pre,
+                False,
+            ),
+            (
+                forecast_result.post_design["X"],
+                forecast_result.result.predictions_post,
+                True,
+            ),
         ):
             mu = pred
             expected = xr.dot(
@@ -257,12 +316,12 @@ def test_covariate_free_future_index_path(its_data):
         formula="y ~ 0",
         model=PyMCForecastModel(
             LocalLevel(),
-            forecaster_kwargs=dict(sample_kwargs),
-            num_samples=200,
+            forecaster_kwargs=dict(fast_sample_kwargs),
+            num_samples=50,
             random_seed=42,
         ),
-    )
-    mu = result.post_pred
+    ).fit()
+    mu = result.result.predictions_post
     assert mu.dims == ("chain", "draw", "obs_ind", "treated_units")
     pd.testing.assert_index_equal(
         pd.Index(mu.coords["obs_ind"].values),
@@ -271,7 +330,7 @@ def test_covariate_free_future_index_path(its_data):
     )
     # A local level frozen at treatment time underestimates the trend, but the
     # level shift must dominate the impact estimate.
-    mean_impact = float(result.post_impact.mean(("chain", "draw")).mean())
+    mean_impact = float(result.result.impact_post.mean(("chain", "draw")).mean())
     assert mean_impact > TRUE_EFFECT / 2
 
 
@@ -345,6 +404,43 @@ def test_unfit_adapter_has_no_idata_or_coefficients():
         adapter.coefficients()
 
 
+def test_print_coefficients_before_fit_raises():
+    with pytest.raises(RuntimeError, match="has not been fit"):
+        make_forecast_model().print_coefficients([])
+
+
+def test_print_coefficients_without_scalar_parameters(capsys):
+    """Time-varying forecasting latents do not require scalar parameters."""
+    model = make_forecast_model()
+    posterior = xr.Dataset({"latent": (("chain", "draw", "time"), np.ones((1, 2, 3)))})
+    model.idata = xr.DataTree.from_dict({"posterior": posterior})
+
+    model.print_coefficients([])
+
+    assert capsys.readouterr().out == (
+        "Model parameters:\n  (no scalar parameters in posterior)\n"
+    )
+
+
+def test_print_coefficients_skips_non_scalar_parameters(capsys):
+    """Only scalar posterior variables are reported as model parameters."""
+    model = make_forecast_model()
+    posterior = xr.Dataset(
+        {
+            "sigma": (("chain", "draw"), np.full((1, 2), 1.23456)),
+            "latent": (("chain", "draw", "time"), np.ones((1, 2, 3))),
+        }
+    )
+    model.idata = xr.DataTree.from_dict({"posterior": posterior})
+
+    model.print_coefficients([], round_to=3)
+
+    output = capsys.readouterr().out
+    assert "sigma" in output
+    assert "1.23" in output
+    assert "latent" not in output
+
+
 @pytest.mark.integration
 def test_three_period_design(its_data):
     """treatment_end_time splitting works on the forecast backend's output."""
@@ -353,11 +449,13 @@ def test_three_period_design(its_data):
         df,
         treatment_time,
         formula="y ~ 1 + t",
-        model=make_forecast_model(),
+        model=make_fast_forecast_model(),
         treatment_end_time=df.index[85],
-    )
-    assert result.intervention_pred.sizes["obs_ind"] == 15
-    assert result.post_intervention_pred.sizes["obs_ind"] == 15
+    ).fit()
+    # Three-period views are derived on demand from the fitted bundle.
+    slices = result._period_slices(result.result)
+    assert slices["intervention_pred"].sizes["obs_ind"] == 15
+    assert slices["post_intervention_pred"].sizes["obs_ind"] == 15
     summary = result.effect_summary(period="comparison")
     assert "persistence" in summary.text
 
@@ -366,6 +464,24 @@ def test_statespace_models_rejected():
     """Statespace backends lack a noise-free latent (pymc-forecast#50)."""
     with pytest.raises(NotImplementedError, match="pymc-forecast/issues/50"):
         PyMCForecastModel(linear_model, forecaster=pymc_forecast.StatespaceForecaster)
+
+
+def test_statespace_model_instances_rejected():
+    """The StatespaceModel branch cannot silently use noisy predictions."""
+
+    class UnsupportedStatespaceModel(pymc_forecast.StatespaceModel):
+        def statespace(self, data, covariates):
+            raise AssertionError(
+                "The rejection guard must run before model construction."
+            )
+
+        def priors(self, ss_mod, data, covariates):
+            raise AssertionError(
+                "The rejection guard must run before model construction."
+            )
+
+    with pytest.raises(NotImplementedError, match="pymc-forecast/issues/50"):
+        PyMCForecastModel(UnsupportedStatespaceModel())
 
 
 def test_clone_returns_unfitted_copy_with_same_config():
@@ -386,12 +502,80 @@ def test_clone_returns_unfitted_copy_with_same_config():
     assert cloned.idata is None
 
 
+def test_fit_produces_datatree_with_posterior():
+    """fit() wraps the thinned posterior subsample as a DataTree."""
+    model = make_forecast_model()
+    posterior = xr.Dataset(
+        {
+            "beta": (("chain", "draw", "coeffs"), np.ones((1, 2, 1))),
+            "sigma": (("chain", "draw"), np.ones((1, 2))),
+        },
+        coords={"coeffs": ["x"]},
+    )
+
+    class FakeForecaster:
+        def fit(self, *args, **kwargs):
+            return None
+
+        def draw_posterior(self, n, random_seed=None):
+            assert n == model.num_samples
+            return posterior
+
+    model.forecaster = FakeForecaster()
+    X, y = _design_arrays()
+    idata = model.fit(X, y)
+
+    assert isinstance(idata, xr.DataTree)
+    assert "posterior" in idata
+    assert model.idata is idata
+    assert set(idata["posterior"].to_dataset().data_vars) == {"beta", "sigma"}
+
+
+def test_to_inference_data_yields_datatree_posterior_predictive():
+    """_to_inference_data returns a DataTree with a posterior_predictive group."""
+    model = make_forecast_model()
+    model._treated_units = ["unit_0"]
+    obs_ind = pd.date_range("2020-01-01", periods=3, freq="D").to_numpy()
+    mu = xr.DataArray(np.ones((1, 2, 3)), dims=("chain", "draw", "obs_ind"))
+    y_hat = mu.copy()
+
+    out = model._to_inference_data(mu, y_hat, obs_ind)
+
+    assert isinstance(out, xr.DataTree)
+    assert "posterior_predictive" in out
+    pp = out["posterior_predictive"]
+    assert "mu" in pp and "y_hat" in pp
+    assert pp["mu"].dims == ("chain", "draw", "obs_ind", "treated_units")
+    np.testing.assert_array_equal(
+        pp["mu"].coords["obs_ind"].values.astype("datetime64[ns]"),
+        obs_ind.astype("datetime64[ns]"),
+    )
+
+
+def test_to_inference_data_renames_series_dimension():
+    """Upstream multi-series predictions retain their unit coordinate."""
+    model = make_forecast_model()
+    obs_ind = pd.date_range("2020-01-01", periods=3, freq="D").to_numpy()
+    samples = xr.DataArray(
+        np.ones((1, 2, 3, 2)),
+        dims=("chain", "draw", "obs_ind", "series"),
+        coords={"series": ["unit_a", "unit_b"]},
+    )
+
+    out = model._to_inference_data(samples, samples.copy(), obs_ind)
+
+    pp = out["posterior_predictive"]
+    assert pp["mu"].dims == ("chain", "draw", "obs_ind", "treated_units")
+    assert list(pp["mu"].treated_units.values) == ["unit_a", "unit_b"]
+
+
 @pytest.mark.integration
 def test_fit_idata_exposes_full_fit_result(forecast_result):
     """fit_idata is the full NUTS result; idata the thinned draw-coherent
     posterior used for prediction."""
     model = forecast_result.model
     full = model.fit_idata
+    assert isinstance(full, xr.DataTree)
     assert hasattr(full, "sample_stats")
     assert full.posterior.sizes["draw"] == sample_kwargs["draws"]
     thinned = forecast_result.idata
@@ -413,7 +597,7 @@ class TestPlaceboInTime:
         from causalpy.checks.base import clone_model
 
         df, _ = its_data
-        base_model = forecast_result.model
+        base_model = make_fast_forecast_model()
 
         def factory(data, treatment_time):
             return cp.InterruptedTimeSeries(
@@ -421,23 +605,154 @@ class TestPlaceboInTime:
                 treatment_time,
                 formula="y ~ 1 + t",
                 model=clone_model(base_model),
-            )
+            ).fit()
 
+        # ``n_folds=1`` is forced by this fixture's geometry, not by convenience: the intervention window is 29 daily observations (``dates[70]`` through ``dates[99]``), so a fold is only eligible when at least 29 pre-treatment rows precede its pseudo treatment time. Two sequential folds would sit at ``dates[12]`` and ``dates[41]``, and the first is skipped as ``insufficient_pre_period``, so the fixture can never admit two eligible sequential folds. This test is about PlaceboInTime accepting and refitting the forecast backend, so one fitted fold exercises it fully; do not raise ``n_folds`` here.
         check = cp.checks.PlaceboInTime(
-            n_folds=2,
+            n_folds=1,
             experiment_factory=factory,
-            sample_kwargs={
-                "draws": 100,
-                "tune": 100,
-                "chains": 2,
-                "progressbar": False,
-            },
+            sample_kwargs=dict(fast_sample_kwargs),
             random_seed=42,
         )
         result = check.run(forecast_result)
-        assert len(result.metadata["fold_results"]) == 2
+        assert len(result.metadata["fold_results"]) == 1
         for fold in result.metadata["fold_results"]:
             fold_model = fold.experiment.model
             assert isinstance(fold_model, PyMCForecastModel)
             assert fold_model is not base_model
             assert fold_model.idata is not None
+
+    def test_placebo_context_factory_clones_forecast_model(
+        self, its_data, forecast_result
+    ):
+        """The PipelineContext factory path preserves the forecast backend."""
+        df, treatment_time = its_data
+        configured_model = make_fast_forecast_model()
+        context = cp.PipelineContext(data=df)
+        context.experiment = forecast_result
+        context.experiment_config = {
+            "method": cp.InterruptedTimeSeries,
+            "treatment_time": treatment_time,
+            "formula": "y ~ 1 + t",
+            "model": configured_model,
+        }
+
+        check = cp.checks.PlaceboInTime(
+            n_folds=1,
+            sample_kwargs=dict(fast_sample_kwargs),
+            random_seed=42,
+        )
+        result = check.run(forecast_result, context)
+        fold_model = result.metadata["fold_results"][0].experiment.model
+        assert isinstance(fold_model, PyMCForecastModel)
+        assert fold_model is not configured_model
+        assert fold_model.idata is not None
+
+
+def test_pymc_forecast_02_prediction_schema_contract():
+    """The optional extra's pinned 0.2 schema matches adapter consumption."""
+    assert version("pymc-forecast").startswith("0.2.")
+    assert {
+        "OBS_VAR": pymc_forecast.OBS_VAR,
+        "MU_VAR": pymc_forecast.MU_VAR,
+        "FORECAST_VAR": pymc_forecast.FORECAST_VAR,
+        "MU_FORECAST_VAR": pymc_forecast.MU_FORECAST_VAR,
+        "TIME_DIM": pymc_forecast.TIME_DIM,
+        "FUTURE_DIM": pymc_forecast.FUTURE_DIM,
+    } == {
+        "OBS_VAR": "obs",
+        "MU_VAR": "mu",
+        "FORECAST_VAR": "forecast",
+        "MU_FORECAST_VAR": "mu_future",
+        "TIME_DIM": "time",
+        "FUTURE_DIM": "time_future",
+    }
+    assert callable(pymc_forecast.prediction_samples)
+
+
+def test_missing_forecast_extra_has_actionable_install_error(monkeypatch):
+    """The optional dependency boundary fails only at forecast-model creation."""
+    monkeypatch.setitem(sys.modules, "pymc_forecast", None)
+    with pytest.raises(ImportError, match=r"pip install causalpy\[forecast\]") as error:
+        _import_pymc_forecast()
+    assert "pymc-forecast[extras]>=0.2,<0.3" in str(error.value)
+
+
+def test_default_forecaster_is_hmc(forecast_result):
+    """The default backend executes the documented HMC forecaster."""
+    assert isinstance(forecast_result.model.forecaster, pymc_forecast.HMCForecaster)
+
+
+def test_default_forecaster_configuration_is_empty():
+    """An omitted forecaster configuration constructs a usable HMC backend."""
+    model = PyMCForecastModel(linear_model)
+    assert isinstance(model.forecaster, pymc_forecast.HMCForecaster)
+    assert model.forecaster_kwargs == {}
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("forecaster", "forecaster_kwargs"),
+    [
+        pytest.param(
+            pymc_forecast.Forecaster,
+            {"num_steps": 1_000, "progressbar": False},
+            id="advi",
+        ),
+        pytest.param(
+            pymc_forecast.PathfinderForecaster,
+            {
+                "pathfinder_kwargs": {
+                    "num_paths": 1,
+                    "num_draws": 50,
+                    "num_draws_per_path": 50,
+                    "num_elbo_draws": 5,
+                    "parallel": False,
+                },
+                "progressbar": False,
+            },
+            id="pathfinder",
+        ),
+    ],
+)
+def test_approximate_forecasters_fit_and_predict_canonical_containers(
+    its_data, forecaster, forecaster_kwargs
+):
+    """ADVI and Pathfinder retain full fitted DataTrees and emit canonical
+    prediction DataArrays without making an accuracy claim."""
+    df, treatment_time = its_data
+    num_samples = 10
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time,
+        formula="y ~ 1 + t",
+        model=PyMCForecastModel(
+            linear_model,
+            forecaster=forecaster,
+            forecaster_kwargs=forecaster_kwargs,
+            num_samples=num_samples,
+            random_seed=42,
+        ),
+    ).fit()
+
+    model = result.model
+    assert isinstance(model.forecaster, forecaster)
+    assert model.forecaster.is_fitted
+    assert isinstance(model.idata, xr.DataTree)
+    assert model.idata.posterior.sizes["draw"] == num_samples
+    if forecaster is pymc_forecast.Forecaster:
+        with pytest.raises(AttributeError, match="does not retain a full DataTree"):
+            _ = model.fit_idata
+    else:
+        assert isinstance(model.fit_idata, xr.DataTree)
+    assert list(result.result.score.index) == ["unit_0_r2", "unit_0_r2_std"]
+    for pred, expected_index in (
+        (result.result.predictions_pre, result.datapre.index),
+        (result.result.predictions_post, result.datapost.index),
+    ):
+        assert isinstance(pred, xr.DataArray)
+        assert pred.name == "mu"
+        assert pred.dims == ("chain", "draw", "obs_ind", "treated_units")
+        pd.testing.assert_index_equal(
+            pd.Index(pred.obs_ind.values), expected_index, check_names=False
+        )

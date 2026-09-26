@@ -11,8 +11,8 @@ name: CausalPy
 channels:
   - conda-forge
 dependencies:
-  - python>=3.11
-  - arviz<1.0,>=0.14.0
+  - python>=3.12
+  - arviz<2,>=1.1
   - codespell
   - diff-cover
   - graphviz
@@ -20,19 +20,25 @@ dependencies:
   - jinja2
   - make
   - matplotlib>=3.5.3
+  - mypy==2.3.0
+  - narwhals>=1.13.1
   - nbconvert
   - nbformat
   - numpy
-  - pandas
+  - pandas<4,>=2.3
   - papermill
   - patsy
+  - plotnine>=0.15.7
+  - polars
   - prek
+  - pyarrow
   - pymc-bart
-  - pymc-extras>=0.3.0
-  - pymc<6,>=5.15.1
-  - pytensor<3,>=2.38.1
+  - pymc-extras>=0.11
+  - pymc<7,>=6.0.1
+  - pytensor<4,>=3
   - pytest
   - pytest-cov
+  - pytest-xdist
   - pyyaml
   - scikit-learn>=1
   - scipy

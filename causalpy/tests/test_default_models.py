@@ -216,6 +216,12 @@ def test_missing_default_model_class_raises_valueerror():
         supports_bayes = True
         supports_ols = True
 
+        def _fit_inputs(self):
+            pass
+
+        def _finalize(self, group):
+            pass
+
         def _plot(self):
             pass
 

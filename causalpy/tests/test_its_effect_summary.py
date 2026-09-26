@@ -164,7 +164,7 @@ def test_effect_summary_2period_pymc_datetime(datetime_data_2period, mock_pymc_s
         treatment_time=treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Default summary (all post-treatment period)
     summary = result.effect_summary()
@@ -191,7 +191,7 @@ def test_effect_summary_2period_ols_datetime(datetime_data_2period):
         treatment_time=treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Default summary
     summary = result.effect_summary()
@@ -216,7 +216,7 @@ def test_effect_summary_2period_pymc_integer(integer_data_2period, mock_pymc_sam
         treatment_time=treatment_time,
         formula="y ~ 1 + t",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     summary = result.effect_summary()
     assert summary is not None
@@ -234,7 +234,7 @@ def test_effect_summary_2period_ols_integer(integer_data_2period):
         treatment_time=treatment_time,
         formula="y ~ 1 + t",
         model=LinearRegression(),
-    )
+    ).fit()
 
     summary = result.effect_summary()
     assert summary is not None
@@ -252,7 +252,7 @@ def test_effect_summary_2period_with_window(datetime_data_2period, mock_pymc_sam
         treatment_time=treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Use a window that's a subset of post-treatment period
     window_start = df.index[df.index >= treatment_time][5]
@@ -276,7 +276,7 @@ def test_effect_summary_2period_with_parameters(
         treatment_time=treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test with different parameters
     summary1 = result.effect_summary(cumulative=True, relative=True)
@@ -308,7 +308,7 @@ def test_effect_summary_3period_intervention_pymc_datetime(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="intervention")
     assert summary is not None
@@ -338,7 +338,7 @@ def test_effect_summary_3period_intervention_ols_datetime(datetime_data_3period)
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="intervention")
     assert summary is not None
@@ -364,7 +364,7 @@ def test_effect_summary_3period_intervention_pymc_integer(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="intervention")
     assert summary is not None
@@ -383,7 +383,7 @@ def test_effect_summary_3period_intervention_ols_integer(integer_data_3period):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t",
         model=LinearRegression(),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="intervention")
     assert summary is not None
@@ -409,7 +409,7 @@ def test_effect_summary_3period_post_pymc_datetime(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="post")
     assert summary is not None
@@ -437,7 +437,7 @@ def test_effect_summary_3period_post_ols_datetime(datetime_data_3period):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="post")
     assert summary is not None
@@ -463,7 +463,7 @@ def test_effect_summary_3period_post_pymc_integer(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="post")
     assert summary is not None
@@ -482,7 +482,7 @@ def test_effect_summary_3period_post_ols_integer(integer_data_3period):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t",
         model=LinearRegression(),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="post")
     assert summary is not None
@@ -508,7 +508,7 @@ def test_effect_summary_3period_comparison_pymc_datetime(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="comparison")
     assert summary is not None
@@ -544,7 +544,7 @@ def test_effect_summary_3period_comparison_ols_datetime(datetime_data_3period):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="comparison")
     assert summary is not None
@@ -576,7 +576,7 @@ def test_effect_summary_3period_comparison_pymc_integer(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="comparison")
     assert summary is not None
@@ -600,7 +600,7 @@ def test_effect_summary_3period_comparison_ols_integer(integer_data_3period):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t",
         model=LinearRegression(),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="comparison")
     assert summary is not None
@@ -629,7 +629,7 @@ def test_effect_summary_3period_default_pymc(datetime_data_3period, mock_pymc_sa
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Default should summarize all post-treatment data (backward compatible)
     summary1 = result.effect_summary(period=None)
@@ -652,7 +652,7 @@ def test_effect_summary_3period_default_ols(datetime_data_3period):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Default should summarize all post-treatment data
     summary = result.effect_summary()
@@ -679,7 +679,7 @@ def test_effect_summary_3period_intervention_with_parameters(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test with different parameters
     summary1 = result.effect_summary(
@@ -712,7 +712,7 @@ def test_effect_summary_3period_post_with_parameters(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test with different parameters
     summary1 = result.effect_summary(period="post", cumulative=True, relative=True)
@@ -790,7 +790,7 @@ def test_effect_summary_3period_consistency_pymc(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Get summaries for each period
     intervention_summary = result.effect_summary(period="intervention")
@@ -824,7 +824,7 @@ def test_effect_summary_3period_consistency_ols(datetime_data_3period):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Get summaries for each period
     intervention_summary = result.effect_summary(period="intervention")
