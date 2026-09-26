@@ -68,10 +68,13 @@ _mock_gen = None
 _guard_originals: dict = {}
 
 #: Doctests that stay slow even with the sampling mock (model build and PyTensor
-#: compile dominate). They get the ``slow`` marker, so the default ``-m "not
-#: correctness and not slow"`` addopts skips them on PRs and the nightly workflow
-#: runs them. Keys are doctest item names (``module.object``).
-SLOW_DOCTESTS = frozenset({"causalpy.pymc_models.StateSpaceTimeSeries"})
+#: compile dominate). They get the ``nightly`` marker, so the default ``-m "not
+#: correctness and not nightly"`` addopts skips them on PRs and the nightly
+#: workflow runs them. Keys are doctest item names (``module.object``). If an
+#: entry stops matching (e.g. the object is renamed), the nightly ``-m nightly``
+#: doctest step collects nothing, exits with code 5 and opens a failure issue:
+#: update the name here.
+NIGHTLY_DOCTESTS = frozenset({"causalpy.pymc_models.StateSpaceTimeSeries"})
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -91,7 +94,7 @@ def pytest_configure(config: pytest.Config) -> None:
 def pytest_collection_modifyitems(
     config: pytest.Config, items: list[pytest.Item]
 ) -> None:
-    """Mark the doctests in :data:`SLOW_DOCTESTS` as ``slow``.
+    """Mark the doctests in :data:`NIGHTLY_DOCTESTS` as ``nightly``.
 
     Runs before pytest's own ``-m`` deselection so the marker is visible to it.
 
@@ -101,12 +104,12 @@ def pytest_collection_modifyitems(
         The active pytest configuration (unused; required by the hook
         signature).
     items : list of pytest.Item
-        Collected items; doctest items named in :data:`SLOW_DOCTESTS` are
+        Collected items; doctest items named in :data:`NIGHTLY_DOCTESTS` are
         marked in place.
     """
     for item in items:
-        if isinstance(item, pytest.DoctestItem) and item.name in SLOW_DOCTESTS:
-            item.add_marker(pytest.mark.slow)
+        if isinstance(item, pytest.DoctestItem) and item.name in NIGHTLY_DOCTESTS:
+            item.add_marker(pytest.mark.nightly)
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:

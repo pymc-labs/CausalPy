@@ -237,7 +237,7 @@ def test_state_space_predict_and_score():
 
 
 @pytest.mark.integration
-@pytest.mark.slow
+@pytest.mark.nightly
 def test_its_with_state_space_covariates(mock_pymc_sample):
     """ITS + StateSpaceTimeSeries with exogenous covariates end to end."""
     try:
@@ -279,7 +279,7 @@ def test_its_with_state_space_covariates(mock_pymc_sample):
     # No posterior-accuracy assertions here: mock_pymc_sample replaces
     # pm.sample, so draws come from the prior. The fixture is requested
     # explicitly so the mock also applies when this slow test runs in its
-    # own process (make test-slow / nightly). Numerical recovery is
+    # own process (make test-nightly / nightly workflow). Numerical recovery is
     # exercised outside the test suite.
     assert "beta_exog" in result.idata.posterior
     assert list(result.idata.posterior["beta_exog"].coords["state_exog"].values) == [
@@ -348,6 +348,8 @@ def test_its_with_state_space_variable_selection(mock_pymc_sample):
 @pytest.mark.integration
 @pytest.mark.slow
 @pytest.mark.correctness
+# About 6 minutes on CI runners, so it runs in the nightly workflow rather than the PR correctness step.
+@pytest.mark.nightly
 def test_its_state_space_variable_selection_recovery():
     """Irrelevant covariates shrink out under the spike-and-slab prior.
 

@@ -429,15 +429,15 @@ def test_doctest_command_loads_the_plugin(relpath):
 
 @pytest.mark.parametrize(
     ("marker_expr", "expected_selected"),
-    [("not slow", 0), ("slow", 1), ("", 1)],
+    [("not nightly", 0), ("nightly", 1), ("", 1)],
 )
-def test_slow_doctests_are_marked_slow(tmp_path, marker_expr, expected_selected):
-    """Doctests named in ``SLOW_DOCTESTS`` are selectable with ``-m slow``."""
+def test_nightly_doctests_are_marked_nightly(tmp_path, marker_expr, expected_selected):
+    """Doctests named in ``NIGHTLY_DOCTESTS`` are selectable with ``-m nightly``."""
     (tmp_path / "probe.py").write_text(_MOCK_PROBE)
     # Point the allowlist at the probe before collection runs.
     (tmp_path / "conftest.py").write_text(
         "from causalpy.tests import doctest_sampling\n"
-        'doctest_sampling.SLOW_DOCTESTS = frozenset({"probe.probe"})\n'
+        'doctest_sampling.NIGHTLY_DOCTESTS = frozenset({"probe.probe"})\n'
     )
     result = subprocess.run(
         [

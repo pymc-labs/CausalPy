@@ -27,7 +27,7 @@ Agent workflow for working in this repo. For codebase design and conventions, re
 - Even for quick verification, write it as a real test that provides ongoing value
 - Preference should be given to integration tests, but unit tests are acceptable for core functionality to maintain high code coverage.
 - Tests should remain quick to run. Tests involving MCMC sampling with PyMC should use custom `sample_kwargs` to minimize the computational load.
-- Tests that stay heavy even with light `sample_kwargs` get `@pytest.mark.slow` (heavy doctests go in `SLOW_DOCTESTS` in `causalpy/tests/doctest_sampling.py`). The default pytest addopts skip `slow` and `correctness` tests, so they do not run on PRs; `.github/workflows/nightly.yml` runs them. Run them locally with `make test-slow` and `make test-correctness`.
+- Tests that stay heavy even with light `sample_kwargs` get `@pytest.mark.nightly` (heavy doctests go in `NIGHTLY_DOCTESTS` in `causalpy/tests/doctest_sampling.py`). The default pytest addopts skip `nightly` and `correctness` tests; PR CI runs the `correctness` tests that are not also `nightly` in a separate step, and `.github/workflows/nightly.yml` runs everything. Run them locally with `make test-nightly` and `make test-correctness`. `slow` is descriptive only and does not change where a test runs.
 
 ## Sandbox and permissions
 

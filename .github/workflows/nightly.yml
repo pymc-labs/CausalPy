@@ -1,6 +1,6 @@
 name: nightly
 
-# Heavy tests kept off the PR critical path: `slow`-marked tests (including the doctests listed in causalpy/tests/doctest_sampling.py SLOW_DOCTESTS) and the `correctness` tests, which sample with real NUTS. PR and push CI in ci.yml deselects both via the default pytest addopts.
+# Heavy tests kept off the PR critical path: `nightly`-marked tests (including the doctests listed in causalpy/tests/doctest_sampling.py NIGHTLY_DOCTESTS). ci.yml deselects them via the default pytest addopts. This workflow also reruns every `correctness` test with a cold compiledir, including the `nightly` ones that ci.yml skips.
 #
 # GitHub only runs `schedule` from the default branch, so the cron fires on main. Until the PyMC 6 migration branch merges into main, pushes to that branch run this workflow instead so its heavy tests still run after every merge. Drop the `push` trigger once the branch has merged.
 
@@ -15,7 +15,8 @@ permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Bursts of merges only need the newest push tested, but a manual dispatch must not cancel an in-flight scheduled run.
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
   heavy-tests:
@@ -53,15 +54,17 @@ jobs:
         run: >-
           uv sync --locked --extra test --python ${{ matrix.python-version }}
           --group ${{ matrix.pandas-group }}
-      - name: Run slow doctests
-        run: uv run --no-sync pytest --doctest-modules -p causalpy.tests.doctest_sampling --ignore=causalpy/tests/ causalpy/ --no-cov -m slow
-      - name: Run slow tests
-        run: uv run --no-sync pytest --no-cov -m "slow and not correctness"
+      - name: Run nightly doctests
+        run: uv run --no-sync pytest --doctest-modules -p causalpy.tests.doctest_sampling --ignore=causalpy/tests/ causalpy/ --no-cov -m nightly
+      - name: Run nightly tests
+        run: uv run --no-sync pytest --no-cov -m "nightly and not correctness"
       - name: Run statistical correctness tests
         # A cold, job-local compiledir keeps these exact reproducibility tests independent of any cached C modules.
         env:
           PYTENSOR_FLAGS: base_compiledir=${{ runner.temp }}/pytensor-correctness
-        run: uv run --no-sync pytest -o addopts='' -m correctness --no-cov
+        run: |
+          uv run --no-sync python -c "import pytensor; print('base_compiledir=', pytensor.config.base_compiledir); print('compiledir=', pytensor.config.compiledir)"
+          uv run --no-sync pytest -o addopts='' -m correctness --no-cov
 
   report-failure:
     # Nobody watches scheduled runs, so a failure opens (or comments on) a tracking issue.
