@@ -215,6 +215,27 @@ class TestComputeSyntheticAndGaps:
         np.testing.assert_allclose(sc_all, expected_sc)
         np.testing.assert_allclose(gaps, y_tr[np.newaxis, np.newaxis, :] - expected_sc)
 
+    def test_joint_reordering_of_controls_and_weights_is_invariant(self):
+        """Permuting control units and their weights leaves the synthetic path unchanged."""
+        n_chains, n_draws, n_co, T = 2, 4, 5, 8
+        rng = np.random.default_rng(0)
+        omega = rng.normal(size=(n_chains, n_draws, n_co))
+        omega0 = rng.normal(size=(n_chains, n_draws))
+        Y_co = rng.normal(size=(n_co, T))
+        y_tr = rng.normal(size=(T,))
+        perm = np.array([3, 0, 4, 1, 2])
+
+        sc_all, _gaps = SyntheticDifferenceInDifferences._compute_synthetic_and_gaps(
+            omega, omega0, Y_co, y_tr
+        )
+        reordered, _reordered_gaps = (
+            SyntheticDifferenceInDifferences._compute_synthetic_and_gaps(
+                omega[..., perm], omega0, Y_co[perm], y_tr
+            )
+        )
+
+        np.testing.assert_allclose(sc_all, reordered, atol=1e-12)
+
 
 class TestComputeTau:
     """Unit tests for the static ``_compute_tau`` helper."""
