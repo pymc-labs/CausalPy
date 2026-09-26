@@ -16,7 +16,7 @@ Do not add a pattern just because it appeared once. Skill bloat makes agents ski
 Choose the smallest useful scope:
 
 | Pattern type | File |
-|---|---|
+| --- | --- |
 | PR-type checklist | The matching PR-type resource file |
 | Severity-sorted recurring pattern | `review-patterns.md` |
 | CausalPy source-code convention | `code-patterns.md` |

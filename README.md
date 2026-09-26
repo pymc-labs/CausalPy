@@ -118,7 +118,7 @@ Click on the thumbnail below to watch a video about CausalPy on YouTube.
 CausalPy provides methods for common causal inference decision contexts:
 
 | Decision context | Methods |
-|------------------|---------|
+| --- | --- |
 | Focussed testing on certain units (geos, products) | Synthetic control, Geographical lift |
 | Evaluate before/after changes, launches, policy changes | Differences in Differences, Staggered DiD, Interrupted time series |
 | Exploit cutoff rules, score-based eligibility (credit, age) | Regression discontinuity, Regression kink |
@@ -128,7 +128,7 @@ CausalPy provides methods for common causal inference decision contexts:
 ### Available methods
 
 | Method | Description |
-|-|-|
+| --- | --- |
 | Synthetic control | Constructs a synthetic version of the treatment group from a weighted combination of control units. Used for causal inference in comparative case studies when a single unit is treated, and there are multiple control units. |
 | Geographical lift | Measures the impact of an intervention in a specific geographic area by comparing it to similar areas without the intervention. Commonly used in marketing to assess regional campaigns. |
 | ANCOVA | Analysis of Covariance combines ANOVA and regression to control for the effects of one or more quantitative covariates. Used when comparing group means while controlling for other variables. |

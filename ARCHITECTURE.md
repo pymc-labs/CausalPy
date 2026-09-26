@@ -5,7 +5,7 @@ CausalPy implements 10+ quasi-experimental causal inference methods over two cor
 ## Module Map
 
 | Path | Purpose |
-|------|---------|
+| --- | --- |
 | `causalpy/__init__.py` | Public API — re-exports experiment classes, models, pipeline, steps, transforms |
 | `causalpy/experiments/` | One experiment class per file; `base.py` holds `BaseExperiment` |
 | `causalpy/pymc_models.py` | All `PyMCModel` subclasses (Bayesian backend) |
@@ -51,7 +51,7 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 ## Experiment Inventory
 
 | Class | Method | Backends | Notable quirk |
-|-------|--------|----------|---------------|
+| --- | --- | --- | --- |
 | `InterruptedTimeSeries` | ITS | OLS + Bayes | 3-period design via `treatment_end_time` |
 | `PiecewiseITS` | Segmented ITS | OLS + Bayes | Fits full series; `step()`/`ramp()` transforms |
 | `DifferenceInDifferences` | DiD | OLS + Bayes | Effect from interaction coefficient |
@@ -77,7 +77,7 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 ## Key Conventions
 
 | Topic | Detail |
-|-------|--------|
+| --- | --- |
 | **Formulas** | Patsy `dmatrices()` for design matrices; `build_design_matrices()` for counterfactual prediction. Bare datetime predictors are encoded as continuous elapsed days from the fitted origin; use `C(date)` for date fixed effects. `PiecewiseITS` uses `step()`/`ramp()` stateful transforms. |
 | **obs_ind** | All experiments set `data.index.name = "obs_ind"`. Canonical xarray/PyMC dimension name. |
 | **treated_units always 2D** | Even single-unit experiments use `treated_units=["unit_0"]`. Never pass 1D y to PyMC. |
