@@ -10,7 +10,7 @@ The sensitivity framework has three main pieces:
 
 1. **`Check`** --- a protocol that individual checks implement. Each check declares which experiment types it applies to (`applicable_methods`), validates preconditions, and returns a structured `CheckResult`.
 2. **`SensitivityAnalysis`** --- a pipeline step that holds a list of `Check` objects and runs them against the fitted experiment.
-3. **`CheckResult`** --- the output of a check, containing a pass/fail verdict (or `None` for informational checks), a prose summary, an optional diagnostics table, optional figures, and arbitrary metadata.
+3. **`CheckResult`** --- the output of a check, containing a pass/fail verdict (or `None` when a check is informational or inconclusive), a prose summary, an optional diagnostics table, optional figures, and arbitrary metadata.
 
 When a `GenerateReport` step follows `SensitivityAnalysis`, those results are included in the generated HTML report automatically.
 
@@ -72,7 +72,8 @@ cp.SensitivityAnalysis(
 
 ## Where examples already exist
 
-- `PlaceboInTime`: {doc}`pipeline-workflow`, {doc}`reporting-demo`, {doc}`interrupted-time-series-placebo-in-time-analysis`
+- `PlaceboInTime`: {doc}`interrupted-time-series-post-intervention-analysis`, {doc}`interrupted-time-series-placebo-in-time-analysis`, {doc}`pipeline-workflow`, {doc}`reporting-demo`
+- `PersistenceCheck`: {doc}`interrupted-time-series-post-intervention-analysis`
 - `BandwidthSensitivity`: {doc}`regression-kink-pymc`
 - `PreTreatmentPlaceboCheck`: {doc}`staggered-difference-in-differences-pymc`
 - More check-specific walkthroughs are still being added, so some checks currently have API coverage but no dedicated notebook example yet.
@@ -83,7 +84,30 @@ cp.SensitivityAnalysis(
 
 `PlaceboInTime` moves the intervention backward into the pre-treatment period and re-fits the model. If those pseudo-interventions often produce effects comparable to the observed one, the original result looks less credible. In synthetic control settings, placebo and falsification exercises are a standard part of design assessment {cite:p}`abadie2021using`; in interrupted time series settings, the same logic aligns with broader falsification practice in pre/post intervention designs {cite:p}`lopezbernal2017its`.
 
-This check requires a PyMC-backed model because it works with posterior impact draws. In CausalPy it can also fit a hierarchical null model and, optionally, estimate Bayesian assurance for a user-supplied expected effect prior.
+This check requires a PyMC-backed model because it works with posterior impact draws. Its identified placebo null calibrates the design and identification uncertainty that a posterior HDI does not contain; it does not replace the within-model practical/sign statement from HDI+ROPE. Use the two together: interpret HDI+ROPE within the fitted model, then ask whether the effect remains distinctive against the placebo null. The {doc}`reporting statistics guide <../knowledgebase/reporting_statistics>` explains that division of responsibility.
+
+For an identified null, `cp.checks.operating_characteristics()` computes the exact, deterministic conditional decision probabilities for each true effect size: correct detection, wrong-sign misclassification, and indeterminate outcomes under the configured ROPE rule. It is not an assurance calculation by itself. Assurance is the detection curve integrated against an explicit expected-effect prior, so it answers a design question only after you state which effects you expect. When `PlaceboInTime` is **INCONCLUSIVE**, no identified null exists and neither calibration-based operating characteristics nor assurance should be interpreted.
+
+#### Fold eligibility and the pre-period constraint
+
+Every placebo fold is a full re-fit, so a fold needs enough pre-treatment history to identify the model before its pseudo-intervention begins. `PlaceboInTime` requires each fold to have at least one full intervention window of observed history ahead of it, and skips folds that fall short rather than fitting them. A fold fitted on a handful of observations produces a posterior cumulative impact with a very large standard deviation, which inflates the between-fold scale `tau` of the hierarchical status-quo model and widens the learned null until it can swallow a genuine effect.
+
+Skipped folds are reported in the check text and recorded in `metadata["skipped_folds"]` with the observed and required pre-period row counts, and a warning names the reason. If fewer than two usable folds remain, or the completed folds do not identify a finite positive between-fold spread, the check returns `passed=None` (inconclusive) rather than building an unidentified null. These results do not have `metadata["null_samples"]` or `metadata["p_effect_outside_null"]`; test those keys are present before accessing them, because a `passed is None` result has neither.
+
+The constraint bites when the pre-period is only a few times longer than the post-period, because by default each fold consumes one post-period worth of history. There are two ways out:
+
+- Pass an explicit `intervention_length` to shorten the placebo window. This shortens both the window and the history each fold requires, so more folds become eligible without changing the headline analysis. The actual effect is still summarised over the whole post-intervention period, so a much shorter window compares a long actual cumulative impact against a null built from short windows; `PlaceboInTime` warns when that happens and records both spans in `metadata["comparison_window"]`.
+- Pass an `experiment_factory` that adapts the model to the shorter fold data, for example by tightening priors or reducing the donor pool.
+
+```python
+cp.checks.PlaceboInTime(n_folds=4, intervention_length=10, random_seed=42)
+```
+
+#### Reproducibility
+
+`PlaceboInTime` has several stochastic stages: the per-fold experiment fits, the hierarchical status-quo `pm.sample`, the posterior predictive draw for `theta_new`, random fold selection, and the assurance simulation. When the check identifies a hierarchical null, the constructor's `random_seed` is the master seed for all of them, so setting it alone is enough to make the reported verdict, `metadata["p_effect_outside_null"]` and `metadata["null_samples"]` reproducible. Folds are seeded as `random_seed + fold_index`, so they are independent of one another but stable across runs.
+
+The one deliberate override is `sample_kwargs["random_seed"]`: when supplied explicitly it takes precedence, for the hierarchical `pm.sample` call only. Two cases sit outside the master seed and are surfaced rather than hidden. A custom `experiment_factory` owns any randomness it introduces, and an `expected_effect_prior` whose `.rvs` does not accept `random_state` is drawn unseeded, which raises a warning and is recorded in `metadata["unseeded_custom_priors"]`.
 
 ### {doc}`PriorSensitivity <../api/generated/causalpy.checks.prior_sensitivity.PriorSensitivity>`
 
@@ -107,6 +131,15 @@ This is the broadest check in the current API, but it is only available for PyMC
 
 `PlaceboInSpace` re-labels each control unit as though it were treated and compares those placebo effects to the observed treated effect. If many placebo units show effects as large as the treated unit, the original estimate looks less distinctive {cite:p}`abadie2010synthetic`.
 
+Raw effect sizes are hard to compare across units the synthetic control fits with differing accuracy, so the check also reports each unit's mean squared prediction error in the `pre_mspe`, `post_mspe` and `mspe_ratio` columns, with the treated unit's own figures in `metadata["baseline_mspe"]`. The ratio is the statistic recommended in section 3.4 and Figure 8 of {cite:t}`abadie2010synthetic`, unchanged, so its values are directly comparable to the ones published there: a large value means a unit tracks its synthetic control closely before the intervention and diverges after it. `PlaceboInSpace.plot_mspe_ratio(result)` draws every unit's ratio in rank order with the treated unit highlighted, and reports the permutation p-value, which is the share of units whose ratio is at least as large as the treated unit's. Each treated unit is ranked against the placebo units and itself, never against the other treated units, and the p-value is conditional on the units that fitted successfully: a unit with an undefined ratio is outside both the figure and the p-value, while a unit with an infinite ratio counts towards the p-value but cannot be drawn.
+
+The design of the check follows {cite:t}`abadie2010synthetic`, with four differences that are CausalPy choices:
+
+- The actual treated unit is never a donor in the placebo fits. The paper moves California into the donor pool for its placebo runs.
+- The residuals are averaged over the posterior first and then squared, so each MSPE is one number, not a posterior distribution.
+- With more than one treated unit, each one is ranked only against the placebo units and itself. The paper has a single treated unit.
+- A zero pre-period MSPE with a positive post-period MSPE gives an infinite ratio, which stays in the ranking. Zero over zero, or a missing MSPE, gives an undefined ratio, which is left out.
+
 ### {doc}`BandwidthSensitivity <../api/generated/causalpy.checks.bandwidth.BandwidthSensitivity>`
 
 `BandwidthSensitivity` re-fits RD or RKink models across a sequence of bandwidths. Because bandwidth choice drives the bias-variance trade-off in local designs, a result that flips across plausible bandwidths should be treated cautiously {cite:p}`imbens2008regression,lee2010regression`.
@@ -123,7 +156,7 @@ This is the broadest check in the current API, but it is only available for PyMC
 
 Each check returns a `CheckResult` with the following fields:
 
-- **`passed`** --- `True` if the check passed, `False` if it failed, or `None` for informational checks with no pass/fail criterion.
+- **`passed`** --- `True` if the check passed, `False` if it failed, or `None` when it is informational or cannot reach a verdict.
 - **`text`** --- a prose summary describing the outcome.
 - **`table`** --- an optional `pandas.DataFrame` with diagnostic statistics.
 - **`figures`** --- an optional list of matplotlib figures.
@@ -136,13 +169,17 @@ for cr in result.sensitivity_results:
     status = (
         "PASS"
         if cr.passed is True
-        else ("FAIL" if cr.passed is False else "INFO")
+        else ("FAIL" if cr.passed is False else "NO VERDICT")
     )
     print(f"[{status}] {cr.check_name}: {cr.text}")
 
     if cr.table is not None:
         display(cr.table)
 ```
+
+When `passed is None`, inspect the result text: it may describe an informational diagnostic or an inconclusive check that could not reach a verdict.
+
+Check-specific metadata can be absent when a check has no verdict. In particular, an inconclusive `PlaceboInTime` result has neither `null_samples` nor `p_effect_outside_null`; access learned-null values only after testing the relevant key, for example `if "null_samples" in cr.metadata:`.
 
 When a `GenerateReport` step follows `SensitivityAnalysis` in the pipeline, check results are automatically included in the HTML report.
 
@@ -172,6 +209,7 @@ For the pipeline mechanics, see {doc}`pipeline-workflow`. For HTML reporting of 
 
 - {doc}`pipeline-workflow` --- end-to-end pipeline tutorial
 - {doc}`reporting-demo` --- HTML report generation
+- {doc}`interrupted-time-series-post-intervention-analysis` --- fixed-period ITS example with `PlaceboInTime` and `PersistenceCheck`
 - {doc}`staggered-difference-in-differences-pymc` --- staggered DiD example with `PreTreatmentPlaceboCheck`
 - {doc}`regression-kink-pymc` --- regression kink example with `BandwidthSensitivity`
 - {doc}`../knowledgebase/reporting_statistics` --- statistical concepts used in CausalPy reporting

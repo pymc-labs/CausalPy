@@ -61,22 +61,22 @@ as `pymc-forecast#50 <https://github.com/pymc-labs/pymc-forecast/issues/50>`_.
 
 Inference diagnostics: :attr:`PyMCForecastModel.idata` holds the thinned,
 draw-coherent posterior subsample used for prediction; the *full* fit result
-(e.g. the complete NUTS ``InferenceData`` with sample stats) is exposed as
+(e.g. the complete NUTS ``DataTree`` with sample stats) is exposed as
 :attr:`PyMCForecastModel.fit_idata`.
 """
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any
 
 import arviz as az
 import numpy as np
 import pandas as pd
 import xarray as xr
-from arviz import r2_score
 
 from causalpy.constants import HDI_PROB
-from causalpy.utils import round_num
+from causalpy.utils import _bayesian_r2_score, round_num
 
 __all__ = ["PyMCForecastModel"]
 
@@ -89,7 +89,7 @@ def _import_pymc_forecast():
         raise ImportError(
             "PyMCForecastModel requires the optional dependency 'pymc-forecast'. "
             "Install it with `pip install causalpy[forecast]` or "
-            "`pip install 'pymc-forecast[extras]>=0.2'`."
+            "`pip install 'pymc-forecast[extras]>=0.2,<0.3'`."
         ) from err
     return pymc_forecast
 
@@ -191,7 +191,7 @@ class PyMCForecastModel:
             random_seed=self.random_seed,
             **self.forecaster_kwargs,
         )
-        self.idata: az.InferenceData | None = None
+        self.idata: xr.DataTree | None = None
         self._posterior: xr.Dataset | None = None
         self._treated_units: list[str] = ["unit_0"]
         self._has_covariates = False
@@ -213,11 +213,11 @@ class PyMCForecastModel:
         )
 
     @property
-    def fit_idata(self) -> az.InferenceData:
+    def fit_idata(self) -> xr.DataTree:
         """Full inference result of the underlying forecaster fit.
 
         For the default NUTS backend this is the complete MCMC
-        ``InferenceData`` (posterior, sample stats, diagnostics) — as
+        ``DataTree`` (posterior, sample stats, diagnostics) — as
         distinct from :attr:`idata`, which holds the thinned posterior
         subsample shared by every predictive call for draw coherence.
 
@@ -226,7 +226,7 @@ class PyMCForecastModel:
         RuntimeError
             If the model has not been fit yet.
         AttributeError
-            If the forecaster does not retain an ``InferenceData`` fit
+            If the forecaster does not retain a ``DataTree`` fit
             result (e.g. variational fits, which expose ``.approx`` /
             ``.losses`` on ``.forecaster`` instead).
         """
@@ -236,7 +236,7 @@ class PyMCForecastModel:
         if fit_result is None:
             raise AttributeError(
                 f"{type(self.forecaster).__name__} does not retain a full "
-                "InferenceData fit result; inspect the forecaster directly "
+                "DataTree fit result; inspect the forecaster directly "
                 "via `.forecaster` (e.g. `.approx` / `.losses` for "
                 "variational fits)."
             )
@@ -246,7 +246,7 @@ class PyMCForecastModel:
 
     def fit(
         self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None = None
-    ) -> az.InferenceData:
+    ) -> xr.DataTree:
         """Construct and fit the forecasting model on the pre-period.
 
         Parameters
@@ -276,10 +276,16 @@ class PyMCForecastModel:
         # one posterior subsample, shared by every predictive call: draw i of
         # the pre-period fit and draw i of the counterfactual come from the
         # same parameter draw
-        self._posterior = self.forecaster.draw_posterior(
-            self.num_samples, random_seed=self.random_seed
+        posterior_context = (
+            self.forecaster.model
+            if isinstance(self.forecaster, self._pf.Forecaster)
+            else nullcontext()
         )
-        self.idata = az.InferenceData(posterior=self._posterior)
+        with posterior_context:
+            self._posterior = self.forecaster.draw_posterior(
+                self.num_samples, random_seed=self.random_seed
+            )
+        self.idata = xr.DataTree.from_dict({"posterior": self._posterior})
         return self.idata
 
     @staticmethod
@@ -296,8 +302,7 @@ class PyMCForecastModel:
         X: xr.DataArray,
         coords: dict[str, Any] | None = None,
         out_of_sample: bool | None = False,
-        **kwargs: Any,
-    ) -> az.InferenceData:
+    ) -> xr.DataTree:
         """Predict in-sample (pre-period) or forecast the counterfactual.
 
         Parameters
@@ -312,12 +317,10 @@ class PyMCForecastModel:
             Not used, kept for API compatibility.
         out_of_sample : bool, default False
             ``True`` draws the post-period counterfactual ("as if untreated").
-        **kwargs
-            Reserved for forward-compatibility; not consumed.
 
         Returns
         -------
-        az.InferenceData
+        xr.DataTree
             With a ``posterior_predictive`` group holding draw-level ``mu``
             (the noise-free latent predictor) and ``y_hat`` (the posterior
             predictive of the observed variable) with dims
@@ -356,8 +359,8 @@ class PyMCForecastModel:
 
     def _to_inference_data(
         self, mu: xr.DataArray, y_hat: xr.DataArray, obs_ind: np.ndarray
-    ) -> az.InferenceData:
-        """Rename schema dims onto CausalPy coords and wrap as InferenceData."""
+    ) -> xr.DataTree:
+        """Rename schema dims onto CausalPy coords and wrap as a DataTree."""
 
         def normalize(samples: xr.DataArray) -> xr.DataArray:
             if "series" in samples.dims:
@@ -369,7 +372,7 @@ class PyMCForecastModel:
             )
 
         ds = xr.Dataset({"mu": normalize(mu), "y_hat": normalize(y_hat)})
-        return az.InferenceData(posterior_predictive=ds)
+        return xr.DataTree.from_dict({"posterior_predictive": ds})
 
     # -- scoring and impact ------------------------------------------------
 
@@ -396,7 +399,7 @@ class PyMCForecastModel:
         for i, unit in enumerate(mu.coords["treated_units"].values):
             unit_mu = mu.sel(treated_units=unit).transpose("sample", "obs_ind")
             unit_y = y.sel(treated_units=unit).data
-            unit_score = r2_score(unit_y, unit_mu.data)
+            unit_score = _bayesian_r2_score(unit_y, unit_mu.data)
             scores[f"unit_{i}_r2"] = unit_score["r2"]
             scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
         return pd.Series(scores)
