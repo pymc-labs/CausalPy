@@ -1,0 +1,19 @@
+causalpy/tests/test_sdid_helpers.py
+  s_8c2f801f7f8606::t_e5f53850b4c0f7 218-238
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "af1a88ee175b64392abeef1c3705016068c9e31c",
+  "prompts": {},
+  "sessions": {
+    "s_8c2f801f7f8606": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "1affd6bf-5925-4fb2-aa50-09a515b78d97",
+        "model": "grok-4.7"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
