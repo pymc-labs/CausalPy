@@ -169,7 +169,7 @@ The descriptions above assume standard usage. Always consider what your specific
 ## Quick Reference
 
 | Method | Empirical Estimand |
-|--------|-------------------|
+| --- | --- |
 | Difference-in-Differences | {term}`ATT` |
 | Interrupted Time Series | Time-varying unit-specific impact |
 | Synthetic Control | Time-varying unit-specific impact |
