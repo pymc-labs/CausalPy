@@ -27,7 +27,7 @@ Use this skill to stress-test a causal claim before trusting or communicating it
 ## CausalPy Checks
 
 | Alternative explanation | Useful check |
-|---|---|
+| --- | --- |
 | Effect existed before treatment | `cp.checks.PreTreatmentPlaceboCheck` |
 | Model detects fake effects in untreated periods | `cp.checks.PlaceboInTime` |
 | Result depends on one donor or observation | `cp.checks.LeaveOneOut` |
