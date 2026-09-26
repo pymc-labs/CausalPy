@@ -93,7 +93,7 @@ placebo_result = check.run(experiment=result)
 The `CheckResult` metadata contains:
 
 | Key | Type | Description |
-|-----|------|-------------|
+| --- | --- | --- |
 | `fold_results` | `list[PlaceboFoldResult]` | Per-fold results with posterior samples |
 | `status_quo_idata` | `InferenceData` | Hierarchical model trace |
 | `null_samples` | `np.ndarray` | Draws from theta_new (the null distribution) |

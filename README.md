@@ -64,7 +64,7 @@ pip install git+https://github.com/pymc-labs/CausalPy.git
 
 As of the PyMC 6 release, CausalPy runs on PyMC 6 / PyTensor 3 / ArviZ 1.x and requires Python 3.12+. A few runtime behaviours are worth knowing about:
 
-- **numba is now a (transitive) hard dependency and the default backend.** PyTensor 3 compiles models with numba by default, so the *first* sample from a freshly defined model incurs a noticeable one-off compilation delay before sampling starts. Subsequent samples reuse the compiled function.
+- **numba is now a (transitive) hard dependency and the default backend.** PyTensor 3 compiles models with numba by default, so the _first_ sample from a freshly defined model incurs a noticeable one-off compilation delay before sampling starts. Subsequent samples reuse the compiled function.
 - **Native crashes can replace Python tracebacks.** When a numba-compiled sampler worker dies, the failure may surface as a native crash or a stalled worker rather than a Python traceback — so a wedged worker can present as a silent hang rather than an exception.
 - **Installing `nutpie` changes sampling defaults.** If a recent enough `nutpie` is installed, PyMC uses it as the default NUTS sampler unless you pass an explicit `nuts_sampler=`, and nutpie applies its own number of tuning steps rather than PyMC's built-in default of 1000. Merely installing nutpie is therefore enough to change how `pm.sample()` behaves; pass `nuts_sampler="pymc"` if you need the built-in sampler.
 
@@ -128,7 +128,7 @@ Click on the thumbnail below to watch a video about CausalPy on YouTube.
 CausalPy provides methods for common causal inference decision contexts:
 
 | Decision context | Methods |
-|------------------|---------|
+| --- | --- |
 | Focussed testing on certain units (geos, products) | Synthetic control, Geographical lift |
 | Evaluate before/after changes, launches, policy changes | Differences in Differences, Staggered DiD, Interrupted time series |
 | Exploit cutoff rules, score-based eligibility (credit, age) | Regression discontinuity, Regression kink |
@@ -138,7 +138,7 @@ CausalPy provides methods for common causal inference decision contexts:
 ### Available methods
 
 | Method | Description |
-|-|-|
+| --- | --- |
 | Synthetic control | Constructs a synthetic version of the treatment group from a weighted combination of control units. Used for causal inference in comparative case studies when a single unit is treated, and there are multiple control units. |
 | Geographical lift | Measures the impact of an intervention in a specific geographic area by comparing it to similar areas without the intervention. Commonly used in marketing to assess regional campaigns. |
 | ANCOVA | Analysis of Covariance combines ANOVA and regression to control for the effects of one or more quantitative covariates. Used when comparing group means while controlling for other variables. |
