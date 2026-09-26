@@ -1,0 +1,21 @@
+causalpy/tests/test_migration_baseline_harness.py
+  s_a5aa31507678ad::t_bd5fb7e04ca439 1221,1227
+scripts/migration_baseline/README.md
+  s_a5aa31507678ad::t_10b3720eb0514f 5,11-13,60,67,71,73,87-88,95,98,101,104,107
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "dabe12a73bdfcc738029570ab21ab093e07d350a",
+  "prompts": {},
+  "sessions": {
+    "s_a5aa31507678ad": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a728f4bcc31b88407",
+        "model": "unknown"
+      },
+      "human_author": "daimon-pymclabs <daimon@pymc-labs.com>"
+    }
+  }
+}

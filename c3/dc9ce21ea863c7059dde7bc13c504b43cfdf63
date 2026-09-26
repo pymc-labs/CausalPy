@@ -1,0 +1,19 @@
+scripts/migration_baseline/harness.py
+  s_150e341bfe358e::t_54f55794bc7180 465
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "c3dc9ce21ea863c7059dde7bc13c504b43cfdf63",
+  "prompts": {},
+  "sessions": {
+    "s_150e341bfe358e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-aba55211d263849d6",
+        "model": "unknown"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}

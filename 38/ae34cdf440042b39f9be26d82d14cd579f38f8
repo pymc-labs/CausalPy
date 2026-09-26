@@ -1,0 +1,16 @@
+causalpy/experiments/regression_discontinuity.py
+  h_d36ca8649a0e95 433-451,455,476-478,481
+causalpy/tests/test_input_validation.py
+  h_d36ca8649a0e95 20,892,904-966,968-981,985,997-1031
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "38ae34cdf440042b39f9be26d82d14cd579f38f8",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}

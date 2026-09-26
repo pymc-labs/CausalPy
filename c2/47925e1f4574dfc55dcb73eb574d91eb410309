@@ -1,0 +1,21 @@
+causalpy/pymc_models.py
+  s_c5e0308edcbe07::t_e3f8d9a8a28ea3 660-666,668-674,680-688,690,692-693,695-706,708,716-720
+causalpy/tests/test_auto_scale_sigma.py
+  s_c5e0308edcbe07::t_3bb11b08cdcd56 18-20,186-187,203-223,335-339,341,348-370,375,377,416,423,425,433-436
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "c247925e1f4574dfc55dcb73eb574d91eb410309",
+  "prompts": {},
+  "sessions": {
+    "s_c5e0308edcbe07": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6fe20fe0-185d-4455-beee-b78ff9524806",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Daimon <daimon@pymc-labs.com>"
+    }
+  }
+}

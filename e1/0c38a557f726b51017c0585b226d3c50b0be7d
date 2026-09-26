@@ -1,0 +1,26 @@
+causalpy/experiments/instrumental_variable.py
+  h_d36ca8649a0e95 142,146
+causalpy/experiments/inverse_propensity_weighting.py
+  h_d36ca8649a0e95 98
+causalpy/experiments/prepostnegd.py
+  h_d36ca8649a0e95 118
+causalpy/experiments/regression_discontinuity.py
+  h_d36ca8649a0e95 131
+causalpy/experiments/regression_kink.py
+  h_d36ca8649a0e95 97
+causalpy/tests/test_dataframe_backends.py
+  h_d36ca8649a0e95 66,222
+causalpy/tests/test_time_column.py
+  h_d36ca8649a0e95 52-66,100-106,208,215,290-320,398-413
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "e10c38a557f726b51017c0585b226d3c50b0be7d",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,25 @@
+causalpy/reporting.py
+  s_70f459cca9fb15::t_8b5fb53283d157 464-465
+docs/source/notebooks/interrupted-time-series-lift-test.ipynb
+  s_70f459cca9fb15::t_9a737f2c7a0c6d 1566,2173
+causalpy/experiments/synthetic_difference_in_differences.py
+  s_70f459cca9fb15::t_6b35038136a2bc 90
+docs/source/knowledgebase/prediction-contract.md
+  s_70f459cca9fb15::t_45bd2c782cb720 38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e347d170762f3ff1b94f8e8be8ee1830c30c2dea",
+  "prompts": {},
+  "sessions": {
+    "s_70f459cca9fb15": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b324016-5037-4f62-93aa-24cc7dd27c2e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}

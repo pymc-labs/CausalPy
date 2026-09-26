@@ -1,0 +1,19 @@
+.gitignore
+  s_78195a3bbaa437::t_31ec54e7ef0f30 33-35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "79f7ae158356007722b2a61ee42c2ef01cea0cde",
+  "prompts": {},
+  "sessions": {
+    "s_78195a3bbaa437": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "570ab073-cb5e-4713-b6d9-7ab2fc4f7140",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}

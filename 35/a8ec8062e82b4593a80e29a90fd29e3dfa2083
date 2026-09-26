@@ -1,0 +1,28 @@
+causalpy/checks/__init__.py
+  h_d36ca8649a0e95 21-25,32,47-48
+causalpy/checks/operating_characteristics.py
+  h_d36ca8649a0e95 1-664
+causalpy/checks/placebo_in_time.py
+  h_d36ca8649a0e95 41-42,66-69,172-173,240-242,250-258,260-261,263-265,267-268,360-386,393-401,410,413-415,417,1023,1033,1063,1070-1071,1081-1086,1088-1095,1103-1108,1124
+causalpy/tests/test_operating_characteristics.py
+  h_d36ca8649a0e95 1-352
+causalpy/tests/test_placebo_in_time.py
+  h_d36ca8649a0e95 33,35,37,244-264,286-292,408,412-416,418-419,422-426,429-433,435-436,439-442,892-983,2158,2162-2165,2167-2169,2174-2177,2179,2182-2223,2278-2279,2281-2283,2285-2300
+docs/source/knowledgebase/reporting_statistics.md
+  h_d36ca8649a0e95 128,130
+docs/source/notebooks/interrupted-time-series-placebo-in-time-analysis.ipynb
+  h_d36ca8649a0e95 394,580,981,1081,1083,1085,1087-1089,1091,1093,1106,1109-1110,1114-1115,1122,1124,1126
+docs/source/notebooks/sensitivity_checks.md
+  h_d36ca8649a0e95 86-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "35a8ec8062e82b4593a80e29a90fd29e3dfa2083",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}

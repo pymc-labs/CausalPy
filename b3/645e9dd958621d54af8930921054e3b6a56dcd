@@ -1,0 +1,21 @@
+.agents/skills/_shared/pr_triage/labels.py
+  s_81dc5c6a18e96b::t_577016089d2679 249-262
+.agents/skills/pr-digest/scripts/build_digest.py
+  s_81dc5c6a18e96b::t_93dfb9bea0e963 47-55,57-67,109-111,114-118,143,201-202
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "b3645e9dd958621d54af8930921054e3b6a56dcd",
+  "prompts": {},
+  "sessions": {
+    "s_81dc5c6a18e96b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "s_81dc5c6a18e96b",
+        "model": "unknown"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}
