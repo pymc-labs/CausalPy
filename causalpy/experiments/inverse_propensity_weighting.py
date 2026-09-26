@@ -319,7 +319,10 @@ class InversePropensityWeighting(BaseExperiment):
         *Foundations of Agnostic Statistics*.  This implementation fixes the
         outcome model to ordinary least squares (OLS), so the compromise
         between the outcome model and the propensity model is always performed
-        with a linear regression.
+        with a linear regression. Outcome regressions use
+        ``fit_intercept=False``: Patsy supplies the intercept when the
+        propensity formula includes one, and a second scikit-learn intercept
+        would change the contrast when it does not.
 
         Parameters
         ----------
@@ -338,8 +341,12 @@ class InversePropensityWeighting(BaseExperiment):
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         t = self.t.flatten()
-        m0 = sk_lin_reg().fit(X[t == 0].astype(float), self.y[t == 0])
-        m1 = sk_lin_reg().fit(X[t == 1].astype(float), self.y[t == 1])
+        m0 = sk_lin_reg(fit_intercept=False).fit(
+            X[t == 0].astype(float), self.y[t == 0]
+        )
+        m1 = sk_lin_reg(fit_intercept=False).fit(
+            X[t == 1].astype(float), self.y[t == 1]
+        )
         m0_pred = m0.predict(X)
         m1_pred = m1.predict(X)
         ## Compromise between outcome and treatment assignment model
