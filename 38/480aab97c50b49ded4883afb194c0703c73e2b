@@ -1,0 +1,23 @@
+causalpy/tests/test_ipw_doubly_robust_intercept.py
+  s_8c2f801f7f8606::t_055fcdd861f8a6 35,38,41,43-44
+  s_8c2f801f7f8606::t_006ec81662f805 1-34,36-37,39-40,42,45-78
+causalpy/experiments/inverse_propensity_weighting.py
+  s_8c2f801f7f8606::t_62e6146a040a71 322-325
+  s_8c2f801f7f8606::t_7c16c8abee1111 344-349
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "38480aab97c50b49ded4883afb194c0703c73e2b",
+  "prompts": {},
+  "sessions": {
+    "s_8c2f801f7f8606": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "1affd6bf-5925-4fb2-aa50-09a515b78d97",
+        "model": "grok-4.7"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

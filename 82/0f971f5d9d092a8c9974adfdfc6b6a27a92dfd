@@ -1,0 +1,19 @@
+causalpy/tests/test_did_saturated_four_mean.py
+  s_8c2f801f7f8606::t_60e392a32bfa17 1-59
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "820f971f5d9d092a8c9974adfdfc6b6a27a92dfd",
+  "prompts": {},
+  "sessions": {
+    "s_8c2f801f7f8606": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "1affd6bf-5925-4fb2-aa50-09a515b78d97",
+        "model": "grok-4.7"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

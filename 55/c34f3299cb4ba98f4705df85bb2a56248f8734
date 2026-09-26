@@ -1,0 +1,19 @@
+causalpy/tests/test_ipw_get_ate.py
+  s_8c2f801f7f8606::t_29ab6322f045fa 287-322
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "55c34f3299cb4ba98f4705df85bb2a56248f8734",
+  "prompts": {},
+  "sessions": {
+    "s_8c2f801f7f8606": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "1affd6bf-5925-4fb2-aa50-09a515b78d97",
+        "model": "grok-4.7"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
