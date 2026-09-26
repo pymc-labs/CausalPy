@@ -38,6 +38,7 @@ dependencies:
   - pytensor<4,>=3
   - pytest
   - pytest-cov
+  - pytest-xdist
   - pyyaml
   - scikit-learn>=1
   - scipy

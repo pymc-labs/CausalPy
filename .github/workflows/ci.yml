@@ -104,10 +104,9 @@ jobs:
     name: Test (Python ${{ matrix.python-version }}, pandas ${{ matrix.pandas-version }})
     runs-on: ubuntu-latest
     # Guard (issue #1117): a wedged run fails as `failure` in minutes instead of
-    # being `cancelled` at GitHub's 6h ceiling. Headroom over the observed ~21 min
-    # max for this job (incl. cold uv-cache resolves); tune if legitimately
-    # slower runs appear.
-    timeout-minutes: 30
+    # being `cancelled` at GitHub's 6h ceiling. The main suite runs under
+    # pytest-xdist (~15 min expected); 40 min leaves headroom for cold caches.
+    timeout-minutes: 40
     permissions:
       contents: read
     strategy:
@@ -288,8 +287,8 @@ jobs:
         if: steps.pytensor-cmodules-cache.outputs.cache-hit != 'true'
         run: rm -rf ~/.pytensor/compiledir_*
       - name: Run tests
-        # The default addopts deselect `nightly` and `correctness` tests. Correctness runs in the step above; `nightly` tests run in .github/workflows/nightly.yml.
-        run: uv run --no-sync pytest --cov-append --cov-report=xml --no-cov-on-fail
+        # The default addopts deselect `nightly` and `correctness` tests. Correctness runs in the step above; `nightly` tests run in .github/workflows/nightly.yml. The suite runs in parallel with pytest-xdist (one worker per runner core); the serial run took ~25 min and hit the job timeout.
+        run: uv run --no-sync pytest -n auto --dist worksteal --cov-append --cov-report=xml --no-cov-on-fail
       - name: Save the PyTensor C-module cache
         if: steps.pytensor-cmodules-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
