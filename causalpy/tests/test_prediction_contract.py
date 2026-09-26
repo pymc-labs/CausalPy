@@ -103,8 +103,9 @@ def test_linear_regression_mu_matches_outcome_scale_impact(rng, mock_pymc_sample
     pred = model.predict(X, coords)
 
     adapter_mu = PyMCModelAdapter(model).predict(X, coords=coords)
+    assert adapter_mu.dims == ("chain", "draw", "obs_ind", "treated_units")
     impact = y - adapter_mu
-    mu = pred.posterior_predictive["mu"]
+    mu = pred["posterior_predictive"]["mu"]
     expected = y - mu
 
     xr.testing.assert_allclose(
@@ -129,7 +130,7 @@ def test_poisson_log_link_mu_is_expected_count(rng, mock_pymc_sample):
     model.fit(X, y, coords)
     pred = model.predict(X, coords)
 
-    mu = pred.posterior_predictive["mu"]
+    mu = pred["posterior_predictive"]["mu"]
     assert float(mu.min()) >= 0.0
     impact = y - PyMCModelAdapter(model).predict(X, coords=coords)
     # Impact mean should be on the count scale, not the log scale.
@@ -154,7 +155,7 @@ def test_bernoulli_logit_mu_is_probability(rng, mock_pymc_sample):
     model.fit(X, y, coords)
     pred = model.predict(X, coords)
 
-    mu = pred.posterior_predictive["mu"]
+    mu = pred["posterior_predictive"]["mu"]
     assert float(mu.min()) >= 0.0
     assert float(mu.max()) <= 1.0
     impact = y - PyMCModelAdapter(model).predict(X, coords=coords)
@@ -205,10 +206,68 @@ def test_impact_uses_mu_not_y_hat(rng, mock_pymc_sample):
     pred = model.predict(X, coords)
 
     impact_from_mu = y - PyMCModelAdapter(model).predict(X, coords=coords)
-    noise_inclusive = y - pred.posterior_predictive["y_hat"]
+    noise_inclusive = y - pred["posterior_predictive"]["y_hat"]
 
     with pytest.raises(AssertionError):
         xr.testing.assert_allclose(
             impact_from_mu.transpose(..., "obs_ind"),
             noise_inclusive.transpose(..., "obs_ind"),
         )
+
+
+def test_predictive_and_counterfactual_datatree_item_access(rng, mock_pymc_sample):
+    """Adapter predictions preserve ``obs_ind`` from DataTree samples."""
+    n_obs = 10
+    obs_ind = np.arange(100, 100 + n_obs)
+    X = xr.DataArray(
+        np.column_stack([np.ones(n_obs), rng.normal(size=n_obs)]),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": obs_ind, "coeffs": ["Intercept", "x1"]},
+    )
+    y = xr.DataArray(
+        (
+            X.data @ np.array([[0.25, 0.75]]).T + rng.normal(scale=0.3, size=(n_obs, 1))
+        ).astype(float),
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": obs_ind, "treated_units": ["unit_0"]},
+    )
+    coords = {
+        "obs_ind": obs_ind,
+        "coeffs": ["Intercept", "x1"],
+        "treated_units": ["unit_0"],
+    }
+
+    model = LinearRegression(sample_kwargs={**sample_kwargs, "random_seed": 17})
+    model.fit(X, y, coords)
+
+    pred = model.predict(X, coords)
+    assert isinstance(pred, xr.DataTree)
+    mu = pred["posterior_predictive"]["mu"]
+    np.testing.assert_array_equal(
+        mu.coords["obs_ind"].values, X.coords["obs_ind"].values
+    )
+
+    adapter = PyMCModelAdapter(model)
+    adapter_mu = adapter.predict(X, coords=coords)
+    assert adapter_mu.dims == ("chain", "draw", "obs_ind", "treated_units")
+    np.testing.assert_array_equal(
+        adapter_mu.coords["obs_ind"].values, y.coords["obs_ind"].values
+    )
+    impact = y - adapter_mu
+    np.testing.assert_array_equal(impact["obs_ind"].values, y["obs_ind"].values)
+
+    # Counterfactual-style predict on a modified design matrix preserves the
+    # same coordinate contract and changes the expected outcome.
+    X_cf = X.copy(deep=True)
+    X_cf.loc[:, "x1"] = 0.0
+    cf_pred = model.predict(X_cf, coords)
+    assert isinstance(cf_pred, xr.DataTree)
+    cf_mu = cf_pred["posterior_predictive"]["mu"]
+    np.testing.assert_array_equal(
+        cf_mu.coords["obs_ind"].values, X_cf.coords["obs_ind"].values
+    )
+    adapter_cf_mu = adapter.predict(X_cf, coords=coords)
+    np.testing.assert_array_equal(
+        adapter_cf_mu.coords["obs_ind"].values, y.coords["obs_ind"].values
+    )
+    assert not np.allclose(adapter_mu.values, adapter_cf_mu.values)

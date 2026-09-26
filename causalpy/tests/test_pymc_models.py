@@ -27,6 +27,7 @@ from causalpy.pymc_models import (
     SoftmaxWeightedSumFitter,
     SyntheticDifferenceInDifferencesWeightFitter,
     WeightedSumFitter,
+    _extend_datatree_left,
     _softmax_simplex_weights,
 )
 
@@ -110,7 +111,52 @@ class TestPyMCModel:
         with pytest.raises(
             NotImplementedError, match="This method must be implemented by a subclass"
         ):
-            PyMCModel().fit(X=np.ones(2), y=np.ones(3), coords={"a": 1})
+            X = xr.DataArray(
+                np.ones((2, 1)),
+                dims=["obs_ind", "coeffs"],
+                coords={"obs_ind": [0, 1], "coeffs": ["x"]},
+            )
+            y = xr.DataArray(
+                np.ones((2, 1)),
+                dims=["obs_ind", "treated_units"],
+                coords={"obs_ind": [0, 1], "treated_units": ["unit_0"]},
+            )
+            PyMCModel().fit(X=X, y=y, coords={"a": 1})
+
+    @pytest.mark.parametrize(
+        ("X", "y", "match"),
+        [
+            (
+                {"unit": xr.DataArray([1.0], dims=["obs_ind"])},
+                xr.DataArray([1.0], dims=["obs_ind"]),
+                "both be xarray.DataArray",
+            ),
+            (
+                {"unit": np.array([1.0])},
+                {"unit": xr.DataArray([1.0], dims=["obs_ind"])},
+                "mapping strings to xarray.DataArray",
+            ),
+        ],
+        ids=["mixed-direct-and-mapping", "mapping-with-non-dataarray-value"],
+    )
+    def test_fit_rejects_mixed_or_malformed_input_shapes(self, X, y, match) -> None:
+        """Fit rejects non-DataArray pairs before model construction."""
+        with pytest.raises(TypeError, match=match):
+            MyToyModel().fit(X=X, y=y)
+
+    def test_base_mapping_fit_rejects_unsupported_model(self) -> None:
+        """The mapping fit capability fails clearly on ordinary PyMC models."""
+        data = {"unit": xr.DataArray([1.0], dims=["obs_ind"])}
+        with pytest.raises(TypeError, match="does not support mapping-valued inputs"):
+            PyMCModelAdapter(MyToyModel()).fit(X=data, y=data)
+
+    def test_adapter_rejects_mixed_mapping_and_array_inputs(self) -> None:
+        """The adapter requires predictor and target containers to match."""
+        data = xr.DataArray([1.0], dims=["obs_ind"])
+        with pytest.raises(
+            TypeError, match="either both be mappings or both be arrays"
+        ):
+            PyMCModelAdapter(MyToyModel()).fit(X={"unit": data}, y=data)
 
     @pytest.mark.parametrize(
         argnames="coords",
@@ -123,10 +169,10 @@ class TestPyMCModel:
 
         Generates normal data, fits the model, makes predictions, scores the model
         then:
-        1. checks that model.idata is az.InferenceData type
+        1. checks that model.idata is an xr.DataTree
         2. checks that beta, sigma, mu, and y_hat can be extract from idata
         3. checks score is a pandas series of the correct shape
-        4. checks that predictions are az.InferenceData type
+        4. checks that predictions are xr.DataTree
         """
         X = rng.normal(loc=0, scale=1, size=(20, 2))
         y = rng.normal(loc=0, scale=1, size=(20, 1))  # Now 2D with single treated unit
@@ -162,7 +208,10 @@ class TestPyMCModel:
         model.fit(X, y, coords=base_coords)
         predictions = model.predict(X=X)
         score = model.score(X=X, y=y)
-        assert isinstance(model.idata, az.InferenceData)
+        assert isinstance(model.idata, xr.DataTree)
+        assert "posterior" in model.idata
+        assert "prior_predictive" in model.idata
+        assert "posterior_predictive" in model.idata
         assert az.extract(data=model.idata, var_names=["beta"]).shape == (
             1,
             2,
@@ -185,7 +234,38 @@ class TestPyMCModel:
         # Test that the score follows the new unified format
         assert "unit_0_r2" in score.index
         assert "unit_0_r2_std" in score.index
-        assert isinstance(predictions, az.InferenceData)
+        assert isinstance(predictions, xr.DataTree)
+
+    def test_predict_preserves_datetime_obs_ind(self, rng, mock_pymc_sample):
+        """Predict reattaches the caller's datetime coordinates to the DataTree."""
+        dates = pd.date_range("2024-01-01", periods=8, freq="D")
+        X = xr.DataArray(
+            rng.normal(size=(len(dates), 1)),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": dates, "coeffs": ["x"]},
+        )
+        y = xr.DataArray(
+            rng.normal(size=(len(dates), 1)),
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": dates, "treated_units": ["unit_0"]},
+        )
+        model = MyToyModel(sample_kwargs={"chains": 1, "draws": 2})
+        model.fit(
+            X,
+            y,
+            coords={
+                "obs_ind": np.arange(len(dates)),
+                "coeffs": ["x"],
+                "treated_units": ["unit_0"],
+            },
+        )
+
+        prediction = model.predict(X)
+
+        np.testing.assert_array_equal(
+            prediction["posterior_predictive"].to_dataset().coords["obs_ind"].values,
+            X.coords["obs_ind"].values,
+        )
 
 
 class NonStandardDataModel(PyMCModel):
@@ -293,7 +373,34 @@ class TestDataSetterValidation:
         model = LinearRegression(sample_kwargs={"chains": 2, "draws": 2})
         model.fit(X, y, coords=coords)
         predictions = model.predict(X=X)
-        assert isinstance(predictions, az.InferenceData)
+        assert isinstance(predictions, xr.DataTree)
+
+    def test_standard_data_nodes_predict_without_coords(self, rng, mock_pymc_sample):
+        """Prediction retains fitted unit width when no coordinate mapping is supplied."""
+        X = xr.DataArray(
+            rng.normal(size=(10, 1)),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": np.arange(10), "coeffs": ["x1"]},
+        )
+        y = xr.DataArray(
+            rng.normal(size=(10, 1)),
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(10), "treated_units": ["unit_0"]},
+        )
+        model = LinearRegression(sample_kwargs={"chains": 2, "draws": 2})
+
+        model.fit(X, y)
+        np.testing.assert_array_equal(model.coords["obs_ind"], X.coords["obs_ind"])
+        np.testing.assert_array_equal(model.coords["coeffs"], X.coords["coeffs"])
+        np.testing.assert_array_equal(
+            model.coords["treated_units"], y.coords["treated_units"]
+        )
+        predictions = model.predict(X=X)
+        score = model.score(X=X, y=y)
+
+        assert isinstance(predictions, xr.DataTree)
+        assert predictions["posterior_predictive"]["mu"].sizes["treated_units"] == 1
+        assert "unit_0_r2" in score
 
 
 def test_idata_property(mock_pymc_sample, did_data):
@@ -304,9 +411,88 @@ def test_idata_property(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit(**sample_kwargs)
     assert hasattr(result, "idata")
-    assert isinstance(result.idata, az.InferenceData)
+    assert isinstance(result.idata, xr.DataTree)
+
+
+def test_prior_merge_adds_groups_without_overwriting_sample_groups():
+    """Post-sample prior merging preserves the sample tree's shared groups."""
+    sample_idata = xr.DataTree.from_dict(
+        {
+            "posterior": xr.Dataset({"beta": xr.DataArray([1.0], dims="draw")}),
+            "observed_data": xr.Dataset({"y_hat": xr.DataArray([2.0], dims="obs_ind")}),
+            "constant_data": xr.Dataset({"X": xr.DataArray([3.0], dims="obs_ind")}),
+        }
+    )
+    prior_idata = xr.DataTree.from_dict(
+        {
+            "prior": xr.Dataset({"beta": xr.DataArray([4.0], dims="draw")}),
+            "prior_predictive": xr.Dataset(
+                {"y_hat": xr.DataArray([5.0], dims="obs_ind")}
+            ),
+            "observed_data": xr.Dataset({"y_hat": xr.DataArray([6.0], dims="obs_ind")}),
+            "constant_data": xr.Dataset({"X": xr.DataArray([7.0], dims="obs_ind")}),
+        }
+    )
+    sample_observed = sample_idata["observed_data"].to_dataset().copy()
+    sample_constant = sample_idata["constant_data"].to_dataset().copy()
+    prior = prior_idata["prior"].to_dataset().copy()
+    prior_predictive = prior_idata["prior_predictive"].to_dataset().copy()
+
+    merged = _extend_datatree_left(sample_idata, prior_idata)
+
+    assert merged is sample_idata
+    assert {"posterior", "prior", "prior_predictive"} <= set(merged.children)
+    xr.testing.assert_identical(merged["observed_data"].to_dataset(), sample_observed)
+    xr.testing.assert_identical(merged["constant_data"].to_dataset(), sample_constant)
+    xr.testing.assert_identical(merged["prior"].to_dataset(), prior)
+    xr.testing.assert_identical(
+        merged["prior_predictive"].to_dataset(), prior_predictive
+    )
+
+
+def test_propensity_score_fit_returns_datatree_groups(mock_pymc_sample):
+    """Propensity fitting retains posterior, prior predictive, and PPC groups."""
+    X = np.ones((8, 1))
+    t = np.array([0, 1, 0, 1, 0, 1, 0, 1])
+    model = cp.pymc_models.PropensityScore(
+        sample_kwargs={"chains": 1, "draws": 2, "progressbar": False}
+    )
+
+    idata = model.fit(
+        X=X,
+        t=t,
+        coords={"obs_ind": np.arange(len(t)), "coeffs": ["intercept"]},
+    )
+
+    assert isinstance(idata, xr.DataTree)
+    assert {"posterior", "prior_predictive", "posterior_predictive"} <= set(
+        idata.children
+    )
+
+
+def test_propensity_fit_outcome_model_returns_datatree(mock_pymc_sample):
+    """The outcome-model posterior update retains prior predictive groups."""
+    X = np.ones((8, 1))
+    t = np.array([0, 1, 0, 1, 0, 1, 0, 1])
+    model = cp.pymc_models.PropensityScore(
+        sample_kwargs={"chains": 1, "draws": 2, "progressbar": False}
+    )
+    model.fit(
+        X=X,
+        t=t,
+        coords={"obs_ind": np.arange(len(t)), "coeffs": ["intercept"]},
+    )
+
+    idata, _ = model.fit_outcome_model(
+        X_outcome=pd.DataFrame({"intercept": np.ones(len(t))}),
+        y=pd.Series(np.linspace(0.0, 1.0, len(t))),
+        coords={"outcome_coeffs": ["intercept"]},
+    )
+
+    assert isinstance(idata, xr.DataTree)
+    assert {"prior_predictive", "posterior"} <= set(idata.children)
 
 
 seeds = [1234, 42, 123456789]
@@ -327,14 +513,14 @@ def test_result_reproducibility(seed, mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit(**sample_kwargs)
     result2 = cp.DifferenceInDifferences(
         did_data,
         formula="y ~ 1 + group + t + group:post_treatment",
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit(**sample_kwargs)
     assert np.all(result1.idata.posterior.mu == result2.idata.posterior.mu)
     assert np.all(result1.idata.prior.mu == result2.idata.prior.mu)
     assert np.all(
@@ -462,9 +648,9 @@ class TestWeightedSumFitterMultiUnit:
         result = wsf.fit(X, y, coords=coords)
 
         # Check that fitting was successful
-        assert isinstance(result, az.InferenceData)
-        assert "posterior" in result.groups()
-        assert "posterior_predictive" in result.groups()
+        assert isinstance(result, xr.DataTree)
+        assert "posterior" in result
+        assert "posterior_predictive" in result
 
     def test_multi_unit_predictions(self, synthetic_control_data):
         """Test that predictions work correctly with multiple treated units."""
@@ -477,8 +663,8 @@ class TestWeightedSumFitterMultiUnit:
         pred = wsf.predict(X)
 
         # Check prediction structure
-        assert isinstance(pred, az.InferenceData)
-        assert "posterior_predictive" in pred.groups()
+        assert isinstance(pred, xr.DataTree)
+        assert "posterior_predictive" in pred
 
         # Check shapes - should be (chains, draws, obs_ind, treated_units)
         mu_shape = pred["posterior_predictive"]["mu"].shape
@@ -543,7 +729,7 @@ class TestWeightedSumFitterMultiUnit:
         result = wsf.fit(X, y, coords=coords)
 
         # Check that fitting was successful
-        assert isinstance(result, az.InferenceData)
+        assert isinstance(result, xr.DataTree)
 
         # Test prediction
         pred = wsf.predict(X)
@@ -828,18 +1014,47 @@ class TestSyntheticDifferenceInDifferencesWeightFitter:
         }
         return X, y, coords
 
-    def test_fitting(self, sdid_data):
-        """Test that the model fits and produces omega and lam posteriors."""
+    def test_fitting_through_adapter_preserves_coordinate_labels(self, sdid_data):
+        """Fitting through the adapter preserves the specialized mapping labels."""
         X, y, coords = sdid_data
-        model = SyntheticDifferenceInDifferencesWeightFitter(
-            sample_kwargs=sample_kwargs
+        adapter = PyMCModelAdapter(
+            SyntheticDifferenceInDifferencesWeightFitter(sample_kwargs=sample_kwargs)
         )
-        result = model.fit(X, y, coords=coords)
+        result = adapter.fit(X, y, coords=coords)
 
-        assert isinstance(result, az.InferenceData)
-        assert "posterior" in result.groups()
+        assert isinstance(result, xr.DataTree)
+        assert "posterior" in result
         assert "omega" in result.posterior
         assert "lam" in result.posterior
+        np.testing.assert_array_equal(
+            result.posterior["omega"].coords["coeffs"].values,
+            coords["coeffs"],
+        )
+        np.testing.assert_array_equal(
+            result.posterior["lam"].coords["obs_ind"].values,
+            coords["obs_ind"],
+        )
+
+    def test_mapping_fit_rejects_malformed_values(self, sdid_data):
+        """The SDID mapping boundary rejects values without xarray labels."""
+        X, y, coords = sdid_data
+        X = {**X, "unit": np.asarray(X["unit"])}
+        adapter = PyMCModelAdapter(SyntheticDifferenceInDifferencesWeightFitter())
+
+        with pytest.raises(TypeError, match="mapping strings to xarray.DataArray"):
+            adapter.fit(X, y, coords=coords)
+
+    def test_direct_fit_rejects_mixed_mapping_and_array_inputs(self, sdid_data):
+        """The direct SDID fit boundary requires matching input containers."""
+        X, y, coords = sdid_data
+        with pytest.raises(
+            TypeError, match="either both be mappings or both be arrays"
+        ):
+            SyntheticDifferenceInDifferencesWeightFitter().fit(
+                X,
+                y["unit"],
+                coords=coords,
+            )
 
     def test_omega_is_simplex(self, sdid_data):
         """Test that omega weights sum to 1."""
@@ -876,9 +1091,9 @@ class TestSoftmaxWeightedSumFitterMultiUnit:
         wsf = SoftmaxWeightedSumFitter(sample_kwargs=sample_kwargs)
         result = wsf.fit(X, y, coords=coords)
 
-        assert isinstance(result, az.InferenceData)
-        assert "posterior" in result.groups()
-        assert "posterior_predictive" in result.groups()
+        assert isinstance(result, xr.DataTree)
+        assert "posterior" in result
+        assert "posterior_predictive" in result
 
     def test_multi_unit_predictions(self, synthetic_control_data):
         """Test that predictions work correctly with multiple treated units."""
@@ -888,8 +1103,8 @@ class TestSoftmaxWeightedSumFitterMultiUnit:
         wsf.fit(X, y, coords=coords)
 
         pred = wsf.predict(X)
-        assert isinstance(pred, az.InferenceData)
-        assert "posterior_predictive" in pred.groups()
+        assert isinstance(pred, xr.DataTree)
+        assert "posterior_predictive" in pred
 
     def test_coefficients_structure(self, synthetic_control_data):
         """Test that beta weights sum to 1 along coeffs dim (simplex constraint)."""
@@ -910,8 +1125,8 @@ class TestSoftmaxWeightedSumFitterMultiUnit:
         wsf = SoftmaxWeightedSumFitter(sample_kwargs=sample_kwargs)
         result = wsf.fit(X, y, coords=coords)
 
-        assert isinstance(result, az.InferenceData)
-        assert "posterior" in result.groups()
+        assert isinstance(result, xr.DataTree)
+        assert "posterior" in result
         assert "beta" in result.posterior
 
     def test_scoring(self, synthetic_control_data):
@@ -926,12 +1141,24 @@ class TestSoftmaxWeightedSumFitterMultiUnit:
         for i, _unit in enumerate(treated_units):
             assert f"unit_{i}_r2" in scores.index
 
-    def test_build_model_raises_without_coeffs_coord(self, synthetic_control_data):
-        """Test that build_model raises ValueError when coords lacks 'coeffs'."""
-        X, y, _coords, _control_units, _treated_units = synthetic_control_data
+    def test_fit_infers_coords_from_labeled_arrays(self, synthetic_control_data):
+        """Fit infers model coordinates from labeled DataArray inputs."""
+        X, y, _coords, control_units, treated_units = synthetic_control_data
         wsf = SoftmaxWeightedSumFitter(sample_kwargs=sample_kwargs)
-        with pytest.raises(ValueError, match="coords must include 'coeffs'"):
-            wsf.fit(X, y, coords={"treated_units": ["unit_0"], "obs_ind": [0]})
+        result = wsf.fit(X, y)
+
+        np.testing.assert_array_equal(
+            result.posterior.coords["coeffs"].values,
+            control_units,
+        )
+        np.testing.assert_array_equal(
+            result.posterior.coords["treated_units"].values,
+            treated_units,
+        )
+        np.testing.assert_array_equal(
+            result.posterior.coords["obs_ind"].values,
+            X.coords["obs_ind"].values,
+        )
 
 
 @pytest.fixture(scope="module")
@@ -1212,3 +1439,70 @@ class TestPriorIntegration:
         assert "beta" in model.priors
         beta_prior = model.priors["beta"]
         assert beta_prior.distribution == "Dirichlet"
+
+
+# ---------------------------------------------------------------------------
+# Third-pass review: pinned prior-phase defaults, clone carriage, rebuild guard
+# ---------------------------------------------------------------------------
+
+
+def test_default_prior_sample_kwargs_are_pinned():
+    """The documented default (draws=500 + posterior seed) is load-bearing."""
+    model = cp.pymc_models.LinearRegression(sample_kwargs={"random_seed": 7})
+    assert model.prior_sample_kwargs == {"draws": 500, "random_seed": 7}
+    explicit = cp.pymc_models.LinearRegression(prior_sample_kwargs={"draws": 42})
+    assert explicit.prior_sample_kwargs == {"draws": 42}
+
+
+def test_clone_carries_prior_sample_kwargs():
+    """_clone() must forward prior_sample_kwargs, not silently re-default."""
+    model = cp.pymc_models.LinearRegression(
+        sample_kwargs={"draws": 9},
+        prior_sample_kwargs={"draws": 123, "random_seed": 5},
+    )
+    cloned = model._clone()
+    assert cloned.prior_sample_kwargs == {"draws": 123, "random_seed": 5}
+    assert cloned.sample_kwargs == {"draws": 9}
+
+
+def test_clone_carries_prior_sample_kwargs_on_overriding_backends():
+    """The BBETS/StateSpace _clone overrides forward the setting too."""
+    from causalpy.tests.test_timeseries_model_coverage import MockComponent
+
+    bbets = cp.pymc_models.BayesianBasisExpansionTimeSeries(
+        trend_component=MockComponent(),
+        seasonality_component=MockComponent(),
+        sample_kwargs={"draws": 9},
+        prior_sample_kwargs={"draws": 321, "random_seed": 6},
+    )
+    assert bbets._clone().prior_sample_kwargs == {"draws": 321, "random_seed": 6}
+
+    ss = cp.pymc_models.StateSpaceTimeSeries(
+        sample_kwargs={"draws": 9},
+        prior_sample_kwargs={"draws": 321, "random_seed": 6},
+    )
+    assert ss._clone().prior_sample_kwargs == {"draws": 321, "random_seed": 6}
+
+
+def test_rebuild_with_same_inputs_is_noop_and_changed_inputs_raise():
+    """build() is idempotent for identical inputs and loud about changes."""
+    rng = np.random.default_rng(0)
+    X = xr.DataArray(
+        rng.normal(size=(10, 2)),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": np.arange(10), "coeffs": ["a", "b"]},
+    )
+    y = xr.DataArray(
+        rng.normal(size=(10, 1)),
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": np.arange(10), "treated_units": ["unit_0"]},
+    )
+    model = cp.pymc_models.LinearRegression()
+    model.build(X=X, y=y)
+    # Same inputs: idempotent no-op.
+    model.build(X=X, y=y)
+    assert model._built
+    # Same shape, different values: rejected instead of silently ignored.
+    changed = y * 1000.0
+    with pytest.raises(RuntimeError, match="already built with different inputs"):
+        model.build(X=X, y=changed)
