@@ -1,0 +1,33 @@
+.github/workflows/nightly.yml
+  s_538694f14ffe43::t_427259d82c8384 1-86
+.github/workflows/ci.yml
+  s_538694f14ffe43::t_2366a53b9b471e 263,284-285
+AGENTS.md
+  s_538694f14ffe43::t_df0c839fcdbb3c 30
+Makefile
+  s_538694f14ffe43::t_d2709c49de67e9 11,69-70,75-77
+causalpy/tests/doctest_sampling.py
+  s_538694f14ffe43::t_6c5aa168acbe2f 70-75,90-111
+causalpy/tests/test_doctest_sampling.py
+  s_538694f14ffe43::t_29885fa974f6eb 428-466
+causalpy/tests/test_integration_its_new_timeseries.py
+  s_538694f14ffe43::t_bd6d9e40e6f664 240
+pyproject.toml
+  s_538694f14ffe43::t_e7c73de885dc23 178,187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "0b0ec09a600c975086324f34a3a957bb08f4481b",
+  "prompts": {},
+  "sessions": {
+    "s_538694f14ffe43": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b02992e4-73ef-4fb2-8f50-969faa960cdc",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}
