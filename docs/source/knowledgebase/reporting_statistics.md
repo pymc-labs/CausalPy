@@ -14,7 +14,7 @@ This page explains the statistical concepts used in CausalPy's reporting layer. 
 CausalPy supports two modeling frameworks, each with its own statistical paradigm:
 
 | Model Framework | Statistical Approach | Statistics Reported |
-|----------------|---------------------|---------------------|
+| --- | --- | --- |
 | PyMC models | Bayesian | Mean, Median, HDI, Tail Probabilities, ROPE |
 | Scikit-learn models | Frequentist (OLS) | Mean, Confidence Intervals, p-values |
 
@@ -27,7 +27,7 @@ The reporting layer automatically detects which type of model you're using and g
 The `effect_summary()` method is available for the following experiment types:
 
 | Experiment Type | PyMC Models | Scikit-learn (OLS) Models |
-|----------------|-------------|---------------------------|
+| --- | --- | --- |
 | Difference-in-Differences | ✅ Full support | ✅ Full support |
 | Regression Discontinuity | ✅ Full support | ✅ Full support |
 | Regression Kink | ✅ Full support | ❌ Not implemented |

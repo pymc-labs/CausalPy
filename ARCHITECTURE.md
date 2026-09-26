@@ -5,7 +5,7 @@ CausalPy implements 10+ quasi-experimental causal inference methods over two cor
 ## Module Map
 
 | Path | Purpose |
-|------|---------|
+| --- | --- |
 | `causalpy/__init__.py` | Public API — re-exports experiment classes, models, pipeline, steps, transforms |
 | `causalpy/experiments/` | One experiment class per file; `base.py` holds `BaseExperiment` |
 | `causalpy/pymc_models.py` | All `PyMCModel` subclasses (Bayesian backend) |
@@ -79,7 +79,7 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 ## Experiment Inventory
 
 | Class | Method | Backends | Notable quirk |
-|-------|--------|----------|---------------|
+| --- | --- | --- | --- |
 | `InterruptedTimeSeries` | ITS | OLS + Bayes | 3-period design via `treatment_end_time` |
 | `PiecewiseITS` | Segmented ITS | OLS + Bayes | Fits full series; `step()`/`ramp()` transforms |
 | `DifferenceInDifferences` | DiD | OLS + Bayes | Effect from interaction coefficient |
@@ -105,7 +105,7 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 ## Key Conventions
 
 | Topic | Detail |
-|-------|--------|
+| --- | --- |
 | **Lazy fitting** | `__init__` never samples. Explicit `fit()` / `sample_prior_predictive()` run the phases; see Experiment Lifecycle. |
 | **HDI_PROB** | Project default is 0.94, not 0.95; CausalPy passes it explicitly rather than inheriting ArviZ defaults. |
 | **Formulas** | Patsy `dmatrices()` for design matrices; `build_design_matrices()` for counterfactual prediction. Bare datetime predictors are encoded as continuous elapsed days from the fitted origin; use `C(date)` for date fixed effects. `PiecewiseITS` uses `step()`/`ramp()` stateful transforms. |
