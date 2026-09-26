@@ -250,6 +250,28 @@ class TestComputeTau:
         )
         np.testing.assert_allclose(tau.to_numpy(), 0.0)
 
+    def test_tau_is_zero_for_constant_gap_and_simplex_weights(self):
+        """A constant gap and simplex time weights cancel in the double difference.
+
+        Zero gaps are not enough: any time weights give tau 0 in that case.
+        Here the gap is 4 everywhere, so tau is 0 only because the weights sum to 1.
+        """
+        n_chains, n_draws, T_pre, T_post = 2, 4, 5, 3
+        gaps = np.full((n_chains, n_draws, T_pre + T_post), 4.0)
+        lam = np.random.default_rng(0).random((n_chains, n_draws, T_pre))
+        lam /= lam.sum(axis=-1, keepdims=True)
+
+        tau = SyntheticDifferenceInDifferences._compute_tau(
+            gaps, lam, T_pre, n_chains, n_draws
+        )
+        np.testing.assert_allclose(tau.to_numpy(), 0.0, atol=1e-12)
+
+        not_simplex = np.full((n_chains, n_draws, T_pre), 0.1)
+        tau_off_simplex = SyntheticDifferenceInDifferences._compute_tau(
+            gaps, not_simplex, T_pre, n_chains, n_draws
+        )
+        np.testing.assert_allclose(tau_off_simplex.to_numpy(), 2.0)
+
 
 class TestBuildReportingObjects:
     """Unit tests for ``_build_reporting_objects``."""
