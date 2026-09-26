@@ -425,3 +425,42 @@ def test_doctest_command_loads_the_plugin(relpath):
         assert f"-p {_PLUGIN_ARG}" in line, (
             f"doctest command in {relpath} does not load the plugin: {line!r}"
         )
+
+
+@pytest.mark.parametrize(
+    ("marker_expr", "expected_selected"),
+    [("not slow", 0), ("slow", 1), ("", 1)],
+)
+def test_slow_doctests_are_marked_slow(tmp_path, marker_expr, expected_selected):
+    """Doctests named in ``SLOW_DOCTESTS`` are selectable with ``-m slow``."""
+    (tmp_path / "probe.py").write_text(_MOCK_PROBE)
+    # Point the allowlist at the probe before collection runs.
+    (tmp_path / "conftest.py").write_text(
+        "from causalpy.tests import doctest_sampling\n"
+        'doctest_sampling.SLOW_DOCTESTS = frozenset({"probe.probe"})\n'
+    )
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "--doctest-modules",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            _PLUGIN_ARG,
+            "--collect-only",
+            "-q",
+            "-m",
+            marker_expr,
+            "probe.py",
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    assert result.stdout.count("probe.py::probe.probe") == expected_selected, (
+        result.stdout + result.stderr
+    )

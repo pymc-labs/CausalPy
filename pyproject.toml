@@ -175,7 +175,7 @@ Discussions = "https://github.com/pymc-labs/CausalPy/discussions"
 addopts = [
     "-vv",
     "-m",
-    "not correctness",
+    "not correctness and not slow",
     "--strict-markers",
     "--strict-config",
     "--cov=causalpy",
@@ -184,7 +184,7 @@ addopts = [
 testpaths = "causalpy/tests"
 markers = [
     "integration: mark as an integration test.",
-    "slow: mark test as slow.",
+    "slow: heavy test that runs in the nightly workflow (.github/workflows/nightly.yml), not on PRs. Run locally with `make test-slow`.",
     "correctness: mark statistical correctness and reproducibility tests.",
 ]
 

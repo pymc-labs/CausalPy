@@ -237,6 +237,7 @@ def test_state_space_predict_and_score():
 
 
 @pytest.mark.integration
+@pytest.mark.slow
 def test_its_with_state_space_covariates():
     """ITS + StateSpaceTimeSeries with exogenous covariates end to end."""
     try:

@@ -8,7 +8,7 @@ PACKAGE_DIR = causalpy
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: init setup setup-conda lint check_lint typecheck check-exports check-architecture test test-correctness test-patch-cov uml gallery html cleandocs doctest run_notebooks_full help
+.PHONY: init setup setup-conda lint check_lint typecheck check-exports check-architecture test test-slow test-correctness test-patch-cov uml gallery html cleandocs doctest run_notebooks_full help
 
 # Patch coverage must be measured against the branch the PR actually targets.
 # While the 1.0 transition branch exists, work branched from it targets it, not
@@ -66,11 +66,14 @@ check-exports: ## Verify public API export and documentation wiring
 check-architecture: ## Verify ARCHITECTURE.md experiment inventory matches code
 	python scripts/check_architecture_inventory.py --check
 
-doctest: ## Run doctests for the causalpy module
-	python -m pytest --doctest-modules -p causalpy.tests.doctest_sampling --ignore=causalpy/tests/ causalpy/
+doctest: ## Run doctests for the causalpy module (slow doctests included)
+	python -m pytest --doctest-modules -p causalpy.tests.doctest_sampling --ignore=causalpy/tests/ causalpy/ -m ""
 
 test: ## Run default tests with pytest
 	python -m pytest
+
+test-slow: ## Run slow tests (non-correctness) that are skipped by default and run nightly in CI
+	python -m pytest -m "slow and not correctness" --no-cov
 
 test-correctness: ## Run statistical correctness tests
 	python -m pytest -o addopts='' -m correctness --no-cov
