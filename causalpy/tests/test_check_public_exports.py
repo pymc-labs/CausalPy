@@ -59,6 +59,69 @@ def test_detects_synthetic_did_in_experiment_exports(script_module) -> None:
     assert "SyntheticDifferenceInDifferences" in exp_imports
 
 
+def test_detects_unbound_top_level_export(tmp_path: Path, script_module) -> None:
+    """Tier 1 ``__all__`` entries must be locally bound."""
+    package_init = tmp_path / "__init__.py"
+    package_init.write_text(
+        'from .public import available\n\n__all__ = ["available", "missing"]\n',
+        encoding="utf-8",
+    )
+
+    errors = script_module.check_top_level_exports(package_init)
+
+    assert errors == [
+        "  causalpy/__init__.py __all__ vs top-level bindings missing: missing"
+    ]
+
+
+def test_requires_top_level_sphinx_members(tmp_path: Path, script_module) -> None:
+    """Tier 1 Sphinx coverage must render the root package members."""
+    api_index = tmp_path / "index.md"
+    api_index.write_text(
+        "```{eval-rst}\n.. automodule:: causalpy\n   :imported-members:\n```\n",
+        encoding="utf-8",
+    )
+
+    errors = script_module.check_top_level_api_docs(api_index)
+
+    assert len(errors) == 1
+    assert ":members:" in errors[0]
+
+
+def test_requires_top_level_sphinx_undocumented_members(
+    tmp_path: Path, script_module
+) -> None:
+    """Tier 1 Sphinx coverage must render exports without docstrings."""
+    api_index = tmp_path / "index.md"
+    api_index.write_text(
+        "```{eval-rst}\n.. automodule:: causalpy\n   :members:\n"
+        "   :imported-members:\n```\n",
+        encoding="utf-8",
+    )
+
+    errors = script_module.check_top_level_api_docs(api_index)
+
+    assert len(errors) == 1
+    assert ":undoc-members:" in errors[0]
+
+
+def test_requires_top_level_sphinx_imported_members(
+    tmp_path: Path, script_module
+) -> None:
+    """Tier 1 Sphinx coverage must render root re-exports."""
+    api_index = tmp_path / "index.md"
+    api_index.write_text(
+        "```{eval-rst}\n.. automodule:: causalpy\n   :members:\n"
+        "   :undoc-members:\n```\n",
+        encoding="utf-8",
+    )
+
+    errors = script_module.check_top_level_api_docs(api_index)
+
+    assert len(errors) == 1
+    assert ":imported-members:" in errors[0]
+
+
 def test_cli_exits_zero_when_exports_are_current() -> None:
     """CLI ``--check`` should succeed on the current repository."""
     result = subprocess.run(

@@ -21,4 +21,5 @@ myst:
 knowledgebase/index
 api/index
 notebooks/index
+release_notes
 :::

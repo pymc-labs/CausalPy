@@ -14,7 +14,7 @@
 """
 This is a simple script that converts the jupyter notebooks into markdown
 for easier (and cleaner) parsing for the codespell check. Whitelisted words
-are maintained within this directory in the `codespeel-whitelist.txt`. For
+are maintained within this directory in the `codespell-whitelist.txt`. For
 more information on this pre-commit hook please visit the github homepage
 for the project: https://github.com/codespell-project/codespell.
 """
