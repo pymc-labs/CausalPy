@@ -284,3 +284,39 @@ class TestDesignInfoAttributes:
     def test_t_and_x_design_info_are_distinct(self, ipw_result):
         """The two attributes must point to different design objects."""
         assert ipw_result._t_design_info is not ipw_result._x_design_info
+
+
+def _ipw_without_fit(X, y, t, labels):
+    """Build an IPW instance whose weighting methods can run without MCMC."""
+    ipw = cp.InversePropensityWeighting.__new__(cp.InversePropensityWeighting)
+    ipw.X = np.asarray(X, dtype=float)
+    ipw.labels = list(labels)
+    ipw.y = np.asarray(y, dtype=float)
+    ipw.t = np.asarray(t, dtype=float).reshape(-1, 1)
+    ipw.outcome_variable = "y"
+    return ipw
+
+
+def test_raw_and_robust_ate_agree_for_binary_treatment():
+    """Raw and robust IPW match for binary treatment, including unequal arms.
+
+    The robust scheme multiplies by the treatment rate and divides by the arm
+    count. Those factors cancel, so the ATE and both arm means match raw IPW.
+    """
+    rng = np.random.default_rng(0)
+    n = 40
+    X = np.column_stack([np.ones(n), rng.normal(size=(n, 2))])
+    y = rng.normal(size=n)
+    labels = ["Intercept", "x1", "x2"]
+    designs = {
+        "equal_arms": np.array([1.0, 0.0] * (n // 2)),
+        "unequal_arms": np.array([1.0] * 10 + [0.0] * 30),
+    }
+    for name, t in designs.items():
+        ps = np.clip(rng.uniform(0.05, 0.95, size=n), 0.05, 0.95)
+        ipw = _ipw_without_fit(X, y, t, labels)
+        raw = ipw._compute_ate_raw(ps)
+        robust = ipw._compute_ate_robust(ps)
+        np.testing.assert_allclose(
+            raw, robust, atol=1e-12, err_msg=f"{name} raw and robust differ"
+        )
