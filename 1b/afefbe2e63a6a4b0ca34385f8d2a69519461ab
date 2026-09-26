@@ -1,0 +1,22 @@
+causalpy/tests/test_doctest_sampling.py
+  s_31b78d1407146d::t_093c39773b3980 440-444,447
+  s_31b78d1407146d::t_667d703756b46c 449-453
+  s_31b78d1407146d::t_66825731572c9b 431-439,445-446,448,454-458
+  s_31b78d1407146d::t_03d3e9d0d1ff99 30
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "1bafefbe2e63a6a4b0ca34385f8d2a69519461ab",
+  "prompts": {},
+  "sessions": {
+    "s_31b78d1407146d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "174057f3-3116-4346-b5b7-52ebd7db7874",
+        "model": "composer-2.5"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
