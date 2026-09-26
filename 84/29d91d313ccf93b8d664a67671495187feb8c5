@@ -1,0 +1,61 @@
+.pre-commit-config.yaml
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 65
+causalpy/skills/README.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 12
+ARCHITECTURE.md
+  s_a6fbad2d8e426c::t_27e4f006f2227b 108
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 8,82
+docs/source/knowledgebase/estimands.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 172
+causalpy/skills/causal-detective/reference/counterfactual_analysis.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 10
+.agents/skills/review-pr/resources/maintenance.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 19
+docs/source/knowledgebase/reporting_statistics.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 17,30
+scripts/migration_baseline/REPORT_TEMPLATE.md
+  s_a6fbad2d8e426c::t_791ffe91f7fe6d 62
+causalpy/skills/running-placebo-analysis/reference/placebo_in_time.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 96
+causalpy/skills/choosing-causalpy-methods/reference/method_capability_matrix.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 6
+causalpy/skills/causal-detective/SKILL.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 30
+causalpy/skills/choosing-causalpy-methods/reference/not_in_causalpy.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 8
+.agents/skills/review-pr/resources/workflow.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 70
+causalpy/skills/choosing-causalpy-methods/reference/experiment_decision_guide.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 8,18,27
+docs/source/notebooks/sensitivity_checks.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 62
+docs/source/knowledgebase/prediction-contract.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 10,24
+causalpy/skills/example-datasets/SKILL.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 21
+CONTRIBUTING.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 69,268,357
+docs/source/knowledgebase/design_notation.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 16-18,24-26,38-39,41,47-48,50,59-60,62,70-71,80-81,83,93-94,96
+docs/source/notebooks/synthetic-control-pymc.ipynb
+  s_a6fbad2d8e426c::t_d29516416a5eab 17-19
+README.md
+  s_a6fbad2d8e426c::t_516e1d63b62ad0 131,141
+  s_a6fbad2d8e426c::t_791ffe91f7fe6d 67
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8429d91d313ccf93b8d664a67671495187feb8c5",
+  "prompts": {},
+  "sessions": {
+    "s_a6fbad2d8e426c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "57d30190-a6c7-4238-84da-f644bc3bee39",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}
