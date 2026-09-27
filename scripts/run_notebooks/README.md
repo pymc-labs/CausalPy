@@ -24,7 +24,7 @@ The notebook runner mirrors the CI setup and expects a full docs/test environmen
    ```
 
    Note: CI's notebook workflow additionally installs the docs-only PyMC-Marketing
-   transition snapshot from `docs/requirements.txt` first via `uv pip install`
+   pin from `docs/requirements.txt` first via `uv pip install`
    (unlocked — its pins conflict with `uv.lock`'s floors). See
    `.github/workflows/test_notebook.yml`.
 

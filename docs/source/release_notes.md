@@ -6,14 +6,14 @@ release lives on the
 [GitHub releases](https://github.com/pymc-labs/CausalPy/releases) page; this
 page is the curated, human-written companion to it.
 
-## 1.0.0 (unreleased) — PyMC 6 migration
+## 1.0.0rc1 (pre-release) — PyMC 6 migration
 
-This is a **major, breaking release**. It migrates CausalPy off the PyMC 5 stack and onto PyMC 6 / PyTensor 3 / ArviZ 1.x; the docs-only PyMC-Marketing transition snapshot is pinned separately in `docs/requirements.txt`. Read the breaking-change section below before upgrading; several public signatures and default behaviours changed.
+This is a **major, breaking release**, published first as the release candidate `1.0.0rc1`. It migrates CausalPy off the PyMC 5 stack and onto PyMC 6 / PyTensor 3 / ArviZ 1.x; the docs-only PyMC-Marketing release is pinned separately in `docs/requirements.txt`. Read the breaking-change section below before upgrading; several public signatures and default behaviours changed.
 
 ### Declared dependency ranges
 
 - **Python `>=3.12`** (raised from 3.11). The dependency stack currently resolves on Python 3.12–3.14 (PyTensor caps Python `<3.15`). CI exercises 3.12 and 3.14.
-- **pymc `>=6.0.1,<7`** (previously the PyMC 5 series). PyMC metadata determines its compatible PyTensor patch range. The pinned docs-only PyMC-Marketing transition snapshot narrows only a combined docs installation to `pymc>=6.0.1,<6.1`; base installs that omit `docs/requirements.txt` can select later compatible PyMC 6 minors.
+- **pymc `>=6.0.1,<7`** (previously the PyMC 5 series). PyMC metadata determines its compatible PyTensor patch range. The docs-only PyMC-Marketing pin narrows only a combined docs installation to `pymc>=6.2,<6.3`; base installs that omit `docs/requirements.txt` can select later compatible PyMC 6 minors.
 - **pytensor `>=3,<4`**. Its selected minor and patch version are paired by PyMC metadata.
 - **arviz `>=1.1,<2`** — the ArviZ 0.x → 1.x jump. `arviz.InferenceData` is no longer available as a usable class — accessing it emits a `MigrationWarning` (`"arviz.InferenceData is no longer available on the arviz package"`) — and ArviZ now uses xarray's `DataTree` for the same role.
 - **pandas `>=2.3,<4`** — pandas 2.3 through the 3.x line are supported and are exercised as separate CI legs.
@@ -202,4 +202,4 @@ See also the [runtime notes in the README](https://github.com/pymc-labs/CausalPy
 
 ### Version
 
-This release is **1.0.0**: the migration is backwards-incompatible, so the major version increments. The version is single-sourced from `causalpy/version.py`, and `pyproject.toml` reads it dynamically, so `causalpy.__version__` and the installed distribution metadata cannot drift apart.
+This release is **1.0.0**, published first as the release candidate **1.0.0rc1**: the migration is backwards-incompatible, so the major version increments. Pip only selects the release candidate when asked, with `pip install --pre causalpy` or `pip install causalpy==1.0.0rc1`; a plain `pip install causalpy` keeps installing the latest 0.x release until 1.0.0 final. The version is single-sourced from `causalpy/version.py`, and `pyproject.toml` reads it dynamically, so `causalpy.__version__` and the installed distribution metadata cannot drift apart.

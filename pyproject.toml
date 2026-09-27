@@ -54,7 +54,7 @@ dependencies = [
     "plotnine>=0.15.7",
     "polars",
     # Keep these public major-version ranges broad. PyMC metadata supplies compatible PyTensor patch-level ranges, so base installs may select newer PyMC/PyTensor minors.
-    # The docs-only PyMC-Marketing transition snapshot in docs/requirements.txt has its own narrower resolver constraints; it does not restrict normal runtime installs.
+    # The docs-only PyMC-Marketing pin in docs/requirements.txt has its own narrower resolver constraints; it does not restrict normal runtime installs.
     # pymc-extras 0.11 is the first release that declares PyMC 6 support and provides the structural state-space API CausalPy imports.
     "pymc>=6.0.1,<7",
     "pytensor>=3,<4",
