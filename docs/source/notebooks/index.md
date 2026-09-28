@@ -182,7 +182,7 @@ A quasi-experimental design that uses time series methods to generate counterfac
 :link-type: doc
 :::
 
-:::{grid-item-card} Excess deaths due to COVID-19
+:::{grid-item-card} Estimating excess deaths during COVID-19 in England and Wales
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/interrupted-time-series-covid.png
 :link: interrupted-time-series-covid
