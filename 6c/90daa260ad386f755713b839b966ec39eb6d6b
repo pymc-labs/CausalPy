@@ -1,0 +1,19 @@
+causalpy/tests/test_pymc_forecast_adapter.py
+  s_e1820245946784::t_648b2ad391b5d2 585,587,593
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "6c90daa260ad386f755713b839b966ec39eb6d6b",
+  "prompts": {},
+  "sessions": {
+    "s_e1820245946784": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a8408771e9ee74bb4",
+        "model": "unknown"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}

@@ -1,0 +1,19 @@
+causalpy/experiments/panel_regression.py
+  s_91e0d02b649bb5::t_c8a34c88b3f31d 151,181
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "e5043ff3eb553e4440d497918131372cd91c11cc",
+  "prompts": {},
+  "sessions": {
+    "s_91e0d02b649bb5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e83d3f82-f700-41ce-adc3-0f35964acd03",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}

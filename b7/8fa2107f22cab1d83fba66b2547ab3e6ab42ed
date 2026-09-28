@@ -1,0 +1,35 @@
+.github/workflows/test_notebook.yml
+  s_e70e8dc2300154::t_c8bbf2ceb9fc4b 75
+scripts/run_notebooks/README.md
+  s_e70e8dc2300154::t_59b58dae1ebc60 27
+pyproject.toml
+  s_e70e8dc2300154::t_5e124b05c7302a 57
+causalpy/version.py
+  s_e70e8dc2300154::t_94c32010ba2050 16
+docs/source/release_notes.md
+  s_e70e8dc2300154::t_703b30af736695 9,11
+  s_e70e8dc2300154::t_df75589e5280db 16
+  s_e70e8dc2300154::t_1466928e8e6b54 205
+AGENTS.md
+  s_e70e8dc2300154::t_f0509c2bd4b3fb 14
+docs/requirements.txt
+  s_e70e8dc2300154::t_a1b88444d1dea4 1-3
+.readthedocs.yaml
+  s_e70e8dc2300154::t_c1ed60bb420519 56
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "b78fa2107f22cab1d83fba66b2547ab3e6ab42ed",
+  "prompts": {},
+  "sessions": {
+    "s_e70e8dc2300154": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "d1e99ed0-07fc-4684-8e80-6baeac2f0039",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

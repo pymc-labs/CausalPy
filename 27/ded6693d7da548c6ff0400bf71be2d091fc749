@@ -1,0 +1,19 @@
+docs/source/notebooks/sensitivity_checks.md
+  s_c5e0308edcbe07::t_ca4e6c3b4b2b53 88-108
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "27ded6693d7da548c6ff0400bf71be2d091fc749",
+  "prompts": {},
+  "sessions": {
+    "s_c5e0308edcbe07": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6fe20fe0-185d-4455-beee-b78ff9524806",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Daimon <daimon@pymc-labs.com>"
+    }
+  }
+}

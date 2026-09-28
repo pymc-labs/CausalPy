@@ -1,0 +1,25 @@
+.github/workflows/ci.yml
+  s_ce68bd1a74ffcf::t_ad45345b4bc558 107-109,290-291
+environment.yml
+  s_ce68bd1a74ffcf::t_672c6700a1b654 41
+pyproject.toml
+  s_ce68bd1a74ffcf::t_76283ee11b00ad 127
+uv.lock
+  s_ce68bd1a74ffcf::t_9f5911e9e581a0 8-11,15-18,20-23,64-69,71,164,547,605,1272-1280,3320,3378,3384-3385,3506,4260-4272,5175-5178,5182-5184,5187-5190,5711-5713
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "8af4701c3650a4b1f086730717482a9fcb979a80",
+  "prompts": {},
+  "sessions": {
+    "s_ce68bd1a74ffcf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f70760c8-ce96-4989-866d-f4c123d8c229",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}

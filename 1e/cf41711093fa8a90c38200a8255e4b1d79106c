@@ -1,0 +1,55 @@
+.github/workflows/ci.yml
+  s_260f5d18bdfb4a::t_dedf5d898afcb1 69,79-89,104,106-110,119-140,155
+.gitignore
+  s_260f5d18bdfb4a::t_6cfedc36e17b05 33-35
+causalpy/date_utils.py
+  s_260f5d18bdfb4a::t_05a3e860b7bf6c 15,22-71
+causalpy/experiments/diff_in_diff.py
+  s_260f5d18bdfb4a::t_5ffb8f9fbed7b7 23,32,125-126,178,195,215
+causalpy/experiments/interrupted_time_series.py
+  s_260f5d18bdfb4a::t_9de8cf6954a759 27-31,33,167-168,269,271-273
+causalpy/experiments/model_adapter.py
+  s_260f5d18bdfb4a::t_8821f104e869d8 434
+causalpy/experiments/panel_regression.py
+  s_260f5d18bdfb4a::t_194f7e74976bc6 202-203,242-247,372-381,392,398-400,404,916,925
+causalpy/experiments/prepostnegd.py
+  s_260f5d18bdfb4a::t_cbee2bd5ffcc27 29
+causalpy/experiments/regression_discontinuity.py
+  s_260f5d18bdfb4a::t_599c73b353f742 24,27,129-130,274-276
+causalpy/experiments/regression_kink.py
+  s_260f5d18bdfb4a::t_b7398df1b57a27 25,27
+causalpy/experiments/staggered_did.py
+  s_260f5d18bdfb4a::t_9de98f26c031e5 243-246,255-259,265-269,307,335-340,589-591,693-695,722,1082,1197-1199,1229-1231
+causalpy/experiments/synthetic_control.py
+  s_260f5d18bdfb4a::t_d1d0010829abe1 26-30,117-118,340
+causalpy/experiments/synthetic_difference_in_differences.py
+  s_260f5d18bdfb4a::t_b5f5f3ed295f82 29-33,138-139,180
+causalpy/formula_utils.py
+  s_260f5d18bdfb4a::t_a66c114fc9fc76 20,22-31,46-131,189,194-195
+causalpy/tests/test_input_validation.py
+  s_260f5d18bdfb4a::t_ba732737e9fb4e 681,692,700,711
+causalpy/tests/test_pandas_compat.py
+  s_260f5d18bdfb4a::t_845836946da9ac 1-545
+causalpy/tests/test_synthetic_data.py
+  s_260f5d18bdfb4a::t_b4bbc948e472ea 56
+environment.yml
+  s_260f5d18bdfb4a::t_486aa4b8cf6f35 26
+pyproject.toml
+  s_260f5d18bdfb4a::t_550a3071017c67 48
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "1ecf41711093fa8a90c38200a8255e4b1d79106c",
+  "prompts": {},
+  "sessions": {
+    "s_260f5d18bdfb4a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e44b919-52df-4f81-8666-60c1204228ce",
+        "model": "claude-opus-5"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}

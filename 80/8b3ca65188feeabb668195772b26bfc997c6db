@@ -1,0 +1,63 @@
+causalpy/skills/causal-detective/SKILL.md
+  s_8f8a81231fe9b9::t_20f442246daae4 30
+causalpy/skills/running-placebo-analysis/reference/placebo_in_time.md
+  s_8f8a81231fe9b9::t_20f442246daae4 94
+causalpy/skills/example-datasets/SKILL.md
+  s_8f8a81231fe9b9::t_20f442246daae4 21
+.agents/skills/review-pr/resources/maintenance.md
+  s_8f8a81231fe9b9::t_20f442246daae4 19
+README.md
+  s_8f8a81231fe9b9::t_20f442246daae4 121,131
+causalpy/skills/choosing-causalpy-methods/reference/experiment_decision_guide.md
+  s_8f8a81231fe9b9::t_20f442246daae4 8,18,27
+docs/source/knowledgebase/prediction-contract.md
+  s_8f8a81231fe9b9::t_20f442246daae4 10,24
+causalpy/skills/causal-detective/reference/counterfactual_analysis.md
+  s_8f8a81231fe9b9::t_20f442246daae4 10
+causalpy/skills/choosing-causalpy-methods/reference/not_in_causalpy.md
+  s_8f8a81231fe9b9::t_20f442246daae4 8
+docs/source/knowledgebase/design_notation.md
+  s_8f8a81231fe9b9::t_0a7277c7e2d936 16,18
+  s_8f8a81231fe9b9::t_cdd0b71b04d8b1 47,50
+  s_8f8a81231fe9b9::t_eea30c6f2da4cb 59,62
+  s_8f8a81231fe9b9::t_20f442246daae4 17,25,39,48,60,71,81,94
+  s_8f8a81231fe9b9::t_fdf46586eed5aa 70
+  s_8f8a81231fe9b9::t_4a9298f16a4a2d 80,83
+  s_8f8a81231fe9b9::t_b48ef6d6742c65 93,96
+  s_8f8a81231fe9b9::t_08cc01b29c868d 24,26
+  s_8f8a81231fe9b9::t_267238a7469699 38,41
+docs/source/notebooks/sensitivity_checks.md
+  s_8f8a81231fe9b9::t_20f442246daae4 62
+docs/source/knowledgebase/reporting_statistics.md
+  s_8f8a81231fe9b9::t_20f442246daae4 17,30
+ARCHITECTURE.md
+  s_8f8a81231fe9b9::t_20f442246daae4 8,54,80
+docs/source/knowledgebase/estimands.md
+  s_8f8a81231fe9b9::t_20f442246daae4 172
+causalpy/skills/README.md
+  s_8f8a81231fe9b9::t_20f442246daae4 12
+CONTRIBUTING.md
+  s_8f8a81231fe9b9::t_20f442246daae4 345
+  s_8f8a81231fe9b9::t_c44367b8766f66 69
+  s_8f8a81231fe9b9::t_5a9330eef57e7d 264
+.agents/skills/review-pr/resources/workflow.md
+  s_8f8a81231fe9b9::t_20f442246daae4 70
+causalpy/skills/choosing-causalpy-methods/reference/method_capability_matrix.md
+  s_8f8a81231fe9b9::t_20f442246daae4 6
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "808b3ca65188feeabb668195772b26bfc997c6db",
+  "prompts": {},
+  "sessions": {
+    "s_8f8a81231fe9b9": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0e2a3baa-baa6-48c1-91fc-64e56922d50c",
+        "model": "grok-4.7"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

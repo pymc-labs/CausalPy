@@ -1,0 +1,25 @@
+causalpy/date_utils.py
+  s_c5e0308edcbe07::t_dbb2dc4838b492 15,22-71
+causalpy/experiments/interrupted_time_series.py
+  s_c5e0308edcbe07::t_b1e9f608ed561a 28-32,270,272-274
+causalpy/experiments/synthetic_control.py
+  s_c5e0308edcbe07::t_cf2862bc1555b7 26-30,340
+causalpy/experiments/synthetic_difference_in_differences.py
+  s_c5e0308edcbe07::t_0a3d80d2c5c1db 29-33,180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "7d101c2e40139618f59c8c21e9c999092dda2e83",
+  "prompts": {},
+  "sessions": {
+    "s_c5e0308edcbe07": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6fe20fe0-185d-4455-beee-b78ff9524806",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Daimon <daimon@pymc-labs.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+.github/workflows/test_notebook.yml
+  s_eb4791e8775def::t_ec336b1fc9b5cf 36
+scripts/run_notebooks/injected.py
+  s_eb4791e8775def::t_52ce41830e4ea4 34,47,49,51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "1c9f1f5d8ce9385680eedc461090959fc9c0807d",
+  "prompts": {},
+  "sessions": {
+    "s_eb4791e8775def": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_062b5dec3ffeVrXLSQQpZzpqxL",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}

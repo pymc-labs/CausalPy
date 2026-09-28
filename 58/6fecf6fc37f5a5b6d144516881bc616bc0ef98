@@ -1,0 +1,14 @@
+docs/source/knowledgebase/reporting_statistics.md
+  h_d36ca8649a0e95 122-131
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "586fecf6fc37f5a5b6d144516881bc616bc0ef98",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}

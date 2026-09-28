@@ -1,0 +1,31 @@
+.agents/skills/pr-digest/scripts/build_digest.py
+  s_bc3fa07aee304d::t_1b5404e865ee7a 1-208
+.agents/skills/_shared/pr_triage/README.md
+  s_bc3fa07aee304d::t_607e5ce1d19d39 1-24
+.agents/skills/_shared/pr_triage/labels.py
+  s_bc3fa07aee304d::t_193952ed03a5c5 1-318
+.agents/skills/pr-digest/SKILL.md
+  s_bc3fa07aee304d::t_6cd3fc2b3dd578 1-64
+.agents/skills/pr-digest/resources/format.md
+  s_bc3fa07aee304d::t_976ec5da855100 1-53
+.agents/skills/pr-status-labeller/SKILL.md
+  s_bc3fa07aee304d::t_d96df7d24219a8 1-51
+.agents/skills/pr-status-labeller/scripts/reconcile_labels.py
+  s_bc3fa07aee304d::t_83f08279f801da 1-146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "28021f01fc0d90b76a058b864a3b8517987365c4",
+  "prompts": {},
+  "sessions": {
+    "s_bc3fa07aee304d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f5fd9cb1-4285-49d8-b092-823bab99f027",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "daimon <noreply@pymc-labs.com>"
+    }
+  }
+}

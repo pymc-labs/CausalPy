@@ -1,0 +1,80 @@
+pyproject.toml
+  s_70f459cca9fb15::t_3f5988ad635d4e 215-217
+  s_70f459cca9fb15::t_dbe938cad961a8 92-93
+  s_70f459cca9fb15::t_a2cea4c140d4f2 140-141,145-164
+.python-version
+  s_70f459cca9fb15::t_bd59bb47acfb96 1
+scripts/migration_baseline/README.md
+  s_70f459cca9fb15::t_6440b759ecabda 3-4
+.pre-commit-config.yaml
+  s_70f459cca9fb15::t_e90e3d43ad575c 72-75,103-110
+.github/dependabot.yml
+  s_70f459cca9fb15::t_c8f21d2b25b822 17-30
+causalpy/pymc_models.py
+  s_70f459cca9fb15::t_7a1dfcc49c5a95 2970-2971,2988-2989
+CONTRIBUTING.md
+  s_70f459cca9fb15::t_20fc824792a563 161-208
+  s_70f459cca9fb15::t_411827f4ebd890 230-232
+  s_70f459cca9fb15::t_f33170fcde44ae 295
+  s_70f459cca9fb15::t_ec3efb0e74d2d9 29,31,35-36,39,42-43,46,49
+  s_70f459cca9fb15::t_44122fc09fe771 12
+  s_70f459cca9fb15::t_95021938d9f4b5 224,240,246,270,278,302,308,314,324,330-331,353
+  s_70f459cca9fb15::t_d94c8c0f17f894 109,112-113,116,118,121-123,128,131,134
+  s_70f459cca9fb15::t_4be8f8871607a3 135
+.agents/skills/python-environment/SKILL.md
+  s_70f459cca9fb15::t_f38046941a6f0a 3,8,12,21-23,27-59,61-65,82,90,92,95,98,108,114,116,127
+scripts/run_notebooks/README.md
+  s_70f459cca9fb15::t_6cb03c93a85891 20-32,37
+.agents/skills/pr-to-green/SKILL.md
+  s_70f459cca9fb15::t_2f4a2502102843 21-23
+AGENTS.md
+  s_70f459cca9fb15::t_88cc1b4a4925e9 52,85,91
+  s_70f459cca9fb15::t_cdf9d9d813f1ed 7,9,12,14-15
+.github/workflows/uml.yml
+  s_70f459cca9fb15::t_417977e12ce68c 37
+  s_70f459cca9fb15::t_c144dbb138e702 38-39
+  s_89ef246a078231::t_8eedd71c1ddc61 25-26,28,32,43
+Makefile
+  s_70f459cca9fb15::t_0da208eea47215 11
+  s_70f459cca9fb15::t_07d2450591466a 41-46,50
+.github/workflows/test_notebook.yml
+  s_70f459cca9fb15::t_4477b44a263e3c 65-66,68,74-80,83-84,103
+  s_70f459cca9fb15::t_606c138007c5a4 82
+.github/workflows/ci.yml
+  s_70f459cca9fb15::t_3a545df686c527 141,149,170-176,189,192,224-225,227,232,250,258,260,266-267,274,279,286,289-290
+  s_70f459cca9fb15::t_33a4aac8c05f9b 74-93
+  s_70f459cca9fb15::t_cb7f37b22edd70 107-109,113,116,119,125-126,128-137
+  s_70f459cca9fb15::t_6ae24f1a811a1a 99
+.agents/skills/review-pr/SKILL.md
+  s_70f459cca9fb15::t_438af7339bbd91 80
+.cursor/agents/ci-failure-investigator.md
+  s_70f459cca9fb15::t_87ae1809779abf 29
+scripts/generate_plots.py
+  s_70f459cca9fb15::t_7fc0d6d6f774c8 14,16
+uv.lock
+  s_70f459cca9fb15::t_1b3c1c6170e597 1-5805
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "44b46c5e90918bc3b2def6e05b4af2bff8de5281",
+  "prompts": {},
+  "sessions": {
+    "s_70f459cca9fb15": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b324016-5037-4f62-93aa-24cc7dd27c2e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "root <root@e2b.local>"
+    },
+    "s_89ef246a078231": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a176dcdcfd85525ab",
+        "model": "unknown"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}

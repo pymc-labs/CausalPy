@@ -1,0 +1,25 @@
+causalpy/tests/test_migration_baseline_harness.py
+  s_260f5d18bdfb4a::t_75e72c245f7cf1 1-1193
+scripts/migration_baseline/README.md
+  s_260f5d18bdfb4a::t_952b755e557061 1-121
+scripts/migration_baseline/REPORT_TEMPLATE.md
+  s_260f5d18bdfb4a::t_bd33ecf1dd7c55 1-74
+scripts/migration_baseline/harness.py
+  s_260f5d18bdfb4a::t_565fc9748e0d1b 1-2731
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2cda933a8b16565448a16db7c7c6829325c12393",
+  "prompts": {},
+  "sessions": {
+    "s_260f5d18bdfb4a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7e44b919-52df-4f81-8666-60c1204228ce",
+        "model": "claude-opus-5"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}

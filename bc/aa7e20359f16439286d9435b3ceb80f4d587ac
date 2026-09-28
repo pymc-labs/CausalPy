@@ -1,0 +1,31 @@
+scripts/run_notebooks/README.md
+  s_1b92c32de2161b::t_bceab453eab29f 3,9-12,63-73,76-77,80,85
+scripts/run_notebooks/runner.py
+  s_1b92c32de2161b::t_1dee55edfac3a9 1,27-32,52-56,58,130,158-160,166,176-179,181,183-247,256-258,261,277-290,298-304,307-308,310,315-317,320,322-328,331,336-340,343-344
+scripts/run_notebooks/skip_notebooks.yml
+  s_508487dc244b60::t_b883b6f6e4e0a4 6-7,12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "bcaa7e20359f16439286d9435b3ceb80f4d587ac",
+  "prompts": {},
+  "sessions": {
+    "s_1b92c32de2161b": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_062db4284ffe9fvcXX2KLIPJvE",
+        "model": "kimi-k2.7-code"
+      },
+      "human_author": "Carlos Trujillo <carlangastr@gmail.com>"
+    },
+    "s_508487dc244b60": {
+      "agent_id": {
+        "tool": "opencode",
+        "id": "ses_062db42bfffeT2GH8IqpFO4D4X",
+        "model": "qwen3.7-max"
+      },
+      "human_author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}
