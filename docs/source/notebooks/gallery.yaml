@@ -72,7 +72,7 @@ groups:
             notebook: interrupted-time-series-pymc
           - title: Interrupted Time Series for fixed-period interventions
             notebook: interrupted-time-series-post-intervention-analysis
-          - title: Excess deaths due to COVID-19
+          - title: Monthly deaths in England and Wales after 2020
             notebook: interrupted-time-series-covid
           - title: Lift Testing with Interrupted Time Series
             notebook: interrupted-time-series-lift-test
