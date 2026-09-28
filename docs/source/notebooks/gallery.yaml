@@ -48,6 +48,8 @@ groups:
             notebook: geolift-single-cell
           - title: Multi-cell geolift analysis
             notebook: multi-cell-geolift
+          - title: Up, down, and control geo lift with PyMC
+            notebook: up-down-control-geolift-pymc
       - title: Difference in Differences
         intro: |
           Analysis where the treatment effect is estimated as a difference between treatment conditions in the differences between pre-treatment to post treatment observations.

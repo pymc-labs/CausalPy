@@ -44,6 +44,7 @@ from .experiments.synthetic_control import SyntheticControl
 from .experiments.synthetic_difference_in_differences import (
     SyntheticDifferenceInDifferences,
 )
+from .experiments.up_down_geolift import UpDownGeoLift
 from .pipeline import Pipeline, PipelineContext, PipelineResult, Step
 from .reporting import EffectSummary
 from .steps import (
@@ -92,5 +93,6 @@ __all__ = [
     "Step",
     "SyntheticControl",
     "SyntheticDifferenceInDifferences",
+    "UpDownGeoLift",
     "variable_selection_priors",
 ]

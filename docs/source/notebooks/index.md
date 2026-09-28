@@ -109,6 +109,13 @@ Geolift (geographical lift testing) is a method for measuring the causal impact 
 :link: multi-cell-geolift
 :link-type: doc
 :::
+
+:::{grid-item-card} Up, down, and control geo lift with PyMC
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/up-down-control-geolift-pymc.png
+:link: up-down-control-geolift-pymc
+:link-type: doc
+:::
 ::::
 
 ## Difference in Differences
@@ -425,6 +432,7 @@ interrupted-time-series-causalpy-vs-causalimpact.ipynb
 
 geolift-single-cell.ipynb
 multi-cell-geolift.ipynb
+up-down-control-geolift-pymc.ipynb
 :::
 
 :::{toctree}
