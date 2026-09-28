@@ -4,7 +4,7 @@ This script runs Jupyter notebooks from the gallery (`docs/source/notebooks/`) a
 
 ## How It Works
 
-1. **Mocks `pm.sample()`** — Replaces MCMC sampling with prior predictive (1 chain × 100 draws) for speed
+1. **Mocks `pm.sample()` by default** — Replaces MCMC sampling with prior predictive for speed. A notebook with `metadata.causalpy.requires_real_sampling: true` uses real posterior sampling because its results depend on fitted estimates.
 2. **Uses Papermill** — Executes notebooks programmatically
 3. **Runs serially** — Executes one notebook at a time to control memory use
 4. **Clears saved outputs** — Avoids widget state issues during execution
@@ -57,6 +57,7 @@ The notebook runner mirrors the CI setup and expects a full docs/test environmen
   provides that kernel (e.g., from `ipykernel` installed via the docs extras).
 
 - The CI workflow uses Python 3.12 and installs the same extras.
+- The runner discards outputs in both default modes. A notebook that requests real sampling through metadata still saves outputs only when run explicitly with `--full`.
 
 ## Usage
 
