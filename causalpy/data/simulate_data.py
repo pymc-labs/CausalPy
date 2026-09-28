@@ -61,12 +61,18 @@ def generate_up_down_geolift_data(
 
     The tested channel is ``search``. Its realized change starts at the common
     intervention date; ``display`` is unchanged. Treated business-as-usual
-    revenue is a convex combination of control revenue. Effects are differences
-    in geo-specific saturating response to realized and baseline search spend,
-    with no carryover. Set ``effect_scale=0`` for a no-effect case.
+    revenue is a convex combination of control revenue plus idiosyncratic noise.
+    Control geos span smaller and larger sizes than treated geos, producing
+    correspondingly lower and higher baseline spend and revenue. Effects are
+    differences in geo-specific saturating response to realized and baseline
+    search spend, with no carryover. Set ``effect_scale=0`` for a no-effect case.
     """
     if min(n_pre, n_post, n_control, n_up, n_down) < 1:
         raise ValueError("All geo and period counts must be positive.")
+    if n_control < 2:
+        raise ValueError(
+            "At least two control geos are needed to bracket treated geos."
+        )
     if effect_scale < 0 or not np.isfinite(effect_scale):
         raise ValueError("effect_scale must be finite and nonnegative.")
     if not np.isfinite(delivery_fraction) or not 0 <= delivery_fraction <= 1:
@@ -86,27 +92,42 @@ def generate_up_down_geolift_data(
     post = np.arange(len(time)) >= n_pre
 
     common = 110 + 0.18 * np.arange(len(time)) + 4 * np.sin(np.arange(len(time)) / 5)
+    # Geo size creates distinct spend and revenue levels. Controls span the
+    # treated sizes so a convex donor combination can interpolate each geo.
+    control_sizes = np.linspace(0.7, 1.3, n_control)
+    treated_sizes = np.linspace(
+        control_sizes[0] + 0.2 * np.ptp(control_sizes),
+        control_sizes[-1] - 0.2 * np.ptp(control_sizes),
+        n_up + n_down,
+    )
+    geo_sizes = dict(zip(arms["control"], control_sizes, strict=True))
     controls = pd.DataFrame(
         {
-            geo: common + rng.normal(0, 3) + rng.normal(0, 1.2, len(time))
-            for geo in arms["control"]
+            geo: size * common + rng.normal(0, 0.8, len(time))
+            for geo, size in geo_sizes.items()
         },
         index=time,
     )
     no_intervention = controls.copy()
-    for geo in arms["up"] + arms["down"]:
-        weights = rng.dirichlet(np.ones(n_control))
-        no_intervention[geo] = controls.to_numpy() @ weights + rng.normal(
-            0, 0.6, len(time)
+    for geo, size in zip(arms["up"] + arms["down"], treated_sizes, strict=True):
+        geo_sizes[geo] = size
+        upper = min(np.searchsorted(control_sizes, size, side="right"), n_control - 1)
+        lower = upper - 1
+        upper_weight = (size - control_sizes[lower]) / (
+            control_sizes[upper] - control_sizes[lower]
         )
+        donor_mean = (1 - upper_weight) * controls.iloc[
+            :, lower
+        ].to_numpy() + upper_weight * controls.iloc[:, upper].to_numpy()
+        no_intervention[geo] = donor_mean + rng.normal(0, 0.4, len(time))
 
     spend_columns = pd.MultiIndex.from_product(
         [geos, ["search", "display"]], names=["geo", "channel"]
     )
     spend_baseline = pd.DataFrame(index=time, columns=spend_columns, dtype=float)
     for geo in geos:
-        spend_baseline[(geo, "search")] = rng.uniform(30, 50)
-        spend_baseline[(geo, "display")] = rng.uniform(15, 25)
+        spend_baseline[(geo, "search")] = 40 * geo_sizes[geo]
+        spend_baseline[(geo, "display")] = 20 * geo_sizes[geo]
 
     spend_planned = spend_baseline.copy()
     spend_realized = spend_baseline.copy()

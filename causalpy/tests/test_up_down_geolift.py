@@ -46,6 +46,17 @@ def test_up_down_simulator_reproducible_and_exposes_potential_outcomes():
     assert (post[down] < 0).all().all()
     assert (post[controls] == 0).all().all()
     assert (first.effects.loc[: first.treatment_time].iloc[:-1] == 0).all().all()
+    baseline_search = first.spend_baseline.xs("search", axis=1, level="channel").iloc[0]
+    treated = up + down
+    assert baseline_search[controls].min() < baseline_search[treated].min()
+    assert baseline_search[controls].max() > baseline_search[treated].max()
+    assert baseline_search[treated].nunique() == len(treated)
+    pre_revenue = first.no_intervention.loc[
+        first.no_intervention.index < first.treatment_time
+    ]
+    assert (pre_revenue[treated].min(axis=1) > pre_revenue[controls].min(axis=1)).all()
+    assert (pre_revenue[treated].max(axis=1) < pre_revenue[controls].max(axis=1)).all()
+    assert pre_revenue[controls].mean().max() - pre_revenue[controls].mean().min() > 50
     assert set(first.spend_baseline.columns.get_level_values("channel")) == {
         "search",
         "display",
@@ -80,6 +91,7 @@ def test_up_down_simulator_no_effect_and_no_delivery():
     ("settings", "message"),
     [
         ({"n_pre": 0}, "counts must be positive"),
+        ({"n_control": 1}, "At least two control geos"),
         ({"effect_scale": -1}, "effect_scale"),
         ({"delivery_fraction": 1.2}, "delivery_fraction"),
     ],
@@ -90,7 +102,7 @@ def test_up_down_simulator_rejects_invalid_design(settings, message):
 
 
 @pytest.mark.integration
-def test_up_down_no_effect_recovers_near_zero():
+def test_up_down_no_effect_recovers_near_zero(real_pymc_sampling):
     simulated = generate_up_down_geolift_data(
         seed=615,
         n_pre=32,
@@ -150,7 +162,7 @@ def test_up_down_revenue_panel_requires_complete_unique_periods():
 
 
 @pytest.fixture(scope="module")
-def fitted_up_down():
+def fitted_up_down(real_pymc_sampling):
     simulated = generate_up_down_geolift_data(
         seed=415, n_pre=32, n_post=8, n_control=5, n_up=2, n_down=2
     )
