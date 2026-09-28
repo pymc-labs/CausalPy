@@ -14,13 +14,16 @@
 """Arm-aware geo lift analysis built on synthetic control."""
 
 from collections.abc import Mapping, Sequence
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
 import xarray as xr
+from matplotlib import pyplot as plt
+from matplotlib.ticker import StrMethodFormatter
 from sklearn.base import RegressorMixin
 
+from causalpy.constants import HDI_PROB
 from causalpy.pymc_models import PyMCModel, SoftmaxWeightedSumFitter
 
 from .synthetic_control import SyntheticControl
@@ -53,6 +56,12 @@ class UpDownGeoLift(SyntheticControl):
         Minimum pre-period correlation before warning about a donor.
     auto_scale_sigma : bool, default True
         Whether to scale the stock observation-noise prior by pre-period data.
+
+    Notes
+    -----
+    The inherited three-panel :meth:`plot` labels revenue and impact axes from
+    ``data.attrs["unit"]`` when present. A per-period unit such as ``USD/week``
+    becomes ``USD`` on the cumulative-impact axis.
     """
 
     supports_ols = False
@@ -100,6 +109,52 @@ class UpDownGeoLift(SyntheticControl):
             min_donor_correlation=min_donor_correlation,
             auto_scale_sigma=auto_scale_sigma,
         )
+
+    def _plot(
+        self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+        round_to: int | None = None,
+        treated_unit: str | None = None,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
+        plot_predictors: bool = False,
+        figsize: tuple[float, float] = (7, 8),
+        **kwargs: Any,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Label the inherited synthetic-control diagnostics in revenue units."""
+        fig, axes = super()._plot(
+            group=group,
+            round_to=round_to,
+            treated_unit=treated_unit,
+            ci_prob=ci_prob,
+            kind=kind,
+            ci_kind=ci_kind,
+            num_samples=num_samples,
+            plot_predictors=plot_predictors,
+            figsize=figsize,
+            **kwargs,
+        )
+        period_unit = f" ({self.outcome_unit})" if self.outcome_unit else ""
+        axes[0].set_ylabel(f"Revenue{period_unit}")
+        if group == "posterior":
+            cumulative_unit = (
+                self.outcome_unit.rsplit("/", 1)[0] if self.outcome_unit else None
+            )
+            axes[1].set_ylabel(f"Impact{period_unit}")
+            axes[2].set_ylabel(
+                f"Cumulative impact ({cumulative_unit})"
+                if cumulative_unit
+                else "Cumulative impact"
+            )
+        if self.outcome_unit and self.outcome_unit.startswith("USD"):
+            for axis in axes:
+                axis.yaxis.set_major_formatter(StrMethodFormatter("${x:,.1f}"))
+        geo = self.treated_units[0] if treated_unit is None else treated_unit
+        axes[0].set_title(f"{geo}: {axes[0].get_title()}")
+        return fig, axes
 
     @property
     def impact_draws(self) -> xr.DataArray:

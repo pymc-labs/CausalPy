@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+from matplotlib import pyplot as plt
 
 import causalpy as cp
 from causalpy.data.simulate_data import generate_up_down_geolift_data
@@ -202,6 +203,20 @@ def test_up_down_recovers_signed_geo_effects_and_joint_arm_draws(fitted_up_down)
     assert len(table) == 6
     assert table.loc[(table.level == "arm") & (table.arm == "up"), "mean"].item() > 0
     assert table.loc[(table.level == "arm") & (table.arm == "down"), "mean"].item() < 0
+
+
+@pytest.mark.integration
+def test_up_down_plot_labels_geo_and_revenue_units(fitted_up_down):
+    simulated, result = fitted_up_down
+    for arm in ("up", "down"):
+        geo = simulated.arms[arm][0]
+        fig, axes = result.plot(treated_unit=geo, show=False)
+        assert len(axes) == 3
+        assert axes[0].get_title().startswith(f"{geo}:")
+        assert axes[0].get_ylabel() == "Revenue (USD/week)"
+        assert axes[1].get_ylabel() == "Impact (USD/week)"
+        assert axes[2].get_ylabel() == "Cumulative impact (USD)"
+        plt.close(fig)
 
 
 @pytest.mark.integration
