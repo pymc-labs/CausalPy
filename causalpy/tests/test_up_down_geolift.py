@@ -306,3 +306,59 @@ def test_up_down_mmm_export_matches_window_and_validates_spend(fitted_up_down):
             start=start,
             end=end,
         )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("frame_name", ["spend_baseline", "spend_realized"])
+def test_up_down_mmm_export_rejects_duplicate_spend_columns(fitted_up_down, frame_name):
+    simulated, result = fitted_up_down
+    baseline = simulated.spend_baseline.copy()
+    realized = simulated.spend_realized.copy()
+    frame = baseline if frame_name == "spend_baseline" else realized
+    geo = simulated.arms["up"][0]
+    frame.insert(
+        len(frame.columns),
+        (geo, "search"),
+        frame[(geo, "search")],
+        allow_duplicates=True,
+    )
+    with pytest.raises(ValueError, match="columns must be unique"):
+        result.to_mmm_lift(
+            spend_baseline=baseline,
+            spend_realized=realized,
+            channel="search",
+            spend_unit="USD/week",
+            outcome_unit="USD/week",
+        )
+
+
+@pytest.mark.integration
+def test_up_down_mmm_export_rejects_zero_spend_change(fitted_up_down):
+    simulated, result = fitted_up_down
+    realized = simulated.spend_realized.copy()
+    geo = simulated.arms["up"][0]
+    realized[(geo, "search")] = simulated.spend_baseline[(geo, "search")]
+    with pytest.raises(ValueError, match="spend change must be nonzero"):
+        result.to_mmm_lift(
+            spend_baseline=simulated.spend_baseline,
+            spend_realized=realized,
+            channel="search",
+            spend_unit="USD/week",
+            outcome_unit="USD/week",
+        )
+
+
+@pytest.mark.integration
+def test_up_down_mmm_export_rejects_zero_lift(fitted_up_down, monkeypatch):
+    simulated, result = fitted_up_down
+    zero_draws = result.aggregate_draws()
+    zero_draws["geo"] = xr.zeros_like(zero_draws["geo"])
+    monkeypatch.setattr(result, "aggregate_draws", lambda **_: zero_draws)
+    with pytest.raises(ValueError, match="Estimated lift must be nonzero"):
+        result.to_mmm_lift(
+            spend_baseline=simulated.spend_baseline,
+            spend_realized=simulated.spend_realized,
+            channel="search",
+            spend_unit="USD/week",
+            outcome_unit="USD/week",
+        )

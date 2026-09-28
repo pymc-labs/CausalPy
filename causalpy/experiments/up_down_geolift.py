@@ -301,6 +301,8 @@ class UpDownGeoLift(SyntheticControl):
                 raise ValueError(
                     f"{label} must have (geo, channel) MultiIndex columns."
                 )
+            if not frame.columns.is_unique:
+                raise ValueError(f"{label} geo/channel columns must be unique.")
             if not frame.index.is_unique or not selected.isin(frame.index).all():
                 raise ValueError(f"{label} does not align with the outcome window.")
             missing = [
@@ -343,9 +345,19 @@ class UpDownGeoLift(SyntheticControl):
                 raise ValueError(
                     f"Delivered spend direction conflicts with '{arm}' assignment for '{geo}'."
                 )
+            if change.mean() == 0:
+                raise ValueError(
+                    f"Delivered spend change must be nonzero for geo '{geo}' "
+                    "in the scalar MMM lift likelihood."
+                )
             samples = geo_draws.sel(treated_units=geo).to_numpy().ravel()
             delta_y = float(samples.mean())
             sigma = float(samples.std())
+            if delta_y == 0:
+                raise ValueError(
+                    f"Estimated lift must be nonzero for geo '{geo}' "
+                    "in the scalar MMM lift likelihood."
+                )
             if change.mean() * delta_y < 0:
                 raise ValueError(
                     f"Estimated lift for geo '{geo}' has the opposite sign from its "
