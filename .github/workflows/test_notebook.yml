@@ -72,7 +72,7 @@ jobs:
 
       - name: Install dependencies
         # This lane intentionally does NOT use `uv sync --locked`: the docs-only
-        # PyMC-Marketing transition snapshot pinned in docs/requirements.txt
+        # PyMC-Marketing release pinned in docs/requirements.txt
         # (pymc-extras<0.15, pymc<6.3, pytensor<3.3) conflicts with the floors
         # uv.lock resolves for the rest of the project. `uv venv` + `uv pip
         # install` mirrors today's unlocked pip install sequence instead:
