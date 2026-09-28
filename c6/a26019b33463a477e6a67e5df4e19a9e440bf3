@@ -1,0 +1,23 @@
+pyproject.toml
+  s_5a4a02c6203906::t_6d974366aa1f26 172
+.github/release-drafts/1.0.0rc1.md
+  s_5a4a02c6203906::t_6d974366aa1f26 1-201
+README.md
+  s_5a4a02c6203906::t_6d974366aa1f26 71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "c6a26019b33463a477e6a67e5df4e19a9e440bf3",
+  "prompts": {},
+  "sessions": {
+    "s_5a4a02c6203906": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6bc55cf-4f25-4c06-9812-76c4f794fde5",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}
