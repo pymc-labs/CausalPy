@@ -68,7 +68,7 @@ As of the PyMC 6 release, CausalPy runs on PyMC 6 / PyTensor 3 / ArviZ 1.x and r
 - **Native crashes can replace Python tracebacks.** When a numba-compiled sampler worker dies, the failure may surface as a native crash or a stalled worker rather than a Python traceback — so a wedged worker can present as a silent hang rather than an exception.
 - **Installing `nutpie` changes sampling defaults.** If a recent enough `nutpie` is installed, PyMC uses it as the default NUTS sampler unless you pass an explicit `nuts_sampler=`, and nutpie applies its own number of tuning steps rather than PyMC's built-in default of 1000. Merely installing nutpie is therefore enough to change how `pm.sample()` behaves; pass `nuts_sampler="pymc"` if you need the built-in sampler.
 
-For the full list of breaking changes in this release, see the [release notes](https://causalpy.readthedocs.io/en/latest/release_notes.html).
+For the full list of breaking changes in this release, see the [GitHub release notes](https://github.com/pymc-labs/CausalPy/releases).
 
 ## AI Agent Skills
 
