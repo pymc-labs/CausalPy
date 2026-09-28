@@ -387,6 +387,42 @@ def test_mock_execution_discards_output_and_cleans_temp(
     assert not temp_paths[0].exists()
 
 
+def test_real_sampling_metadata_avoids_mock_and_discards_output(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    notebook = tmp_path / "notebook.ipynb"
+    notebook.write_text(
+        '{"cells": [{"cell_type": "code", "id": "test-cell", '
+        '"metadata": {}, "execution_count": 1, "outputs": '
+        '[{"output_type": "stream", "name": "stdout", "text": "old"}], '
+        '"source": "x = 1"}], "metadata": {"causalpy": '
+        '{"requires_real_sampling": true}}, "nbformat": 4, "nbformat_minor": 5}'
+    )
+    temp_paths: list[Path] = []
+
+    def execute_notebook(**kwargs: object) -> None:
+        temp_path = Path(str(kwargs["input_path"]))
+        temp_paths.append(temp_path)
+        temporary = runner.load_notebook_node(str(temp_path))
+        assert len(temporary.cells) == 1
+        assert temporary.cells[0].source == "x = 1"
+        assert temporary.cells[0].outputs == []
+        assert temporary.cells[0].execution_count is None
+        assert kwargs["output_path"] is None
+
+    monkeypatch.setattr(runner.papermill, "execute_notebook", execute_notebook)
+    monkeypatch.setattr(
+        runner,
+        "inject_mock_code",
+        lambda _: pytest.fail("real-sampling notebook received mock code"),
+    )
+
+    runner.run_notebook(notebook)
+
+    assert len(temp_paths) == 1
+    assert not temp_paths[0].exists()
+
+
 def test_kernel_path_prefers_active_environment(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

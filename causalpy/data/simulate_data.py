@@ -15,6 +15,8 @@
 Functions that generate data sets used in examples
 """
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 from scipy.stats import gamma
@@ -22,6 +24,155 @@ from statsmodels.nonparametric.smoothers_lowess import lowess
 
 default_lowess_kwargs: dict[str, float | int] = {"frac": 0.2, "it": 0}
 RANDOM_SEED: int = 8927
+
+
+@dataclass(frozen=True)
+class UpDownGeoLiftSimulation:
+    """A reproducible three-arm geo experiment with known potential outcomes.
+
+    Spend frames have a common time index and ``(geo, channel)`` columns. Revenue
+    and effect frames have one column per geo. Spend and revenue are simulated
+    USD per week, recorded in each frame's ``attrs['unit']``.
+    """
+
+    revenue: pd.DataFrame
+    no_intervention: pd.DataFrame
+    effects: pd.DataFrame
+    spend_baseline: pd.DataFrame
+    spend_planned: pd.DataFrame
+    spend_realized: pd.DataFrame
+    arms: dict[str, list[str]]
+    treatment_time: pd.Timestamp
+    tested_channel: str
+
+
+def generate_up_down_geolift_data(
+    seed: int = RANDOM_SEED,
+    *,
+    n_pre: int = 40,
+    n_post: int = 12,
+    n_control: int = 6,
+    n_up: int = 2,
+    n_down: int = 2,
+    effect_scale: float = 150.0,
+    delivery_fraction: float = 0.9,
+) -> UpDownGeoLiftSimulation:
+    """Simulate weekly revenue and two-channel spend for an up/down/control test.
+
+    The tested channel is ``search``. Its realized change starts at the common
+    intervention date; ``display`` is unchanged. Treated business-as-usual
+    revenue is a convex combination of control revenue plus idiosyncratic noise.
+    Control geos span smaller and larger sizes than treated geos, producing
+    correspondingly lower and higher baseline spend and revenue. Effects are
+    differences in geo-specific saturating response to realized and baseline
+    search spend, with no carryover. Set ``effect_scale=0`` for a no-effect case.
+    """
+    if min(n_pre, n_post, n_control, n_up, n_down) < 1:
+        raise ValueError("All geo and period counts must be positive.")
+    if n_control < 2:
+        raise ValueError(
+            "At least two control geos are needed to bracket treated geos."
+        )
+    if effect_scale < 0 or not np.isfinite(effect_scale):
+        raise ValueError("effect_scale must be finite and nonnegative.")
+    if not np.isfinite(delivery_fraction) or not 0 <= delivery_fraction <= 1:
+        raise ValueError("delivery_fraction must lie between 0 and 1.")
+
+    rng = np.random.default_rng(seed)
+    time = pd.date_range(
+        "2024-01-07", periods=n_pre + n_post, freq="W-SUN", name="time"
+    )
+    treatment_time = time[n_pre]
+    arms = {
+        "up": [f"up_{i + 1}" for i in range(n_up)],
+        "down": [f"down_{i + 1}" for i in range(n_down)],
+        "control": [f"control_{i + 1}" for i in range(n_control)],
+    }
+    geos = arms["control"] + arms["up"] + arms["down"]
+    post = np.arange(len(time)) >= n_pre
+
+    common = 110 + 0.18 * np.arange(len(time)) + 4 * np.sin(np.arange(len(time)) / 5)
+    # Geo size creates distinct spend and revenue levels. Controls span the
+    # treated sizes so a convex donor combination can interpolate each geo.
+    control_sizes = np.linspace(0.7, 1.3, n_control)
+    treated_sizes = np.linspace(
+        control_sizes[0] + 0.2 * np.ptp(control_sizes),
+        control_sizes[-1] - 0.2 * np.ptp(control_sizes),
+        n_up + n_down,
+    )
+    geo_sizes = dict(zip(arms["control"], control_sizes, strict=True))
+    controls = pd.DataFrame(
+        {
+            geo: size * common + rng.normal(0, 0.8, len(time))
+            for geo, size in geo_sizes.items()
+        },
+        index=time,
+    )
+    no_intervention = controls.copy()
+    for geo, size in zip(arms["up"] + arms["down"], treated_sizes, strict=True):
+        geo_sizes[geo] = size
+        upper = min(np.searchsorted(control_sizes, size, side="right"), n_control - 1)
+        lower = upper - 1
+        upper_weight = (size - control_sizes[lower]) / (
+            control_sizes[upper] - control_sizes[lower]
+        )
+        donor_mean = (1 - upper_weight) * controls.iloc[
+            :, lower
+        ].to_numpy() + upper_weight * controls.iloc[:, upper].to_numpy()
+        no_intervention[geo] = donor_mean + rng.normal(0, 0.4, len(time))
+
+    spend_columns = pd.MultiIndex.from_product(
+        [geos, ["search", "display"]], names=["geo", "channel"]
+    )
+    spend_baseline = pd.DataFrame(index=time, columns=spend_columns, dtype=float)
+    for geo in geos:
+        spend_baseline[(geo, "search")] = 40 * geo_sizes[geo]
+        spend_baseline[(geo, "display")] = 20 * geo_sizes[geo]
+
+    spend_planned = spend_baseline.copy()
+    spend_realized = spend_baseline.copy()
+    # Equal absolute planned shifts per paired geo make the planned net change zero.
+    for arm, sign in (("up", 1), ("down", -1)):
+        for geo in arms[arm]:
+            baseline = spend_baseline[(geo, "search")].to_numpy()
+            planned = baseline + np.where(post, sign * 8.0, 0.0)
+            realized = baseline + np.where(post, sign * 8.0 * delivery_fraction, 0.0)
+            spend_planned[(geo, "search")] = planned
+            spend_realized[(geo, "search")] = realized
+
+    effects = pd.DataFrame(0.0, index=time, columns=no_intervention.columns)
+    for geo in arms["up"] + arms["down"]:
+        half_saturation = rng.uniform(25, 55)
+        geo_scale = effect_scale * rng.uniform(0.85, 1.15)
+        baseline = spend_baseline[(geo, "search")]
+        realized = spend_realized[(geo, "search")]
+        effects[geo] = geo_scale * (
+            realized / (half_saturation + realized)
+            - baseline / (half_saturation + baseline)
+        )
+
+    revenue = no_intervention + effects
+    for frame in (
+        revenue,
+        no_intervention,
+        effects,
+        spend_baseline,
+        spend_planned,
+        spend_realized,
+    ):
+        frame.attrs["unit"] = "USD/week"
+
+    return UpDownGeoLiftSimulation(
+        revenue=revenue,
+        no_intervention=no_intervention,
+        effects=effects,
+        spend_baseline=spend_baseline,
+        spend_planned=spend_planned,
+        spend_realized=spend_realized,
+        arms=arms,
+        treatment_time=treatment_time,
+        tested_channel="search",
+    )
 
 
 def _smoothed_gaussian_random_walk(

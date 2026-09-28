@@ -26,12 +26,15 @@ class ExperimentMetadata:
         return "none"
 
 
-def _bases_include_base_experiment(node: ast.ClassDef) -> bool:
+def _bases_include_base_experiment(
+    node: ast.ClassDef, discovered: set[str] | None = None
+) -> bool:
+    known = discovered or set()
     for base in node.bases:
         # Subscripted generics: class Foo(BaseExperiment[CausalResult]).
         if isinstance(base, ast.Subscript):
             base = base.value
-        if isinstance(base, ast.Name) and base.id == "BaseExperiment":
+        if isinstance(base, ast.Name) and base.id in {"BaseExperiment", *known}:
             return True
         if isinstance(base, ast.Attribute) and base.attr == "BaseExperiment":
             return True
@@ -117,13 +120,27 @@ def discover_experiment_metadata(
 ) -> dict[str, ExperimentMetadata]:
     """Return experiment metadata keyed by class name."""
     metadata: dict[str, ExperimentMetadata] = {}
+    classes: list[ast.ClassDef] = []
     for path in sorted(experiments_dir.glob("*.py")):
         if path.name in {"__init__.py", "base.py"}:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in tree.body:
-            if isinstance(node, ast.ClassDef) and _bases_include_base_experiment(node):
+            if isinstance(node, ast.ClassDef):
+                classes.append(node)
+    # Resolve direct subclasses first, then subclasses of discovered experiments.
+    # A single pass misses public variants such as UpDownGeoLift(SyntheticControl).
+    unresolved = classes
+    while unresolved:
+        next_unresolved = []
+        for node in unresolved:
+            if _bases_include_base_experiment(node, set(metadata)):
                 metadata[node.name] = _experiment_metadata_from_class(node)
+            else:
+                next_unresolved.append(node)
+        if len(next_unresolved) == len(unresolved):
+            break
+        unresolved = next_unresolved
     return metadata
 
 

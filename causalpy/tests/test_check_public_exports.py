@@ -59,6 +59,30 @@ def test_detects_synthetic_did_in_experiment_exports(script_module) -> None:
     assert "SyntheticDifferenceInDifferences" in exp_imports
 
 
+def test_discovers_indirect_experiment_subclasses(
+    tmp_path: Path, script_module
+) -> None:
+    """Public subclasses of an experiment must remain in the export inventory."""
+    (tmp_path / "direct.py").write_text(
+        "class Direct(BaseExperiment):\n"
+        "    supports_ols = False\n"
+        "    supports_bayes = True\n"
+        "    _default_model_class = SomeModel\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "indirect.py").write_text(
+        "class Indirect(Direct):\n"
+        "    supports_ols = False\n"
+        "    supports_bayes = True\n"
+        "    _default_model_class = SomeModel\n",
+        encoding="utf-8",
+    )
+    assert script_module.discover_experiment_class_names(tmp_path) == {
+        "Direct",
+        "Indirect",
+    }
+
+
 def test_detects_unbound_top_level_export(tmp_path: Path, script_module) -> None:
     """Tier 1 ``__all__`` entries must be locally bound."""
     package_init = tmp_path / "__init__.py"

@@ -130,7 +130,7 @@ def inject_mock_code(cells: list) -> None:
 
 
 def run_notebook(notebook_path: Path, *, full: bool = False) -> None:
-    """Run a notebook, optionally without mock injection and saving outputs in place.
+    """Run a notebook, saving outputs only in full mode.
 
     Parameters
     ----------
@@ -138,13 +138,11 @@ def run_notebook(notebook_path: Path, *, full: bool = False) -> None:
         Path to the notebook to execute.
     full : bool
         If True, execute without mock injection and overwrite the notebook
-        with fresh outputs.  If False (default), inject mock code and
-        discard outputs.
+        with fresh outputs. Otherwise discard outputs and use mock sampling
+        unless notebook metadata requires real posterior sampling.
     """
-    mode = "full" if full else "mock"
-    LOGGER.info(f"Running notebook ({mode}): {notebook_path.name}")
-
     if full:
+        LOGGER.info("Running notebook (full): %s", notebook_path.name)
         papermill.execute_notebook(
             input_path=str(notebook_path),
             output_path=str(notebook_path),
@@ -157,7 +155,24 @@ def run_notebook(notebook_path: Path, *, full: bool = False) -> None:
         return
 
     nb = load_notebook_node(str(notebook_path))
-    inject_mock_code(nb.cells)
+    # The up/down/control geo-lift notebook exports fitted effects with
+    # UpDownGeoLift.to_mmm_lift(). That export rejects an effect whose sign
+    # conflicts with delivered spend. Our usual pm.sample stand-in returns
+    # prior draws, whose sign is arbitrary, so it can fail an otherwise
+    # executable notebook. Its requires_real_sampling flag keeps this one
+    # notebook on posterior sampling until the mock can satisfy that contract.
+    real_sampling = (
+        nb.metadata.get("causalpy", {}).get("requires_real_sampling") is True
+    )
+    LOGGER.info(
+        "Running notebook (%s): %s",
+        "real sampling" if real_sampling else "mock",
+        notebook_path.name,
+    )
+    if real_sampling:
+        clear_cell_outputs(nb.cells)
+    else:
+        inject_mock_code(nb.cells)
 
     temp_path: Path | None = None
     try:
