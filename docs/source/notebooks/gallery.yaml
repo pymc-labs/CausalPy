@@ -48,7 +48,7 @@ groups:
             notebook: geolift-single-cell
           - title: Multi-cell geolift analysis
             notebook: multi-cell-geolift
-          - title: Up, down, and control geo lift with PyMC
+          - title: "Multi-arm geo lift with PyMC: up, down, and control"
             notebook: up-down-control-geolift-pymc
       - title: Difference in Differences
         intro: |

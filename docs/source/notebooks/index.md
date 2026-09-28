@@ -110,7 +110,7 @@ Geolift (geographical lift testing) is a method for measuring the causal impact 
 :link-type: doc
 :::
 
-:::{grid-item-card} Up, down, and control geo lift with PyMC
+:::{grid-item-card} Multi-arm geo lift with PyMC: up, down, and control
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/up-down-control-geolift-pymc.png
 :link: up-down-control-geolift-pymc
