@@ -155,6 +155,12 @@ def run_notebook(notebook_path: Path, *, full: bool = False) -> None:
         return
 
     nb = load_notebook_node(str(notebook_path))
+    # The up/down/control geo-lift notebook exports fitted effects with
+    # UpDownGeoLift.to_mmm_lift(). That export rejects an effect whose sign
+    # conflicts with delivered spend. Our usual pm.sample stand-in returns
+    # prior draws, whose sign is arbitrary, so it can fail an otherwise
+    # executable notebook. Its requires_real_sampling flag keeps this one
+    # notebook on posterior sampling until the mock can satisfy that contract.
     real_sampling = (
         nb.metadata.get("causalpy", {}).get("requires_real_sampling") is True
     )
