@@ -1,0 +1,26 @@
+{
+  "$schema": "https://context7.com/schema/context7.json",
+  "url": "https://context7.com/pymc-labs/causalpy",
+  "public_key": "pk_VEVKqL1O3R30z9IzEQkg4",
+  "projectTitle": "CausalPy",
+  "description": "Causal inference for quasi-experiments in Python, with Bayesian (PyMC) and scikit-learn backends.",
+  "excludeFolders": [
+    ".agents",
+    ".cursor",
+    ".github",
+    "scripts",
+    "causalpy/tests",
+    "docs/source/_templates",
+    "docs/source/.codespell"
+  ],
+  "excludeFiles": [
+    "AGENTS.md",
+    "ARCHITECTURE.md",
+    "CONTRIBUTING.md"
+  ],
+  "rules": [
+    "Use `import causalpy as cp`. Experiments are top-level classes: `cp.DifferenceInDifferences`, `cp.InterruptedTimeSeries`, `cp.SyntheticControl`, `cp.RegressionDiscontinuity` and others.",
+    "The old `cp.pymc_experiments` and `cp.skl_experiments` modules no longer exist.",
+    "Pass a pandas DataFrame, a patsy `formula` and a `model` from `cp.pymc_models` (Bayesian) or a scikit-learn regressor; inspect results with `result.summary()` and `result.plot()`."
+  ]
+}
