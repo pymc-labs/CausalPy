@@ -202,6 +202,13 @@ A quasi-experimental design that uses time series methods to generate counterfac
 :link: interrupted-time-series-placebo-in-time-analysis
 :link-type: doc
 :::
+
+:::{grid-item-card} Seasonality in quasi-experimental time series
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/seasonal-effects-pymc.png
+:link: seasonal-effects-pymc
+:link-type: doc
+:::
 ::::
 
 ## Comparative Interrupted Time Series
@@ -457,6 +464,7 @@ interrupted-time-series-post-intervention-analysis.ipynb
 interrupted-time-series-covid.ipynb
 interrupted-time-series-lift-test.ipynb
 interrupted-time-series-placebo-in-time-analysis.ipynb
+seasonal-effects-pymc.ipynb
 :::
 
 :::{toctree}
