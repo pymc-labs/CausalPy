@@ -42,11 +42,10 @@ from causalpy.data.simulate_data import (
 
 # Try to use PyMC's testing helpers if available; otherwise, fall back to no-op fixtures
 try:  # pragma: no cover - conditional import for compatibility across PyMC versions
-    from pymc.testing import mock_sample, mock_sample_setup_and_teardown  # type: ignore
+    from pymc.testing import mock_sample_setup_and_teardown  # type: ignore
 
     _HAVE_PYMC_TESTING = True
 except Exception:  # pragma: no cover
-    mock_sample = None  # type: ignore
     mock_sample_setup_and_teardown = None  # type: ignore
     _HAVE_PYMC_TESTING = False
 
@@ -68,16 +67,18 @@ else:
         yield
 
 
-@pytest.fixture(autouse=True)
-def mock_sample_for_doctest(request):
-    if not request.config.getoption("--doctest-modules", default=False):
-        return
-
-    if not _HAVE_PYMC_TESTING or mock_sample is None:
-        return
+@pytest.fixture(scope="module")
+def real_pymc_sampling(mock_pymc_sample):
+    """Use genuine posterior draws regardless of which module ran first."""
     import pymc as pm
+    import pymc.sampling.mcmc
 
-    pm.sample = mock_sample
+    patched = pm.sample
+    pm.sample = pymc.sampling.mcmc.sample
+    try:
+        yield
+    finally:
+        pm.sample = patched
 
 
 @pytest.fixture(scope="session")

@@ -83,9 +83,7 @@ Stable signs and magnitudes across reasonable bandwidths strengthen the claim.
 Alternative tested: the Bayesian result is driven by prior choices rather than data.
 
 ```python
-check = cp.checks.PriorSensitivity(
-    prior_range={"sigma": [0.5, 1.0, 2.0, 5.0]}
-)
+check = cp.checks.PriorSensitivity(prior_range={"sigma": [0.5, 1.0, 2.0, 5.0]})
 result = check.run(experiment)
 ```
 
