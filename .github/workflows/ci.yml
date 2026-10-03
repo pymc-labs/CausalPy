@@ -101,7 +101,9 @@ jobs:
         run: uv lock --check
 
   test:
-    name: Test (Python ${{ matrix.python-version }}, pandas ${{ matrix.pandas-version }})
+    # Keep the pandas 3 legs named `test (<python>)`: main's ruleset requires the
+    # `test (3.14)` status check by name (issue #1216).
+    name: test (${{ matrix.python-version }}${{ matrix.pandas-version != '3.x' && format(', pandas {0}', matrix.pandas-version) || '' }})
     runs-on: ubuntu-latest
     # Guard (issue #1117): a wedged run fails as `failure` in minutes instead of
     # being `cancelled` at GitHub's 6h ceiling. The main suite runs under
