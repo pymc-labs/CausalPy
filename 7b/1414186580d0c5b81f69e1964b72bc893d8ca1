@@ -1,0 +1,19 @@
+Makefile
+  s_ec5834f3800d63::t_1ddb5257746ecb 17-19,22-26,29-30,34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "7b1414186580d0c5b81f69e1964b72bc893d8ca1",
+  "prompts": {},
+  "sessions": {
+    "s_ec5834f3800d63": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8f375015-671b-4f8a-93b7-3fe2b6b27104",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "daimon-pymclabs <daimon@pymc-labs.com>"
+    }
+  }
+}
