@@ -30,7 +30,7 @@ repos:
       - id: check-case-conflict
       - id: mixed-line-ending
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.7
+    rev: v0.16.10
     hooks:
       # Run the linter
       - id: ruff
@@ -56,12 +56,12 @@ repos:
   # public API surface). Private members are excluded via the config-level
   # regex in ``pyproject.toml``.
   - repo: https://github.com/numpy/numpydoc
-    rev: v1.11.0rc0
+    rev: v1.11.0
     hooks:
       - id: numpydoc-validation
         files: ^causalpy/(?!tests/|data/).*\.py$
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.3.1
+    rev: v2.4.0
     hooks:
       - id: mypy
         args: [--ignore-missing-imports]
