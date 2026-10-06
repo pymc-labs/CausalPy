@@ -1,0 +1,19 @@
+.github/workflows/release.yml
+  s_76523c34df26f4::t_6a2fb5259104b3 93
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "c689ac9bf6e1391c1f3f7cd86ba96e78888de6ff",
+  "prompts": {},
+  "sessions": {
+    "s_76523c34df26f4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bfa8de7c-5c8b-4f0c-be22-0109fceed18f",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}
