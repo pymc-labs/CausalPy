@@ -22,12 +22,15 @@ resolution-markers = [
     "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.14' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.14' and sys_platform == 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.14' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
 ]
 conflicts = [[
@@ -473,7 +476,8 @@ dependencies = [
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-8-causalpy-pandas2'" },
     { name = "pandas", version = "3.0.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-8-causalpy-pandas3' or extra != 'group-8-causalpy-pandas2'" },
     { name = "patsy" },
-    { name = "plotnine" },
+    { name = "plotnine", version = "0.15.8", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
+    { name = "plotnine", version = "0.16.0a15", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
     { name = "polars" },
     { name = "pymc" },
     { name = "pymc-extras" },
@@ -481,8 +485,7 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "scipy" },
     { name = "seaborn" },
-    { name = "statsmodels", version = "0.14.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "statsmodels", version = "0.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
+    { name = "statsmodels" },
     { name = "xarray" },
 ]
 
@@ -522,8 +525,7 @@ docs = [
     { name = "sphinxcontrib-bibtex" },
     { name = "sphinxext-opengraph" },
     { name = "sphinxext-rediraffe" },
-    { name = "statsmodels", version = "0.14.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "statsmodels", version = "0.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
+    { name = "statsmodels" },
 ]
 forecast = [
     { name = "pymc-forecast", extra = ["extras"] },
@@ -1379,14 +1381,14 @@ name = "formulaic"
 version = "1.2.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "interface-meta", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
-    { name = "narwhals", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
-    { name = "numpy", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
-    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2') or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2')" },
-    { name = "pandas", version = "3.0.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.14' and extra != 'group-8-causalpy-pandas2') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra != 'group-8-causalpy-pandas2') or (extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "scipy", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
-    { name = "typing-extensions", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
-    { name = "wrapt", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
+    { name = "interface-meta" },
+    { name = "narwhals" },
+    { name = "numpy" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-8-causalpy-pandas2'" },
+    { name = "pandas", version = "3.0.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-8-causalpy-pandas3' or extra != 'group-8-causalpy-pandas2'" },
+    { name = "scipy" },
+    { name = "typing-extensions" },
+    { name = "wrapt" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/f1/87/e7b9b39d218793f159d7425e264c0ac196da07f1decc333001502fac02fb/formulaic-1.2.2.tar.gz", hash = "sha256:c99e8f11ff7d327eaecaf63855ca69b7fa0da100ad6c0041ef80912fbac667e6", size = 657522, upload-time = "2026-06-02T18:24:42.632Z" }
 wheels = [
@@ -3317,7 +3319,8 @@ resolution-markers = [
     "python_full_version >= '3.15'",
     "python_full_version == '3.14.*'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten'",
-    "python_full_version < '3.14' and sys_platform == 'emscripten'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version < '3.13' and sys_platform != 'emscripten'",
 ]
 dependencies = [
@@ -3377,7 +3380,8 @@ resolution-markers = [
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32'",
     "python_full_version < '3.13' and sys_platform == 'win32'",
-    "python_full_version < '3.14' and sys_platform == 'emscripten'",
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten'",
     "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32'",
 ]
 dependencies = [
@@ -3594,19 +3598,67 @@ wheels = [
 name = "plotnine"
 version = "0.15.8"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version >= '3.15' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.14.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.14.*' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.13' and sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+    "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
+]
 dependencies = [
-    { name = "matplotlib" },
-    { name = "mizani" },
-    { name = "numpy" },
-    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-8-causalpy-pandas2'" },
-    { name = "pandas", version = "3.0.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-8-causalpy-pandas3' or extra != 'group-8-causalpy-pandas2'" },
-    { name = "scipy" },
-    { name = "statsmodels", version = "0.14.4", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "statsmodels", version = "0.15.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
+    { name = "matplotlib", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
+    { name = "mizani", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
+    { name = "numpy", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2') or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2')" },
+    { name = "pandas", version = "3.0.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.14' and extra != 'group-8-causalpy-pandas2') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra != 'group-8-causalpy-pandas2') or (extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "scipy", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
+    { name = "statsmodels", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9f/5d/3471689cf15cf2b6ebb6ebdebc7e33831fb35d85e2323875b5a0e150505d/plotnine-0.15.8.tar.gz", hash = "sha256:d3859997c3abd6edff6dee376d912716e75bbe0b0099b7054176d84fe11e8e20", size = 6863148, upload-time = "2026-08-14T16:27:49.399Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/40/37/7a0275ea8143f0f0a2b27db73656d7ea3459e9cf8f869e292e450b357d1e/plotnine-0.15.8-py3-none-any.whl", hash = "sha256:b8a17fbccdf331f0474ff59ea03186c07d96586eb0ebe70121b03fbf131881a9", size = 1573224, upload-time = "2026-08-14T16:27:47.601Z" },
+]
+
+[[package]]
+name = "plotnine"
+version = "0.16.0a15"
+source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "python_full_version == '3.13.*' and sys_platform == 'emscripten'",
+    "python_full_version < '3.13' and sys_platform == 'emscripten'",
+]
+dependencies = [
+    { name = "contourpy", marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "matplotlib", marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "mizani", marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "numpy", marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.14' and sys_platform == 'emscripten' and extra == 'group-8-causalpy-pandas2') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "pandas", version = "3.0.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.14' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2') or (extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "scipy", marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+    { name = "statsmodels", marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/83/64/a03425c8e1ed71d42f2d2b0c1adce1bbb16780a909d494b923fee157bddd/plotnine-0.16.0a15.tar.gz", hash = "sha256:63b8ca9cb364a711a721db46bacfb49a781d98252a293416c4e185e60c9765c4", size = 8211026, upload-time = "2026-09-28T12:38:49.962Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4e/55/ae136918ba5674c9a14271687937bbad4d37bd98decf576b107ec5df5919/plotnine-0.16.0a15-py3-none-any.whl", hash = "sha256:147ff1a2e4cc43f7449e33cb65dd8cf16a08f0d80ed38affdfdcf19412260235", size = 1452085, upload-time = "2026-09-28T12:38:47.95Z" },
 ]
 
 [[package]]
@@ -5131,73 +5183,16 @@ wheels = [
 
 [[package]]
 name = "statsmodels"
-version = "0.14.4"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version < '3.14' and sys_platform == 'emscripten'",
-]
-dependencies = [
-    { name = "numpy", marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "packaging", marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.14' and sys_platform == 'emscripten' and extra == 'group-8-causalpy-pandas2') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "pandas", version = "3.0.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version < '3.14' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2') or (extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "patsy", marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "scipy", marker = "(python_full_version < '3.14' and sys_platform == 'emscripten') or (python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/1f/3b/963a015dd8ea17e10c7b0e2f14d7c4daec903baf60a017e756b57953a4bf/statsmodels-0.14.4.tar.gz", hash = "sha256:5d69e0f39060dc72c067f9bb6e8033b6dccdb0bae101d76a7ef0bcc94e898b67", size = 20354802, upload-time = "2024-10-03T16:15:36.273Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f5/99/654fd41a9024643ee70b239e5ebc987bf98ce9fc2693bd550bee58136564/statsmodels-0.14.4-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:5221dba7424cf4f2561b22e9081de85f5bb871228581124a0d1b572708545199", size = 10220508, upload-time = "2024-10-03T17:10:31.183Z" },
-    { url = "https://files.pythonhosted.org/packages/67/d8/ac30cf4cf97adaa48548be57e7cf02e894f31b45fd55bf9213358d9781c9/statsmodels-0.14.4-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:17672b30c6b98afe2b095591e32d1d66d4372f2651428e433f16a3667f19eabb", size = 9912317, upload-time = "2024-10-03T16:22:29.504Z" },
-    { url = "https://files.pythonhosted.org/packages/e0/77/2440d551eaf27f9c1d3650e13b3821a35ad5b21d3a19f62fb302af9203e8/statsmodels-0.14.4-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:ab5e6312213b8cfb9dca93dd46a0f4dccb856541f91d3306227c3d92f7659245", size = 10301662, upload-time = "2024-10-03T17:13:04.537Z" },
-    { url = "https://files.pythonhosted.org/packages/fa/e1/60a652f18996a40a7410aeb7eb476c18da8a39792c7effe67f06883e9852/statsmodels-0.14.4-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4bbb150620b53133d6cd1c5d14c28a4f85701e6c781d9b689b53681effaa655f", size = 10741763, upload-time = "2024-10-03T17:13:17.594Z" },
-    { url = "https://files.pythonhosted.org/packages/81/0c/2453eec3ac25e300847d9ed97f41156de145e507391ecb5ac989e111e525/statsmodels-0.14.4-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:bb695c2025d122a101c2aca66d2b78813c321b60d3a7c86bb8ec4467bb53b0f9", size = 10879534, upload-time = "2024-10-03T17:13:31.19Z" },
-    { url = "https://files.pythonhosted.org/packages/59/9a/e466a1b887a1441141e52dbcc98152f013d85076576da6eed2357f2016ae/statsmodels-0.14.4-cp312-cp312-win_amd64.whl", hash = "sha256:7f7917a51766b4e074da283c507a25048ad29a18e527207883d73535e0dc6184", size = 9823866, upload-time = "2024-10-03T16:14:23.828Z" },
-    { url = "https://files.pythonhosted.org/packages/31/f8/2662e6a101315ad336f75168fa9bac71f913ebcb92a6be84031d84a0f21f/statsmodels-0.14.4-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:b5a24f5d2c22852d807d2b42daf3a61740820b28d8381daaf59dcb7055bf1a79", size = 10186886, upload-time = "2024-10-03T17:10:44.074Z" },
-    { url = "https://files.pythonhosted.org/packages/fa/c0/ee6e8ed35fc1ca9c7538c592f4974547bf72274bc98db1ae4a6e87481a83/statsmodels-0.14.4-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:df4f7864606fa843d7e7c0e6af288f034a2160dba14e6ccc09020a3cf67cb092", size = 9880066, upload-time = "2024-10-03T17:10:56.972Z" },
-    { url = "https://files.pythonhosted.org/packages/d1/97/3380ca6d8fd66cfb3d12941e472642f26e781a311c355a4e97aab2ed0216/statsmodels-0.14.4-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:91341cbde9e8bea5fb419a76e09114e221567d03f34ca26e6d67ae2c27d8fe3c", size = 10283521, upload-time = "2024-10-03T17:14:06.216Z" },
-    { url = "https://files.pythonhosted.org/packages/fe/2a/55c5b5c5e5124a202ea3fe0bcdbdeceaf91b4ec6164b8434acb9dd97409c/statsmodels-0.14.4-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1322286a7bfdde2790bf72d29698a1b76c20b8423a55bdcd0d457969d0041f72", size = 10723228, upload-time = "2024-10-03T17:14:19.587Z" },
-    { url = "https://files.pythonhosted.org/packages/4f/76/67747e49dc758daae06f33aad8247b718cd7d224f091d2cd552681215bb2/statsmodels-0.14.4-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:e31b95ac603415887c9f0d344cb523889cf779bc52d68e27e2d23c358958fec7", size = 10859503, upload-time = "2024-10-03T17:14:32.798Z" },
-    { url = "https://files.pythonhosted.org/packages/1d/eb/cb8b01f5edf8f135eb3d0553d159db113a35b2948d0e51eeb735e7ae09ea/statsmodels-0.14.4-cp313-cp313-win_amd64.whl", hash = "sha256:81030108d27aecc7995cac05aa280cf8c6025f6a6119894eef648997936c2dd0", size = 9817574, upload-time = "2024-10-03T16:14:37.461Z" },
-]
-
-[[package]]
-name = "statsmodels"
 version = "0.15.0"
 source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version >= '3.15' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version >= '3.15' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version >= '3.15' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.14.*' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.14.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.14.*' and sys_platform == 'emscripten' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.14.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.13.*' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version == '3.13.*' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.13' and sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.13' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-    "python_full_version < '3.13' and sys_platform != 'emscripten' and sys_platform != 'win32' and extra != 'group-8-causalpy-pandas2' and extra != 'group-8-causalpy-pandas3'",
-]
 dependencies = [
-    { name = "formulaic", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
-    { name = "numpy", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
-    { name = "packaging", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
-    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.14' and extra == 'group-8-causalpy-pandas2') or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas2')" },
-    { name = "pandas", version = "3.0.6", source = { registry = "https://pypi.org/simple" }, marker = "(python_full_version >= '3.14' and extra != 'group-8-causalpy-pandas2') or (sys_platform != 'emscripten' and extra == 'group-8-causalpy-pandas3') or (sys_platform != 'emscripten' and extra != 'group-8-causalpy-pandas2') or (extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3')" },
-    { name = "patsy", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
-    { name = "scipy", marker = "python_full_version >= '3.14' or (python_full_version < '3.14' and extra == 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3') or sys_platform != 'emscripten'" },
+    { name = "formulaic" },
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-8-causalpy-pandas2'" },
+    { name = "pandas", version = "3.0.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-8-causalpy-pandas3' or extra != 'group-8-causalpy-pandas2'" },
+    { name = "patsy" },
+    { name = "scipy" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/a8/1f/a3cbf6ed7cf6286afec694bfef561f3e51483197716717fb8476f1f0c50e/statsmodels-0.15.0.tar.gz", hash = "sha256:5d257fe58d0772bc46a557880ca78e2a8e07fec7bfd9d11074aef8e33e1aecbc", size = 15736853, upload-time = "2026-08-27T10:45:21.988Z" }
 wheels = [
