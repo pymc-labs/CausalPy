@@ -49,7 +49,7 @@ dependencies = [
     "matplotlib>=3.5.3",
     "narwhals>=1.13.1",
     "numpy",
-    "pandas>=2.3,<4",
+    "pandas<4,>=2.3",
     "patsy",
     "plotnine>=0.15.7",
     "polars",
@@ -154,7 +154,7 @@ marimo = { pip = true }
 # (the base `dependencies` pandas constraint stays broad: >=2.3,<4).
 [dependency-groups]
 pandas2 = ["pandas>=2.3,<3"]
-pandas3 = ["pandas>=3,<4"]
+pandas3 = ["pandas<4,>=3"]
 
 [tool.uv]
 conflicts = [
