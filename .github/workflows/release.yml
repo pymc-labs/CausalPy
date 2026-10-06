@@ -90,7 +90,7 @@ jobs:
           # we might request to install before test.pypi is aware that it actually has the package
           sleep 5s
           python -m venv venv-test-pypi
-          venv-test-pypi/bin/python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple causalpy
+          venv-test-pypi/bin/python -m pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple "causalpy==${REF_NAME}"
           echo "Checking import and version number"
           venv-test-pypi/bin/python -c "import causalpy; assert causalpy.__version__ == '${REF_NAME}'"
         env:
