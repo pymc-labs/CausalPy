@@ -20,7 +20,7 @@ dependencies:
   - jinja2
   - make
   - matplotlib>=3.5.3
-  - mypy==2.3.0
+  - mypy==2.3.1
   - narwhals>=1.13.1
   - nbconvert
   - nbformat
