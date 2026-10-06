@@ -30,3 +30,6 @@ docs/source/_static/thumbnails/
 # Local scratch space (not tracked)
 .scratch/
 coverage.xml
+
+# PyTensor compilation cache (may appear in the working tree during local runs)
+.pytensor/

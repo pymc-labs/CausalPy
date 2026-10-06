@@ -1,5 +1,11 @@
 ci:
   autofix_prs: false
+  # Hosted pre-commit.ci cannot install arbitrary tools, so the `uv-lock-check`
+  # hook (language: system, shells out to `uv lock --check`) is not runnable
+  # there. It still runs locally via `prek run --all-files` and in the
+  # dedicated `uv-lock-check` GitHub Actions job (.github/workflows/ci.yml),
+  # both of which install/have `uv` on PATH.
+  skip: [uv-lock-check]
 
 # See https://pre-commit.com for more information
 # See https://pre-commit.com/hooks.html for more hooks
@@ -46,27 +52,14 @@ repos:
         additional_dependencies:
           # Support pyproject.toml configuration
           - tomli
-  # Validate numpydoc-style docstrings across the package. The check set and
-  # exclude regex are configured under [tool.numpydoc_validation] in
-  # pyproject.toml. Originally introduced under #886 as a narrow check on
-  # public ``.plot`` overrides, the scope was widened under #898 to cover the
-  # whole ``causalpy`` package. The ``files`` pattern below excludes the test
-  # suite and the simulated-data helpers in ``causalpy/data/`` (those use the
-  # Sphinx ``:param:`` style for didactic clarity and are not part of the
-  # public API surface). Private members are excluded via the config-level
-  # regex in ``pyproject.toml``.
+  # Validate numpydoc-style docstrings across the package. The check set and exclude regex are configured under [tool.numpydoc_validation] in pyproject.toml. Originally introduced under #886 as a narrow check on public ``.plot`` overrides, the scope was widened under #898 to cover the whole ``causalpy`` package; keep it package-wide, because narrowing ``files`` to a hand-maintained allowlist silently drops validation for every module missing from the list.
+  # The ``files`` pattern below excludes the test suite and the simulated-data helpers in ``causalpy/data/`` (those use the Sphinx ``:param:`` style for didactic clarity and are not part of the public API surface). Private members are excluded via the config-level regex in ``pyproject.toml``.
   - repo: https://github.com/numpy/numpydoc
     rev: v1.11.0
     hooks:
       - id: numpydoc-validation
         files: ^causalpy/(?!tests/|data/).*\.py$
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.4.0
-    hooks:
-      - id: mypy
-        args: [--ignore-missing-imports]
-        files: ^causalpy/
-        additional_dependencies: [numpy>=1.20, pandas-stubs]
+  # Type checking is not a hook (issue #1127). It ran here against an isolated env holding only numpy and pandas-stubs, so pymc, pytensor, arviz, patsy and sklearn were not present to analyse and the hook passed on code that fails a real check. It now runs as ``make typecheck`` in the project environment, from the test job in ci.yml.
   - repo: https://github.com/abravalheri/validate-pyproject
     rev: '0.26'
     hooks:
@@ -82,9 +75,11 @@ repos:
         files: \.md$
         exclude: ^(docs/_build/|\.scratch/|docs/source/notebooks/index\.md)$
   # Regenerate environment.yml from pyproject.toml when deps change (run on commit; review diff).
-  # Dev env uses python>=3.11; conda-only deps (make, pip, pymc-bart, marimo[mcp]) are in args.
-  # Stay on 0.22.x until pyproject2conda fixes the 0.23.x CondaRequirement regression
-  # (see check-environment-yml job in .github/workflows/ci.yml).
+  # Dev env uses python>=3.12; conda-only deps (make, pip, pymc-bart) are in args. marimo[mcp]
+  # and pymc-forecast route to the pip section via [tool.pyproject2conda.dependencies].
+  # environment.yml is the conda *alternative* to the canonical uv.lock (see CONTRIBUTING.md);
+  # the rev here is the single source of truth for the pin: the check-environment-yml job in
+  # .github/workflows/ci.yml runs this same hook rather than re-declaring the version.
   - repo: https://github.com/usnistgov/pyproject2conda
     rev: v0.23.2
     hooks:
@@ -102,17 +97,23 @@ repos:
           - -w
           - force
           - --python-include
-          - "python>=3.11"
+          - "python>=3.12"
           - -d
           - make
           - -d
           - pip
           - -d
           - pymc-bart
-          - -r
-          - "marimo[mcp]"
   - repo: local
     hooks:
+      # Keep the committed uv.lock in sync with pyproject.toml (declaration source
+      # of truth). uv must be installed locally; CI runs the same check.
+      - id: uv-lock-check
+        name: Check uv.lock is in sync with pyproject.toml
+        entry: uv lock --check
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|uv\.lock)$
       - id: validate-notebooks
         name: Validate notebooks
         entry: python scripts/validate_notebooks.py
@@ -150,11 +151,11 @@ repos:
         files: ^causalpy/.*\.py$
         exclude: ^causalpy/tests/
       - id: check-public-exports
-        name: Check public API export wiring
+        name: Check public API export and documentation wiring
         entry: python scripts/check_public_exports.py --check
         language: python
         pass_filenames: false
-        files: ^(causalpy/__init__\.py|causalpy/experiments/.*|causalpy/checks/.*)$
+        files: ^(causalpy/__init__\.py|causalpy/experiments/.*|causalpy/checks/.*|causalpy/tests/test_check_public_exports\.py|docs/source/api/index\.md|scripts/check_public_exports\.py|scripts/_ast_introspection\.py)$
       - id: check-architecture-inventory
         name: Check ARCHITECTURE.md experiment inventory
         entry: python scripts/check_architecture_inventory.py --check

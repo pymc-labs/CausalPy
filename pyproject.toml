@@ -8,25 +8,27 @@ requires = ["setuptools>=61.0"]
 [tool.setuptools.packages.find]
 exclude = ["causalpy.test*", "docs*"]
 
+[tool.setuptools.dynamic]
+version = {attr = "causalpy.version.__version__"}
+
 [tool.setuptools.package-data]
 "causalpy.data" = ["*.csv"]
 "causalpy.templates" = ["*.html"]
 
 [project]
 name = "CausalPy"
-version = "0.9.0"
+dynamic = ["version"]
 description = "Causal inference for quasi-experiments in Python"
 readme = "README.md"
 license = { file = "LICENSE" }
 authors = [{ name = "Ben Vincent", email = "ben.vincent@pymc-labs.com" }]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 keywords = ["causal inference", "statistics", "econometrics", "pymc", "bayesian"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
@@ -40,22 +42,28 @@ classifiers = [
 # For an analysis of this field vs pip's requirements files see:
 # https://packaging.python.org/discussions/install-requires-vs-requirements/
 dependencies = [
-    "arviz>=0.14.0,<1.0",
+    "arviz>=1.1,<2",
     "graphviz",
     "ipython!=8.7.0",
     "jinja2",
     "matplotlib>=3.5.3",
+    "narwhals>=1.13.1",
     "numpy",
-    "pandas",
+    "pandas>=2.3,<4",
     "patsy",
-    "pymc>=5.15.1,<6",
-    "pytensor>=2.38.1,<3",
+    "plotnine>=0.15.7",
+    "polars",
+    # Keep these public major-version ranges broad. PyMC metadata supplies compatible PyTensor patch-level ranges, so base installs may select newer PyMC/PyTensor minors.
+    # The docs-only PyMC-Marketing pin in docs/requirements.txt has its own narrower resolver constraints; it does not restrict normal runtime installs.
+    # pymc-extras 0.11 is the first release that declares PyMC 6 support and provides the structural state-space API CausalPy imports.
+    "pymc>=6.0.1,<7",
+    "pytensor>=3,<4",
     "scikit-learn>=1",
     "scipy",
     "seaborn>=0.11.2",
     "statsmodels",
     "xarray>=v2022.11.0",
-    "pymc-extras>=0.3.0",
+    "pymc-extras>=0.11",
 ]
 
 # List additional groups of dependencies here (e.g. development dependencies). Users
@@ -74,27 +82,29 @@ forecast = [
 ]
 dev = [
     "prek",
+    # Pinned: a type checker that floats turns an untouched branch red whenever upstream ships new checks. Bump deliberately, with the allowlist in [tool.mypy] re-measured (issue #1127). TOML cannot share the value, so the same pin appears in the ``lint`` extra below and the two must be bumped together.
+    "mypy==2.3.0",
     "twine",
     "codespell",
     "nbformat",
     "nbconvert",
     "PyYAML",
+    # Editor/agent tooling used during development; not a runtime or test dependency.
+    "marimo[mcp]",
 ]
 docs = [
     "ipykernel",
     "maketables",
-    "pymc-marketing>=0.13.1",
     "daft-pgm",
+    "pymc-bart",
     "linkify-it-py",
     "myst-nb<=1.0.0",
-    "pathlib",
     "pylint",
     "sphinx",
     "sphinx-autodoc-typehints",
     "sphinx_autodoc_defaultargs",
     "labs-sphinx-theme",
     "sphinx-copybutton",
-    "sphinx-rtd-theme",
     "sphinx-sitemap",
     "statsmodels",
     "sphinxcontrib-bibtex>=2.7.0",
@@ -109,25 +119,50 @@ docs = [
     "sphinxext-opengraph",
     "sphinxext-rediraffe",
 ]
-lint = ["prek", "ruff", "mypy"]
+# The mypy pin here must match the one in the ``dev`` extra above; TOML cannot share the value, so bump both together.
+lint = ["prek", "ruff", "mypy==2.3.0"]
 test = [
     "pytest",
     "pytest-cov",
+    "pytest-xdist",
     "diff-cover",
     "codespell",
     "nbformat",
     "nbconvert",
     "papermill",
+    "polars",
+    "pyarrow",
     "pymc-forecast[extras]>=0.2,<0.3",
 ]
 
 [tool.pyproject2conda]
 channels = ["conda-forge"]
 
-# pymc-forecast is PyPI-only (not on conda-forge): route it to the pip
+# pymc-forecast and marimo are PyPI-only (not on conda-forge, or not
+# resolvable with the ``[mcp]`` extra via conda): route them to the pip
 # section of the generated environment.yml.
 [tool.pyproject2conda.dependencies]
 pymc-forecast = { pip = true }
+marimo = { pip = true }
+
+# uv is the canonical resolver for local dev + CI (uv.lock). environment.yml
+# (generated via pyproject2conda) remains a supported alternative for
+# contributors who prefer conda/micromamba; see CONTRIBUTING.md.
+#
+# Two conflicting dependency groups pin the pandas major version tested in
+# CI so a single uv.lock can hold both pandas 2.3 and pandas 3.x resolutions
+# (the base `dependencies` pandas constraint stays broad: >=2.3,<4).
+[dependency-groups]
+pandas2 = ["pandas>=2.3,<3"]
+pandas3 = ["pandas>=3,<4"]
+
+[tool.uv]
+conflicts = [
+    [
+        { group = "pandas2" },
+        { group = "pandas3" },
+    ],
+]
 
 [project.urls]
 Homepage = "https://github.com/pymc-labs/CausalPy"
@@ -140,6 +175,8 @@ Discussions = "https://github.com/pymc-labs/CausalPy/discussions"
 [tool.pytest.ini_options]
 addopts = [
     "-vv",
+    "-m",
+    "not correctness and not nightly",
     "--strict-markers",
     "--strict-config",
     "--cov=causalpy",
@@ -149,6 +186,8 @@ testpaths = "causalpy/tests"
 markers = [
     "integration: mark as an integration test.",
     "slow: mark test as slow.",
+    "nightly: heavy test deselected on PRs by the default addopts; runs in .github/workflows/nightly.yml. Run locally with `make test-nightly`.",
+    "correctness: mark statistical correctness and reproducibility tests.",
 ]
 
 [tool.ruff.format]
@@ -175,14 +214,11 @@ select = [
 
 [tool.codespell]
 ignore-words = "./docs/source/.codespell/codespell-whitelist.txt"
-skip = "*.ipynb,*.csv,*.svg,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt"
+# uv.lock is autogenerated (`uv lock`) and full of third-party package names
+# (e.g. "astroid") that trip codespell false positives; never hand-edit it anyway.
+skip = "*.ipynb,*.csv,*.svg,pyproject.toml,docs/source/.codespell/codespell-whitelist.txt,uv.lock"
 
-# Numpydoc validation. Originally introduced under #886 as a narrow check on
-# public ``.plot`` overrides, expanded under #898 to enforce a curated set of
-# numpydoc rules across the whole ``causalpy`` package. The ``exclude`` regex
-# matches any dotted node whose path contains a private (underscore-prefixed)
-# component — private helpers, dunders, and members of private modules are
-# considered implementation detail and not subject to docstring validation.
+# Numpydoc validation. Originally introduced under #886 as a narrow check on public ``.plot`` overrides, expanded under #898 to enforce a curated set of numpydoc rules across the whole ``causalpy`` package. The ``exclude`` regex matches any dotted node whose path contains a private (underscore-prefixed) component — private helpers, dunders, and members of private modules are considered implementation detail and not subject to docstring validation.
 [tool.numpydoc_validation]
 checks = [
     "PR01",  # Parameters not documented
@@ -218,24 +254,17 @@ exclude_lines = [
     "@(abc\\.)?abstractmethod",
 ]
 
+# Type checking (issue #1127). ``files = "causalpy"`` recurses, so the subpackages are covered; the old ``causalpy/*.py`` glob did not and only reached the 18 top-level modules. ``make typecheck`` runs this from the project environment, where the real dependencies are importable, and CI runs the same target. ``ignore_missing_imports`` drops the untyped-third-party noise (pymc, patsy, arviz and friends ship no stubs).
 [tool.mypy]
-files = "causalpy/*.py"
+files = "causalpy"
 exclude = "build|dist|docs|notebooks|tests|setup.py"
-
-[tool.mypy-matplotlib]
 ignore_missing_imports = true
-
-[tool.mypy-pymc]
-ignore_missing_imports = true
-
-[tool.mypy-seaborn]
-ignore_missing_imports = true
-
-[tool.mypy-sklearn]
-ignore_missing_imports = true
-
-[tool.mypy-scipy]
-ignore_missing_imports = true
+# Report a per-module override that stops matching a real module, so a rename or a deletion does not leave a stale entry behind unnoticed. This warns rather than fails: mypy prints ``note: unused section(s)`` and still exits 0. There are no overrides left, and this keeps it that way if one is ever added and then outlives its module.
+warn_unused_configs = true
+# The allowlist is empty: the package type-checks clean. What could not be expressed in the type system is a handful of line-level ``type: ignore`` comments, each with the reasoning next to it.
+#
+# ``warn_unused_ignores`` keeps those comments self-cleaning: a fix that removes the underlying error now fails the check unless the now-unneeded ignore is deleted with it.
+warn_unused_ignores = true
 
 [tool.marimo.runtime]
 watcher_on_save = "autorun"

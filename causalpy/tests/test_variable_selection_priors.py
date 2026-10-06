@@ -15,6 +15,7 @@
 import numpy as np
 import pymc as pm
 import pytest
+import xarray as xr
 
 from causalpy.variable_selection_priors import (
     HorseshoePrior,
@@ -109,6 +110,56 @@ def test_create_prior_normal(coords, sample_data):
 
         assert "beta" in model.named_vars
         assert beta.name == "beta"
+
+
+def test_inclusion_probabilities_supports_datatree_posterior():
+    """Inclusion summaries operate on ArviZ 1 DataArray extracts."""
+    idata = xr.DataTree.from_dict(
+        {
+            "posterior": xr.Dataset(
+                {
+                    "gamma_beta": (
+                        ("chain", "draw", "features"),
+                        np.array([[[1, 0], [1, 1]], [[0, 0], [1, 0]]]),
+                    )
+                }
+            )
+        }
+    )
+
+    summary = VariableSelectionPrior("spike_and_slab").get_inclusion_probabilities(
+        idata, "beta"
+    )
+
+    np.testing.assert_allclose(summary["prob"], [0.75, 0.25])
+    assert summary["selected"].tolist() == [True, False]
+    np.testing.assert_allclose(summary["gamma_mean"], [0.75, 0.25])
+
+
+def test_shrinkage_factors_supports_datatree_posterior():
+    """Horseshoe summaries broadcast DataArray posterior draws by sample."""
+    idata = xr.DataTree.from_dict(
+        {
+            "posterior": xr.Dataset(
+                {
+                    "tau_beta": (
+                        ("chain", "draw"),
+                        np.array([[2.0, 3.0], [4.0, 5.0]]),
+                    ),
+                    "lambda_tilde_beta": (
+                        ("chain", "draw", "features"),
+                        np.array([[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]]),
+                    ),
+                }
+            )
+        }
+    )
+
+    summary = VariableSelectionPrior("horseshoe").get_shrinkage_factors(idata, "beta")
+
+    np.testing.assert_allclose(summary["shrinkage_factor"], [16.5, 20.0])
+    np.testing.assert_allclose(summary["lambda_tilde"], [4.0, 5.0])
+    np.testing.assert_allclose(summary["tau"], 3.5)
 
 
 def test_convenience_function_with_custom_hyperparams(coords):

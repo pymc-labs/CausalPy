@@ -35,7 +35,7 @@ Every model adapter returns scores in one canonical ``pandas.Series``. Each trea
 
 For multi-output sklearn models, CausalPy computes one :math:`R^2` per output instead of exposing sklearn's default uniform average. The shared container does not make the statistics identical: PyMC reports Bayesian :math:`R^2` and its posterior dispersion, while sklearn reports classical point-estimate :math:`R^2`. It only guarantees that consumers can locate each unit's score without knowing which backend produced it.
 
-This is a user-visible change for sklearn experiments: ``experiment.score`` is a keyed ``pandas.Series`` rather than a bare float. Single-output users should read ``experiment.score["unit_0_r2"]``.
+This is a user-visible change for sklearn experiments: ``experiment.result.score`` is a keyed ``pandas.Series`` rather than a bare float. Single-output users should read ``experiment.result.score["unit_0_r2"]``.
 
 For direct adapter callers, ``SklearnModelAdapter.score()`` keyword arguments follow :func:`sklearn.metrics.r2_score` (for example ``sample_weight``), not the underlying estimator's ``score`` method. ``multioutput`` is fixed to ``"raw_values"`` so each treated unit keeps its own ``unit_{i}_r2`` entry.
 
