@@ -22,6 +22,26 @@ CausalPy implements 10+ quasi-experimental causal inference methods over two cor
 | `docs/source/notebooks/` | How-to notebooks (`{method}_{backend}.ipynb`) |
 | `docs/source/knowledgebase/` | Educational content (glossary, reporting explainers) |
 
+## Public API Policy
+
+CausalPy assigns every supported surface to one of four tiers. Membership comes from the manifests below, not from importability or a name's underscore convention. When the same object has more than one documented path, the strongest applicable tier governs its compatibility promise.
+
+1. **Tier 1 — stable top-level API.** `causalpy.__all__` is the authoritative manifest: only its names are stable as `causalpy.<name>`. `docs/source/api/index.md` documents that package with a Sphinx `automodule` using `:members:`, `:undoc-members:`, and `:imported-members:`, and `scripts/check_public_exports.py` statically requires both that documentation wiring and a local binding for every export. Removing, renaming, or incompatibly changing a Tier 1 signature, return contract, or behavior is SemVer-major work; issue a deprecation warning in a prior feature release whenever practical and provide migration or release-note guidance. Adding a Tier 1 name is backwards-compatible but creates this promise.
+
+2. **Tier 2 — documented submodule API.** A qualified symbol is Tier 2 only when its containing CausalPy module is explicitly listed in `docs/source/api/index.md` and the symbol is rendered on that module's generated Sphinx autosummary page. A whole-submodule re-export, direct import, or unprefixed name alone does not promote a symbol. Tier 2 paths are stable within a release line and may break only in a declared major release; normally warn through a deprecation first, and when that is not practical provide explicit migration and release-note guidance in that major release.
+
+3. **Tier 3 — internal implementation.** Everything not classified as Tier 1, Tier 2, or Tier 4 is internal, including unprefixed support helpers in modules such as `utils`, `plot_utils`, `date_utils`, and `custom_exceptions`. Evaluate the explicit Tier 4 protocol before this fallback, so an integration hook does not become Tier 3 merely because it has an underscore-style name. Leading underscores remain a strong signal, but are not the classifier. Tier 3 paths have no compatibility guarantee; leave ambiguous helpers here until a separately reviewed manifest and documentation decision promotes them, and use a deprecation plan before removing an import path with known users.
+
+4. **Tier 4 — protocol and integrator hooks.** `BaseExperiment.set_maketables_options()`, the `BaseExperiment.__maketables_*__` protocol, and model `_clone()` overrides consumed by CausalPy checks are supported for integrators despite their underscore-style names. They are documented for contributors and integrators here rather than as end-user Sphinx API. An incompatible protocol change is SemVer-major and needs a migration or deprecation notice. No other underscored name is Tier 4 unless this policy is updated.
+
+### Current boundary decisions
+
+`EffectSummary` is the only new Tier 1 promotion: public `effect_summary()` methods return it, and the reporting knowledgebase already names its `table` and `text` contract. Re-exporting it as `causalpy.EffectSummary` gives users a stable type path; adding `reporting` to the Sphinx API surface and its explicit `__all__` documents that type without exposing its underscored calculation helpers.
+
+The top-level Sphinx `automodule` documents every existing `causalpy.__all__` export, including established utility and transform re-exports, without adding their support modules to the autosummary list. This aligns existing Tier 1 paths with docs rather than broadly promoting `utils`, `plot_utils`, `date_utils`, `custom_exceptions`, or other ambiguous helpers. No aliases, import removals, plot signatures, or effect-summary behavior change as part of this policy.
+
+`causalpy.experiments.model_adapter` and its `ModelAdapter` / concrete adapter import paths are Tier 3 backend plumbing: experiments retain adapters only on private `_model_backend`, and supported user access is the underlying `BaseExperiment.model`. The adapters are therefore deliberately absent from the API manifest and package exports.
+
 ## Backend Model
 
 Backend dispatch is centralized in `causalpy/experiments/model_adapter.py`. `BaseExperiment.__init__` calls `make_model_adapter()`, which handles sklearn coercion (`clone`/`deepcopy`, `create_causalpy_compatible_class()`, `fit_intercept=False` warning), default-model instantiation, and `supports_bayes`/`supports_ols`/`supports_pymc_forecast` validation. Each experiment stores `self._model_backend` (private) and keeps `self.model` as the public handle. Bayesian-only consumers check `ModelAdapter.supports_idata` and use `require_idata()`; the honest `idata` property returns `None` for unsupported or unfitted backends instead of using `AttributeError` as capability discovery.
@@ -46,7 +66,15 @@ The optional third backend, `PyMCForecastModel` (`causalpy/pymc_forecast_models.
 
 ## Experiment Lifecycle
 
-Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepare_data()` → `algorithm()`. There is no separate `.fit()` on the experiment. Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls the subclass's backend-agnostic `_plot()`. Uncertainty rendering keys on data properties of the canonical prediction container (`has_posterior_draws()`), not on backend identity. `effect_summary()` returns `EffectSummary(table, text)` using helpers from `causalpy.reporting`.
+Construction is lazy: `__init__` runs validation and deterministic preprocessing only (`_build_design_matrices()` → `_prepare_data()`); nothing is sampled. The lifecycle is `configure → optional prior checks → fit()`:
+
+- **`build()`** — public, idempotent, auto-called by both samplers. Merges data-driven priors (defaults → data-derived → user) and constructs the PyMC graph so the spec is inspectable (`pm.model_to_graphviz(exp.model)`, `exp.model.basic_RVs`) before any compute is spent.
+- **`sample_prior_predictive(**kwargs)`** — optional prior phase; populates `exp.prior_result`. Raises `PriorPredictiveNotSupportedException` on backends without a prior phase (sklearn, pymc-forecast, IV, state space).
+- **`fit(**kwargs)`** — posterior phase; runs NUTS + posterior predictive first to preserve the RNG stream of the historical eager baseline, then fills the absent prior phase so `idata` matches the historical eager output. Both sampling phases re-arm mutable data nodes before drawing, so design correctness does not depend on phase order. Returns `Self`, so call sites migrate with one appended token: `cp.InterruptedTimeSeries(...).fit()`.
+
+Draw-derived state lives in per-experiment bundles (`causalpy/experiments/_results.py`) exposed through two raising properties: `exp.result` (posterior group) and `exp.prior_result` (prior group). Nothing derived from draws is assigned to the experiment itself; `is_fitted` / `has_prior_predictive` are predicates over those two slots. Read methods take keyword-only `group: Literal["prior", "posterior"]`; the guard and group→bundle resolution live once in `_render_plot()` / `_resolve_group()`. Missing groups raise `GroupNotSampledException` naming the call to make; both exceptions are re-exported from `causalpy`. Re-sampling overwrites its own group only (`fit()` again replaces posterior and warns; prior state survives). Assigning a new model — also the documented prior-revision path instead of a `set_priors()` — resets everything, because graph identity *is* the model instance.
+
+Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls the subclass's backend-agnostic `_plot(group=..., ...)`. Uncertainty rendering keys on data properties of the canonical prediction container (`has_posterior_draws()`), not on backend identity. `plot(group="prior")` renders a reduced panel set (counterfactual vs observed only). `effect_summary(group=...)` returns `EffectSummary(table, text)` using helpers from `causalpy.reporting`; prior-group prose reads as a plausibility check, not a causal claim.
 
 ## Experiment Inventory
 
@@ -57,6 +85,7 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 | `DifferenceInDifferences` | DiD | OLS + Bayes | Effect from interaction coefficient |
 | `StaggeredDifferenceInDifferences` | Staggered DiD | OLS + Bayes | Fits untreated obs only |
 | `SyntheticControl` | SC | OLS + Bayes | Multi-unit; control/treated unit lists, no formula |
+| `UpDownGeoLift` | Three-arm geo lift | Bayes only | Extends synthetic control with up/down/control assignment and joint draw summaries |
 | `SyntheticDifferenceInDifferences` | SDiD | OLS + Bayes | Tau computed analytically from weight posteriors |
 | `RegressionDiscontinuity` | RD | OLS + Bayes | `epsilon` at threshold; optional `bandwidth` |
 | `RegressionKink` | RKD | Bayes only | Slope change at `kink_point` |
@@ -78,23 +107,23 @@ Instantiation fits eagerly in `__init__`: `_build_design_matrices()` → `_prepa
 
 | Topic | Detail |
 | --- | --- |
+| **Lazy fitting** | `__init__` never samples. Explicit `fit()` / `sample_prior_predictive()` run the phases; see Experiment Lifecycle. |
+| **HDI_PROB** | Project default is 0.94, not 0.95; CausalPy passes it explicitly rather than inheriting ArviZ defaults. |
 | **Formulas** | Patsy `dmatrices()` for design matrices; `build_design_matrices()` for counterfactual prediction. Bare datetime predictors are encoded as continuous elapsed days from the fitted origin; use `C(date)` for date fixed effects. `PiecewiseITS` uses `step()`/`ramp()` stateful transforms. |
 | **obs_ind** | All experiments set `data.index.name = "obs_ind"`. Canonical xarray/PyMC dimension name. |
 | **treated_units always 2D** | Even single-unit experiments use `treated_units=["unit_0"]`. Never pass 1D y to PyMC. |
 | **Impact uses mu, not y_hat** | The adapter's `predict()` extracts posterior `mu` (conditional expected outcome in observed units), not `y_hat` (with observation noise); impact is `y - predict(X)`. For GLMs, `mu` must be inverse-linked before impact; see `docs/source/knowledgebase/prediction-contract.md`. |
 | **Intercept handling** | Patsy includes intercept by default. sklearn models must use `fit_intercept=False`. |
-| **Eager fitting** | MCMC runs during `__init__`. No lazy `.fit()` on the experiment. |
-| **HDI_PROB** | Project default is 0.94 (ArviZ default), not 0.95. |
 | **create_causalpy_compatible_class** | Applied during `make_model_adapter()` for sklearn backends; clones the user instance before patching. |
 
 ## Adding New Code
 
 Copy the closest existing experiment or model and follow the `BaseExperiment` contract:
 
-- Declare `supports_ols` / `supports_bayes` (and `supports_pymc_forecast` to opt into the optional pymc-forecast backend); implement a single backend-agnostic `_plot()` (and `get_plot_data()`) that consumes the canonical prediction container, keying uncertainty rendering on `has_posterior_draws()` rather than backend identity
-- `algorithm()` with the fit/predict/impact flow; `effect_summary()` via helpers in `causalpy.reporting`
-- Public `plot(*, ...)` with a kwarg-only signature that delegates to `_render_plot()` — bare `*args` / `**kwargs` are forbidden on the public surface (enforced by `causalpy/tests/test_public_plot_signatures.py`). For experiments without a unified plot view (e.g. `InversePropensityWeighting`, `InstrumentalVariable`), declare an explicit `plot()` stub that raises `NotImplementedError`. For `hdi_prob` defaults, use ``Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).`` in the docstring.
+- Implement `_fit_inputs()` returning the `(X, y, coords)` handed to the backend at build time, and `_finalize(group)` computing the experiment's result bundle from the group's draws; every concrete experiment declares its own explicit `effect_summary(*, group=..., ...)` contract, using helpers in `causalpy.reporting` where that summary is implemented
+- Declare `supports_ols` / `supports_bayes` (and `supports_pymc_forecast` when the experiment accepts a `PyMCForecastModel`) plus `_default_model_class`; `make_model_adapter()` validates them at construction. Subscript the base with the experiment's bundle type (e.g. `BaseExperiment[CausalResult]`, or `BaseExperiment[ResultBundle]` when it stores no bundles)
+- Public APIs expose explicit named parameters rather than bare `*args` / `**kwargs`; use keyword-only optional controls for public plotting and plot-data APIs (enforced by `causalpy/tests/test_public_signatures.py` and surveyed by `scripts/audit_public_signatures.py`). A genuine dynamic or third-party forwarder requires an `Other Parameters` contract and a narrow structural-test exemption. For experiments without a unified plot view (e.g. `InversePropensityWeighting`, `InstrumentalVariable`), declare an explicit `plot()` stub that raises `NotImplementedError`. For `hdi_prob` defaults, use ``Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).`` in the docstring.
 - Raise `FormulaException`, `DataException`, or `BadIndexException` from `causalpy.custom_exceptions` for formula, data, and index errors
 - Avoid backwards-compat shims for APIs introduced in the same PR
 
-**Keeping it current:** When you add, remove, or structurally change an experiment class, PyMC model, backend dispatch path, or data contract, update this file in the same PR. Export wiring and the experiment inventory table are enforced by `scripts/check_public_exports.py` and `scripts/check_architecture_inventory.py` (also run via prek); run `make check-exports` / `make check-architecture` locally if needed.
+**Keeping it current:** When you add, remove, or structurally change an experiment class, PyMC model, backend dispatch path, data contract, or Tier 1 export, update this file and its documented surface in the same PR. `scripts/check_public_exports.py` enforces experiment/check export wiring plus the Tier 1 top-level Sphinx directive, while `scripts/check_architecture_inventory.py` enforces the experiment inventory table (both run via prek); run `make check-exports` / `make check-architecture` locally if needed.

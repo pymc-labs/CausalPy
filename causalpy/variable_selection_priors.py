@@ -438,8 +438,8 @@ class VariableSelectionPrior:
 
         Parameters
         ----------
-        idata : arviz.InferenceData
-            Fitted model inference data
+        idata : xarray.DataTree
+            Fitted model data tree
         param_name : str
             Name of the coefficient parameter (must match name in create_prior)
         threshold : float, default=0.5
@@ -476,25 +476,17 @@ class VariableSelectionPrior:
         import arviz as az
 
         # Extract gamma values
-        gamma = az.extract(idata.posterior[gamma_name])
+        gamma = az.extract(idata, group="posterior", var_names=gamma_name)
+        probabilities = (gamma > threshold).mean(dim="sample")
+        gamma_mean = gamma.mean(dim="sample")
 
-        # Compute inclusion probabilities
-        probabilities = (gamma > threshold).mean(dim="sample").to_array()
-        gamma_mean = gamma.mean(dim="sample").to_array()
-        selected = probabilities > threshold
-
-        summary = {
-            "probabilities": probabilities,
-            "selected": selected,
-            "gamma_mean": gamma_mean,
-        }
-        probs = summary["probabilities"].T
-        df = pd.DataFrame(index=list(range(len(probs))))
-
-        df["prob"] = probs
-        df["selected"] = summary["selected"].T
-        df["gamma_mean"] = summary["gamma_mean"].T
-        return df
+        return pd.DataFrame(
+            {
+                "prob": np.asarray(probabilities).reshape(-1),
+                "selected": np.asarray(probabilities > threshold).reshape(-1),
+                "gamma_mean": np.asarray(gamma_mean).reshape(-1),
+            }
+        )
 
     def get_shrinkage_factors(self, idata, param_name: str) -> pd.DataFrame:
         """
@@ -505,8 +497,8 @@ class VariableSelectionPrior:
 
         Parameters
         ----------
-        idata : arviz.InferenceData
-            Fitted model inference data
+        idata : xarray.DataTree
+            Fitted model data tree
         param_name : str
             Name of the coefficient parameter
 
@@ -538,27 +530,18 @@ class VariableSelectionPrior:
         if lambda_tilde_name not in idata.posterior:
             raise ValueError(f"Could not find '{lambda_tilde_name}' in posterior")
 
-        # Extract components
-        tau = az.extract(idata.posterior[tau_name]).to_array()
-        lambda_tilde = az.extract(idata.posterior[lambda_tilde_name]).to_array()
+        tau = az.extract(idata, group="posterior", var_names=tau_name)
+        lambda_tilde = az.extract(idata, group="posterior", var_names=lambda_tilde_name)
+        shrinkage_factor = (tau * lambda_tilde).mean(dim="sample")
+        lambda_tilde_mean = lambda_tilde.mean(dim="sample")
 
-        shrinkage_factor = np.array(
-            [tau[0, i] * lambda_tilde[0, :, :] for i in range(len(tau))]
+        return pd.DataFrame(
+            {
+                "shrinkage_factor": np.asarray(shrinkage_factor).reshape(-1),
+                "lambda_tilde": np.asarray(lambda_tilde_mean).reshape(-1),
+                "tau": float(tau.mean()),
+            }
         )
-        shrinkage_factor = shrinkage_factor.mean(axis=2)
-
-        summary = {
-            "shrinkage_factors": shrinkage_factor,
-            "tau": tau.mean(),
-            "lambda_tilde": lambda_tilde.mean(dim=("sample")),
-        }
-        probs = summary["shrinkage_factors"].T
-        df = pd.DataFrame(index=list(range(len(probs))))
-        df["shrinkage_factor"] = probs
-
-        df["lambda_tilde"] = summary["lambda_tilde"].T
-        df["tau"] = np.mean(tau).item()
-        return df
 
 
 def create_variable_selection_prior(
