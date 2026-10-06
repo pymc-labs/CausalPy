@@ -1,0 +1,21 @@
+causalpy/formula_utils.py
+  s_c5e0308edcbe07::t_919ea2d0f3994d 46-66,68-75,77-79,84,89-91,93-100
+causalpy/tests/test_pandas_compat.py
+  s_c5e0308edcbe07::t_5ba77bdeb2e4c7 80-96
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "5d9f5521b90befe2c4bcab365d4da9b7f71bddd9",
+  "prompts": {},
+  "sessions": {
+    "s_c5e0308edcbe07": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6fe20fe0-185d-4455-beee-b78ff9524806",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Daimon <daimon@pymc-labs.com>"
+    }
+  }
+}

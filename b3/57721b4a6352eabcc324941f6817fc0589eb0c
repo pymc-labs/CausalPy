@@ -1,0 +1,21 @@
+environment.yml
+  h_d36ca8649a0e95 30,51
+causalpy/experiments/regression_discontinuity.py
+  h_d36ca8649a0e95 23-32,161,427-428,430-433,435-440,455,458-467,470-471,473-483,504-518,521-530,532,534-543
+  h_d36ca8649a0e95 469,472,492-503,520,533
+pyproject.toml
+  h_d36ca8649a0e95 54-55,73,148
+causalpy/tests/test_posterior_plot_contracts.py
+  h_d36ca8649a0e95 1-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "b357721b4a6352eabcc324941f6817fc0589eb0c",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}

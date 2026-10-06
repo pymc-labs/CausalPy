@@ -1,0 +1,20 @@
+causalpy/tests/test_did_covariate_not_four_mean.py
+  s_fb77b85127430a::t_109a4bb5a4afce 64
+  s_fb77b85127430a::t_2af6d844aa0a1c 65
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "6d8a10cb939bb335ac2ce2f9c48a68e64144a484",
+  "prompts": {},
+  "sessions": {
+    "s_fb77b85127430a": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "41b39734-b322-4769-865d-5206c484cb90",
+        "model": "auto-smart"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

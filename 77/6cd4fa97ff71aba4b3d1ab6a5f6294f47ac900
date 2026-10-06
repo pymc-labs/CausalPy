@@ -1,0 +1,19 @@
+causalpy/tests/doctest_sampling.py
+  s_c3ce0eb209d541::t_08bd4be5e6af55 32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "776cd4fa97ff71aba4b3d1ab6a5f6294f47ac900",
+  "prompts": {},
+  "sessions": {
+    "s_c3ce0eb209d541": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3a766bd5-04ec-4d87-8525-15d0bf6486f7",
+        "model": "unknown"
+      },
+      "human_author": "daimon-pymclabs <daimon@pymc-labs.com>"
+    }
+  }
+}

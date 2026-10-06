@@ -1,0 +1,27 @@
+causalpy/tests/test_up_down_geolift.py
+  s_2daad4679f7fdc::t_4704516828a6a2 49-53,57-59
+  s_2daad4679f7fdc::t_ff3d0868f7f31e 54-56,105,165
+  s_2daad4679f7fdc::t_c81ade3d4111d8 94
+causalpy/data/simulate_data.py
+  s_2daad4679f7fdc::t_6b0ec3376b66b7 64-68,72-73,112-116,120
+  s_2daad4679f7fdc::t_36ad00fd8decfc 95-101,117
+  s_2daad4679f7fdc::t_09cb21d874a604 74-75,102-103,106-107,119,121-122,129-130
+docs/source/notebooks/up-down-control-geolift-pymc.ipynb
+  s_2daad4679f7fdc::t_db70f9806b6e97 33,41-46,77-90,113,121-126,134,136,141,151-192,199-207,211,222,234,256-261,266-351,389-394,403,422,430,441,460,554-559,603-606,617-620,631-634,645-648,659-662,673-676,688-693,720,762-767,775,863,871-876,908-909,919,921-924,932,934-937,945,947-950,958,960-963,971-981,999-1012,1047
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "701fac6ca5132558fbc93615cd5f64f5dc9bcd41",
+  "prompts": {},
+  "sessions": {
+    "s_2daad4679f7fdc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e694-a136-7eb2-95b1-eab81e421415",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

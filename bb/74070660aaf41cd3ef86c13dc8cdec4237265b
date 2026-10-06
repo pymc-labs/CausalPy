@@ -1,0 +1,23 @@
+causalpy/experiments/synthetic_control.py
+  s_a03837fb91b092::t_1ffc5efba54ab0 326-331
+causalpy/pymc_models.py
+  s_a03837fb91b092::t_9ac21af227fa7d 261,267-274,278,1978-1983,1991,2466-2471,2479
+causalpy/tests/test_timeseries_model_coverage.py
+  s_a03837fb91b092::t_4c563b39d6a59b 724-762
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "bb74070660aaf41cd3ef86c13dc8cdec4237265b",
+  "prompts": {},
+  "sessions": {
+    "s_a03837fb91b092": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2faa119e-0ab3-4546-9d73-60390e642a90",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "daimon-pymclabs <daimon@pymc-labs.com>"
+    }
+  }
+}

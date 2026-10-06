@@ -1,0 +1,23 @@
+causalpy/experiments/synthetic_control.py
+  s_c5e0308edcbe07::t_cc771d055205d2 37,40,69-70,74-78,140-141,308-318,320-330,334-343
+causalpy/pymc_models.py
+  s_c5e0308edcbe07::t_2b5321d0712747 660-689,796,801-807,826,977,983-987,1014
+causalpy/tests/test_auto_scale_sigma.py
+  s_c5e0308edcbe07::t_1be478280d96c0 396,413-425,456,459-460,462-475,478-491,493-495
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "463efdfa175d220d0fe66619ae1438c16527a232",
+  "prompts": {},
+  "sessions": {
+    "s_c5e0308edcbe07": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6fe20fe0-185d-4455-beee-b78ff9524806",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Daimon <daimon@pymc-labs.com>"
+    }
+  }
+}

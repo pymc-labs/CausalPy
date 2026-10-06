@@ -1,0 +1,21 @@
+causalpy/checks/placebo_in_time.py
+  s_c5e0308edcbe07::t_901dbd81608122 60-67,75-89,169-172,192-196,261-284,323,327-332,364,465-468,708-741,1133-1142,1334-1335,1384-1385,1437-1438
+causalpy/tests/test_placebo_in_time.py
+  s_c5e0308edcbe07::t_3e4b572b563651 955-1127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "a5fd2288e430121ecaf85958092558d37d3f3e76",
+  "prompts": {},
+  "sessions": {
+    "s_c5e0308edcbe07": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6fe20fe0-185d-4455-beee-b78ff9524806",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Daimon <daimon@pymc-labs.com>"
+    }
+  }
+}

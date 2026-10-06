@@ -1,0 +1,22 @@
+ARCHITECTURE.md
+  h_d36ca8649a0e95 43-44,49
+causalpy/experiments/model_adapter.py
+  h_d36ca8649a0e95 166,181-182,194-196,209-210,293,302-303,313,316-318,327-328,330,408,417-418,428,463-472,481-490,498,500-501,507-509,592,601-603,614,617-619,628-630,632
+causalpy/tests/test_model_adapter.py
+  h_d36ca8649a0e95 18,22,26,29-30,41-98,284-454
+causalpy/tests/test_public_signatures.py
+  h_d36ca8649a0e95 64-67,239-505
+scripts/audit_public_signatures.py
+  h_d36ca8649a0e95 6,54-62,92-99,106-108,110-116,120,123,125,127,130,134,139-140,147-219,221-222,227-235,238-240,243-261,263-272,290,358-364,368-377,379-402,447
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "4d4f60fd5d865a24cdaa723342bec4f37bbaebb7",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}

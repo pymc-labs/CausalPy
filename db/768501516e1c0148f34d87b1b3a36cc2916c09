@@ -1,0 +1,19 @@
+causalpy/tests/test_ipw_overlap_identity.py
+  s_8c2f801f7f8606::t_9ae8fe8e1919c5 1-61
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "db768501516e1c0148f34d87b1b3a36cc2916c09",
+  "prompts": {},
+  "sessions": {
+    "s_8c2f801f7f8606": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "1affd6bf-5925-4fb2-aa50-09a515b78d97",
+        "model": "grok-4.7"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

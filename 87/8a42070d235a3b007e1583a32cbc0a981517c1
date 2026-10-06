@@ -1,0 +1,14 @@
+scripts/migration_baseline/README.md
+  h_d36ca8649a0e95 61,81,85,87,90,93,96,99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "878a42070d235a3b007e1583a32cbc0a981517c1",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}

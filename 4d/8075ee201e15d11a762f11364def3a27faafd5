@@ -1,0 +1,24 @@
+.readthedocs.yaml
+  h_d36ca8649a0e95 56-57
+AGENTS.md
+  h_d36ca8649a0e95 14
+docs/requirements.txt
+  h_d36ca8649a0e95 2,4
+docs/source/release_notes.md
+  h_d36ca8649a0e95 11-23
+environment.yml
+  h_d36ca8649a0e95 35
+pyproject.toml
+  h_d36ca8649a0e95 56-58,66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "4d8075ee201e15d11a762f11364def3a27faafd5",
+  "prompts": {},
+  "humans": {
+    "h_d36ca8649a0e95": {
+      "author": "Carlos Trujillo <carlangastr@gmail.com>"
+    }
+  }
+}

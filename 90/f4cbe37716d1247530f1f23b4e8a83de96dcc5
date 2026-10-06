@@ -1,0 +1,24 @@
+.github/workflows/ci.yml
+  s_70f459cca9fb15::t_b657cb89a515bd 150,234,241,259,267,269,275-276,288,298-299
+  s_70f459cca9fb15::t_1e0e753109e14d 33-41
+.github/workflows/uml.yml
+  s_70f459cca9fb15::t_ae871198fb0f85 36-37,40-41,45
+.pre-commit-config.yaml
+  s_70f459cca9fb15::t_edfd0ebcf85b5e 3-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "90f4cbe37716d1247530f1f23b4e8a83de96dcc5",
+  "prompts": {},
+  "sessions": {
+    "s_70f459cca9fb15": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4b324016-5037-4f62-93aa-24cc7dd27c2e",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}

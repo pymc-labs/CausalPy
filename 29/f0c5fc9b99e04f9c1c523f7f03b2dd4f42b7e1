@@ -1,0 +1,24 @@
+docs/source/notebooks/gallery.yaml
+  s_59d7612a60ef22::t_4ebed1430007f1 75
+docs/source/notebooks/interrupted-time-series-covid.ipynb
+  s_59d7612a60ef22::t_e5657ec4d5bc7d 34-37,63-66,107-110,266-269,318-321,399-402,450-453,527,531-534,562,656,660-663,713,717-720,792,812,816-819,891,954,967,972-973,983
+  s_59d7612a60ef22::t_a1324e9480c0df 17,25,506,924
+docs/source/notebooks/index.md
+  s_59d7612a60ef22::t_00b8f27f4b41a5 185
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "29f0c5fc9b99e04f9c1c523f7f03b2dd4f42b7e1",
+  "prompts": {},
+  "sessions": {
+    "s_59d7612a60ef22": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e7fa-07c8-7e50-8513-5c42f575bfe4",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
