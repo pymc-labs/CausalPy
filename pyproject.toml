@@ -99,7 +99,7 @@ docs = [
     "pymc-bart",
     "linkify-it-py",
     "myst-nb<=1.0.0",
-    "pylint",
+    "pylint>=4.1.1",
     "sphinx",
     "sphinx-autodoc-typehints",
     "sphinx_autodoc_defaultargs",
