@@ -1,0 +1,22 @@
+ARCHITECTURE.md
+  h_63db634213747e 118
+causalpy/experiments/_panel_counterfactual.py
+  h_63db634213747e 1-648
+causalpy/experiments/synthetic_control.py
+  h_63db634213747e 25-36,41,270,278,282-283,285-286,318-322,351-352,435,554-555,579-581,583-592,597-615,652-658,737-738,740-741,747
+causalpy/tests/test_hdi_prob_wiring.py
+  h_63db634213747e 340
+causalpy/tests/test_panel_counterfactual.py
+  h_63db634213747e 1-213
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3f9e4fabede9c172337511c4b14b1bf2c3ffea31",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
