@@ -112,6 +112,23 @@ def wide_panel_design(
     )
 
 
+def _obs_ind_text(values: xr.DataArray) -> str:
+    return ", ".join(str(value) for value in values.obs_ind.values.tolist())
+
+
+def _require_aligned_obs_ind(
+    treated: xr.DataArray, predicted: xr.DataArray, period: str
+) -> None:
+    """Reject a counterfactual whose time index does not match the treated series."""
+    if treated.obs_ind.equals(predicted.obs_ind):
+        return
+    raise ValueError(
+        f"{period} obs_ind mismatch: "
+        f"treated=[{_obs_ind_text(treated)}], "
+        f"predictions=[{_obs_ind_text(predicted)}]"
+    )
+
+
 def counterfactual_impacts(
     treated_pre: xr.DataArray,
     predictions_pre: xr.DataArray,
@@ -140,10 +157,8 @@ def counterfactual_impacts(
     tuple of xarray.DataArray
         Pre-period impact, post-period impact, and cumulative post-period impact.
     """
-    # Impact relies on exact obs_ind alignment; a mismatch (e.g. a bare
-    # ndarray X getting arange coords) would silently corrupt the subtraction.
-    assert treated_pre.obs_ind.equals(predictions_pre.obs_ind)
-    assert treated_post.obs_ind.equals(predictions_post.obs_ind)
+    _require_aligned_obs_ind(treated_pre, predictions_pre, "pre-period")
+    _require_aligned_obs_ind(treated_post, predictions_post, "post-period")
     impact_pre = (treated_pre - predictions_pre).transpose(
         ..., "obs_ind", "treated_units"
     )
@@ -284,12 +299,19 @@ def _format_panel_dates(
     pre_index: pd.Index,
     post_index: pd.Index,
 ) -> None:
+    """Format datetime axes without changing the figure's returned axes object.
+
+    ``list(ax)`` on a single ``Axes`` iterates child artists, so a lone axes
+    is wrapped instead. An ndarray from ``plt.subplots`` is copied to a list
+    for ``format_date_axes`` and is still returned unchanged by the plotter.
+    """
     if isinstance(pre_index, pd.DatetimeIndex):
         full_index = _combine_datetime_indices(
             pd.DatetimeIndex(pre_index),
             pd.DatetimeIndex(post_index),
         )
-        format_date_axes(axes, full_index)
+        axis_list = [axes] if isinstance(axes, plt.Axes) else list(axes)
+        format_date_axes(axis_list, full_index)
 
 
 def plot_panel_prior_check(
@@ -468,8 +490,8 @@ def plot_panel_counterfactual(
         labels.append(counterfactual_label)
         ax[0].plot(post_index, post_treated, "k.")
     else:
-        ax[0].plot(pre_treated["obs_ind"], pre_treated, "k.")
-        ax[0].plot(post_treated["obs_ind"], post_treated, "k.")
+        ax[0].plot(pre_index, pre_treated, "k.")
+        ax[0].plot(post_index, post_treated, "k.")
         ax[0].plot(
             pre_index,
             pre_pred.mean(dim=["chain", "draw"]),
@@ -580,6 +602,7 @@ def panel_effect_summary(
     post_index: pd.Index,
     *,
     group: Literal["prior", "posterior"],
+    experiment_type: str,
     window: Literal["post"] | tuple | slice = "post",
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
     alpha: float = 0.05,
@@ -588,7 +611,6 @@ def panel_effect_summary(
     min_effect: float | None = None,
     treated_unit: str | None = None,
     prefix: str = "Post-period",
-    experiment_type: str = "sc",
 ) -> EffectSummary:
     """Summarize a two-period panel counterfactual over ``window``.
 
@@ -616,8 +638,10 @@ def panel_effect_summary(
         Unit to summarize. ``None`` selects the first treated unit.
     prefix : str, optional
         Label prefix for the summary.
-    experiment_type : str, optional
-        Experiment token forwarded to the shared summary.
+    experiment_type : str
+        Experiment token forwarded to the shared summary. ``"sc"`` selects
+        synthetic-control assumptions. Callers that are not synthetic control
+        must pass their own token; there is no ``"sc"`` default.
 
     Returns
     -------

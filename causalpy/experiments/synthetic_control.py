@@ -746,4 +746,5 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             min_effect=min_effect,
             treated_unit=treated_unit,
             prefix=prefix,
+            experiment_type="sc",
         )
