@@ -42,6 +42,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
+import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
@@ -97,15 +98,24 @@ def _obs_ind_text(values: xr.DataArray) -> str:
 
 
 def _require_aligned_obs_ind(
-    treated: xr.DataArray, predicted: xr.DataArray, period: str
+    treated: xr.DataArray,
+    predicted: xr.DataArray,
+    period: str,
+    *,
+    name: str = "predictions",
 ) -> None:
-    """Reject a counterfactual whose time index does not match the treated series."""
+    """Reject a series whose time index does not match the treated series.
+
+    ``name`` is the right-hand label. ``impacts`` keeps the default
+    ``predictions``. Plot paths pass ``impact`` or ``cumulative impact`` when
+    that field is the mismatch.
+    """
     if treated.obs_ind.equals(predicted.obs_ind):
         return
     raise ValueError(
         f"{period} obs_ind mismatch: "
         f"treated=[{_obs_ind_text(treated)}], "
-        f"predictions=[{_obs_ind_text(predicted)}]"
+        f"{name}=[{_obs_ind_text(predicted)}]"
     )
 
 
@@ -168,8 +178,7 @@ class WidePanel:
 
     Not a public API. See the module docstring for what this seam shares and
     what it does not. ``control`` and ``treated_pre`` are the fit-facing reads.
-    Post-period treated outcomes stay inside :meth:`impacts`, :meth:`plot`, and
-    :meth:`plot_data`.
+    Post-period treated outcomes are read through :meth:`_treated_post` only.
     """
 
     treatment_time: int | float | pd.Timestamp
@@ -292,7 +301,7 @@ class WidePanel:
         style: _PosteriorPlotStyle,
         figsize: tuple[float, float],
         plot_predictors: bool,
-    ) -> tuple[plt.Figure, Any]:
+    ) -> tuple[plt.Figure, list[plt.Axes]] | tuple[plt.Figure, np.ndarray]:
         """Draw the prior-check figure or the three-panel posterior figure.
 
         The prior path returns a one-element list of axes. The posterior path
@@ -320,10 +329,12 @@ class WidePanel:
 
         Returns
         -------
-        tuple
-            The figure and its axes. Posterior axes are an ndarray.
+        tuple[matplotlib.figure.Figure, list[matplotlib.axes.Axes]] or tuple[matplotlib.figure.Figure, numpy.ndarray]
+            Posterior axes are the ndarray from ``plt.subplots``. Prior axes
+            are a one-element list.
         """
         unit = resolve_treated_unit(self.treated_units, treated_unit)
+        self._require_aligned_bundle(bundle, unit)
         pre_pred = bundle.predictions_pre.sel(treated_units=unit)
         post_pred = bundle.predictions_post.sel(treated_units=unit)
         pre_treated = self.treated_pre.sel(treated_units=unit)
@@ -399,6 +410,7 @@ class WidePanel:
         pre_data = self.pre.copy()
         post_data = self.post.copy()
         unit = resolve_treated_unit(self.treated_units, treated_unit)
+        self._require_aligned_bundle(bundle, unit)
         pre_pred = bundle.predictions_pre.sel(treated_units=unit)
         post_pred = bundle.predictions_post.sel(treated_units=unit)
         pre_impact = bundle.impact_pre.sel(treated_units=unit)
@@ -480,14 +492,15 @@ class WidePanel:
         EffectSummary
             The windowed post-period effect summary.
         """
+        unit = resolve_treated_unit(self.treated_units, treated_unit)
         windowed_impact, window_coords = _extract_window(
             bundle.impact_post,
             self.post.index,
             window,
-            treated_unit=treated_unit,
+            treated_unit=unit,
         )
         counterfactual = _extract_counterfactual(
-            bundle.predictions_post, window_coords, treated_unit=treated_unit
+            bundle.predictions_post, window_coords, treated_unit=unit
         )
         return _effect_summary_timeseries(
             windowed_impact,
@@ -521,6 +534,27 @@ class WidePanel:
     def _treated_post(self) -> xr.DataArray:
         """Observed post-period treated outcomes. Impact and display only."""
         return self._treated_array(self.post)
+
+    def _require_aligned_bundle(self, bundle: CausalResult, unit: str) -> None:
+        """Reject a bundle whose time index is not the stored period index."""
+        treated_pre = self.treated_pre.sel(treated_units=unit)
+        treated_post = self._treated_post().sel(treated_units=unit)
+        checks = (
+            (treated_pre, bundle.predictions_pre, "pre-period", "predictions"),
+            (treated_post, bundle.predictions_post, "post-period", "predictions"),
+            (treated_pre, bundle.impact_pre, "pre-period", "impact"),
+            (treated_post, bundle.impact_post, "post-period", "impact"),
+            (
+                treated_post,
+                bundle.impact_post_cumulative,
+                "post-period",
+                "cumulative impact",
+            ),
+        )
+        for treated, array, period, name in checks:
+            _require_aligned_obs_ind(
+                treated, array.sel(treated_units=unit), period, name=name
+            )
 
 
 def _plot_prior_check(
@@ -593,7 +627,7 @@ def _plot_counterfactual(
     style: _PosteriorPlotStyle,
     figsize: tuple[float, float],
     plot_predictors: bool,
-) -> tuple[plt.Figure, Any]:
+) -> tuple[plt.Figure, np.ndarray]:
     """Render the three-panel counterfactual, impact, and cumulative figure.
 
     Called only by :meth:`WidePanel.plot`. The returned axes are the ndarray

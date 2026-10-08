@@ -196,7 +196,7 @@ def test_plot_frame_names_hdi_columns_from_the_requested_probability():
 
 
 def test_unknown_treated_unit_names_the_available_units():
-    """The plot-data lookup uses the same missing-unit error as SyntheticControl."""
+    """Plot data and the effect summary share the missing-unit error."""
     index = pd.Index([0])
     observed = pd.DataFrame({"donor": [0.0], "actual": [0.0]}, index=index)
     prediction = _draws(np.ones((1, 1, 1, 1)), index)
@@ -207,8 +207,16 @@ def test_unknown_treated_unit_names_the_available_units():
         impact_post=prediction,
         impact_post_cumulative=prediction,
     )
+    panel = _panel(observed, observed, 0)
     with pytest.raises(ValueError, match="Available units: \\['actual'\\]"):
-        _panel(observed, observed, 0).plot_data(bundle, treated_unit="missing")
+        panel.plot_data(bundle, treated_unit="missing")
+    with pytest.raises(ValueError, match="Available units: \\['actual'\\]"):
+        panel.effect_summary(
+            bundle,
+            group="posterior",
+            experiment_type="other",
+            treated_unit="missing",
+        )
 
 
 def test_fit_inputs_exclude_treated_post_outcomes(sc_data):
@@ -276,8 +284,80 @@ def test_effect_summary_does_not_default_to_synthetic_control_assumptions(sc_dat
     )
 
 
+def _plot_kwargs() -> dict:
+    return {
+        "group": "posterior",
+        "treated_unit": None,
+        "title": "point estimate",
+        "style": _STYLE,
+        "figsize": (4, 6),
+        "plot_predictors": False,
+    }
+
+
+def test_plot_and_plot_data_reject_a_misaligned_time_index():
+    """A permuted coordinate fails in the figure path and names the bad field."""
+    pre = pd.DataFrame(
+        {"donor": [0.0, 0.0, 0.0], "actual": [1.0, 2.0, 3.0]}, index=[0, 1, 2]
+    )
+    post = pd.DataFrame({"donor": [0.0, 0.0], "actual": [4.0, 5.0]}, index=[3, 4])
+    panel = _panel(pre, post, 3)
+    aligned_pre = _draws(np.ones((1, 1, 3, 1)), pd.Index([0, 1, 2]))
+    aligned_post = _draws(np.ones((1, 1, 2, 1)), pd.Index([3, 4]))
+    reversed_pre = _draws(np.array([[[[30.0], [20.0], [10.0]]]]), pd.Index([2, 1, 0]))
+    reversed_post = _draws(np.array([[[[50.0], [40.0]]]]), pd.Index([4, 3]))
+    shifted = CausalResult(
+        predictions_pre=_draws(np.zeros((1, 1, 3, 1)), pd.Index([10, 11, 12])),
+        predictions_post=_draws(np.zeros((1, 1, 2, 1)), pd.Index([13, 14])),
+        impact_pre=aligned_pre,
+        impact_post=aligned_post,
+        impact_post_cumulative=aligned_post,
+    )
+    cases = (
+        (
+            CausalResult(
+                predictions_pre=reversed_pre,
+                predictions_post=reversed_post,
+                impact_pre=aligned_pre,
+                impact_post=aligned_post,
+                impact_post_cumulative=aligned_post,
+            ),
+            r"pre-period obs_ind mismatch: treated=\[0, 1, 2\], predictions=\[2, 1, 0\]",
+        ),
+        (
+            shifted,
+            r"pre-period obs_ind mismatch: treated=\[0, 1, 2\], predictions=\[10, 11, 12\]",
+        ),
+        (
+            CausalResult(
+                predictions_pre=aligned_pre,
+                predictions_post=aligned_post,
+                impact_pre=aligned_pre,
+                impact_post=reversed_post,
+                impact_post_cumulative=aligned_post,
+            ),
+            r"post-period obs_ind mismatch: treated=\[3, 4\], impact=\[4, 3\]",
+        ),
+        (
+            CausalResult(
+                predictions_pre=aligned_pre,
+                predictions_post=aligned_post,
+                impact_pre=aligned_pre,
+                impact_post=aligned_post,
+                impact_post_cumulative=reversed_post,
+            ),
+            r"post-period obs_ind mismatch: treated=\[3, 4\], cumulative impact=\[4, 3\]",
+        ),
+    )
+    for bundle, message in cases:
+        with pytest.raises(ValueError, match=message):
+            panel.plot_data(bundle)
+        with pytest.raises(ValueError, match=message):
+            panel.plot(bundle, **_plot_kwargs())
+
+
 def test_point_estimate_observations_use_the_panel_index():
-    """Observations are drawn on the stored index, not the prediction coordinate."""
+    """Marker x and the fit line follow the stored index, not array position."""
     pre_index = pd.Index([0, 1, 2])
     post_index = pd.Index([3, 4])
     panel = _panel(
@@ -285,29 +365,32 @@ def test_point_estimate_observations_use_the_panel_index():
         pd.DataFrame({"donor": 0.0, "actual": 1.0}, index=post_index),
         3,
     )
+    pre_fit = np.array([30.0, 10.0, 20.0])
+    post_fit = np.array([50.0, 40.0])
     bundle = CausalResult(
-        predictions_pre=_draws(np.zeros((1, 1, 3, 1)), pd.Index([10, 11, 12])),
-        predictions_post=_draws(np.zeros((1, 1, 2, 1)), pd.Index([13, 14])),
-        impact_pre=_draws(np.zeros((1, 1, 3, 1)), pd.Index([10, 11, 12])),
-        impact_post=_draws(np.zeros((1, 1, 2, 1)), pd.Index([13, 14])),
-        impact_post_cumulative=_draws(np.zeros((1, 1, 2, 1)), pd.Index([13, 14])),
+        predictions_pre=_draws(pre_fit.reshape(1, 1, 3, 1), pre_index),
+        predictions_post=_draws(post_fit.reshape(1, 1, 2, 1), post_index),
+        impact_pre=_draws(np.zeros((1, 1, 3, 1)), pre_index),
+        impact_post=_draws(np.zeros((1, 1, 2, 1)), post_index),
+        impact_post_cumulative=_draws(np.zeros((1, 1, 2, 1)), post_index),
     )
-    figure, axes = panel.plot(
-        bundle,
-        group="posterior",
-        treated_unit="actual",
-        title="point estimate",
-        style=_STYLE,
-        figsize=(4, 6),
-        plot_predictors=False,
-    )
-    assert isinstance(axes, np.ndarray)
+    frame = panel.plot_data(bundle)
+    np.testing.assert_allclose(frame["prediction"], [30.0, 10.0, 20.0, 50.0, 40.0])
+    figure, axes = panel.plot(bundle, **_plot_kwargs())
     observation_x = [
         list(line.get_xdata())
         for line in axes[0].get_lines()
         if line.get_marker() == "."
     ]
+    fit = next(line for line in axes[0].get_lines() if line.get_label() == "model fit")
+    counterfactual = next(
+        line for line in axes[0].get_lines() if line.get_label() == "Counterfactual"
+    )
     assert observation_x == [[0, 1, 2], [3, 4]]
+    np.testing.assert_allclose(fit.get_xdata(), [0, 1, 2])
+    np.testing.assert_allclose(fit.get_ydata(), pre_fit)
+    np.testing.assert_allclose(counterfactual.get_xdata(), [3, 4])
+    np.testing.assert_allclose(counterfactual.get_ydata(), post_fit)
     plt.close(figure)
 
 

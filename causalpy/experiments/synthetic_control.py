@@ -285,22 +285,15 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         """Rename the donor axis to ``coeffs`` for ``WeightedSumFitter``.
 
         The shared panel keeps ``control_units``. Post-period treated outcomes
-        are built here for existing ``post_design`` consumers. The panel has no
-        post-treated accessor; new experiments use :meth:`WidePanel.impacts`.
+        come from :meth:`WidePanel._treated_post`, so ``post_design["treated"]``
+        cannot drift from what impact subtracts. That method stays private.
+        New experiments use :meth:`WidePanel.impacts`.
         """
         control = self._panel.control(period).rename({"control_units": "coeffs"})
         if period == "pre":
             treated = self._panel.treated_pre
         else:
-            frame = self._panel.post
-            treated = xr.DataArray(
-                frame[self.treated_units],
-                dims=["obs_ind", "treated_units"],
-                coords={
-                    "obs_ind": frame.index,
-                    "treated_units": self.treated_units,
-                },
-            )
+            treated = self._panel._treated_post()
         return xr.Dataset({"control": control, "treated": treated})
 
     def _pin_legacy_sigma_prior(self) -> None:
@@ -442,16 +435,6 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         for unit, r in corrs.items():
             print(f"Pre-treatment correlation ({unit}): {r:.4f}")
 
-    @staticmethod
-    def _convert_treatment_time_for_axis(
-        axis: plt.Axes, treatment_time: int | float | pd.Timestamp
-    ) -> int | float | pd.Timestamp:
-        """Convert treatment time into the plotting units expected by a specific axis."""
-        try:
-            return axis.xaxis.convert_units(treatment_time)
-        except (TypeError, ValueError):
-            return treatment_time
-
     def plot(
         self,
         *,
@@ -466,7 +449,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         figsize: tuple[float, float] = (7, 8),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    ) -> tuple[plt.Figure, list[plt.Axes]] | tuple[plt.Figure, np.ndarray]:
         """Plot the synthetic control results for a specific treated unit.
 
         Parameters
@@ -526,9 +509,10 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         -------
         fig : matplotlib.figure.Figure
             The figure that was created.
-        ax : list[matplotlib.axes.Axes]
-            The three axes (top: predictions, middle: causal impact,
-            bottom: cumulative impact).
+        ax : list[matplotlib.axes.Axes] or numpy.ndarray
+            Posterior axes are the ndarray from ``plt.subplots`` (top:
+            predictions, middle: causal impact, bottom: cumulative impact).
+            Prior axes are a one-element list.
         """
         return self._render_plot(
             show=show,
@@ -557,7 +541,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         plot_predictors: bool = False,
         figsize: tuple[float, float] = (7, 8),
         **kwargs: Any,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    ) -> tuple[plt.Figure, list[plt.Axes]] | tuple[plt.Figure, np.ndarray]:
         """
         Plot the posterior or prior-check figure for a specific treated unit.
 

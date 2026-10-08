@@ -123,9 +123,9 @@ class UpDownGeoLift(SyntheticControl):
         plot_predictors: bool = False,
         figsize: tuple[float, float] = (7, 8),
         **kwargs: Any,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+    ) -> tuple[plt.Figure, list[plt.Axes]] | tuple[plt.Figure, np.ndarray]:
         """Label the inherited synthetic-control diagnostics in revenue units."""
-        fig, axes = super()._plot(
+        plotted = super()._plot(
             group=group,
             round_to=round_to,
             treated_unit=treated_unit,
@@ -137,6 +137,7 @@ class UpDownGeoLift(SyntheticControl):
             figsize=figsize,
             **kwargs,
         )
+        _, axes = plotted
         period_unit = f" ({self.outcome_unit})" if self.outcome_unit else ""
         axes[0].set_ylabel(f"Revenue{period_unit}")
         if group == "posterior":
@@ -154,7 +155,7 @@ class UpDownGeoLift(SyntheticControl):
                 axis.yaxis.set_major_formatter(StrMethodFormatter("${x:,.1f}"))
         geo = self.treated_units[0] if treated_unit is None else treated_unit
         axes[0].set_title(f"{geo}: {axes[0].get_title()}")
-        return fig, axes
+        return plotted
 
     @property
     def impact_draws(self) -> xr.DataArray:
