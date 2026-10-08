@@ -296,7 +296,7 @@ def _plot_kwargs() -> dict:
 
 
 def test_plot_and_plot_data_reject_a_misaligned_time_index():
-    """A permuted coordinate fails in the figure path and names the bad field."""
+    """A permuted coordinate fails in the figure path, the summary, and names the bad field."""
     pre = pd.DataFrame(
         {"donor": [0.0, 0.0, 0.0], "actual": [1.0, 2.0, 3.0]}, index=[0, 1, 2]
     )
@@ -354,6 +354,46 @@ def test_plot_and_plot_data_reject_a_misaligned_time_index():
             panel.plot_data(bundle)
         with pytest.raises(ValueError, match=message):
             panel.plot(bundle, **_plot_kwargs())
+        with pytest.raises(ValueError, match=message):
+            panel.effect_summary(bundle, group="posterior", experiment_type="other")
+
+
+def test_prediction_without_treated_units_is_rejected():
+    """A shared prediction is not broadcast onto every treated unit."""
+    pre = pd.DataFrame(
+        {"donor": [0.0, 0.0], "t1": [1.0, 2.0], "t2": [3.0, 4.0]}, index=[0, 1]
+    )
+    post = pd.DataFrame(
+        {"donor": [0.0, 0.0], "t1": [4.0, 7.0], "t2": [40.0, 70.0]}, index=[2, 3]
+    )
+    panel = _panel(pre, post, 2, treated_units=["t1", "t2"])
+    aligned_pre = xr.DataArray(
+        np.zeros((1, 1, 2, 2)),
+        dims=["chain", "draw", "obs_ind", "treated_units"],
+        coords={"obs_ind": [0, 1], "treated_units": ["t1", "t2"]},
+    )
+    shared_post = xr.DataArray(
+        np.array([[[1.0, 2.0]]]),
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [2, 3]},
+    )
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"post-period predictions lack a treated_units dimension. "
+            r"Available units: \['t1', 't2'\]"
+        ),
+    ):
+        panel.impacts(aligned_pre, shared_post)
+    per_unit_post = xr.DataArray(
+        np.array([[[[1.0, 1.0], [2.0, 2.0]]]]),
+        dims=["chain", "draw", "obs_ind", "treated_units"],
+        coords={"obs_ind": [2, 3], "treated_units": ["t1", "t2"]},
+    )
+    _, impact_post, _ = panel.impacts(aligned_pre, per_unit_post)
+    np.testing.assert_allclose(
+        impact_post.sel(treated_units="t1").values, [[[3.0, 5.0]]]
+    )
 
 
 def test_point_estimate_observations_use_the_panel_index():

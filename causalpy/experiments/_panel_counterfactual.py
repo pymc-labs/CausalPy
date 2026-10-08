@@ -119,6 +119,18 @@ def _require_aligned_obs_ind(
     )
 
 
+def _require_treated_units_dim(
+    predicted: xr.DataArray, units: Sequence[str], period: str
+) -> None:
+    """Reject a prediction that would broadcast onto every treated unit."""
+    if "treated_units" in predicted.dims:
+        return
+    raise ValueError(
+        f"{period} predictions lack a treated_units dimension. "
+        f"Available units: {list(units)}"
+    )
+
+
 def _counterfactual_impacts(
     treated_pre: xr.DataArray,
     predictions_pre: xr.DataArray,
@@ -128,9 +140,14 @@ def _counterfactual_impacts(
     """Subtract the counterfactual from the observed treated outcomes.
 
     Called only by :meth:`WidePanel.impacts`. Impact is aligned on ``obs_ind``.
-    A coordinate mismatch is an error, not a silent reindex. Cumulative impact
-    is the running sum of the post-period impact.
+    A coordinate mismatch is an error, not a silent reindex. A prediction
+    without a ``treated_units`` dimension is an error, not a broadcast onto
+    every treated unit. Cumulative impact is the running sum of the post-period
+    impact.
     """
+    units = treated_pre.coords["treated_units"].values.tolist()
+    _require_treated_units_dim(predictions_pre, units, "pre-period")
+    _require_treated_units_dim(predictions_post, units, "post-period")
     _require_aligned_obs_ind(treated_pre, predictions_pre, "pre-period")
     _require_aligned_obs_ind(treated_post, predictions_post, "post-period")
     impact_pre = (treated_pre - predictions_pre).transpose(
@@ -269,7 +286,8 @@ class WidePanel:
         """Return pre-period, post-period, and cumulative post-period impact.
 
         Impact is observed minus counterfactual. The post-period treated series
-        is read from the stored frame and is not an argument.
+        is read from the stored frame and is not an argument. Each prediction
+        must carry a ``treated_units`` dimension.
 
         Parameters
         ----------
@@ -460,6 +478,9 @@ class WidePanel:
     ) -> EffectSummary:
         """Summarize the stored post period over ``window``.
 
+        The bundle must share the stored time index. A mismatch raises the same
+        ``ValueError`` as :meth:`plot`.
+
         Parameters
         ----------
         bundle : CausalResult
@@ -493,6 +514,7 @@ class WidePanel:
             The windowed post-period effect summary.
         """
         unit = resolve_treated_unit(self.treated_units, treated_unit)
+        self._require_aligned_bundle(bundle, unit)
         windowed_impact, window_coords = _extract_window(
             bundle.impact_post,
             self.post.index,
