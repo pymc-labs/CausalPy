@@ -1,29 +1,45 @@
-#   Copyright 2025 - 2026 The PyMC Labs Developers
+# Copyright 2025 - 2026 The PyMC Labs Developers
 #
-#   Licensed under the Apache License, Version 2.0 (the "License");
-#   you may not use this file except in compliance with the License.
-#   You may obtain a copy of the License at
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-#       http://www.apache.org/licenses/LICENSE-2.0
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-#   Unless required by applicable law or agreed to in writing, software
-#   distributed under the License is distributed on an "AS IS" BASIS,
-#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-#   See the License for the specific language governing permissions and
-#   limitations under the License.
-"""Shared wide-panel counterfactual helpers.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""Private wide-panel counterfactual seam.
 
-``SyntheticControl`` calls these. Later wide-panel counterfactual experiments
-should call them too, rather than subclassing ``SyntheticControl``. This module
-is not a public API.
+``WidePanel`` is the call surface. ``SyntheticControl`` holds one. Later
+wide-panel counterfactual experiments should hold one too, rather than
+subclassing ``SyntheticControl``. This module is not a public API.
 
-The post-period treated outcomes are stored so impact can be computed. They
-are not a fit input. Callers must not pass them to a model, and must not use
-them to tune a penalty or a rank.
+Shared: the treatment time is post-period (rows at ``treatment_time`` are
+post); impact is observed minus counterfactual, aligned on ``obs_ind``; the
+three-panel counterfactual figure and the reduced prior-check figure; the
+observed-plus-prediction plot frame, donor columns included; effect-summary
+windowing over the post period.
+
+Not shared: donor names as ``coeffs`` (that rename belongs to
+``WeightedSumFitter`` and stays inside ``SyntheticControl``);
+``ModelAdapter.predict`` on post-period donor rows; the score or R² title;
+``isinstance(SyntheticControl)`` checks; synthetic difference-in-differences.
+
+Fit rule: donor outcomes at every time, and treated outcomes strictly before
+``treatment_time``, may enter a fit or a tuning choice. Treated outcomes at
+or after ``treatment_time`` are impact and display only. Penalty and rank
+choice use that same allowed set. There is no ``treated_post`` accessor and
+no ``treated(period)`` twin of ``control(period)``. ``plot`` and
+``plot_data`` read the stored post-period treated series themselves.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import pandas as pd
@@ -47,69 +63,33 @@ from causalpy.reporting import (
 )
 
 
-def panel_period_frames(
-    data: pd.DataFrame, treatment_time: int | float | pd.Timestamp
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split a wide panel at ``treatment_time``.
-
-    Pre-period rows have ``index < treatment_time``. Post-period rows have
-    ``index >= treatment_time``. The treatment time itself is post-period.
+def resolve_treated_unit(treated_units: Sequence[str], treated_unit: str | None) -> str:
+    """Return ``treated_unit``, or the first name when it is omitted.
 
     Parameters
     ----------
-    data : pandas.DataFrame
-        Wide panel indexed by time.
-    treatment_time : int, float, or pandas.Timestamp
-        First post-period time. Rows at this time are post-period.
+    treated_units : sequence of str
+        Treated-unit names stored on the experiment.
+    treated_unit : str or None
+        Requested unit. ``None`` selects the first name.
 
     Returns
     -------
-    tuple of pandas.DataFrame
-        Pre-period frame, then post-period frame.
+    str
+        The resolved treated-unit name.
+
+    Raises
+    ------
+    ValueError
+        If ``treated_unit`` is not in ``treated_units``.
     """
-    pre = data[data.index < treatment_time]
-    post = data[data.index >= treatment_time]
-    return pre, post
-
-
-def wide_panel_design(
-    frame: pd.DataFrame, control_units: list[str], treated_units: list[str]
-) -> xr.Dataset:
-    """Bundle one period of a wide unit panel into control and treated arrays.
-
-    ``control`` has dims ``("obs_ind", "coeffs")``. ``treated`` has dims
-    ``("obs_ind", "treated_units")``.
-
-    Parameters
-    ----------
-    frame : pandas.DataFrame
-        One period of the wide panel.
-    control_units : list of str
-        Donor columns. These become the ``coeffs`` coordinate.
-    treated_units : list of str
-        Treated columns. These become the ``treated_units`` coordinate.
-
-    Returns
-    -------
-    xarray.Dataset
-        ``control`` and ``treated`` arrays for the period.
-    """
-    control = frame[control_units]
-    treated = frame[treated_units]
-    return xr.Dataset(
-        {
-            "control": xr.DataArray(
-                control,
-                dims=["obs_ind", "coeffs"],
-                coords={"obs_ind": control.index, "coeffs": control_units},
-            ),
-            "treated": xr.DataArray(
-                treated,
-                dims=["obs_ind", "treated_units"],
-                coords={"obs_ind": treated.index, "treated_units": treated_units},
-            ),
-        }
-    )
+    names = list(treated_units)
+    treated_unit = treated_unit if treated_unit is not None else names[0]
+    if treated_unit not in names:
+        raise ValueError(
+            f"treated_unit '{treated_unit}' not found. Available units: {names}"
+        )
+    return treated_unit
 
 
 def _obs_ind_text(values: xr.DataArray) -> str:
@@ -129,7 +109,7 @@ def _require_aligned_obs_ind(
     )
 
 
-def counterfactual_impacts(
+def _counterfactual_impacts(
     treated_pre: xr.DataArray,
     predictions_pre: xr.DataArray,
     treated_post: xr.DataArray,
@@ -137,25 +117,9 @@ def counterfactual_impacts(
 ) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray]:
     """Subtract the counterfactual from the observed treated outcomes.
 
-    Impact is aligned on ``obs_ind``. A coordinate mismatch is an error, not a
-    silent reindex. Cumulative impact is the running sum of the post-period
-    impact.
-
-    Parameters
-    ----------
-    treated_pre : xarray.DataArray
-        Observed treated outcomes before intervention.
-    predictions_pre : xarray.DataArray
-        Counterfactual predictions on the same pre-period ``obs_ind``.
-    treated_post : xarray.DataArray
-        Observed treated outcomes from the treatment time onward.
-    predictions_post : xarray.DataArray
-        Counterfactual predictions on the same post-period ``obs_ind``.
-
-    Returns
-    -------
-    tuple of xarray.DataArray
-        Pre-period impact, post-period impact, and cumulative post-period impact.
+    Called only by :meth:`WidePanel.impacts`. Impact is aligned on ``obs_ind``.
+    A coordinate mismatch is an error, not a silent reindex. Cumulative impact
+    is the running sum of the post-period impact.
     """
     _require_aligned_obs_ind(treated_pre, predictions_pre, "pre-period")
     _require_aligned_obs_ind(treated_post, predictions_post, "post-period")
@@ -168,130 +132,14 @@ def counterfactual_impacts(
     return impact_pre, impact_post, impact_post.cumsum(dim="obs_ind")
 
 
-def resolve_treated_unit(treated_units: list[str], treated_unit: str | None) -> str:
-    """Return ``treated_unit``, or the first name when it is omitted.
-
-    Parameters
-    ----------
-    treated_units : list of str
-        Treated-unit names stored on the experiment.
-    treated_unit : str or None
-        Requested unit. ``None`` selects the first name.
-
-    Returns
-    -------
-    str
-        The resolved treated-unit name.
-
-    Raises
-    ------
-    ValueError
-        If ``treated_unit`` is not in ``treated_units``.
-    """
-    treated_unit = treated_unit if treated_unit is not None else treated_units[0]
-    if treated_unit not in treated_units:
-        raise ValueError(
-            f"treated_unit '{treated_unit}' not found. Available units: {treated_units}"
-        )
-    return treated_unit
-
-
-def convert_treatment_time_for_axis(
+def _convert_treatment_time_for_axis(
     axis: plt.Axes, treatment_time: int | float | pd.Timestamp
 ) -> int | float | pd.Timestamp:
-    """Convert treatment time into the plotting units expected by an axis.
-
-    Parameters
-    ----------
-    axis : matplotlib.axes.Axes
-        Axis whose x-axis units should receive the treatment time.
-    treatment_time : int, float, or pandas.Timestamp
-        Treatment time in the experiment's index units.
-
-    Returns
-    -------
-    int, float, or pandas.Timestamp
-        The converted coordinate, or the original value when conversion fails.
-    """
+    """Convert treatment time into the plotting units expected by an axis."""
     try:
         return axis.xaxis.convert_units(treatment_time)
     except (TypeError, ValueError):
         return treatment_time
-
-
-def panel_plot_frame(
-    datapre: pd.DataFrame,
-    datapost: pd.DataFrame,
-    bundle: CausalResult,
-    treated_units: list[str],
-    *,
-    treated_unit: str | None = None,
-    hdi_prob: float = HDI_PROB,
-) -> pd.DataFrame:
-    """Build the observed-plus-prediction frame for one treated unit.
-
-    HDI columns are included only when the prediction container carries
-    posterior draws. Point-estimate backends return ``prediction`` and
-    ``impact`` only.
-
-    Parameters
-    ----------
-    datapre : pandas.DataFrame
-        Observed pre-period panel.
-    datapost : pandas.DataFrame
-        Observed post-period panel.
-    bundle : CausalResult
-        Predictions and impacts for the requested draw group.
-    treated_units : list of str
-        Treated-unit names stored on the experiment.
-    treated_unit : str or None, optional
-        Unit to extract. ``None`` selects the first name.
-    hdi_prob : float, optional
-        Probability mass of the HDI columns. Ignored for point estimates.
-
-    Returns
-    -------
-    pandas.DataFrame
-        Pre-period and post-period rows with prediction and impact columns.
-    """
-    with_uncertainty = has_posterior_draws(bundle.predictions_pre)
-    hdi_pct = int(round(hdi_prob * 100))
-    pre_data = datapre.copy()
-    post_data = datapost.copy()
-    treated_unit = resolve_treated_unit(treated_units, treated_unit)
-
-    pre_pred = bundle.predictions_pre.sel(treated_units=treated_unit)
-    post_pred = bundle.predictions_post.sel(treated_units=treated_unit)
-    pre_impact = bundle.impact_pre.sel(treated_units=treated_unit)
-    post_impact = bundle.impact_post.sel(treated_units=treated_unit)
-
-    pre_data["prediction"] = pre_pred.mean(dim=["chain", "draw"]).values
-    post_data["prediction"] = post_pred.mean(dim=["chain", "draw"]).values
-
-    if with_uncertainty:
-        pred_lower_col = f"pred_hdi_lower_{hdi_pct}"
-        pred_upper_col = f"pred_hdi_upper_{hdi_pct}"
-        pre_hdi = get_hdi_to_df(pre_pred, hdi_prob=hdi_prob)
-        post_hdi = get_hdi_to_df(post_pred, hdi_prob=hdi_prob)
-        pre_data[[pred_lower_col, pred_upper_col]] = pre_hdi.iloc[:, [0, -1]].values
-        post_data[[pred_lower_col, pred_upper_col]] = post_hdi.iloc[:, [0, -1]].values
-
-    pre_data["impact"] = pre_impact.mean(dim=["chain", "draw"]).values
-    post_data["impact"] = post_impact.mean(dim=["chain", "draw"]).values
-
-    if with_uncertainty:
-        impact_lower_col = f"impact_hdi_lower_{hdi_pct}"
-        impact_upper_col = f"impact_hdi_upper_{hdi_pct}"
-        pre_impact_hdi = get_hdi_to_df(pre_impact, hdi_prob=hdi_prob)
-        post_impact_hdi = get_hdi_to_df(post_impact, hdi_prob=hdi_prob)
-        pre_data[[impact_lower_col, impact_upper_col]] = pre_impact_hdi.iloc[
-            :, [0, -1]
-        ].values
-        post_data[[impact_lower_col, impact_upper_col]] = post_impact_hdi.iloc[
-            :, [0, -1]
-        ].values
-
-    return pd.concat([pre_data, post_data])
 
 
 def _format_panel_dates(
@@ -314,7 +162,368 @@ def _format_panel_dates(
         format_date_axes(axis_list, full_index)
 
 
-def plot_panel_prior_check(
+@dataclass(frozen=True)
+class WidePanel:
+    """Stored wide-panel split for a counterfactual experiment.
+
+    Not a public API. See the module docstring for what this seam shares and
+    what it does not. ``control`` and ``treated_pre`` are the fit-facing reads.
+    Post-period treated outcomes stay inside :meth:`impacts`, :meth:`plot`, and
+    :meth:`plot_data`.
+    """
+
+    treatment_time: int | float | pd.Timestamp
+    control_units: tuple[str, ...]
+    treated_units: tuple[str, ...]
+    pre: pd.DataFrame
+    post: pd.DataFrame
+
+    @classmethod
+    def from_frame(
+        cls,
+        data: pd.DataFrame,
+        treatment_time: int | float | pd.Timestamp,
+        control_units: Sequence[str],
+        treated_units: Sequence[str],
+    ) -> WidePanel:
+        """Split ``data`` once and store the two period frames.
+
+        Pre-period rows have ``index < treatment_time``. Post-period rows have
+        ``index >= treatment_time``. The treatment time itself is post-period.
+        The stored frames are copies, so later reads do not re-split ``data``.
+
+        Parameters
+        ----------
+        data : pandas.DataFrame
+            Wide panel indexed by time.
+        treatment_time : int, float, or pandas.Timestamp
+            First post-period time. Rows at this time are post-period.
+        control_units : sequence of str
+            Donor columns.
+        treated_units : sequence of str
+            Treated columns.
+
+        Returns
+        -------
+        WidePanel
+            The stored split.
+        """
+        pre = data.loc[data.index < treatment_time].copy()
+        post = data.loc[data.index >= treatment_time].copy()
+        return cls(
+            treatment_time=treatment_time,
+            control_units=tuple(control_units),
+            treated_units=tuple(treated_units),
+            pre=pre,
+            post=post,
+        )
+
+    def control(self, period: Literal["pre", "post"]) -> xr.DataArray:
+        """Return donor outcomes for ``period``.
+
+        Dims are ``("obs_ind", "control_units")``. This is not the
+        ``WeightedSumFitter`` ``coeffs`` axis.
+
+        Parameters
+        ----------
+        period : {"pre", "post"}
+            Which stored frame to read.
+
+        Returns
+        -------
+        xarray.DataArray
+            Donor outcomes on ``obs_ind × control_units``.
+        """
+        frame = self._period_frame(period)
+        units = list(self.control_units)
+        return xr.DataArray(
+            frame[units],
+            dims=["obs_ind", "control_units"],
+            coords={"obs_ind": frame.index, "control_units": units},
+        )
+
+    @property
+    def treated_pre(self) -> xr.DataArray:
+        """Observed treated outcomes strictly before ``treatment_time``.
+
+        Dims are ``("obs_ind", "treated_units")``. This series may enter a
+        unit-level fit. Post-period treated outcomes are not available through
+        a matching accessor.
+        """
+        return self._treated_array(self.pre)
+
+    def impacts(
+        self,
+        predictions_pre: xr.DataArray,
+        predictions_post: xr.DataArray,
+    ) -> tuple[xr.DataArray, xr.DataArray, xr.DataArray]:
+        """Return pre-period, post-period, and cumulative post-period impact.
+
+        Impact is observed minus counterfactual. The post-period treated series
+        is read from the stored frame and is not an argument.
+
+        Parameters
+        ----------
+        predictions_pre : xarray.DataArray
+            Counterfactual predictions on the pre-period ``obs_ind``.
+        predictions_post : xarray.DataArray
+            Counterfactual predictions on the post-period ``obs_ind``.
+
+        Returns
+        -------
+        tuple of xarray.DataArray
+            Pre-period impact, post-period impact, and cumulative post-period
+            impact.
+        """
+        return _counterfactual_impacts(
+            self.treated_pre,
+            predictions_pre,
+            self._treated_post(),
+            predictions_post,
+        )
+
+    def plot(
+        self,
+        bundle: CausalResult,
+        *,
+        group: Literal["prior", "posterior"],
+        treated_unit: str | None,
+        title: str,
+        style: _PosteriorPlotStyle,
+        figsize: tuple[float, float],
+        plot_predictors: bool,
+    ) -> tuple[plt.Figure, Any]:
+        """Draw the prior-check figure or the three-panel posterior figure.
+
+        The prior path returns a one-element list of axes. The posterior path
+        returns the ndarray from ``plt.subplots``. Observed post-period outcomes
+        are read from the stored frame. ``title`` is the score text owned by
+        the caller; the prior figure ignores it.
+
+        Parameters
+        ----------
+        bundle : CausalResult
+            Predictions and impacts for ``group``.
+        group : {"prior", "posterior"}
+            ``"prior"`` draws the reduced figure. ``"posterior"`` draws three
+            panels.
+        treated_unit : str or None
+            Unit to draw. ``None`` selects the first treated name.
+        title : str
+            Title of the posterior counterfactual panel.
+        style : dict
+            Interval style forwarded to the posterior plotting helper.
+        figsize : tuple of float
+            Figure size in inches.
+        plot_predictors : bool
+            Whether to overlay donor trajectories.
+
+        Returns
+        -------
+        tuple
+            The figure and its axes. Posterior axes are an ndarray.
+        """
+        unit = resolve_treated_unit(self.treated_units, treated_unit)
+        pre_pred = bundle.predictions_pre.sel(treated_units=unit)
+        post_pred = bundle.predictions_post.sel(treated_units=unit)
+        pre_treated = self.treated_pre.sel(treated_units=unit)
+        post_treated = self._treated_post().sel(treated_units=unit)
+        pre_control = self.control("pre")
+        post_control = self.control("post")
+        if group == "prior":
+            return _plot_prior_check(
+                pre_index=self.pre.index,
+                post_index=self.post.index,
+                pre_pred=pre_pred,
+                post_pred=post_pred,
+                pre_treated=pre_treated,
+                post_treated=post_treated,
+                pre_control=pre_control,
+                post_control=post_control,
+                treatment_time=self.treatment_time,
+                style=style,
+                figsize=figsize,
+                plot_predictors=plot_predictors,
+            )
+        if group != "posterior":
+            raise ValueError(f"group must be 'prior' or 'posterior', got {group!r}.")
+        return _plot_counterfactual(
+            pre_index=self.pre.index,
+            post_index=self.post.index,
+            pre_pred=pre_pred,
+            post_pred=post_pred,
+            pre_impact=bundle.impact_pre.sel(treated_units=unit),
+            post_impact=bundle.impact_post.sel(treated_units=unit),
+            post_impact_cumulative=bundle.impact_post_cumulative.sel(
+                treated_units=unit
+            ),
+            pre_treated=pre_treated,
+            post_treated=post_treated,
+            pre_control=pre_control,
+            post_control=post_control,
+            treatment_time=self.treatment_time,
+            title=title,
+            style=style,
+            figsize=figsize,
+            plot_predictors=plot_predictors,
+        )
+
+    def plot_data(
+        self,
+        bundle: CausalResult,
+        *,
+        treated_unit: str | None = None,
+        hdi_prob: float = HDI_PROB,
+    ) -> pd.DataFrame:
+        """Build the observed-plus-prediction frame for one treated unit.
+
+        The frame keeps every stored column, including donors. HDI columns are
+        included only when the prediction container carries posterior draws.
+
+        Parameters
+        ----------
+        bundle : CausalResult
+            Predictions and impacts for the requested draw group.
+        treated_unit : str or None, optional
+            Unit to extract. ``None`` selects the first name.
+        hdi_prob : float, optional
+            Probability mass of the HDI columns. Ignored for point estimates.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Pre-period and post-period rows with prediction and impact columns.
+        """
+        with_uncertainty = has_posterior_draws(bundle.predictions_pre)
+        hdi_pct = int(round(hdi_prob * 100))
+        pre_data = self.pre.copy()
+        post_data = self.post.copy()
+        unit = resolve_treated_unit(self.treated_units, treated_unit)
+        pre_pred = bundle.predictions_pre.sel(treated_units=unit)
+        post_pred = bundle.predictions_post.sel(treated_units=unit)
+        pre_impact = bundle.impact_pre.sel(treated_units=unit)
+        post_impact = bundle.impact_post.sel(treated_units=unit)
+
+        pre_data["prediction"] = pre_pred.mean(dim=["chain", "draw"]).values
+        post_data["prediction"] = post_pred.mean(dim=["chain", "draw"]).values
+        if with_uncertainty:
+            pred_lower_col = f"pred_hdi_lower_{hdi_pct}"
+            pred_upper_col = f"pred_hdi_upper_{hdi_pct}"
+            pre_hdi = get_hdi_to_df(pre_pred, hdi_prob=hdi_prob)
+            post_hdi = get_hdi_to_df(post_pred, hdi_prob=hdi_prob)
+            pre_data[[pred_lower_col, pred_upper_col]] = pre_hdi.iloc[:, [0, -1]].values
+            post_data[[pred_lower_col, pred_upper_col]] = post_hdi.iloc[
+                :, [0, -1]
+            ].values
+
+        pre_data["impact"] = pre_impact.mean(dim=["chain", "draw"]).values
+        post_data["impact"] = post_impact.mean(dim=["chain", "draw"]).values
+        if with_uncertainty:
+            impact_lower_col = f"impact_hdi_lower_{hdi_pct}"
+            impact_upper_col = f"impact_hdi_upper_{hdi_pct}"
+            pre_impact_hdi = get_hdi_to_df(pre_impact, hdi_prob=hdi_prob)
+            post_impact_hdi = get_hdi_to_df(post_impact, hdi_prob=hdi_prob)
+            pre_data[[impact_lower_col, impact_upper_col]] = pre_impact_hdi.iloc[
+                :, [0, -1]
+            ].values
+            post_data[[impact_lower_col, impact_upper_col]] = post_impact_hdi.iloc[
+                :, [0, -1]
+            ].values
+        return pd.concat([pre_data, post_data])
+
+    def effect_summary(
+        self,
+        bundle: CausalResult,
+        *,
+        group: Literal["prior", "posterior"],
+        experiment_type: str,
+        window: Literal["post"] | tuple | slice = "post",
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        alpha: float = 0.05,
+        cumulative: bool = True,
+        relative: bool = True,
+        min_effect: float | None = None,
+        treated_unit: str | None = None,
+        prefix: str = "Post-period",
+    ) -> EffectSummary:
+        """Summarize the stored post period over ``window``.
+
+        Parameters
+        ----------
+        bundle : CausalResult
+            Predictions and impacts for the requested draw group.
+        group : {"prior", "posterior"}
+            Draw group being summarized.
+        experiment_type : str
+            Experiment token forwarded to the shared summary. ``"sc"`` selects
+            synthetic-control assumptions. Callers that are not synthetic control
+            must pass their own token; there is no ``"sc"`` default.
+        window : {"post"}, tuple, or slice, optional
+            Post-period window passed to the shared summary extractor.
+        direction : {"increase", "decrease", "two-sided"}, optional
+            Effect direction used by the probability statement.
+        alpha : float, optional
+            Tail probability used by the summary.
+        cumulative : bool, optional
+            Whether the summary uses the cumulative impact.
+        relative : bool, optional
+            Whether the summary includes a relative effect.
+        min_effect : float or None, optional
+            Minimum effect used by the probability statement.
+        treated_unit : str or None, optional
+            Unit to summarize. ``None`` selects the first treated unit.
+        prefix : str, optional
+            Label prefix for the summary.
+
+        Returns
+        -------
+        EffectSummary
+            The windowed post-period effect summary.
+        """
+        windowed_impact, window_coords = _extract_window(
+            bundle.impact_post,
+            self.post.index,
+            window,
+            treated_unit=treated_unit,
+        )
+        counterfactual = _extract_counterfactual(
+            bundle.predictions_post, window_coords, treated_unit=treated_unit
+        )
+        return _effect_summary_timeseries(
+            windowed_impact,
+            counterfactual,
+            window_coords,
+            direction=direction,
+            alpha=alpha,
+            cumulative=cumulative,
+            relative=relative,
+            min_effect=min_effect,
+            prefix=prefix,
+            experiment_type=experiment_type,
+            group=group,
+        )
+
+    def _period_frame(self, period: Literal["pre", "post"]) -> pd.DataFrame:
+        if period == "pre":
+            return self.pre
+        if period == "post":
+            return self.post
+        raise ValueError(f"period must be 'pre' or 'post', got {period!r}.")
+
+    def _treated_array(self, frame: pd.DataFrame) -> xr.DataArray:
+        units = list(self.treated_units)
+        return xr.DataArray(
+            frame[units],
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": frame.index, "treated_units": units},
+        )
+
+    def _treated_post(self) -> xr.DataArray:
+        """Observed post-period treated outcomes. Impact and display only."""
+        return self._treated_array(self.post)
+
+
+def _plot_prior_check(
     *,
     pre_index: pd.Index,
     post_index: pd.Index,
@@ -331,40 +540,8 @@ def plot_panel_prior_check(
 ) -> tuple[plt.Figure, list[plt.Axes]]:
     """Render the reduced prior-check panel.
 
-    Prior-implied bands are typically far wider than the data, so the impact
-    panels are dropped rather than autoscaled into uselessness.
-
-    Parameters
-    ----------
-    pre_index : pandas.Index
-        Pre-period time index.
-    post_index : pandas.Index
-        Post-period time index.
-    pre_pred : xarray.DataArray
-        Prior counterfactual for one treated unit, before intervention.
-    post_pred : xarray.DataArray
-        Prior counterfactual for one treated unit, from intervention onward.
-    pre_treated : xarray.DataArray
-        Observed pre-period outcome for the plotted unit.
-    post_treated : xarray.DataArray
-        Observed post-period outcome for the plotted unit.
-    pre_control : xarray.DataArray
-        Pre-period donor trajectories.
-    post_control : xarray.DataArray
-        Post-period donor trajectories.
-    treatment_time : int, float, or pandas.Timestamp
-        Time drawn as the intervention line.
-    style : dict
-        Interval style forwarded to the posterior plotting helper.
-    figsize : tuple of float
-        Figure size in inches.
-    plot_predictors : bool
-        Whether to overlay donor trajectories.
-
-    Returns
-    -------
-    tuple
-        The figure and its single axes.
+    Called only by :meth:`WidePanel.plot`. Prior-implied bands are typically
+    far wider than the data, so the impact panels are dropped.
     """
     fig, ax = plt.subplots(1, 1, figsize=figsize)
     h_line, h_patch = plot_posterior_over_x(
@@ -383,7 +560,7 @@ def plot_panel_prior_check(
         plot_hdi_kwargs={"color": "C1"},
     )
     ax.plot(post_index, post_treated, "k.", zorder=3)
-    converted = convert_treatment_time_for_axis(ax, treatment_time)
+    converted = _convert_treatment_time_for_axis(ax, treatment_time)
     ax.axvline(x=converted, ls="-", lw=3, color="r", zorder=1.5)
     ax.legend(
         handles=[tuple(h_line) if isinstance(h_line, list) else (h_line, h_patch)],
@@ -398,7 +575,7 @@ def plot_panel_prior_check(
     return fig, [ax]
 
 
-def plot_panel_counterfactual(
+def _plot_counterfactual(
     *,
     pre_index: pd.Index,
     post_index: pd.Index,
@@ -419,45 +596,8 @@ def plot_panel_counterfactual(
 ) -> tuple[plt.Figure, Any]:
     """Render the three-panel counterfactual, impact, and cumulative figure.
 
-    Parameters
-    ----------
-    pre_index : pandas.Index
-        Pre-period time index.
-    post_index : pandas.Index
-        Post-period time index.
-    pre_pred : xarray.DataArray
-        Counterfactual for one treated unit, before intervention.
-    post_pred : xarray.DataArray
-        Counterfactual for one treated unit, from intervention onward.
-    pre_impact : xarray.DataArray
-        Pre-period impact for the plotted unit.
-    post_impact : xarray.DataArray
-        Post-period impact for the plotted unit.
-    post_impact_cumulative : xarray.DataArray
-        Cumulative post-period impact for the plotted unit.
-    pre_treated : xarray.DataArray
-        Observed pre-period outcome for the plotted unit.
-    post_treated : xarray.DataArray
-        Observed post-period outcome for the plotted unit.
-    pre_control : xarray.DataArray
-        Pre-period donor trajectories.
-    post_control : xarray.DataArray
-        Post-period donor trajectories.
-    treatment_time : int, float, or pandas.Timestamp
-        Time drawn as the intervention line.
-    title : str
-        Title of the counterfactual panel.
-    style : dict
-        Interval style forwarded to the posterior plotting helper.
-    figsize : tuple of float
-        Figure size in inches.
-    plot_predictors : bool
-        Whether to overlay donor trajectories.
-
-    Returns
-    -------
-    tuple
-        The figure and its three axes.
+    Called only by :meth:`WidePanel.plot`. The returned axes are the ndarray
+    from ``plt.subplots``, not a list.
     """
     counterfactual_label = "Counterfactual"
     with_uncertainty = has_posterior_draws(pre_pred)
@@ -571,7 +711,7 @@ def plot_panel_counterfactual(
     ax[2].set(title="Cumulative Causal Impact")
 
     for i in [0, 1, 2]:
-        converted = convert_treatment_time_for_axis(ax[i], treatment_time)
+        converted = _convert_treatment_time_for_axis(ax[i], treatment_time)
         ax[i].axvline(
             x=converted,
             ls="-",
@@ -595,78 +735,3 @@ def plot_panel_counterfactual(
 
     _format_panel_dates(ax, pre_index, post_index)
     return fig, ax
-
-
-def panel_effect_summary(
-    bundle: CausalResult,
-    post_index: pd.Index,
-    *,
-    group: Literal["prior", "posterior"],
-    experiment_type: str,
-    window: Literal["post"] | tuple | slice = "post",
-    direction: Literal["increase", "decrease", "two-sided"] = "increase",
-    alpha: float = 0.05,
-    cumulative: bool = True,
-    relative: bool = True,
-    min_effect: float | None = None,
-    treated_unit: str | None = None,
-    prefix: str = "Post-period",
-) -> EffectSummary:
-    """Summarize a two-period panel counterfactual over ``window``.
-
-    Parameters
-    ----------
-    bundle : CausalResult
-        Predictions and impacts for the requested draw group.
-    post_index : pandas.Index
-        Post-period time index used to resolve ``window``.
-    group : {"prior", "posterior"}
-        Draw group being summarized.
-    window : {"post"}, tuple, or slice, optional
-        Post-period window passed to the shared summary extractor.
-    direction : {"increase", "decrease", "two-sided"}, optional
-        Effect direction used by the probability statement.
-    alpha : float, optional
-        Tail probability used by the summary.
-    cumulative : bool, optional
-        Whether the summary uses the cumulative impact.
-    relative : bool, optional
-        Whether the summary includes a relative effect.
-    min_effect : float or None, optional
-        Minimum effect used by the probability statement.
-    treated_unit : str or None, optional
-        Unit to summarize. ``None`` selects the first treated unit.
-    prefix : str, optional
-        Label prefix for the summary.
-    experiment_type : str
-        Experiment token forwarded to the shared summary. ``"sc"`` selects
-        synthetic-control assumptions. Callers that are not synthetic control
-        must pass their own token; there is no ``"sc"`` default.
-
-    Returns
-    -------
-    EffectSummary
-        The windowed post-period effect summary.
-    """
-    windowed_impact, window_coords = _extract_window(
-        bundle.impact_post,
-        post_index,
-        window,
-        treated_unit=treated_unit,
-    )
-    counterfactual = _extract_counterfactual(
-        bundle.predictions_post, window_coords, treated_unit=treated_unit
-    )
-    return _effect_summary_timeseries(
-        windowed_impact,
-        counterfactual,
-        window_coords,
-        direction=direction,
-        alpha=alpha,
-        cumulative=cumulative,
-        relative=relative,
-        min_effect=min_effect,
-        prefix=prefix,
-        experiment_type=experiment_type,
-        group=group,
-    )

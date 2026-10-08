@@ -11,7 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Contracts for the private wide-panel counterfactual helper."""
+"""Contracts for the private wide-panel counterfactual seam."""
 
 import inspect
 
@@ -22,18 +22,12 @@ import xarray as xr
 from matplotlib import pyplot as plt
 
 import causalpy as cp
-from causalpy.experiments._panel_counterfactual import (
-    counterfactual_impacts,
-    panel_effect_summary,
-    panel_period_frames,
-    panel_plot_frame,
-    plot_panel_counterfactual,
-    plot_panel_prior_check,
-    wide_panel_design,
-)
+import causalpy.experiments._panel_counterfactual as panel_helper
+from causalpy.experiments._panel_counterfactual import WidePanel
 from causalpy.experiments._results import CausalResult
 
 CONTROL_UNITS = ["a", "b", "c", "d", "e", "f", "g"]
+_STYLE = {"ci_prob": 0.94, "kind": "ribbon", "ci_kind": "hdi", "num_samples": 2}
 
 
 def _draws(values: np.ndarray, obs: pd.Index, unit: str = "actual") -> xr.DataArray:
@@ -44,35 +38,101 @@ def _draws(values: np.ndarray, obs: pd.Index, unit: str = "actual") -> xr.DataAr
     )
 
 
+def _panel(
+    pre: pd.DataFrame,
+    post: pd.DataFrame,
+    treatment_time: int | float | pd.Timestamp,
+    *,
+    control_units: list[str] | None = None,
+    treated_units: list[str] | None = None,
+) -> WidePanel:
+    donors = control_units if control_units is not None else ["donor"]
+    treated = treated_units if treated_units is not None else ["actual"]
+    return WidePanel(
+        treatment_time,
+        tuple(donors),
+        tuple(treated),
+        pre,
+        post,
+    )
+
+
 def test_treatment_time_is_post_period():
     """The shared split keeps the treatment time out of the pre-period."""
-    frame = pd.DataFrame({"y": [0, 1, 2]}, index=[69, 70, 71])
-    pre, post = panel_period_frames(frame, 70)
-    assert list(pre.index) == [69]
-    assert list(post.index) == [70, 71]
+    panel = WidePanel.from_frame(
+        pd.DataFrame({"y": [0, 1, 2]}, index=[69, 70, 71]),
+        70,
+        [],
+        ["y"],
+    )
+    assert list(panel.pre.index) == [69]
+    assert list(panel.post.index) == [70, 71]
 
 
-def test_wide_panel_design_names_control_and_treated_axes():
-    """Control columns are coeffs; treated columns keep the treated_units dim."""
-    frame = pd.DataFrame({"donor": [1.0, 2.0], "treated": [3.0, 4.0]}, index=[0, 1])
-    design = wide_panel_design(frame, ["donor"], ["treated"])
-    assert design["control"].dims == ("obs_ind", "coeffs")
-    assert design["treated"].dims == ("obs_ind", "treated_units")
-    assert list(design["control"].coords["coeffs"].values) == ["donor"]
-    np.testing.assert_allclose(design["treated"].values, [[3.0], [4.0]])
+def test_call_surface_is_the_panel_not_exploded_helpers():
+    """New experiments hold a panel. They do not import the old free functions."""
+    assert not hasattr(panel_helper, "plot_panel_counterfactual")
+    assert not hasattr(panel_helper, "wide_panel_design")
+    assert not hasattr(panel_helper, "counterfactual_impacts")
+    panel = WidePanel.from_frame(
+        pd.DataFrame({"donor": [1.0], "treated": [2.0]}, index=[0]),
+        0,
+        ["donor"],
+        ["treated"],
+    )
+    assert not hasattr(panel, "treated_post")
+    assert not hasattr(panel, "treated")
+    assert not hasattr(panel, "fit_inputs")
+
+
+def test_control_axis_is_obs_ind_by_control_units():
+    """The shared donor axis is control_units, not the fitter's coeffs name."""
+    panel = WidePanel.from_frame(
+        pd.DataFrame({"donor": [1.0, 2.0], "treated": [3.0, 4.0]}, index=[0, 1]),
+        2,
+        ["donor"],
+        ["treated"],
+    )
+    control = panel.control("pre")
+    assert control.dims == ("obs_ind", "control_units")
+    assert list(control.coords["control_units"].values) == ["donor"]
+    assert panel.control("post").dims == ("obs_ind", "control_units")
+    assert panel.treated_pre.dims == ("obs_ind", "treated_units")
+    np.testing.assert_allclose(panel.treated_pre.values, [[3.0], [4.0]])
+
+
+def test_synthetic_control_renames_control_to_coeffs_and_stores_the_split(sc_data):
+    """The fitter boundary keeps coeffs. Period frames are not re-split."""
+    experiment = cp.SyntheticControl(
+        sc_data,
+        70,
+        control_units=CONTROL_UNITS,
+        treated_units=["actual"],
+        model=cp.skl_models.WeightedProportion(),
+    )
+    assert experiment.pre_design["control"].dims == ("obs_ind", "coeffs")
+    assert list(experiment.pre_design["control"].coords["coeffs"].values) == (
+        CONTROL_UNITS
+    )
+    assert experiment.pre_design["treated"].dims == ("obs_ind", "treated_units")
+    assert experiment.datapre is experiment._panel.pre
+    assert experiment.datapost is experiment._panel.post
+    assert experiment.datapre is experiment.datapre
+    assert experiment.datapost is experiment.datapost
 
 
 def test_impact_is_observed_minus_counterfactual_on_aligned_time():
     """Impact subtracts in place and cumulative impact is the post-period running sum."""
     pre_index = pd.Index([0, 1], name="obs_ind")
     post_index = pd.Index([2, 3], name="obs_ind")
-    treated_pre = _draws(np.array([[[[1.0], [3.0]]]]), pre_index)
-    predicted_pre = _draws(np.array([[[[0.5], [1.0]]]]), pre_index)
-    treated_post = _draws(np.array([[[[4.0], [7.0]]]]), post_index)
-    predicted_post = _draws(np.array([[[[1.0], [2.0]]]]), post_index)
-
-    impact_pre, impact_post, cumulative = counterfactual_impacts(
-        treated_pre, predicted_pre, treated_post, predicted_post
+    panel = _panel(
+        pd.DataFrame({"donor": [0.0, 0.0], "actual": [1.0, 3.0]}, index=pre_index),
+        pd.DataFrame({"donor": [0.0, 0.0], "actual": [4.0, 7.0]}, index=post_index),
+        2,
+    )
+    impact_pre, impact_post, cumulative = panel.impacts(
+        _draws(np.array([[[[0.5], [1.0]]]]), pre_index),
+        _draws(np.array([[[[1.0], [2.0]]]]), post_index),
     )
 
     np.testing.assert_allclose(impact_pre.values, [[[[0.5], [2.0]]]])
@@ -82,24 +142,28 @@ def test_impact_is_observed_minus_counterfactual_on_aligned_time():
 
 def test_misaligned_prediction_time_is_rejected():
     """A mismatched time index is named, for both the pre-period and post-period pair."""
-    treated = _draws(np.ones((1, 1, 2, 1)), pd.Index([0, 1]))
-    predicted = _draws(np.ones((1, 1, 2, 1)), pd.Index([0, 2]))
+    pre = pd.DataFrame({"donor": [0.0, 0.0], "actual": [1.0, 1.0]}, index=[0, 1])
+    post = pd.DataFrame({"donor": [0.0, 0.0], "actual": [1.0, 1.0]}, index=[2, 3])
+    panel = _panel(pre, post, 2)
+    aligned_pre = _draws(np.ones((1, 1, 2, 1)), pd.Index([0, 1]))
+    aligned_post = _draws(np.ones((1, 1, 2, 1)), pd.Index([2, 3]))
+    misaligned = _draws(np.ones((1, 1, 2, 1)), pd.Index([0, 2]))
     with pytest.raises(
         ValueError,
         match=r"pre-period obs_ind mismatch: treated=\[0, 1\], predictions=\[0, 2\]",
     ):
-        counterfactual_impacts(treated, predicted, treated, treated)
+        panel.impacts(misaligned, aligned_post)
     with pytest.raises(
         ValueError,
-        match=r"post-period obs_ind mismatch: treated=\[0, 1\], predictions=\[0, 2\]",
+        match=r"post-period obs_ind mismatch: treated=\[2, 3\], predictions=\[0, 2\]",
     ):
-        counterfactual_impacts(treated, treated, treated, predicted)
+        panel.impacts(aligned_pre, misaligned)
 
 
-def test_plot_frame_omits_hdi_for_a_point_estimate():
+def test_plot_frame_keeps_donor_columns_and_omits_hdi_for_a_point_estimate():
     """A singleton chain/draw is a point estimate, so the frame has no HDI columns."""
     index = pd.Index([0, 1])
-    observed = pd.DataFrame({"actual": [1.0, 2.0]}, index=index)
+    observed = pd.DataFrame({"donor": [0.0, 0.0], "actual": [1.0, 2.0]}, index=index)
     prediction = _draws(np.array([[[[1.5], [2.5]]]]), index)
     impact = _draws(np.array([[[[-0.5], [-0.5]]]]), index)
     bundle = CausalResult(
@@ -109,15 +173,15 @@ def test_plot_frame_omits_hdi_for_a_point_estimate():
         impact_post=impact,
         impact_post_cumulative=impact,
     )
-    frame = panel_plot_frame(observed, observed, bundle, ["actual"])
-    assert set(frame.columns) == {"actual", "prediction", "impact"}
+    frame = _panel(observed, observed, 0).plot_data(bundle)
+    assert set(frame.columns) == {"donor", "actual", "prediction", "impact"}
     np.testing.assert_allclose(frame["prediction"], [1.5, 2.5, 1.5, 2.5])
 
 
 def test_plot_frame_names_hdi_columns_from_the_requested_probability():
     """Draws produce HDI columns whose names follow the requested probability."""
     index = pd.Index([0])
-    observed = pd.DataFrame({"actual": [0.0]}, index=index)
+    observed = pd.DataFrame({"donor": [0.0], "actual": [0.0]}, index=index)
     prediction = _draws(np.arange(8, dtype=float).reshape(1, 8, 1, 1), index)
     bundle = CausalResult(
         predictions_pre=prediction,
@@ -126,7 +190,7 @@ def test_plot_frame_names_hdi_columns_from_the_requested_probability():
         impact_post=prediction,
         impact_post_cumulative=prediction,
     )
-    frame = panel_plot_frame(observed, observed, bundle, ["actual"], hdi_prob=0.5)
+    frame = _panel(observed, observed, 0).plot_data(bundle, hdi_prob=0.5)
     assert {"pred_hdi_lower_50", "pred_hdi_upper_50"} <= set(frame.columns)
     assert "pred_hdi_lower_94" not in frame.columns
 
@@ -134,7 +198,7 @@ def test_plot_frame_names_hdi_columns_from_the_requested_probability():
 def test_unknown_treated_unit_names_the_available_units():
     """The plot-data lookup uses the same missing-unit error as SyntheticControl."""
     index = pd.Index([0])
-    observed = pd.DataFrame({"actual": [0.0]}, index=index)
+    observed = pd.DataFrame({"donor": [0.0], "actual": [0.0]}, index=index)
     prediction = _draws(np.ones((1, 1, 1, 1)), index)
     bundle = CausalResult(
         predictions_pre=prediction,
@@ -144,7 +208,7 @@ def test_unknown_treated_unit_names_the_available_units():
         impact_post_cumulative=prediction,
     )
     with pytest.raises(ValueError, match="Available units: \\['actual'\\]"):
-        panel_plot_frame(observed, observed, bundle, ["actual"], treated_unit="missing")
+        _panel(observed, observed, 0).plot_data(bundle, treated_unit="missing")
 
 
 def test_fit_inputs_exclude_treated_post_outcomes(sc_data):
@@ -185,15 +249,19 @@ def test_fitted_impact_and_plot_data_follow_the_helper(sc_data):
         plot_data.loc[experiment.datapost.index, "impact"],
         impact.mean(["chain", "draw"]).values,
     )
+    assert set(CONTROL_UNITS) <= set(plot_data.columns)
     figure, axes = experiment.plot(plot_predictors=True)
     assert isinstance(figure, plt.Figure)
+    assert isinstance(axes, np.ndarray)
     assert len(axes) == 3
     plt.close(figure)
 
 
 def test_effect_summary_does_not_default_to_synthetic_control_assumptions(sc_data):
     """Synthetic control must opt into its assumptions text; the helper has no ``sc`` default."""
-    parameter = inspect.signature(panel_effect_summary).parameters["experiment_type"]
+    parameter = inspect.signature(WidePanel.effect_summary).parameters[
+        "experiment_type"
+    ]
     assert parameter.default is inspect.Parameter.empty
     experiment = cp.SyntheticControl(
         sc_data,
@@ -208,84 +276,62 @@ def test_effect_summary_does_not_default_to_synthetic_control_assumptions(sc_dat
     )
 
 
-def test_point_estimate_observations_use_the_supplied_index():
-    """A point-estimate figure uses the index arguments, not the treated ``obs_ind`` coordinate."""
+def test_point_estimate_observations_use_the_panel_index():
+    """Observations are drawn on the stored index, not the prediction coordinate."""
     pre_index = pd.Index([0, 1, 2])
     post_index = pd.Index([3, 4])
-    pre_treated = xr.DataArray(
-        [1.0, 1.0, 1.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
+    panel = _panel(
+        pd.DataFrame({"donor": 0.0, "actual": 1.0}, index=pre_index),
+        pd.DataFrame({"donor": 0.0, "actual": 1.0}, index=post_index),
+        3,
     )
-    post_treated = xr.DataArray(
-        [1.0, 1.0], dims=["obs_ind"], coords={"obs_ind": [13, 14]}
+    bundle = CausalResult(
+        predictions_pre=_draws(np.zeros((1, 1, 3, 1)), pd.Index([10, 11, 12])),
+        predictions_post=_draws(np.zeros((1, 1, 2, 1)), pd.Index([13, 14])),
+        impact_pre=_draws(np.zeros((1, 1, 3, 1)), pd.Index([10, 11, 12])),
+        impact_post=_draws(np.zeros((1, 1, 2, 1)), pd.Index([13, 14])),
+        impact_post_cumulative=_draws(np.zeros((1, 1, 2, 1)), pd.Index([13, 14])),
     )
-    pre_pred = _draws(np.zeros((1, 1, 3, 1)), pre_index).sel(treated_units="actual")
-    post_pred = _draws(np.zeros((1, 1, 2, 1)), post_index).sel(treated_units="actual")
-    control = xr.DataArray(
-        np.zeros((3, 1)),
-        dims=["obs_ind", "coeffs"],
-        coords={"obs_ind": pre_index, "coeffs": ["donor"]},
-    )
-    post_control = xr.DataArray(
-        np.zeros((2, 1)),
-        dims=["obs_ind", "coeffs"],
-        coords={"obs_ind": post_index, "coeffs": ["donor"]},
-    )
-    _figure, axes = plot_panel_counterfactual(
-        pre_index=pre_index,
-        post_index=post_index,
-        pre_pred=pre_pred,
-        post_pred=post_pred,
-        pre_impact=pre_pred,
-        post_impact=post_pred,
-        post_impact_cumulative=post_pred,
-        pre_treated=pre_treated,
-        post_treated=post_treated,
-        pre_control=control,
-        post_control=post_control,
-        treatment_time=3,
+    figure, axes = panel.plot(
+        bundle,
+        group="posterior",
+        treated_unit="actual",
         title="point estimate",
-        style={"ci_prob": 0.94, "kind": "ribbon", "ci_kind": "hdi", "num_samples": 2},
+        style=_STYLE,
         figsize=(4, 6),
         plot_predictors=False,
     )
+    assert isinstance(axes, np.ndarray)
     observation_x = [
         list(line.get_xdata())
         for line in axes[0].get_lines()
         if line.get_marker() == "."
     ]
     assert observation_x == [[0, 1, 2], [3, 4]]
-    plt.close(_figure)
+    plt.close(figure)
 
 
 def test_prior_check_figure_is_one_panel():
     """The shared prior figure drops the impact panels."""
     index = pd.Index([0, 1])
+    observed = pd.DataFrame({"donor": [0.0, 0.0], "actual": [1.0, 1.0]}, index=index)
     prediction = _draws(np.zeros((1, 2, 2, 1)), index)
-    treated = prediction.sel(treated_units="actual")
-    control = xr.DataArray(
-        np.zeros((2, 1)),
-        dims=["obs_ind", "coeffs"],
-        coords={"obs_ind": index, "coeffs": ["donor"]},
-    )
-    figure, axes = plot_panel_prior_check(
-        pre_index=index,
-        post_index=index,
-        pre_pred=treated,
-        post_pred=treated,
-        pre_treated=treated.isel(chain=0, draw=0),
-        post_treated=treated.isel(chain=0, draw=0),
-        pre_control=control,
-        post_control=control,
-        treatment_time=1,
-        style={
-            "ci_prob": 0.94,
-            "kind": "ribbon",
-            "ci_kind": "hdi",
-            "num_samples": 2,
-        },
+    figure, axes = _panel(observed, observed, 1).plot(
+        CausalResult(
+            predictions_pre=prediction,
+            predictions_post=prediction,
+            impact_pre=prediction,
+            impact_post=prediction,
+            impact_post_cumulative=prediction,
+        ),
+        group="prior",
+        treated_unit=None,
+        title="ignored",
+        style=_STYLE,
         figsize=(4, 3),
         plot_predictors=False,
     )
     assert axes[0].get_title() == "Prior predictive check"
     assert len(axes) == 1
+    assert not isinstance(axes, np.ndarray)
     plt.close(figure)

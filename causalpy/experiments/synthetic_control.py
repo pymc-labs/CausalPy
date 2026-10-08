@@ -24,17 +24,7 @@ from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB
 from causalpy.date_utils import validate_treatment_time_against_index
-from causalpy.experiments._panel_counterfactual import (
-    convert_treatment_time_for_axis,
-    counterfactual_impacts,
-    panel_effect_summary,
-    panel_period_frames,
-    panel_plot_frame,
-    plot_panel_counterfactual,
-    plot_panel_prior_check,
-    resolve_treated_unit,
-    wide_panel_design,
-)
+from causalpy.experiments._panel_counterfactual import WidePanel, resolve_treated_unit
 from causalpy.experiments._results import CausalResult
 from causalpy.experiments.model_adapter import PyMCModelAdapter, build_coords
 from causalpy.input_data import DataFrameLike, to_pandas_with_time_index
@@ -130,6 +120,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
     supports_ols = True
     supports_bayes = True
     _default_model_class = WeightedSumFitter
+    _panel: WidePanel
 
     def __init__(
         self,
@@ -265,26 +256,52 @@ class SyntheticControl(BaseExperiment[CausalResult]):
     def datapre(self) -> pd.DataFrame:
         """Data from before the treatment time (exclusive).
 
-        Pre-period: index < treatment_time
+        Pre-period: index < treatment_time. This is the frame stored on the
+        panel at construction, not a fresh split of ``self.data``.
         """
-        return panel_period_frames(self.data, self.treatment_time)[0]
+        return self._panel.pre
 
     @property
     def datapost(self) -> pd.DataFrame:
         """Data from on or after the treatment time (inclusive).
 
-        Post-period: index >= treatment_time
+        Post-period: index >= treatment_time. This is the frame stored on the
+        panel at construction, not a fresh split of ``self.data``.
         """
-        return panel_period_frames(self.data, self.treatment_time)[1]
+        return self._panel.post
 
     def _prepare_data(self) -> None:
-        """Bundle control and treated data into ``xr.Dataset`` objects per period."""
-        self.pre_design = wide_panel_design(
-            self.datapre, self.control_units, self.treated_units
+        """Store the wide panel and the weighted-sum design views."""
+        self._panel = WidePanel.from_frame(
+            self.data,
+            self.treatment_time,
+            self.control_units,
+            self.treated_units,
         )
-        self.post_design = wide_panel_design(
-            self.datapost, self.control_units, self.treated_units
-        )
+        self.pre_design = self._weighted_sum_design("pre")
+        self.post_design = self._weighted_sum_design("post")
+
+    def _weighted_sum_design(self, period: Literal["pre", "post"]) -> xr.Dataset:
+        """Rename the donor axis to ``coeffs`` for ``WeightedSumFitter``.
+
+        The shared panel keeps ``control_units``. Post-period treated outcomes
+        are built here for existing ``post_design`` consumers. The panel has no
+        post-treated accessor; new experiments use :meth:`WidePanel.impacts`.
+        """
+        control = self._panel.control(period).rename({"control_units": "coeffs"})
+        if period == "pre":
+            treated = self._panel.treated_pre
+        else:
+            frame = self._panel.post
+            treated = xr.DataArray(
+                frame[self.treated_units],
+                dims=["obs_ind", "treated_units"],
+                coords={
+                    "obs_ind": frame.index,
+                    "treated_units": self.treated_units,
+                },
+            )
+        return xr.Dataset({"control": control, "treated": treated})
 
     def _pin_legacy_sigma_prior(self) -> None:
         """Swap in a model that carries the legacy noise prior explicitly.
@@ -317,8 +334,10 @@ class SyntheticControl(BaseExperiment[CausalResult]):
     ) -> tuple[xr.DataArray, xr.DataArray, dict[str, Any]]:
         """Return the pre-period control/treated matrices and coordinates for build.
 
-        Post-period treated outcomes are excluded. They stay on ``post_design``
-        for impact only, and are not a fit or tuning input.
+        Post-period treated outcomes are excluded. They stay on the panel and
+        on ``post_design`` for impact and display, and are not a fit or tuning
+        input. ``pre_design["control"]`` is the donor array renamed to
+        ``coeffs`` for ``WeightedSumFitter``.
         """
         control_pre = self.pre_design["control"]
         return (
@@ -341,15 +360,13 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         """
         control_pre = self.pre_design["control"]
         treated_pre = self.pre_design["treated"]
-        treated_post = self.post_design["treated"]
 
         predictions_pre = self._model_backend.predict(X=control_pre, group=group)
-
         predictions_post = self._model_backend.predict(
             X=self.post_design["control"], group=group
         )
-        impact_pre, impact_post, impact_post_cumulative = counterfactual_impacts(
-            treated_pre, predictions_pre, treated_post, predictions_post
+        impact_pre, impact_post, impact_post_cumulative = self._panel.impacts(
+            predictions_pre, predictions_post
         )
 
         score = None
@@ -429,10 +446,11 @@ class SyntheticControl(BaseExperiment[CausalResult]):
     def _convert_treatment_time_for_axis(
         axis: plt.Axes, treatment_time: int | float | pd.Timestamp
     ) -> int | float | pd.Timestamp:
-        """
-        Convert treatment time into the plotting units expected by a specific axis.
-        """
-        return convert_treatment_time_for_axis(axis, treatment_time)
+        """Convert treatment time into the plotting units expected by a specific axis."""
+        try:
+            return axis.xaxis.convert_units(treatment_time)
+        except (TypeError, ValueError):
+            return treatment_time
 
     def plot(
         self,
@@ -577,39 +595,16 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             "num_samples": num_samples,
         }
         treated_unit = resolve_treated_unit(self.treated_units, treated_unit)
-        pre_treated = self.pre_design["treated"].sel(treated_units=treated_unit)
-        post_treated = self.post_design["treated"].sel(treated_units=treated_unit)
-        if group == "prior":
-            return plot_panel_prior_check(
-                pre_index=self.datapre.index,
-                post_index=self.datapost.index,
-                pre_pred=bundle.predictions_pre.sel(treated_units=treated_unit),
-                post_pred=bundle.predictions_post.sel(treated_units=treated_unit),
-                pre_treated=pre_treated,
-                post_treated=post_treated,
-                pre_control=self.pre_design["control"],
-                post_control=self.post_design["control"],
-                treatment_time=self.treatment_time,
-                style=style,
-                figsize=figsize,
-                plot_predictors=plot_predictors,
-            )
-        return plot_panel_counterfactual(
-            pre_index=self.datapre.index,
-            post_index=self.datapost.index,
-            pre_pred=bundle.predictions_pre.sel(treated_units=treated_unit),
-            post_pred=bundle.predictions_post.sel(treated_units=treated_unit),
-            pre_impact=bundle.impact_pre.sel(treated_units=treated_unit),
-            post_impact=bundle.impact_post.sel(treated_units=treated_unit),
-            post_impact_cumulative=bundle.impact_post_cumulative.sel(
-                treated_units=treated_unit
-            ),
-            pre_treated=pre_treated,
-            post_treated=post_treated,
-            pre_control=self.pre_design["control"],
-            post_control=self.post_design["control"],
-            treatment_time=self.treatment_time,
-            title=self._get_score_title(bundle.score, treated_unit, round_to),
+        title = (
+            self._get_score_title(bundle.score, treated_unit, round_to)
+            if group == "posterior"
+            else ""
+        )
+        return self._panel.plot(
+            bundle,
+            group=group,
+            treated_unit=treated_unit,
+            title=title,
             style=style,
             figsize=figsize,
             plot_predictors=plot_predictors,
@@ -649,11 +644,8 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             Observed data with ``prediction`` and ``impact`` columns plus HDI
             bounds when draws are available. Not cached on the experiment.
         """
-        return panel_plot_frame(
-            self.datapre,
-            self.datapost,
+        return self._panel.plot_data(
             self._require_bundle(group),
-            self.treated_units,
             treated_unit=treated_unit,
             hdi_prob=hdi_prob,
         )
@@ -734,9 +726,8 @@ class SyntheticControl(BaseExperiment[CausalResult]):
                 stacklevel=2,
             )
 
-        return panel_effect_summary(
+        return self._panel.effect_summary(
             self._require_bundle(group),
-            self.datapost.index,
             group=group,
             window=window,
             direction=direction,
