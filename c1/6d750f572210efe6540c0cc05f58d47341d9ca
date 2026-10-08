@@ -1,0 +1,16 @@
+causalpy/experiments/_panel_counterfactual.py
+  h_63db634213747e 122-133,143-146,148-150,289-290,481-483,517
+causalpy/tests/test_panel_counterfactual.py
+  h_63db634213747e 299,357-396
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c16d750f572210efe6540c0cc05f58d47341d9ca",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
