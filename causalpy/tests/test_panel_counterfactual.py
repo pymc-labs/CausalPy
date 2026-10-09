@@ -159,6 +159,9 @@ def test_period_frames_follow_later_writes_to_data(sc_data):
     experiment.data.loc[post_label, "actual"] = 9999
     assert experiment.datapre.loc[pre_label, "actual"] == 9999
     assert experiment.datapost.loc[post_label, "actual"] == 9999
+    plot_data = experiment.get_plot_data()
+    assert plot_data.loc[pre_label, "actual"] == 9999
+    assert plot_data.loc[post_label, "actual"] == 9999
     experiment.fit()
     np.testing.assert_allclose(experiment.result.impact_post.values, impact_before)
     assert experiment._panel.post.loc[post_label, "actual"] != 9999

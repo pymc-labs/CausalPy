@@ -632,11 +632,14 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             Observed data with ``prediction`` and ``impact`` columns plus HDI
             bounds when draws are available. Not cached on the experiment.
         """
-        return self._panel.plot_data(
+        frame = self._panel.plot_data(
             self._require_bundle(group),
             treated_unit=treated_unit,
             hdi_prob=hdi_prob,
         )
+        observed = pd.concat([self.datapre, self.datapost])
+        frame.loc[:, list(observed.columns)] = observed
+        return frame
 
     def _get_score_title(
         self, score: pd.Series | None, treated_unit: str, round_to: int | None = 2
