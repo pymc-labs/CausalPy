@@ -36,7 +36,7 @@ from causalpy.pymc_models import (
     _uses_stock_y_hat_default,
 )
 from causalpy.reporting import EffectSummary
-from causalpy.utils import check_convex_hull_violation
+from causalpy.utils import check_convex_hull_violation, has_posterior_draws
 
 from .base import BaseExperiment
 
@@ -631,14 +631,31 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         pd.DataFrame
             Observed data with ``prediction`` and ``impact`` columns plus HDI
             bounds when draws are available. Not cached on the experiment.
+            Observation columns follow a later write to ``self.data``.
+            ``prediction``, ``impact``, and HDI columns stay computed even
+            when the input frame already uses those names.
         """
+        bundle = self._require_bundle(group)
         frame = self._panel.plot_data(
-            self._require_bundle(group),
+            bundle,
             treated_unit=treated_unit,
             hdi_prob=hdi_prob,
         )
         observed = pd.concat([self.datapre, self.datapost])
-        frame.loc[:, list(observed.columns)] = observed
+        computed = {"prediction", "impact"}
+        if has_posterior_draws(bundle.predictions_pre):
+            hdi_pct = int(round(hdi_prob * 100))
+            computed.update(
+                {
+                    f"pred_hdi_lower_{hdi_pct}",
+                    f"pred_hdi_upper_{hdi_pct}",
+                    f"impact_hdi_lower_{hdi_pct}",
+                    f"impact_hdi_upper_{hdi_pct}",
+                }
+            )
+        overlay = [column for column in observed.columns if column not in computed]
+        if overlay:
+            frame.loc[:, overlay] = observed.loc[:, overlay]
         return frame
 
     def _get_score_title(

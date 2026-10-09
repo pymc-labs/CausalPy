@@ -167,6 +167,42 @@ def test_period_frames_follow_later_writes_to_data(sc_data):
     assert experiment._panel.post.loc[post_label, "actual"] != 9999
 
 
+def test_get_plot_data_keeps_computed_columns_when_names_collide(sc_data):
+    """A raw impact or prediction column must not replace the computed one."""
+    collided = sc_data.copy()
+    collided["impact"] = -999.0
+    collided["prediction"] = -888.0
+    collided["pred_hdi_lower_94"] = -777.0
+    experiment = cp.SyntheticControl(
+        collided,
+        70,
+        control_units=CONTROL_UNITS,
+        treated_units=["actual"],
+        model=cp.skl_models.WeightedProportion(),
+    ).fit()
+    plot_data = experiment.get_plot_data()
+    post_index = experiment.datapost.index
+    np.testing.assert_allclose(
+        plot_data.loc[post_index, "impact"],
+        experiment.result.impact_post.sel(treated_units="actual")
+        .mean(["chain", "draw"])
+        .values,
+    )
+    np.testing.assert_allclose(
+        plot_data.loc[post_index, "prediction"],
+        experiment.result.predictions_post.sel(treated_units="actual")
+        .mean(["chain", "draw"])
+        .values,
+    )
+    assert not np.isclose(plot_data["impact"].to_numpy(), -999.0).any()
+    assert not np.isclose(plot_data["prediction"].to_numpy(), -888.0).any()
+    # No posterior draws, so this name is an observation column and stays raw.
+    assert (plot_data["pred_hdi_lower_94"] == -777.0).all()
+    post_label = post_index[0]
+    experiment.data.loc[post_label, "actual"] = 9999
+    assert experiment.get_plot_data().loc[post_label, "actual"] == 9999
+
+
 def test_impact_is_observed_minus_counterfactual_on_aligned_time():
     """Impact subtracts in place and cumulative impact is the post-period running sum."""
     pre_index = pd.Index([0, 1], name="obs_ind")
