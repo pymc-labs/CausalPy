@@ -256,19 +256,21 @@ class SyntheticControl(BaseExperiment[CausalResult]):
     def datapre(self) -> pd.DataFrame:
         """Data from before the treatment time (exclusive).
 
-        Pre-period: index < treatment_time. This is the frame stored on the
-        panel at construction, not a fresh split of ``self.data``.
+        Pre-period: index < treatment_time. A copy of the frame stored on the
+        panel at construction, not a fresh split of ``self.data``. In-place
+        writes do not change the stored panel, the design views, or later impact.
         """
-        return self._panel.pre
+        return self._panel.pre.copy()
 
     @property
     def datapost(self) -> pd.DataFrame:
         """Data from on or after the treatment time (inclusive).
 
-        Post-period: index >= treatment_time. This is the frame stored on the
-        panel at construction, not a fresh split of ``self.data``.
+        Post-period: index >= treatment_time. A copy of the frame stored on the
+        panel at construction, not a fresh split of ``self.data``. In-place
+        writes do not change the stored panel, the design views, or later impact.
         """
-        return self._panel.post
+        return self._panel.post.copy()
 
     def _prepare_data(self) -> None:
         """Store the wide panel and the weighted-sum design views."""

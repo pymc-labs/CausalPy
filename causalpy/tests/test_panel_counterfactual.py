@@ -115,10 +115,31 @@ def test_synthetic_control_renames_control_to_coeffs_and_stores_the_split(sc_dat
         CONTROL_UNITS
     )
     assert experiment.pre_design["treated"].dims == ("obs_ind", "treated_units")
-    assert experiment.datapre is experiment._panel.pre
-    assert experiment.datapost is experiment._panel.post
-    assert experiment.datapre is experiment.datapre
-    assert experiment.datapost is experiment.datapost
+    pd.testing.assert_frame_equal(experiment.datapre, experiment._panel.pre)
+    pd.testing.assert_frame_equal(experiment.datapost, experiment._panel.post)
+    assert experiment.datapre is not experiment._panel.pre
+    assert experiment.datapost is not experiment._panel.post
+
+
+def test_mutating_datapost_does_not_change_impact(sc_data):
+    """Caller writes into the returned period frames leave impact alone."""
+    experiment = cp.SyntheticControl(
+        sc_data,
+        70,
+        control_units=CONTROL_UNITS,
+        treated_units=["actual"],
+        model=cp.skl_models.WeightedProportion(),
+    )
+    experiment.fit()
+    impact_before = experiment.result.impact_post.values.copy()
+    treated_before = experiment.post_design["treated"].values.copy()
+    returned_post = experiment.datapost
+    returned_pre = experiment.datapre
+    returned_post.loc[:, "actual"] = returned_post["actual"] + 1000
+    returned_pre.iloc[:, 0] = returned_pre.iloc[:, 0] + 1000
+    experiment.fit()
+    np.testing.assert_allclose(experiment.result.impact_post.values, impact_before)
+    np.testing.assert_allclose(experiment.post_design["treated"].values, treated_before)
 
 
 def test_impact_is_observed_minus_counterfactual_on_aligned_time():
