@@ -102,7 +102,7 @@ def test_control_axis_is_obs_ind_by_control_units():
 
 
 def test_synthetic_control_renames_control_to_coeffs_and_stores_the_split(sc_data):
-    """The fitter boundary keeps coeffs. Period frames are not re-split."""
+    """The fitter boundary keeps coeffs. Construction values match the panel."""
     experiment = cp.SyntheticControl(
         sc_data,
         70,
@@ -140,6 +140,28 @@ def test_mutating_datapost_does_not_change_impact(sc_data):
     experiment.fit()
     np.testing.assert_allclose(experiment.result.impact_post.values, impact_before)
     np.testing.assert_allclose(experiment.post_design["treated"].values, treated_before)
+
+
+def test_period_frames_follow_later_writes_to_data(sc_data):
+    """datapre and datapost re-split self.data. Impact stays on the panel."""
+    experiment = cp.SyntheticControl(
+        sc_data,
+        70,
+        control_units=CONTROL_UNITS,
+        treated_units=["actual"],
+        model=cp.skl_models.WeightedProportion(),
+    )
+    experiment.fit()
+    impact_before = experiment.result.impact_post.values.copy()
+    pre_label = experiment.data.index[experiment.data.index < 70][0]
+    post_label = experiment.data.index[experiment.data.index >= 70][0]
+    experiment.data.loc[pre_label, "actual"] = 9999
+    experiment.data.loc[post_label, "actual"] = 9999
+    assert experiment.datapre.loc[pre_label, "actual"] == 9999
+    assert experiment.datapost.loc[post_label, "actual"] == 9999
+    experiment.fit()
+    np.testing.assert_allclose(experiment.result.impact_post.values, impact_before)
+    assert experiment._panel.post.loc[post_label, "actual"] != 9999
 
 
 def test_impact_is_observed_minus_counterfactual_on_aligned_time():
