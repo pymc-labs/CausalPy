@@ -85,6 +85,7 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 | `DifferenceInDifferences` | DiD | OLS + Bayes | Effect from interaction coefficient |
 | `StaggeredDifferenceInDifferences` | Staggered DiD | OLS + Bayes | Fits untreated obs only |
 | `SyntheticControl` | SC | OLS + Bayes | Multi-unit; control/treated unit lists, no formula |
+| `MultivariateSyntheticControl` | Multivariate SC | Bayes only | Extends synthetic control with extra predictors (long-format panel); counterfactual from the outcome only |
 | `UpDownGeoLift` | Three-arm geo lift | Bayes only | Extends synthetic control with up/down/control assignment and joint draw summaries |
 | `SyntheticDifferenceInDifferences` | SDiD | OLS + Bayes | Tau computed analytically from weight posteriors |
 | `RegressionDiscontinuity` | RD | OLS + Bayes | `epsilon` at threshold; optional `bandwidth` |
@@ -98,6 +99,7 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 
 - `LinearRegression` — ITS, DiD, RD, RKD, PrePostNEGD, PiecewiseITS, StaggeredDiD, PanelRegression
 - `WeightedSumFitter` / `SoftmaxWeightedSumFitter` — SyntheticControl
+- `MvWeightedSumFitter` — MultivariateSyntheticControl
 - `SyntheticDifferenceInDifferencesWeightFitter` — SyntheticDifferenceInDifferences
 - `InstrumentalVariableRegression` — InstrumentalVariable
 - `PropensityScore` — InversePropensityWeighting
