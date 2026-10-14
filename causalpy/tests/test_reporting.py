@@ -22,7 +22,7 @@ import pandas as pd
 import pytest
 
 import causalpy as cp
-from causalpy.reporting import EffectSummary
+from causalpy.reporting import EffectSummary, _BayesianDecision
 
 sample_kwargs = {
     "chains": 2,
@@ -30,6 +30,107 @@ sample_kwargs = {
     "progressbar": False,
     "random_seed": 42,
 }
+
+
+@pytest.mark.parametrize("experiment_name", ["rd", "did", "prepostnegd"])
+def test_single_draw_prior_summary_uses_bayesian_group(experiment_name, request):
+    """A prior-only singleton draw is summarized as Bayesian, never as OLS."""
+    model = cp.pymc_models.LinearRegression()
+    if experiment_name == "rd":
+        experiment = cp.RegressionDiscontinuity(
+            request.getfixturevalue("rd_data"),
+            formula="y ~ 1 + x + treated + x:treated",
+            treatment_threshold=0.5,
+            model=model,
+        )
+        effect_name = "discontinuity_at_threshold"
+        row = "discontinuity"
+    elif experiment_name == "did":
+        experiment = cp.DifferenceInDifferences(
+            request.getfixturevalue("did_data"),
+            formula="y ~ 1 + group * post_treatment",
+            time_variable_name="t",
+            group_variable_name="group",
+            model=model,
+        )
+        effect_name = "causal_impact"
+        row = "treatment_effect"
+    else:
+        experiment = cp.PrePostNEGD(
+            request.getfixturevalue("anova1_data"),
+            formula="post ~ 1 + C(group) + pre",
+            group_variable_name="group",
+            pretreatment_variable_name="pre",
+            model=model,
+        )
+        effect_name = "causal_impact"
+        row = "treatment_effect"
+
+    experiment.sample_prior_predictive(draws=1, random_seed=42)
+    effect = getattr(experiment.prior_result, effect_name).item()
+    summary = experiment.effect_summary(group="prior")
+
+    assert not experiment.is_fitted
+    np.testing.assert_allclose(
+        summary.table.loc[row, ["mean", "hdi_lower", "hdi_upper"]],
+        [effect, effect, effect],
+    )
+    assert summary.table.loc[row, "p_gt_0"] == float(effect > 0)
+
+
+@pytest.mark.parametrize(
+    "summary_kind, direction",
+    [
+        ("did", "increase"),
+        ("did", "decrease"),
+        ("did", "two-sided"),
+        ("rd", "increase"),
+        ("rkink", "increase"),
+        ("timeseries", "increase"),
+    ],
+)
+def test_prior_summary_labels_probabilities_and_rope_mass(summary_kind, direction):
+    """Prior tail and ROPE probabilities must never be described as posterior."""
+    import xarray as xr
+
+    from causalpy.reporting import (
+        _effect_summary_did,
+        _effect_summary_rd,
+        _effect_summary_rkink,
+        _effect_summary_timeseries,
+    )
+
+    effect = xr.DataArray([[-2.0, 0.0, 2.0, 4.0]], dims=["chain", "draw"])
+    kwargs = {"group": "prior", "direction": direction, "min_effect": 1.0}
+    if summary_kind == "did":
+        summary = _effect_summary_did(SimpleNamespace(causal_impact=effect), **kwargs)
+    elif summary_kind == "rd":
+        summary = _effect_summary_rd(
+            SimpleNamespace(discontinuity_at_threshold=effect),
+            experiment=SimpleNamespace(
+                _model_backend=SimpleNamespace(is_bayesian=True)
+            ),
+            **kwargs,
+        )
+    elif summary_kind == "rkink":
+        summary = _effect_summary_rkink(
+            SimpleNamespace(gradient_change=effect), **kwargs
+        )
+    else:
+        impact = effect.expand_dims(obs_ind=[0, 1])
+        summary = _effect_summary_timeseries(
+            impact,
+            xr.ones_like(impact),
+            pd.Index([0, 1]),
+            cumulative=True,
+            relative=False,
+            **kwargs,
+        )
+
+    prose = summary.text.lower()
+    assert "posterior" not in prose
+    assert "prior" in prose.split("probability")[0]
+    assert prose.count("prior mass") == (2 if summary_kind == "timeseries" else 1)
 
 
 @pytest.mark.integration
@@ -42,7 +143,7 @@ def test_effect_summary_basic(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -74,7 +175,7 @@ def test_effect_summary_with_cumulative(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(cumulative=True)
 
@@ -92,7 +193,7 @@ def test_effect_summary_without_cumulative(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(cumulative=False)
 
@@ -110,7 +211,7 @@ def test_effect_summary_with_relative(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(relative=True)
 
@@ -129,7 +230,7 @@ def test_effect_summary_direction_increase(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="increase")
 
@@ -147,7 +248,7 @@ def test_effect_summary_direction_decrease(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="decrease")
 
@@ -165,7 +266,7 @@ def test_effect_summary_direction_two_sided(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="two-sided")
 
@@ -185,7 +286,7 @@ def test_effect_summary_window_datetime(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Get post-period dates
     post_dates = result.datapost.index
@@ -205,14 +306,14 @@ def test_effect_summary_window_datetime(mock_pymc_sample, its_data):
 def test_effect_summary_window_integer(mock_pymc_sample):
     """Test effect_summary with integer index window."""
     # Create data with integer index
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
     n_pre = 50
     n_post = 30
     t_pre = np.arange(n_pre)
     t_post = np.arange(n_pre, n_pre + n_post)
 
-    y_pre = 10 + 0.5 * t_pre + np.random.normal(0, 1, n_pre)
-    y_post = 15 + 0.5 * t_post + np.random.normal(0, 1, n_post)
+    y_pre = 10 + 0.5 * t_pre + rng.normal(0, 1, n_pre)
+    y_post = 15 + 0.5 * t_post + rng.normal(0, 1, n_post)
 
     df = pd.DataFrame(
         {
@@ -228,7 +329,7 @@ def test_effect_summary_window_integer(mock_pymc_sample):
         treatment_time,
         formula="y ~ 1 + t",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test with tuple window
     stats1 = result.effect_summary(window=(55, 65))
@@ -249,7 +350,7 @@ def test_effect_summary_alpha(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(alpha=0.1)  # 90% HDI
 
@@ -267,12 +368,22 @@ def test_effect_summary_rope(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(min_effect=1.0)
 
     assert "p_rope" in stats.table.columns
     assert 0 <= stats.table.loc["average", "p_rope"] <= 1
+    assert "Using the closed ROPE [-1, 1]" in stats.text
+    assert "Posterior mass is" in stats.text
+    assert any(
+        verdict in stats.text
+        for verdict in (
+            "the effect is practically significant.",
+            "the effect is practically equivalent to zero.",
+            "the result is inconclusive.",
+        )
+    )
 
 
 @pytest.mark.integration
@@ -287,7 +398,7 @@ def test_effect_summary_ols_its(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -316,7 +427,7 @@ def test_effect_summary_ols_did(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -360,7 +471,7 @@ def test_effect_summary_ols_did_residuals_are_per_observation(did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
     X_da = result.design["X"]
     y_da = result.design["y"]
@@ -404,6 +515,90 @@ def test_effect_summary_ols_did_residuals_are_per_observation(did_data):
 
 
 @pytest.mark.integration
+def test_effect_summary_ols_did_order_independent(did_data):
+    """``effect_summary()`` must not depend on which variable is written
+    first in the DiD interaction term.
+
+    ``_compute_statistics_did_ols`` looked up the interaction coefficient via
+    a single concatenated substring (``"group:post_treatment"``), which only
+    matches patsy's column naming when the formula writes the group variable
+    first. Writing the formula the other way round (``post_treatment*group``)
+    fits an identical model (``causal_impact`` was already order-independent,
+    fixed by #994 in ``DifferenceInDifferences.algorithm()``) but this
+    separate, still order-dependent lookup raised
+    ``ValueError: Could not find interaction term ...`` instead of returning
+    a result.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    df = did_data
+
+    result_group_first = cp.DifferenceInDifferences(
+        df.copy(),
+        formula="y ~ 1 + group * post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    ).fit()
+    result_post_first = cp.DifferenceInDifferences(
+        df.copy(),
+        formula="y ~ 1 + post_treatment * group",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    ).fit()
+
+    stats_group_first = result_group_first.effect_summary().table.loc[
+        "treatment_effect"
+    ]
+    stats_post_first = result_post_first.effect_summary().table.loc["treatment_effect"]
+
+    for col in ("mean", "ci_lower", "ci_upper", "p_value"):
+        assert stats_group_first[col] == pytest.approx(stats_post_first[col])
+
+
+@pytest.mark.integration
+def test_effect_summary_ols_did_categorical_group_spelling(did_data):
+    """``effect_summary()`` must accept the ``C(group)`` categorical spelling
+    of the DiD interaction.
+
+    patsy names the interaction column
+    ``"C(group)[T.1]:post_treatment[T.True]"`` for a formula written as
+    ``C(group) * post_treatment``; the concatenated substring lookup
+    (``"group:post_treatment"``) failed on it just as it did for reversed
+    formula order. The design matrix is numerically identical to the plain
+    ``group * post_treatment`` spelling (``group`` is already dummy coded),
+    so the reported statistics must match too.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    df = did_data
+
+    result_plain = cp.DifferenceInDifferences(
+        df.copy(),
+        formula="y ~ 1 + group * post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    ).fit()
+    result_categorical = cp.DifferenceInDifferences(
+        df.copy(),
+        formula="y ~ 1 + C(group) * post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    ).fit()
+
+    stats_plain = result_plain.effect_summary().table.loc["treatment_effect"]
+    stats_categorical = result_categorical.effect_summary().table.loc[
+        "treatment_effect"
+    ]
+
+    for col in ("mean", "ci_lower", "ci_upper", "p_value"):
+        assert stats_plain[col] == pytest.approx(stats_categorical[col])
+
+
+@pytest.mark.integration
 def test_effect_summary_ols_sc(mock_pymc_sample, sc_data):
     """Test effect_summary with OLS model for Synthetic Control."""
     from sklearn.linear_model import LinearRegression
@@ -416,7 +611,7 @@ def test_effect_summary_ols_sc(mock_pymc_sample, sc_data):
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats = result.effect_summary(treated_unit="actual")
 
@@ -437,7 +632,7 @@ def test_effect_summary_rd_pymc(mock_pymc_sample, rd_data):
         formula="y ~ 1 + x + treated + x:treated",
         treatment_threshold=0.5,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -459,7 +654,7 @@ def test_effect_summary_rd_ols(mock_pymc_sample, rd_data):
         formula="y ~ 1 + x + treated + x:treated",
         treatment_threshold=0.5,
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -477,63 +672,79 @@ def test_effect_summary_rd_ols(mock_pymc_sample, rd_data):
 
 @pytest.mark.integration
 def test_effect_summary_ols_rd_residuals_are_per_observation(rd_data):
-    """Regression-pin for RD OLS ``effect_summary()`` intervals.
-
-    The pre-#1049 ``_compute_statistics_rd_ols`` subtracted a bare ``(n,)``
-    ``y_pred`` array from the ``(n, 1)`` y DataArray, broadcasting to an
-    ``(n, n)`` residual matrix (every observation's y minus every *other*
-    observation's prediction) and inflating the MSE ~9x on this dataset, so
-    the reported standard errors were ~3x too wide. ``_point_residuals``
-    fixed that. Separately, the residual variance was estimated as SSR/n
-    (biased) rather than SSR/(n-p) (unbiased), inconsistent with the
-    ``df = n - p`` already used for the t-distribution critical value. With
-    both bugs fixed, this test pins the corrected residual shape and SE
-    against an independent statsmodels fit almost exactly, not just up to
-    some remaining conversion factor.
-    """
+    """RD OLS residuals must have one value per fitted observation."""
     from sklearn.linear_model import LinearRegression
 
     from causalpy.reporting import _point_residuals
 
-    formula = "y ~ 1 + x + treated + x:treated"
+    result = cp.RegressionDiscontinuity(
+        rd_data,
+        formula="y ~ 1 + x + treated + x:treated",
+        treatment_threshold=0.5,
+        model=LinearRegression(),
+    ).fit()
+
+    n, _ = result.design["X"].shape
+    residuals = _point_residuals(result)
+
+    assert residuals.shape == (n,)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "formula",
+    [
+        "y ~ 1 + x + treated + x:treated",
+        "y ~ 1 + x + treated",
+    ],
+    ids=["interaction", "parallel_slopes"],
+)
+def test_effect_summary_ols_rd_matches_statsmodels_threshold_contrast(rd_data, formula):
+    """RD OLS summaries must match the exact threshold prediction contrast."""
+    import statsmodels.formula.api as smf
+    from patsy import build_design_matrices
+    from scipy.stats import t as t_dist
+    from sklearn.linear_model import LinearRegression
+
     result = cp.RegressionDiscontinuity(
         rd_data,
         formula=formula,
         treatment_threshold=0.5,
         model=LinearRegression(),
+    ).fit()
+    row = result.effect_summary().table.loc["discontinuity"]
+
+    threshold_data = pd.DataFrame(
+        {
+            result.running_variable_name: [
+                result.treatment_threshold - result.epsilon,
+                result.treatment_threshold + result.epsilon,
+            ],
+            "treated": [False, True],
+        }
     )
-
-    n, p = result.design["X"].shape
-    residuals = _point_residuals(result)
-    assert residuals.shape == (n,)
-
-    stats = result.effect_summary()
-    row = stats.table.loc["discontinuity"]
-
-    import statsmodels.formula.api as smf
-    from scipy.stats import t as t_dist
+    (expected_threshold_design,) = build_design_matrices(
+        [result._x_design_info], threshold_data
+    )
+    expected_threshold_design = np.asarray(expected_threshold_design)
+    np.testing.assert_allclose(result.x_discon_design, expected_threshold_design)
 
     sm_fit = smf.ols(formula, data=result.fit_data).fit()
-    interaction_col = next(name for name in sm_fit.params.index if "x:treated" in name)
-    unbiased_se = sm_fit.bse[interaction_col]
+    assert list(sm_fit.params.index) == result.labels
+    contrast = expected_threshold_design[1] - expected_threshold_design[0]
+    expected = sm_fit.t_test(contrast)
+    expected_ci = np.asarray(expected.conf_int(alpha=0.05)).squeeze()
+    n, p = result.design["X"].shape
+    t_critical = t_dist.ppf(1 - 0.05 / 2, df=n - p)
+    reported_se = (row["ci_upper"] - row["ci_lower"]) / (2 * t_critical)
+    expected_se = float(np.asarray(expected.sd).squeeze())
 
-    t_crit = t_dist.ppf(1 - 0.05 / 2, df=n - p)
-    reported_se = (row["ci_upper"] - row["ci_lower"]) / (2 * t_crit)
+    assert reported_se == pytest.approx(expected_se)
 
-    assert reported_se == pytest.approx(unbiased_se, rel=1e-8)
-    # Guard against regressing to either the (n, n) broadcast bug (~3x
-    # inflation) or the biased SSR/n denominator understatement.
-    biased_mse = np.mean(residuals**2)
-    XtX_inv = np.linalg.inv(
-        np.asarray(result.design["X"]).T @ np.asarray(result.design["X"])
-    )
-    coeff_idx = next(
-        i
-        for i, label in enumerate(result.labels)
-        if "treated" in label.lower() and ":" in label
-    )
-    biased_se = np.sqrt(biased_mse * XtX_inv[coeff_idx, coeff_idx])
-    assert reported_se != pytest.approx(biased_se, rel=1e-3)
+    assert row["mean"] == pytest.approx(float(np.asarray(expected.effect).squeeze()))
+    assert row["ci_lower"] == pytest.approx(expected_ci[0])
+    assert row["ci_upper"] == pytest.approx(expected_ci[1])
+    assert row["p_value"] == pytest.approx(float(np.asarray(expected.pvalue).squeeze()))
 
 
 @pytest.mark.integration
@@ -561,7 +772,7 @@ def test_effect_summary_rkink_pymc(mock_pymc_sample):
         formula="y ~ 1 + x + I(x**2) + I((x-0.5)*treated) + I(((x-0.5)**2)*treated)",
         kink_point=kink_point,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -599,7 +810,7 @@ def test_effect_summary_rkink_directions(mock_pymc_sample):
         formula="y ~ 1 + x + I(x**2) + I((x-0.5)*treated) + I(((x-0.5)**2)*treated)",
         kink_point=kink_point,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test increase
     stats_increase = result.effect_summary(direction="increase")
@@ -640,7 +851,7 @@ def test_effect_summary_rkink_rope(mock_pymc_sample):
         formula="y ~ 1 + x + I(x**2) + I((x-0.5)*treated) + I(((x-0.5)**2)*treated)",
         kink_point=kink_point,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(min_effect=0.2)
     assert "p_rope" in stats.table.columns
@@ -669,7 +880,7 @@ def test_effect_summary_empty_window_error(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Create window that doesn't overlap with post-period
     future_date = pd.to_datetime("2100-01-01")
@@ -687,7 +898,7 @@ def test_effect_summary_hdi_coverage(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -713,12 +924,12 @@ def test_effect_summary_tail_probabilities_match(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="increase")
 
     # Manually calculate P(effect > 0)
-    avg_effect = result.post_impact.mean(dim="obs_ind")
+    avg_effect = result.result.impact_post.mean(dim="obs_ind")
     manual_p_gt_0 = float((avg_effect > 0).mean().values)
 
     # Should match (within floating point precision)
@@ -736,7 +947,7 @@ def test_effect_summary_synthetic_control(mock_pymc_sample, sc_data):
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(treated_unit="actual")
 
@@ -754,7 +965,7 @@ def test_effect_summary_synthetic_control(mock_pymc_sample, sc_data):
 def test_effect_summary_synthetic_control_multi_unit(mock_pymc_sample):
     """Test effect_summary with Synthetic Control experiment (multiple treated units)."""
     # Create multi-unit synthetic control data
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
     n_obs = 60
     n_control = 4
     n_treated = 2
@@ -766,21 +977,21 @@ def test_effect_summary_synthetic_control_multi_unit(mock_pymc_sample):
     # Control unit data
     control_data = {}
     for i in range(n_control):
-        control_data[f"control_{i}"] = np.random.normal(10, 2, n_obs) + np.sin(
+        control_data[f"control_{i}"] = rng.normal(10, 2, n_obs) + np.sin(
             np.arange(n_obs) * 0.1
         )
 
     # Treated unit data
     treated_data = {}
     for j in range(n_treated):
-        weights = np.random.dirichlet(np.ones(n_control))
+        weights = rng.dirichlet(np.ones(n_control))
         base_signal = sum(
             weights[i] * control_data[f"control_{i}"] for i in range(n_control)
         )
         treatment_effect = np.zeros(n_obs)
-        treatment_effect[40:] = np.random.normal(5, 1, n_obs - 40)
+        treatment_effect[40:] = rng.normal(5, 1, n_obs - 40)
         treated_data[f"treated_{j}"] = (
-            base_signal + treatment_effect + np.random.normal(0, 0.5, n_obs)
+            base_signal + treatment_effect + rng.normal(0, 0.5, n_obs)
         )
 
     df = pd.DataFrame({**control_data, **treated_data}, index=time_index)
@@ -793,7 +1004,7 @@ def test_effect_summary_synthetic_control_multi_unit(mock_pymc_sample):
         control_units=control_units,
         treated_units=treated_units,
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test with first treated unit
     stats1 = result.effect_summary(treated_unit="treated_0")
@@ -821,7 +1032,7 @@ def test_effect_summary_synthetic_control_window(mock_pymc_sample, sc_data):
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test with integer window
     post_indices = result.datapost.index
@@ -846,7 +1057,7 @@ def test_effect_summary_did(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -872,7 +1083,7 @@ def test_effect_summary_did_direction_increase(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="increase")
 
@@ -890,7 +1101,7 @@ def test_effect_summary_did_direction_decrease(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="decrease")
 
@@ -908,7 +1119,7 @@ def test_effect_summary_did_direction_two_sided(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="two-sided")
 
@@ -928,12 +1139,14 @@ def test_effect_summary_did_rope(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(min_effect=1.0)
 
     assert "p_rope" in stats.table.columns
     assert 0 <= stats.table.loc["treatment_effect", "p_rope"] <= 1
+    assert "Using the closed ROPE [-1, 1]" in stats.text
+    assert "Posterior mass is" in stats.text
 
 
 @pytest.mark.integration
@@ -949,7 +1162,7 @@ def test_effect_summary_did_ols_error(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=ols_model,
-    )
+    ).fit()
 
     # OLS is now supported for DiD, so this should not raise an error
     stats = result.effect_summary()
@@ -971,7 +1184,7 @@ def test_effect_summary_did_hdi_coverage(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -987,37 +1200,473 @@ def test_effect_summary_did_hdi_coverage(mock_pymc_sample, did_data):
 # ==============================================================================
 
 
-def test_extract_hdi_bounds_dataset():
-    """Test _extract_hdi_bounds with xr.Dataset input."""
-    import xarray as xr
-
-    from causalpy.reporting import _extract_hdi_bounds
-
-    # Create a mock HDI result as Dataset
-    data = xr.DataArray([1.0, 3.0], dims=["hdi"], coords={"hdi": ["lower", "higher"]})
-    hdi_dataset = xr.Dataset({"effect": data})
-
-    lower, upper = _extract_hdi_bounds(hdi_dataset)
-
-    assert lower == 1.0
-    assert upper == 3.0
-
-
-def test_extract_hdi_bounds_dataarray():
-    """Test _extract_hdi_bounds with xr.DataArray input."""
-    import xarray as xr
-
-    from causalpy.reporting import _extract_hdi_bounds
-
-    # Create a mock HDI result as DataArray
-    hdi_dataarray = xr.DataArray(
-        [1.0, 3.0], dims=["hdi"], coords={"hdi": ["lower", "higher"]}
+def _fixed_bayesian_decision(
+    interval,
+    tail_label,
+    tail_probability,
+    *,
+    conclusion="descriptive",
+    rope=None,
+    masses=(None, None, None),
+):
+    """Create a fixed decision for direct prose fixtures."""
+    below, inside, above = masses
+    return _BayesianDecision(
+        conclusion=conclusion,
+        framework="descriptive" if rope is None else "hdi_rope",
+        interval=interval,
+        rope=rope,
+        tail_label=tail_label,
+        tail_probability=tail_probability,
+        posterior_mass_below_rope=below,
+        posterior_mass_inside_rope=inside,
+        posterior_mass_above_rope=above,
     )
 
-    lower, upper = _extract_hdi_bounds(hdi_dataarray)
 
-    assert lower == 1.0
-    assert upper == 3.0
+@pytest.mark.parametrize(
+    ("direction", "tail_probability"),
+    [
+        ("increase", 0.5),
+        ("decrease", 0.25),
+        ("two-sided", 0.5),
+    ],
+)
+def test_make_bayesian_decision_without_rope_uses_requested_tail(
+    direction, tail_probability
+):
+    """No-ROPE decisions are descriptive and retain their requested tail."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_tail_probabilities, _make_bayesian_decision
+
+    effect = xr.DataArray([2.0, -1.0, 0.0, 2.0])
+    decision = _make_bayesian_decision(
+        effect,
+        hdi_lower=-1.0,
+        hdi_upper=2.0,
+        tail_probabilities=_compute_tail_probabilities(effect, direction),
+        direction=direction,
+        min_effect=None,
+    )
+
+    assert decision.conclusion == "descriptive"
+    assert decision.framework == "descriptive"
+    assert decision.rope is None
+    assert decision.posterior_mass_below_rope is None
+    assert decision.posterior_mass_inside_rope is None
+    assert decision.posterior_mass_above_rope is None
+    assert decision.tail_label == direction
+    assert decision.tail_probability == tail_probability
+
+
+@pytest.mark.parametrize(
+    ("interval", "conclusion"),
+    [
+        ((1.01, 2.0), "practically_significant"),
+        ((-2.0, -1.01), "practically_significant"),
+        ((-1.0, 1.0), "practically_equivalent_to_zero"),
+        ((1.0, 2.0), "inconclusive"),
+        ((-2.0, -1.0), "inconclusive"),
+        ((-0.5, 1.01), "inconclusive"),
+    ],
+)
+def test_make_bayesian_decision_uses_closed_rope_geometry(interval, conclusion):
+    """HDI verdicts use strict non-overlap and inclusive closed-ROPE endpoints."""
+    import xarray as xr
+
+    from causalpy.reporting import _make_bayesian_decision
+
+    decision = _make_bayesian_decision(
+        xr.DataArray([-2.0, 0.0, 2.0]),
+        hdi_lower=interval[0],
+        hdi_upper=interval[1],
+        tail_probabilities={"p_gt_0": 0.5},
+        direction="increase",
+        min_effect=1.0,
+    )
+
+    assert decision.conclusion == conclusion
+    assert decision.rope == (-1.0, 1.0)
+
+
+@pytest.mark.parametrize(
+    ("interval", "conclusion"),
+    [
+        ((np.nextafter(1.0, -np.inf), 2.0), "inconclusive"),
+        ((1.0, 2.0), "inconclusive"),
+        ((np.nextafter(1.0, np.inf), 2.0), "practically_significant"),
+        ((-2.0, np.nextafter(-1.0, -np.inf)), "practically_significant"),
+        ((-2.0, -1.0), "inconclusive"),
+        ((-2.0, np.nextafter(-1.0, np.inf)), "inconclusive"),
+    ],
+)
+def test_make_bayesian_decision_compares_raw_rope_boundaries(interval, conclusion):
+    """ROPE geometry must not round endpoints before comparing them."""
+    import xarray as xr
+
+    from causalpy.reporting import _make_bayesian_decision
+
+    decision = _make_bayesian_decision(
+        xr.DataArray([-2.0, 0.0, 2.0]),
+        hdi_lower=interval[0],
+        hdi_upper=interval[1],
+        tail_probabilities={"p_gt_0": 0.5},
+        direction="increase",
+        min_effect=1.0,
+    )
+
+    assert decision.conclusion == conclusion
+
+
+def test_make_bayesian_decision_partitions_mass_with_rope_boundary_ties():
+    """Boundary draws belong inside the closed ROPE and masses partition exactly."""
+    import xarray as xr
+
+    from causalpy.reporting import _make_bayesian_decision
+
+    decision = _make_bayesian_decision(
+        xr.DataArray([-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5]),
+        hdi_lower=-1.5,
+        hdi_upper=1.5,
+        tail_probabilities={"p_gt_0": 3 / 7},
+        direction="increase",
+        min_effect=1.0,
+    )
+
+    assert decision.posterior_mass_below_rope == pytest.approx(1 / 7)
+    assert decision.posterior_mass_inside_rope == pytest.approx(5 / 7)
+    assert decision.posterior_mass_above_rope == pytest.approx(1 / 7)
+    assert (
+        decision.posterior_mass_below_rope
+        + decision.posterior_mass_inside_rope
+        + decision.posterior_mass_above_rope
+    ) == pytest.approx(1.0)
+
+
+@pytest.mark.parametrize("min_effect", [-1.0, np.nan, np.inf, -np.inf])
+def test_make_bayesian_decision_rejects_invalid_rope_thresholds(min_effect):
+    """Negative and non-finite ROPE thresholds are rejected."""
+    import xarray as xr
+
+    from causalpy.reporting import _make_bayesian_decision
+
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        _make_bayesian_decision(
+            xr.DataArray([0.0]),
+            hdi_lower=0.0,
+            hdi_upper=0.0,
+            tail_probabilities={"p_gt_0": 0.0},
+            direction="increase",
+            min_effect=min_effect,
+        )
+
+
+def test_make_bayesian_decision_accepts_zero_width_rope():
+    """A zero threshold remains a closed point ROPE with a mass partition."""
+    import xarray as xr
+
+    from causalpy.reporting import _make_bayesian_decision
+
+    decision = _make_bayesian_decision(
+        xr.DataArray([-1.0, 0.0, 1.0]),
+        hdi_lower=0.0,
+        hdi_upper=0.0,
+        tail_probabilities={"p_gt_0": 1 / 3},
+        direction="increase",
+        min_effect=0.0,
+    )
+
+    assert decision.rope == (0.0, 0.0)
+    assert decision.conclusion == "practically_equivalent_to_zero"
+    assert decision.posterior_mass_below_rope == pytest.approx(1 / 3)
+    assert decision.posterior_mass_inside_rope == pytest.approx(1 / 3)
+    assert decision.posterior_mass_above_rope == pytest.approx(1 / 3)
+
+
+def test_bayesian_decision_ignores_nonfinite_draws_in_tail_and_rope_masses():
+    """Finite posterior draws alone determine Bayesian tail and ROPE masses."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_tail_probabilities, _make_bayesian_decision
+
+    effect = xr.DataArray([-2.0, 0.0, 2.0, np.nan])
+    tail_probabilities = _compute_tail_probabilities(effect, "increase")
+    decision = _make_bayesian_decision(
+        effect,
+        hdi_lower=-2.0,
+        hdi_upper=2.0,
+        tail_probabilities=tail_probabilities,
+        direction="increase",
+        min_effect=1.0,
+    )
+
+    assert decision.tail_probability == pytest.approx(1 / 3)
+    assert decision.posterior_mass_below_rope == pytest.approx(1 / 3)
+    assert decision.posterior_mass_inside_rope == pytest.approx(1 / 3)
+    assert decision.posterior_mass_above_rope == pytest.approx(1 / 3)
+
+
+def test_scalar_statistics_filter_nonfinite_posterior_draws():
+    """All scalar Bayesian summaries use the same finite posterior draws."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics_scalar
+
+    effect = xr.DataArray([[-2.0, np.inf, 2.0]], dims=["chain", "draw"])
+    stats = _compute_statistics_scalar(effect, min_effect=1.0)
+
+    assert stats["mean"] == pytest.approx(0.0)
+    assert stats["median"] == pytest.approx(0.0)
+    assert np.isfinite(stats["hdi_lower"])
+    assert np.isfinite(stats["hdi_upper"])
+    assert stats["p_gt_0"] == pytest.approx(0.5)
+    assert stats["decision"].posterior_mass_below_rope == pytest.approx(0.5)
+    assert stats["decision"].posterior_mass_above_rope == pytest.approx(0.5)
+
+    with pytest.raises(ValueError, match="contains no finite draws"):
+        _compute_statistics_scalar(
+            xr.DataArray([[np.nan, np.inf]], dims=["chain", "draw"])
+        )
+
+
+def test_time_series_statistics_filter_nonfinite_posterior_draws():
+    """Average and cumulative Bayesian summaries share finite posterior draws."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    impact = xr.DataArray(
+        [[[-0.5, -0.5], [np.inf, np.inf], [1.5, 1.5]]],
+        dims=["chain", "draw", "obs_ind"],
+    )
+    stats = _compute_statistics(
+        impact,
+        xr.zeros_like(impact),
+        min_effect=1.0,
+        relative=False,
+    )
+
+    assert stats["avg"]["mean"] == pytest.approx(0.5)
+    assert stats["cum"]["mean"] == pytest.approx(1.0)
+    assert stats["avg"]["median"] == pytest.approx(0.5)
+    assert stats["cum"]["median"] == pytest.approx(1.0)
+    for summary in stats.values():
+        assert np.isfinite(summary["hdi_lower"])
+        assert np.isfinite(summary["hdi_upper"])
+        assert summary["p_gt_0"] == pytest.approx(0.5)
+        assert summary["decision"].posterior_mass_inside_rope == pytest.approx(0.5)
+        assert summary["decision"].posterior_mass_above_rope == pytest.approx(0.5)
+
+    with pytest.raises(ValueError, match="contains no finite draws"):
+        _compute_statistics(
+            xr.full_like(impact, np.inf),
+            xr.zeros_like(impact),
+            relative=False,
+        )
+
+
+def test_effect_summary_helpers_use_alpha_for_scalar_and_time_series_hdis():
+    """Both Bayesian summary assembly paths use HDI coverage ``1 - alpha``."""
+    import xarray as xr
+
+    from causalpy._arviz_compat import hdi_bounds
+    from causalpy.reporting import _effect_summary_did, _effect_summary_timeseries
+
+    alpha = 0.025
+    effect = xr.DataArray(np.arange(101, dtype=float)[None, :], dims=["chain", "draw"])
+    expected_bounds = hdi_bounds(effect, prob=1 - alpha)
+
+    scalar = _effect_summary_did(SimpleNamespace(causal_impact=effect), alpha=alpha)
+    assert tuple(
+        scalar.table.loc["treatment_effect", ["hdi_lower", "hdi_upper"]]
+    ) == pytest.approx(expected_bounds)
+    assert "97.5% HDI" in scalar.text
+
+    impact = xr.DataArray(
+        np.repeat(effect.values[:, :, None], 2, axis=2),
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1]},
+    )
+    time_series = _effect_summary_timeseries(
+        impact,
+        xr.zeros_like(impact),
+        pd.Index([0, 1], name="obs_ind"),
+        alpha=alpha,
+        cumulative=False,
+        relative=False,
+    )
+    assert tuple(
+        time_series.table.loc["average", ["hdi_lower", "hdi_upper"]]
+    ) == pytest.approx(expected_bounds)
+    assert "97.5% interval" in time_series.text
+
+
+def test_effect_summary_timeseries_renders_distinct_cumulative_rope_decision():
+    """Public time-series prose renders the cumulative decision, not the average one."""
+    import xarray as xr
+
+    from causalpy.reporting import _effect_summary_timeseries
+
+    impact = xr.DataArray(
+        np.full((1, 20, 3), 0.5),
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": [0, 1, 2]},
+    )
+    summary = _effect_summary_timeseries(
+        impact,
+        xr.zeros_like(impact),
+        pd.Index([0, 1, 2], name="obs_ind"),
+        min_effect=1.0,
+        relative=False,
+    )
+
+    assert "The cumulative effect is 1.50 with a 95% HDI [1.50, 1.50]." in summary.text
+    assert (
+        "For the cumulative effect, The posterior probability of an increase is 1.000. "
+        "Using the closed ROPE [-1, 1], the 95% HDI is entirely outside the ROPE; "
+        "the effect is practically significant. Posterior mass is 0.000 below, "
+        "0.000 inside, and 1.000 above the ROPE."
+    ) in summary.text
+
+
+def test_effect_summary_did_distinguishes_zero_rope_from_no_rope():
+    """A public summary retains a point ROPE and strict ``p_rope`` at zero."""
+    import xarray as xr
+
+    from causalpy.reporting import _effect_summary_did
+
+    summary = _effect_summary_did(
+        SimpleNamespace(
+            causal_impact=xr.DataArray([[-1.0, 0.0, 1.0]], dims=["chain", "draw"])
+        ),
+        min_effect=0.0,
+    )
+
+    assert summary.table.loc["treatment_effect", "p_rope"] == pytest.approx(1 / 3)
+    assert "Using the closed ROPE [0, 0]" in summary.text
+
+
+def test_compute_statistics_time_series_rope_uses_requested_direction():
+    """Average and cumulative ``p_rope`` use strict requested-direction tails."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    draw_values = np.array([-2.0, -1.0, 0.0, 1.0, 2.0])
+    impact = xr.DataArray(
+        np.tile(draw_values[None, :, None], (1, 1, 2)),
+        dims=["chain", "draw", "obs_ind"],
+    )
+    counterfactual = xr.zeros_like(impact)
+
+    expected = {
+        "increase": (1 / 5, 2 / 5),
+        "decrease": (1 / 5, 2 / 5),
+        "two-sided": (2 / 5, 4 / 5),
+    }
+    for direction, (avg_expected, cum_expected) in expected.items():
+        stats = _compute_statistics(
+            impact,
+            counterfactual,
+            hdi_prob=0.95,
+            direction=direction,
+            cumulative=True,
+            relative=False,
+            min_effect=1.0,
+        )
+
+        assert stats["avg"]["p_rope"] == pytest.approx(avg_expected)
+        assert stats["cum"]["p_rope"] == pytest.approx(cum_expected)
+
+
+def test_compute_statistics_builds_distinct_average_and_cumulative_decisions():
+    """Cumulative ROPE geometry is computed independently of average geometry."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics
+
+    impact = xr.DataArray(np.full((1, 5, 2), 0.6), dims=["chain", "draw", "obs_ind"])
+    stats = _compute_statistics(
+        impact,
+        xr.zeros_like(impact),
+        hdi_prob=0.95,
+        direction="increase",
+        cumulative=True,
+        relative=False,
+        min_effect=1.0,
+    )
+
+    assert stats["avg"]["decision"].conclusion == "practically_equivalent_to_zero"
+    assert stats["cum"]["decision"].conclusion == "practically_significant"
+
+
+def test_compute_statistics_scalar_hdi_golden_unmonkeypatched():
+    """Approved fixed-seed HDI golden via reporting scalar helpers (no monkeypatch).
+
+    Uses ``default_rng(42).normal(size=(2, 200))`` through
+    ``_compute_statistics_scalar(..., hdi_prob=0.94)`` and
+    ``_generate_table_scalar``. Bounds match the approved baseline to 1e-12.
+    """
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics_scalar, _generate_table_scalar
+
+    rng = np.random.default_rng(42)
+    effect = xr.DataArray(rng.normal(size=(2, 200)), dims=["chain", "draw"])
+    stats = _compute_statistics_scalar(effect, hdi_prob=0.94)
+    table = _generate_table_scalar(stats)
+
+    assert stats["hdi_lower"] == pytest.approx(
+        -1.7577283913566313, rel=1e-12, abs=1e-12
+    )
+    assert stats["hdi_upper"] == pytest.approx(1.732311605409944, rel=1e-12, abs=1e-12)
+    assert table.loc["effect", "hdi_lower"] == pytest.approx(
+        -1.7577283913566313, rel=1e-12, abs=1e-12
+    )
+    assert table.loc["effect", "hdi_upper"] == pytest.approx(
+        1.732311605409944, rel=1e-12, abs=1e-12
+    )
+    assert "decision" not in table.columns
+
+
+def test_compute_statistics_scalar_singleton_treated_units():
+    """Singleton ``treated_units`` must squeeze through scalar HDI reporting."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics_scalar, _generate_table_scalar
+
+    rng = np.random.default_rng(42)
+    effect = xr.DataArray(
+        rng.normal(size=(2, 200, 1)),
+        dims=["chain", "draw", "treated_units"],
+        coords={"treated_units": ["unit_a"]},
+    )
+    stats = _compute_statistics_scalar(effect, hdi_prob=0.94)
+    table = _generate_table_scalar(stats)
+
+    assert stats["hdi_lower"] == pytest.approx(
+        -1.7577283913566313, rel=1e-12, abs=1e-12
+    )
+    assert stats["hdi_upper"] == pytest.approx(1.732311605409944, rel=1e-12, abs=1e-12)
+    assert isinstance(stats["mean"], float)
+    assert isinstance(table.loc["effect", "hdi_lower"], float)
+
+
+def test_compute_statistics_scalar_unreduced_treated_units_raises():
+    """Unreduced multi-value ``treated_units`` must fail closed in scalar reporting."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics_scalar
+
+    rng = np.random.default_rng(42)
+    effect = xr.DataArray(
+        rng.normal(size=(2, 50, 2)),
+        dims=["chain", "draw", "treated_units"],
+        coords={"treated_units": ["a", "b"]},
+    )
+    with pytest.raises(ValueError):
+        _compute_statistics_scalar(effect, hdi_prob=0.94)
 
 
 def test_as_scalar_handles_singleton_arrays():
@@ -1161,6 +1810,59 @@ def test_compute_statistics_rope_decrease():
     assert stats["cum"]["p_rope"] > 0.95
 
 
+def test_compute_statistics_time_series_hdi_golden():
+    """ArviZ 0.22 94% HDIs for a frozen average/cumulative/relative table."""
+    import xarray as xr
+
+    from causalpy.reporting import _compute_statistics, _generate_table
+
+    rng = np.random.default_rng(123)
+    impact = xr.DataArray(
+        rng.normal(size=(2, 200, 3)),
+        dims=["chain", "draw", "obs_ind"],
+    )
+    counterfactual = xr.DataArray(
+        10 + rng.normal(size=(2, 200, 3)),
+        dims=["chain", "draw", "obs_ind"],
+    )
+
+    table = _generate_table(
+        _compute_statistics(
+            impact,
+            counterfactual,
+            hdi_prob=0.94,
+            cumulative=True,
+            relative=True,
+        )
+    )
+
+    assert tuple(table.loc["average", ["hdi_lower", "hdi_upper"]]) == pytest.approx(
+        (-1.136764984172878, 1.1654528765047945),
+        rel=1e-12,
+        abs=1e-12,
+    )
+    assert tuple(table.loc["cumulative", ["hdi_lower", "hdi_upper"]]) == pytest.approx(
+        (-3.4102949525186337, 3.496358629514383),
+        rel=1e-12,
+        abs=1e-12,
+    )
+    assert tuple(
+        table.loc["average", ["relative_hdi_lower", "relative_hdi_upper"]]
+    ) == pytest.approx(
+        (-11.11634243961037, 12.08950890903512),
+        rel=1e-12,
+        abs=1e-12,
+    )
+    assert tuple(
+        table.loc["cumulative", ["relative_hdi_lower", "relative_hdi_upper"]]
+    ) == pytest.approx(
+        (-11.116342446857432, 12.089508916593045),
+        rel=1e-12,
+        abs=1e-12,
+    )
+    assert "decision" not in table.columns
+
+
 def test_compute_statistics_with_singleton_treated_unit_dim():
     """Regression test for singleton dims surviving reductions in xarray workflows."""
     import xarray as xr
@@ -1194,44 +1896,33 @@ def test_compute_statistics_with_singleton_treated_unit_dim():
     assert isinstance(stats["cum"]["relative_mean"], float)
 
 
-def test_compute_statistics_hdi_dataarray_paths(monkeypatch):
-    """Exercise _compute_statistics branches where az.hdi returns a DataArray."""
+def test_compute_statistics_unreduced_treated_units_raises():
+    """Unreduced multi-value ``treated_units`` must fail in time-series reporting."""
     import xarray as xr
 
-    from causalpy import reporting as reporting_mod
+    from causalpy.reporting import _compute_statistics
 
-    def fake_hdi(_obj, hdi_prob=0.95):
-        _ = hdi_prob
-        return xr.DataArray(
-            [0.1, 0.9], dims=["hdi"], coords={"hdi": ["lower", "higher"]}
-        )
-
-    monkeypatch.setattr(reporting_mod.az, "hdi", fake_hdi)
-
+    rng = np.random.default_rng(0)
     impact = xr.DataArray(
-        np.random.normal(1.0, 0.1, (2, 20, 4)),
-        dims=["chain", "draw", "obs_ind"],
-        coords={"obs_ind": [0, 1, 2, 3]},
+        rng.normal(loc=1.0, scale=0.1, size=(2, 20, 4, 2)),
+        dims=["chain", "draw", "obs_ind", "treated_units"],
+        coords={"obs_ind": [0, 1, 2, 3], "treated_units": ["a", "b"]},
     )
     counterfactual = xr.DataArray(
-        np.ones((2, 20, 4)) * 10.0,
-        dims=["chain", "draw", "obs_ind"],
-        coords={"obs_ind": [0, 1, 2, 3]},
+        np.ones((2, 20, 4, 2)) * 10.0,
+        dims=["chain", "draw", "obs_ind", "treated_units"],
+        coords={"obs_ind": [0, 1, 2, 3], "treated_units": ["a", "b"]},
     )
 
-    stats = reporting_mod._compute_statistics(
-        impact,
-        counterfactual,
-        hdi_prob=0.95,
-        direction="two-sided",
-        cumulative=True,
-        relative=True,
-    )
-
-    assert isinstance(stats["avg"]["hdi_lower"], float)
-    assert isinstance(stats["cum"]["hdi_lower"], float)
-    assert isinstance(stats["avg"]["relative_hdi_lower"], float)
-    assert isinstance(stats["cum"]["relative_hdi_lower"], float)
+    with pytest.raises(ValueError):
+        _compute_statistics(
+            impact,
+            counterfactual,
+            hdi_prob=0.94,
+            direction="two-sided",
+            cumulative=True,
+            relative=True,
+        )
 
 
 def test_extract_window_canonical_dataarray():
@@ -1241,14 +1932,13 @@ def test_extract_window_canonical_dataarray():
     from causalpy.reporting import _extract_window
 
     datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
-    result = SimpleNamespace(
-        post_impact=xr.DataArray(
-            [1.0, 2.0, 3.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
-        ),
-        datapost=datapost,
+    post_impact = xr.DataArray(
+        [1.0, 2.0, 3.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
     )
 
-    windowed_impact, window_coords = _extract_window(result, window="post")
+    windowed_impact, window_coords = _extract_window(
+        post_impact, datapost.index, window="post"
+    )
 
     assert isinstance(windowed_impact, xr.DataArray)
     assert window_coords.equals(datapost.index)
@@ -1261,16 +1951,12 @@ def test_extract_counterfactual_canonical_dataarray():
     from causalpy.reporting import _extract_counterfactual
 
     datapost = pd.DataFrame(index=pd.Index([10, 11, 12], name="obs_ind"))
-    result = SimpleNamespace(
-        post_pred=xr.DataArray(
-            [5.0, 6.0, 7.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
-        ),
-        datapost=datapost,
+    post_pred = xr.DataArray(
+        [5.0, 6.0, 7.0], dims=["obs_ind"], coords={"obs_ind": [10, 11, 12]}
     )
 
     window_coords = datapost.index[:2]
-    counterfactual = _extract_counterfactual(result, window_coords)
-
+    counterfactual = _extract_counterfactual(post_pred, window_coords)
     assert isinstance(counterfactual, xr.DataArray)
     np.testing.assert_array_equal(counterfactual.values, np.array([5.0, 6.0]))
 
@@ -1377,27 +2063,18 @@ def test_compute_statistics_rope_near_threshold():
     assert 0.3 < stats["avg"]["p_rope"] < 0.7
 
 
-def test_compute_statistics_rope_autodetect_direction_for_prose_consistency():
-    """ROPE should follow the auto-detected sign direction for one-sided requests."""
+def test_compute_statistics_rope_honors_requested_direction():
+    """Time-series ``p_rope`` must not flip a requested increase to decrease."""
     import xarray as xr
 
     from causalpy.reporting import _compute_statistics
 
-    rng = np.random.default_rng(42)
-    draws = rng.normal(loc=-5.0, scale=0.5, size=(1, 200, 3))
-    impact = xr.DataArray(
-        draws,
-        dims=["chain", "draw", "obs_ind"],
-        coords={"obs_ind": [0, 1, 2]},
-    )
+    draws = np.full((1, 20, 3), -5.0)
+    impact = xr.DataArray(draws, dims=["chain", "draw", "obs_ind"])
     counterfactual = xr.DataArray(
-        np.ones((1, 200, 3)) * 10.0,
-        dims=["chain", "draw", "obs_ind"],
-        coords={"obs_ind": [0, 1, 2]},
+        np.full((1, 20, 3), 10.0), dims=["chain", "draw", "obs_ind"]
     )
 
-    # Request increase, but true effect is strongly negative.
-    # p_rope should align with the detected "decrease" direction.
     stats = _compute_statistics(
         impact,
         counterfactual,
@@ -1410,8 +2087,8 @@ def test_compute_statistics_rope_autodetect_direction_for_prose_consistency():
 
     assert stats["avg"]["mean"] < 0
     assert stats["cum"]["mean"] < 0
-    assert stats["avg"]["p_rope"] > 0.95
-    assert stats["cum"]["p_rope"] > 0.95
+    assert stats["avg"]["p_rope"] == 0.0
+    assert stats["cum"]["p_rope"] == 0.0
 
 
 def test_format_number():
@@ -1422,6 +2099,18 @@ def test_format_number():
     assert _format_number(3.14159, decimals=3) == "3.142"
     assert _format_number(10.0, decimals=1) == "10.0"
     assert _format_number(0.001, decimals=4) == "0.0010"
+
+
+def test_format_rope_bound_is_compact_and_round_trip_safe():
+    """ROPE prose remains usable for finite thresholds across float magnitudes."""
+    from causalpy.reporting import _format_rope_bound
+
+    smallest = np.nextafter(0.0, 1.0)
+    largest = np.finfo(float).max
+
+    assert _format_rope_bound(1.0) == "1"
+    assert float(_format_rope_bound(smallest)) == smallest
+    assert float(_format_rope_bound(largest)) == largest
 
 
 def test_select_treated_unit():
@@ -1499,9 +2188,10 @@ def test_detect_experiment_type_unknown():
     """Test _detect_experiment_type raises error for unknown experiment type."""
     from causalpy.reporting import _detect_experiment_type
 
-    # Create mock result with no recognized attributes
+    # Mock experiment whose result bundle is not a recognized type
     class MockResult:
         some_other_attribute = "value"
+        result = None
 
     result = MockResult()
 
@@ -1511,14 +2201,19 @@ def test_detect_experiment_type_unknown():
 
 def test_detect_experiment_type_prepostnegd():
     """Test _detect_experiment_type correctly identifies PrePostNEGD (has causal_impact but not post_impact)."""
+    from causalpy.experiments._results import CoefficientResult
     from causalpy.reporting import _detect_experiment_type
 
-    # Create mock result like PrePostNEGD
+    # Create mock experiment with a CoefficientResult bundle, like PrePostNEGD
     class MockPrePostNEGD:
-        causal_impact = None
+        result = CoefficientResult(
+            causal_impact=None,
+            scenario_control=None,
+            scenario_treated=None,
+            scenario_counterfactual=None,
+        )
 
     result = MockPrePostNEGD()
-
     experiment_type = _detect_experiment_type(result)
     assert experiment_type == "did"
 
@@ -1540,7 +2235,9 @@ def test_extract_window_invalid_type():
 
     # Invalid window type (not "post", tuple, or slice)
     with pytest.raises(ValueError, match="window must be"):
-        _extract_window(result, window=[1, 2, 3])  # list is invalid
+        _extract_window(
+            result.post_impact, result.datapost.index, window=[1, 2, 3]
+        )  # list is invalid
 
 
 @pytest.mark.integration
@@ -1561,7 +2258,7 @@ def test_compute_statistics_did_ols_missing_interaction_term(
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Manually corrupt the labels to trigger error
     result.labels = ["Intercept", "some_other_term"]
@@ -1571,34 +2268,82 @@ def test_compute_statistics_did_ols_missing_interaction_term(
 
 
 @pytest.mark.integration
-def test_compute_statistics_rd_ols_fallback_path(mock_pymc_sample, rd_data):
-    """Test _compute_statistics_rd_ols uses fallback when coefficient not found."""
+def test_compute_statistics_rd_ols_raises_when_threshold_design_is_missing(rd_data):
+    """RD contrast inference requires the stored threshold design rows."""
     from sklearn.linear_model import LinearRegression
 
     from causalpy.reporting import _compute_statistics_rd_ols
 
-    df = rd_data
     result = cp.RegressionDiscontinuity(
-        df,
+        rd_data,
         formula="y ~ 1 + x + treated + x:treated",
         treatment_threshold=0.5,
         model=LinearRegression(),
-    )
+    ).fit()
+    del result.x_discon_design
 
-    # Manually corrupt the labels to trigger fallback
-    original_labels = result.labels
-    result.labels = ["Intercept", "x", "some_other_term"]
+    with pytest.raises(ValueError, match="threshold design rows are unavailable"):
+        _compute_statistics_rd_ols(result)
 
-    # Should not raise error, but use fallback SE calculation
-    stats = _compute_statistics_rd_ols(result, alpha=0.05)
 
-    # Restore labels
-    result.labels = original_labels
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "invalid_design",
+    [
+        lambda design: design[:1],
+        lambda design: design[0],
+        lambda design: design[:, :-1],
+        lambda design: np.full(design.shape, "not-a-number", dtype=object),
+        lambda design: np.full_like(design, np.nan),
+        lambda design: np.full_like(design, np.inf),
+        lambda design: np.full_like(design, -np.inf),
+    ],
+    ids=[
+        "one_row",
+        "one_dimensional",
+        "wrong_width",
+        "nonnumeric",
+        "nan",
+        "positive_infinity",
+        "negative_infinity",
+    ],
+)
+def test_compute_statistics_rd_ols_raises_when_threshold_design_is_malformed(
+    rd_data, invalid_design
+):
+    """RD contrast inference rejects stored design rows that cannot form c."""
+    from sklearn.linear_model import LinearRegression
 
-    assert "mean" in stats
-    assert "ci_lower" in stats
-    assert "ci_upper" in stats
-    assert "p_value" in stats
+    from causalpy.reporting import _compute_statistics_rd_ols
+
+    result = cp.RegressionDiscontinuity(
+        rd_data,
+        formula="y ~ 1 + x + treated + x:treated",
+        treatment_threshold=0.5,
+        model=LinearRegression(),
+    ).fit()
+    result.x_discon_design = invalid_design(result.x_discon_design)
+
+    with pytest.raises(ValueError, match="threshold design"):
+        _compute_statistics_rd_ols(result)
+
+
+@pytest.mark.integration
+def test_compute_statistics_rd_ols_raises_when_fitted_design_is_singular(rd_data):
+    """RD contrast inference rejects singular normal equations."""
+    from sklearn.linear_model import LinearRegression
+
+    from causalpy.reporting import _compute_statistics_rd_ols
+
+    result = cp.RegressionDiscontinuity(
+        rd_data,
+        formula="y ~ 1 + x + I(2 * x) + treated",
+        treatment_threshold=0.5,
+        model=LinearRegression(),
+    ).fit()
+
+    with pytest.raises(ValueError, match="X.T @ X is singular"):
+        _compute_statistics_rd_ols(result)
 
 
 # ==============================================================================
@@ -1634,40 +2379,44 @@ def test_select_treated_unit_with_multiple_units():
     np.testing.assert_array_equal(result.values, np.array([3, 6, 9]))
 
 
-@pytest.mark.integration
-def test_extract_window_slice_with_step(mock_pymc_sample):
-    """Test _extract_window with slice having step parameter."""
-    # Create data with integer index
-    np.random.seed(42)
-    n_pre = 50
-    n_post = 30
-    t_pre = np.arange(n_pre)
-    t_post = np.arange(n_pre, n_pre + n_post)
+@pytest.mark.parametrize(
+    "datetime_index, window, positions",
+    [
+        (False, slice(10, 16, 2), [0, 2, 4]),
+        (True, slice(None, None, 2), [0, 2, 4]),
+        (True, slice(0, 3), [0, 1, 2]),
+        (True, slice(-3, None), [3, 4, 5]),
+        (True, slice(None, None, -1), [5, 4, 3, 2, 1, 0]),
+        (True, slice("2020-02-01", "2020-06-01", 2), [1, 3, 5]),
+    ],
+)
+def test_extract_window_slice_with_step(datetime_index, window, positions):
+    """Window selection preserves bounds and steps in coordinates and values."""
+    import xarray as xr
 
-    y_pre = 10 + 0.5 * t_pre + np.random.normal(0, 1, n_pre)
-    y_post = 15 + 0.5 * t_post + np.random.normal(0, 1, n_post)
+    from causalpy.reporting import _extract_window
 
-    df = pd.DataFrame(
-        {
-            "y": np.concatenate([y_pre, y_post]),
-            "t": np.concatenate([t_pre, t_post]),
-        },
-        index=np.concatenate([t_pre, t_post]),
+    index = (
+        pd.date_range("2020-01-01", periods=6, freq="MS")
+        if datetime_index
+        else pd.Index(range(10, 16))
     )
+    impact = xr.DataArray(np.arange(6), dims=["obs_ind"], coords={"obs_ind": index})
+    selected, coordinates = _extract_window(impact, index, window)
+    pd.testing.assert_index_equal(coordinates, index[positions])
+    xr.testing.assert_equal(selected, impact.isel(obs_ind=positions))
 
-    treatment_time = 50
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
 
-    # Test with slice having step
-    stats = result.effect_summary(window=slice(50, 70, 2))  # Every other point
-    assert isinstance(stats, EffectSummary)
-    # Window should have approximately half the points
-    assert len(str(stats.text)) > 0
+def test_datetime_window_rejects_mixed_positional_and_label_bounds():
+    """Mixed slice semantics must not silently convert integers to timestamps."""
+    import xarray as xr
+
+    from causalpy.reporting import _extract_window
+
+    index = pd.date_range("2020-01-01", periods=6, freq="MS")
+    impact = xr.DataArray(np.arange(6), dims=["obs_ind"], coords={"obs_ind": index})
+    with pytest.raises(ValueError, match="cannot mix positional integer bounds"):
+        _extract_window(impact, index, slice(0, "2020-03-01"))
 
 
 @pytest.mark.integration
@@ -1678,15 +2427,16 @@ def test_relative_effects_with_near_zero_counterfactual(mock_pymc_sample):
     from causalpy.reporting import _compute_statistics
 
     # Create mock data with near-zero counterfactual
+    rng = np.random.default_rng(42)
     impact = xr.DataArray(
-        np.random.normal(1.0, 0.1, (2, 10, 5)),
+        rng.normal(1.0, 0.1, (2, 10, 5)),
         dims=["chain", "draw", "obs_ind"],
         coords={"chain": [0, 1], "draw": range(10), "obs_ind": range(5)},
     )
 
     # Counterfactual with values very close to zero
     counterfactual = xr.DataArray(
-        np.random.normal(0.0001, 0.00001, (2, 10, 5)),
+        rng.normal(0.0001, 0.00001, (2, 10, 5)),
         dims=["chain", "draw", "obs_ind"],
         coords={"chain": [0, 1], "draw": range(10), "obs_ind": range(5)},
     )
@@ -1719,10 +2469,12 @@ def test_extract_counterfactual_canonical_pymc(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     window_coords = result.datapost.index[:10]
-    counterfactual = _extract_counterfactual(result, window_coords, treated_unit=None)
+    counterfactual = _extract_counterfactual(
+        result.result.predictions_post, window_coords, treated_unit=None
+    )
 
     assert counterfactual.sizes["obs_ind"] == 10
     assert {"chain", "draw"} <= set(counterfactual.dims)
@@ -1930,6 +2682,7 @@ def test_generate_prose_scalar_increase():
         "hdi_lower": 1.0,
         "hdi_upper": 4.0,
         "p_gt_0": 0.95,
+        "decision": _fixed_bayesian_decision((1.0, 4.0), "increase", 0.95),
     }
 
     prose = _generate_prose_scalar(
@@ -1954,6 +2707,7 @@ def test_generate_prose_scalar_decrease():
         "hdi_lower": -4.0,
         "hdi_upper": -1.0,
         "p_lt_0": 0.98,
+        "decision": _fixed_bayesian_decision((-4.0, -1.0), "decrease", 0.98),
     }
 
     prose = _generate_prose_scalar(
@@ -1974,7 +2728,9 @@ def test_generate_prose_scalar_two_sided():
         "mean": 2.5,
         "hdi_lower": 1.0,
         "hdi_upper": 4.0,
+        "p_two_sided": 0.30,
         "prob_of_effect": 0.85,
+        "decision": _fixed_bayesian_decision((1.0, 4.0), "two-sided", 0.30),
     }
 
     prose = _generate_prose_scalar(
@@ -1982,9 +2738,130 @@ def test_generate_prose_scalar_two_sided():
     )
 
     assert "discontinuity" in prose
-    assert "2.50" in prose
-    assert "0.850" in prose
-    assert "effect" in prose  # "effect" (not "increase" or "decrease")
+    assert "two-sided tail probability" in prose
+    assert "0.850" not in prose
+    assert "0.300" in prose
+
+
+@pytest.mark.parametrize(
+    ("alpha", "coverage"),
+    [
+        (0.05, "95%"),
+        (0.10, "90%"),
+        (0.025, "97.5%"),
+    ],
+)
+def test_generate_prose_scalar_renders_coverage_from_alpha(alpha, coverage):
+    """Bayesian prose coverage is derived from ``1 - alpha`` without truncation."""
+    from causalpy.reporting import _generate_prose_scalar
+
+    prose = _generate_prose_scalar(
+        {
+            "mean": 1.0,
+            "hdi_lower": 0.5,
+            "hdi_upper": 1.5,
+            "decision": _fixed_bayesian_decision((0.5, 1.5), "increase", 0.9),
+        },
+        "effect",
+        alpha=alpha,
+        direction="increase",
+    )
+
+    assert f"{coverage} HDI" in prose
+
+
+@pytest.mark.parametrize(
+    ("conclusion", "interval", "expected_verdict"),
+    [
+        (
+            "practically_significant",
+            (1.01, 2.0),
+            "is entirely outside the ROPE; the effect is practically significant.",
+        ),
+        (
+            "practically_equivalent_to_zero",
+            (-1.0, 1.0),
+            "is entirely inside the ROPE; the effect is practically equivalent to zero.",
+        ),
+        (
+            "inconclusive",
+            (1.0, 2.0),
+            "overlaps the ROPE; the result is inconclusive.",
+        ),
+    ],
+)
+def test_generate_prose_scalar_renders_each_rope_decision(
+    conclusion, interval, expected_verdict
+):
+    """Scalar prose renders the attached ROPE verdict and complete mass partition."""
+    from causalpy.reporting import _generate_prose_scalar
+
+    prose = _generate_prose_scalar(
+        {
+            "mean": 1.5,
+            "hdi_lower": interval[0],
+            "hdi_upper": interval[1],
+            "decision": _fixed_bayesian_decision(
+                interval,
+                "increase",
+                0.75,
+                conclusion=conclusion,
+                rope=(-1.0, 1.0),
+                masses=(0.1, 0.8, 0.1),
+            ),
+        },
+        "effect",
+        alpha=0.05,
+        direction="increase",
+    )
+
+    assert "posterior probability of an increase is 0.750" in prose
+    assert "Using the closed ROPE [-1, 1], the 95% HDI" in prose
+    assert expected_verdict in prose
+    assert (
+        "Posterior mass is 0.100 below, 0.800 inside, and 0.100 above the ROPE."
+        in prose
+    )
+
+
+def test_bayesian_prose_uses_attached_decision_without_rederiving_statistics():
+    """Scalar and detailed prose read intervals and tails only from decisions."""
+    from causalpy.reporting import _generate_prose_detailed, _generate_prose_scalar
+
+    decision = _fixed_bayesian_decision((1.0, 2.0), "increase", 0.123)
+    scalar_prose = _generate_prose_scalar(
+        {
+            "mean": -5.0,
+            "hdi_lower": -6.0,
+            "hdi_upper": -4.0,
+            "p_gt_0": 0.999,
+            "decision": decision,
+        },
+        "effect",
+        direction="decrease",
+    )
+    detailed_prose = _generate_prose_detailed(
+        {
+            "avg": {
+                "mean": -5.0,
+                "hdi_lower": -6.0,
+                "hdi_upper": -4.0,
+                "p_lt_0": 0.999,
+                "decision": decision,
+            }
+        },
+        pd.Index([1]),
+        direction="decrease",
+        cumulative=False,
+        relative=False,
+    )
+
+    for prose in (scalar_prose, detailed_prose):
+        assert "posterior probability of an increase is 0.123" in prose
+        assert "posterior probability of a decrease" not in prose
+        assert "0.999" not in prose
+        assert "HDI [1.00, 2.00]" in prose
+        assert "HDI [-6.00, -4.00]" not in prose
 
 
 # ==============================================================================
@@ -2105,6 +2982,7 @@ def test_generate_prose_detailed_basic():
             "hdi_lower": 1.0,
             "hdi_upper": 4.0,
             "p_gt_0": 0.99,
+            "decision": _fixed_bayesian_decision((1.0, 4.0), "increase", 0.99),
         }
     }
 
@@ -2140,6 +3018,7 @@ def test_generate_prose_detailed_counterfactual_interval():
             "hdi_lower": -3.0,
             "hdi_upper": -1.0,
             "p_gt_0": 0.001,
+            "decision": _fixed_bayesian_decision((-3.0, -1.0), "increase", 0.001),
         }
     }
 
@@ -2165,8 +3044,8 @@ def test_generate_prose_detailed_counterfactual_interval():
     assert "20.00" in prose
 
 
-def test_generate_prose_detailed_direction_autodetect_negative():
-    """Test that a negative effect with direction='increase' auto-detects decrease."""
+def test_generate_prose_detailed_honors_requested_increase_direction():
+    """A negative mean must not change a requested increase to decrease."""
     from causalpy.reporting import _generate_prose_detailed
 
     stats = {
@@ -2175,6 +3054,7 @@ def test_generate_prose_detailed_direction_autodetect_negative():
             "hdi_lower": -2.15,
             "hdi_upper": -1.33,
             "p_gt_0": 0.0,
+            "decision": _fixed_bayesian_decision((-2.15, -1.33), "increase", 0.0),
         }
     }
 
@@ -2191,16 +3071,13 @@ def test_generate_prose_detailed_direction_autodetect_negative():
         counterfactual_avg=18.82,
     )
 
-    # Should auto-detect decrease: P(decrease) = 1 - P(increase) = 1.0
-    assert "decrease" in prose
-    # HDI excludes zero, so it should say "does not include zero"
-    assert "does not include zero" in prose
-    # Posterior probability should be 1.000 (auto-detected)
-    assert "1.000" in prose
+    assert "posterior probability of an increase is 0.000" in prose
+    assert "posterior probability of a decrease" not in prose
+    assert "does not include zero" not in prose
 
 
-def test_generate_prose_detailed_direction_autodetect_positive():
-    """Test that a positive effect with direction='decrease' auto-detects increase."""
+def test_generate_prose_detailed_honors_requested_decrease_direction():
+    """A positive mean must not change a requested decrease to increase."""
     from causalpy.reporting import _generate_prose_detailed
 
     stats = {
@@ -2209,6 +3086,7 @@ def test_generate_prose_detailed_direction_autodetect_positive():
             "hdi_lower": 1.5,
             "hdi_upper": 4.5,
             "p_lt_0": 0.001,
+            "decision": _fixed_bayesian_decision((1.5, 4.5), "decrease", 0.001),
         }
     }
 
@@ -2225,12 +3103,12 @@ def test_generate_prose_detailed_direction_autodetect_positive():
         counterfactual_avg=50.0,
     )
 
-    assert "increase" in prose
-    assert "does not include zero" in prose
+    assert "posterior probability of a decrease is 0.001" in prose
+    assert "posterior probability of an increase" not in prose
 
 
-def test_generate_prose_detailed_two_sided_uses_correct_article():
-    """Test that two-sided prose uses 'an effect' (not 'a effect')."""
+def test_generate_prose_detailed_two_sided_uses_tail_probability():
+    """Two-sided prose names ``p_two_sided`` as a tail probability."""
     from causalpy.reporting import _generate_prose_detailed
 
     stats = {
@@ -2238,7 +3116,9 @@ def test_generate_prose_detailed_two_sided_uses_correct_article():
             "mean": 0.5,
             "hdi_lower": -0.2,
             "hdi_upper": 1.2,
+            "p_two_sided": 0.2,
             "prob_of_effect": 0.9,
+            "decision": _fixed_bayesian_decision((-0.2, 1.2), "two-sided", 0.2),
         }
     }
     window_coords = pd.Index([10, 11, 12])
@@ -2252,8 +3132,9 @@ def test_generate_prose_detailed_two_sided_uses_correct_article():
         relative=False,
     )
 
-    assert "posterior probability of an effect" in prose
-    assert "posterior probability of a effect" not in prose
+    assert "two-sided tail probability is 0.200" in prose
+    assert "posterior probability of an effect" not in prose
+    assert "0.900" not in prose
 
 
 def test_generate_prose_detailed_preserves_custom_prefix_casing():
@@ -2266,6 +3147,7 @@ def test_generate_prose_detailed_preserves_custom_prefix_casing():
             "hdi_lower": 1.0,
             "hdi_upper": 4.0,
             "p_gt_0": 0.99,
+            "decision": _fixed_bayesian_decision((1.0, 4.0), "increase", 0.99),
         }
     }
     window_coords = pd.Index([10, 11, 12])
@@ -2293,11 +3175,20 @@ def test_generate_prose_detailed_cumulative():
             "hdi_lower": 1.0,
             "hdi_upper": 3.0,
             "p_gt_0": 0.99,
+            "decision": _fixed_bayesian_decision((1.0, 3.0), "increase", 0.99),
         },
         "cum": {
             "mean": 20.0,
             "hdi_lower": 10.0,
             "hdi_upper": 30.0,
+            "decision": _fixed_bayesian_decision(
+                (10.0, 30.0),
+                "increase",
+                0.99,
+                conclusion="practically_significant",
+                rope=(-1.0, 1.0),
+                masses=(0.0, 0.0, 1.0),
+            ),
         },
     }
 
@@ -2322,6 +3213,17 @@ def test_generate_prose_detailed_cumulative():
     # cum_cf_lower = 520 - 30 = 490, cum_cf_upper = 520 - 10 = 510
     assert "490.00" in prose
     assert "510.00" in prose
+    assert "The cumulative effect is 20.00 with a 95% HDI [10.00, 30.00]." in prose
+    assert (
+        "For the cumulative effect, The posterior probability of an increase is 0.990."
+        in prose
+    )
+    assert "the effect is practically significant." in prose
+    assert "Using the closed ROPE [-1, 1]" in prose
+    assert (
+        "Posterior mass is 0.000 below, 0.000 inside, and 1.000 above the ROPE."
+        in prose
+    )
 
 
 def test_generate_prose_detailed_with_relative():
@@ -2337,6 +3239,7 @@ def test_generate_prose_detailed_with_relative():
             "relative_mean": 5.0,
             "relative_hdi_lower": 2.0,
             "relative_hdi_upper": 8.0,
+            "decision": _fixed_bayesian_decision((1.0, 4.0), "increase", 0.99),
         }
     }
 
@@ -2359,8 +3262,8 @@ def test_generate_prose_detailed_with_relative():
     assert "8.00%" in prose
 
 
-def test_generate_prose_detailed_rope_in_prose():
-    """Test that ROPE probability appears in prose when provided."""
+def test_generate_prose_detailed_rope_decision_in_prose():
+    """Test that an attached ROPE decision, not ``p_rope``, controls prose."""
     from causalpy.reporting import _generate_prose_detailed
 
     stats = {
@@ -2370,6 +3273,14 @@ def test_generate_prose_detailed_rope_in_prose():
             "hdi_upper": 4.0,
             "p_gt_0": 0.99,
             "p_rope": 0.85,
+            "decision": _fixed_bayesian_decision(
+                (1.0, 4.0),
+                "increase",
+                0.99,
+                conclusion="practically_significant",
+                rope=(-0.004, 0.004),
+                masses=(0.0, 0.0, 1.0),
+            ),
         }
     }
 
@@ -2386,8 +3297,15 @@ def test_generate_prose_detailed_rope_in_prose():
         counterfactual_avg=50.0,
     )
 
-    assert "minimum effect size threshold" in prose
-    assert "0.850" in prose
+    assert (
+        "Using the closed ROPE [-0.004, 0.004], the 95% HDI is entirely outside"
+        in prose
+    )
+    assert (
+        "Posterior mass is 0.000 below, 0.000 inside, and 1.000 above the ROPE."
+        in prose
+    )
+    assert "minimum effect size threshold" not in prose
 
 
 def test_generate_prose_detailed_is_descriptive():
@@ -2400,6 +3318,7 @@ def test_generate_prose_detailed_is_descriptive():
             "hdi_lower": 1.0,
             "hdi_upper": 4.0,
             "p_gt_0": 0.99,
+            "decision": _fixed_bayesian_decision((1.0, 4.0), "increase", 0.99),
         }
     }
 
@@ -2422,8 +3341,8 @@ def test_generate_prose_detailed_is_descriptive():
     assert "weak or inconclusive" not in prose
     assert "strong statistical evidence" not in prose
     # Should contain descriptive factual statements
-    assert "does not include zero" in prose
-    assert "posterior probability" in prose
+    assert "does not include zero" not in prose
+    assert "posterior probability of an increase" in prose
     assert "We recommend" in prose
 
 
@@ -2674,7 +3593,7 @@ def test_assumptions_text_default():
 
 
 # ==============================================================================
-# Tests for direction auto-detection without observed/cf values
+# Tests for prose without observed/counterfactual values
 # ==============================================================================
 
 
@@ -2688,6 +3607,7 @@ def test_prose_detailed_no_observed_values():
             "hdi_lower": 1.0,
             "hdi_upper": 4.0,
             "p_gt_0": 0.99,
+            "decision": _fixed_bayesian_decision((1.0, 4.0), "increase", 0.99),
         }
     }
 
@@ -2748,7 +3668,7 @@ def test_effect_summary_prepostnegd_pymc(mock_pymc_sample, anova1_data):
         group_variable_name="group",
         pretreatment_variable_name="pre",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary()
 
@@ -2774,7 +3694,7 @@ def test_effect_summary_prepostnegd_directions(mock_pymc_sample, anova1_data):
         group_variable_name="group",
         pretreatment_variable_name="pre",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test increase
     stats_increase = result.effect_summary(direction="increase")
@@ -2800,7 +3720,7 @@ def test_effect_summary_prepostnegd_rope(mock_pymc_sample, anova1_data):
         group_variable_name="group",
         pretreatment_variable_name="pre",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(min_effect=0.5)
 
@@ -2823,7 +3743,7 @@ def test_effect_summary_its_relative_false(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(relative=False)
 
@@ -2843,7 +3763,7 @@ def test_effect_summary_ols_cumulative_false(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats = result.effect_summary(cumulative=False)
 
@@ -2864,7 +3784,7 @@ def test_effect_summary_ols_relative_false(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats = result.effect_summary(relative=False)
 
@@ -2882,7 +3802,7 @@ def test_effect_summary_rope_with_two_sided_its(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="two-sided", min_effect=1.0)
 
@@ -2902,7 +3822,7 @@ def test_effect_summary_rope_with_two_sided_did(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="two-sided", min_effect=0.5)
 
@@ -2919,7 +3839,7 @@ def test_effect_summary_rd_two_sided_with_rope(mock_pymc_sample, rd_data):
         formula="y ~ 1 + x + treated + x:treated",
         treatment_threshold=0.5,
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(direction="two-sided", min_effect=0.5)
 
@@ -2940,7 +3860,7 @@ def test_effect_summary_sc_cumulative_false(mock_pymc_sample, sc_data):
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(cumulative=False, treated_unit="actual")
 
@@ -2960,7 +3880,7 @@ def test_effect_summary_sc_relative_false(mock_pymc_sample, sc_data):
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(relative=False, treated_unit="actual")
 
@@ -2980,7 +3900,7 @@ def test_effect_summary_ols_both_false(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     stats = result.effect_summary(cumulative=False, relative=False)
 
@@ -3000,7 +3920,7 @@ def test_effect_summary_pymc_both_false(mock_pymc_sample, its_data):
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     stats = result.effect_summary(cumulative=False, relative=False)
 

@@ -1,0 +1,3 @@
+# Docs-only PyMC-Marketing pin for the documentation notebooks. It is kept out of the package metadata because its
+# declared pymc (>=6.2,<6.3) and pymc-extras (>=0.14,<0.15) ranges are narrower than CausalPy's runtime ranges.
+pymc-marketing==1.1.0

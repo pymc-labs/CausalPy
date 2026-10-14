@@ -109,6 +109,13 @@ Geolift (geographical lift testing) is a method for measuring the causal impact 
 :link: multi-cell-geolift
 :link-type: doc
 :::
+
+:::{grid-item-card} Multi-arm geo lift with PyMC: up, down, and control
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/up-down-control-geolift-pymc.png
+:link: up-down-control-geolift-pymc
+:link-type: doc
+:::
 ::::
 
 ## Difference in Differences
@@ -175,7 +182,7 @@ A quasi-experimental design that uses time series methods to generate counterfac
 :link-type: doc
 :::
 
-:::{grid-item-card} Excess deaths due to COVID-19
+:::{grid-item-card} Estimating excess deaths during COVID-19 in England and Wales
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/interrupted-time-series-covid.png
 :link: interrupted-time-series-covid
@@ -425,6 +432,7 @@ interrupted-time-series-causalpy-vs-causalimpact.ipynb
 
 geolift-single-cell.ipynb
 multi-cell-geolift.ipynb
+up-down-control-geolift-pymc.ipynb
 :::
 
 :::{toctree}

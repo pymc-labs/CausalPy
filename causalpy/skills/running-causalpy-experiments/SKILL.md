@@ -11,10 +11,11 @@ Use this skill when the CausalPy experiment class is already known or has just b
 
 1. Load and validate a pandas `DataFrame` with the data layout required by the chosen experiment.
 2. Choose a backend: PyMC models for posterior uncertainty and priors, or sklearn-compatible regressors where the experiment supports OLS/sklearn.
-3. Configure the model before construction. For PyMC, set `sample_kwargs` and scale-aware `priors` when predictors or outcomes are not standardized.
-4. Instantiate the experiment. CausalPy experiments fit during initialization.
-5. Inspect outputs with `summary()`, `effect_summary()`, `print_coefficients()`, and `plot()` only where the chosen experiment supports them.
-6. Run relevant sensitivity checks through `cp.Pipeline`, `cp.EstimateEffect`, and `cp.SensitivityAnalysis` when robustness matters.
+3. Configure the model before construction. For PyMC, set `sample_kwargs`, optional `prior_sample_kwargs`, and scale-aware `priors` when predictors or outcomes are not standardized.
+4. Instantiate the experiment. Construction is lazy: nothing is sampled until you call `fit()`, which returns the fitted experiment (`exp = cp.InterruptedTimeSeries(...).fit()`).
+5. Optionally run prior predictive checks before paying for MCMC: `exp.sample_prior_predictive()` (uses `prior_sample_kwargs` from the model, default 500 draws), then `exp.plot(group="prior")` and `exp.effect_summary(group="prior")` — under a neutral prior, `P(effect > 0)` should sit near 0.5. Revise priors by assigning a fresh model (`exp.model = cp.pymc_models.LinearRegression(priors={...})`); assignment resets all results.
+6. Inspect outputs with `summary()`, `effect_summary()`, `print_coefficients()`, and `plot()` only after `fit()`; results live on `exp.result` and `exp.prior_result`, and read methods raise `GroupNotSampledException` naming the missing call when a phase has not run.
+7. Run relevant sensitivity checks through `cp.Pipeline`, `cp.EstimateEffect`, and `cp.SensitivityAnalysis` when robustness matters.
 
 ## Model And Prior Guardrails
 

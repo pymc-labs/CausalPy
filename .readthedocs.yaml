@@ -53,6 +53,8 @@ sphinx:
 # Optionally declare the Python requirements required to build your docs
 python:
    install:
+   # Install the docs-only PyMC-Marketing pin first (see docs/requirements.txt).
+   - requirements: docs/requirements.txt
    - method: pip
      path: .
      extra_requirements:

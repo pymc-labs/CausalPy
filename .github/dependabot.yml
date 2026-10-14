@@ -14,3 +14,17 @@ updates:
       actions:
         patterns:
           - "*"
+  # Keep uv.lock from silently going stale between manual `uv lock` runs.
+  # This only opens PRs for out-of-range updates that pyproject.toml allows;
+  # it does not run `uv lock --upgrade` on a schedule. A weekly full-upgrade
+  # job (`uv sync --upgrade` against a single CI leg) is a follow-up, tracked
+  # alongside issue #1174.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    labels:
+      - "devops"
+      - "no releasenotes"

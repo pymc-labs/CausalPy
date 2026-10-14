@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -28,6 +29,39 @@ if TYPE_CHECKING:
     from causalpy.experiments.synthetic_control import SyntheticControl
 
 from causalpy.constants import HDI_PROB
+
+
+def _design_fingerprint(*inputs: Any) -> tuple:
+    """Structural hash of build-time values, dimensions, and coordinates.
+
+    Inputs may be mappings of named arrays or array-likes. A second
+    ``build()`` whose fingerprint differs from the recorded one means the
+    caller is trying to reuse an immutable graph with different data, which
+    must fail loudly instead of being silently ignored.
+    """
+
+    def _digest(value: Any) -> Any:
+        if isinstance(value, xr.DataArray):
+            return (
+                value.dims,
+                _digest(value.values),
+                tuple(
+                    (name, coord.dims, _digest(coord.values))
+                    for name, coord in sorted(value.coords.items())
+                ),
+            )
+        if isinstance(value, dict):
+            return tuple(sorted((key, _digest(item)) for key, item in value.items()))
+        arr = np.ascontiguousarray(np.asarray(value))
+        # Object arrays store pointers, not label contents, in their raw bytes.
+        payload = repr(arr.tolist()).encode() if arr.dtype.hasobject else arr.tobytes()
+        return (
+            arr.shape,
+            str(arr.dtype),
+            hashlib.blake2b(payload, digest_size=16).hexdigest(),
+        )
+
+    return tuple(_digest(value) for value in inputs)
 
 
 def _as_scalar(value: Any) -> float:
@@ -47,6 +81,16 @@ def _as_scalar(value: Any) -> float:
     2.5
     """
     return float(np.asarray(value).reshape(()))
+
+
+def _bayesian_r2_score(y_true: np.ndarray, y_pred: np.ndarray) -> pd.Series:
+    """Compute Bayesian R-squared across posterior predictive draws."""
+    var_y_est = np.var(y_pred, axis=1, ddof=0)
+    var_e = np.var(y_true - y_pred, axis=1, ddof=0)
+    r2_samples = var_y_est / (var_y_est + var_e)
+    return pd.Series(
+        [r2_samples.mean(), r2_samples.std(ddof=0)], index=["r2", "r2_std"]
+    )
 
 
 def has_posterior_draws(Y: xr.DataArray) -> bool:
@@ -80,13 +124,14 @@ def _series_has_2_levels(series: pd.Series) -> bool:
     return len(pd.Categorical(series).categories) == 2
 
 
-def round_num(n: float, round_to: int | None) -> str:
+def round_num(n: float | xr.DataArray, round_to: int | None) -> str:
     """Return a string representing a number with significant figures.
 
     Parameters
     ----------
-    n : float
-        Number to round.
+    n : float or xr.DataArray
+        Number to round. A zero-dimensional DataArray, as produced by
+        ``.mean()`` on posterior samples, formats like the scalar it wraps.
     round_to : int, optional
         Number of significant figures. If None, defaults to 2.
 
@@ -100,7 +145,7 @@ def round_num(n: float, round_to: int | None) -> str:
     return f"{n:.{sig_figs}g}"
 
 
-def _format_sig_figs(value: float, default: int | None = None) -> int:
+def _format_sig_figs(value: float | xr.DataArray, default: int | None = None) -> int:
     """Get a default number of significant figures.
 
     Gives the integer part or `default`, whichever is bigger.
@@ -287,27 +332,25 @@ def plot_correlations(
     Parameters
     ----------
     data : pd.DataFrame
-        Wide-format panel data with time as the index and locations/units
-        as columns.
+        Wide-format panel data with time as the index and locations/units as columns.
     columns : list[str], optional
-        Subset of columns to include. If ``None``, all numeric columns
-        are used.
+        Subset of columns to include. If ``None``, all numeric columns are used.
     method : {"pearson", "kendall", "spearman"}, default "pearson"
         Correlation method passed to :meth:`pandas.DataFrame.corr`.
     figsize : tuple[float, float], optional
-        Width and height in inches for the figure. Only used when ``ax``
-        is not provided. If ``None``, matplotlib's default is used.
+        Width and height in inches for the figure. Only used when ``ax`` is not provided. If ``None``, matplotlib's default is used.
     ax : matplotlib.axes.Axes, optional
-        Axes on which to draw the heatmap. If ``None``, a new figure and
-        axes are created (sized according to ``figsize``).
-    **kwargs
-        Additional keyword arguments forwarded to :func:`seaborn.heatmap`
-        (e.g., ``vmin``, ``vmax``, ``annot``, ``annot_kws``).
+        Axes on which to draw the heatmap. If ``None``, a new figure and axes are created (sized according to ``figsize``).
 
     Returns
     -------
     tuple[pd.DataFrame, matplotlib.axes.Axes]
         The correlation matrix and the axes containing the heatmap.
+
+    Other Parameters
+    ----------------
+    **kwargs
+        Keyword arguments forwarded to :func:`seaborn.heatmap`: ``vmin``, ``vmax``, ``cmap``, ``center``, ``robust``, ``annot``, ``fmt``, ``annot_kws``, ``linewidths``, ``linecolor``, ``cbar``, ``cbar_kws``, ``cbar_ax``, ``square``, ``xticklabels``, ``yticklabels``, ``mask``, and the :meth:`matplotlib.axes.Axes.pcolormesh` keywords supported by the installed seaborn version. ``data`` and ``ax`` are supplied by CausalPy. This narrow third-party forwarder lets callers override CausalPy's heatmap defaults without duplicating seaborn's evolving forwarding surface; unknown keys are rejected by seaborn or matplotlib rather than ignored.
 
     Examples
     --------
@@ -431,7 +474,7 @@ def extract_lift_for_mmm(
             model=cp.pymc_models.WeightedSumFitter(
                 sample_kwargs={"progressbar": False}
             ),
-        )
+        ).fit()
 
         # Extract lift results for MMM calibration
         df_lift = cp.extract_lift_for_mmm(
@@ -453,7 +496,8 @@ def extract_lift_for_mmm(
 
     # Key on the container, not backend identity: sigma needs genuine
     # posterior dispersion, which a degenerate single-draw run also lacks.
-    if not has_posterior_draws(sc_result.post_impact):
+    impact_post = sc_result.result.impact_post
+    if not has_posterior_draws(impact_post):
         raise ValueError(
             "extract_lift_for_mmm requires a Bayesian (PyMC) model for uncertainty "
             "quantification. OLS models do not provide posterior distributions needed "
@@ -465,7 +509,7 @@ def extract_lift_for_mmm(
 
     for unit in treated_units:
         # Get posterior samples for this unit's causal impact
-        unit_impact = sc_result.post_impact.sel(treated_units=unit)
+        unit_impact = impact_post.sel(treated_units=unit)
 
         # Aggregate across time periods using the named method (e.g. "mean", "sum")
         lift_samples = getattr(unit_impact, aggregate)(dim="obs_ind")

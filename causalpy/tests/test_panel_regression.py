@@ -20,9 +20,12 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+from matplotlib.collections import PolyCollection
+from matplotlib.colors import to_rgba
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
+from causalpy._arviz_compat import hdi_bound_arrays
 
 # Minimal sample kwargs for fast tests
 sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2, "progressbar": False}
@@ -95,7 +98,7 @@ def test_panel_regression_pymc_dummies(mock_pymc_sample, small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Check basic properties
     assert isinstance(result, cp.PanelRegression)
@@ -127,7 +130,7 @@ def test_panel_regression_pymc_demeaned(mock_pymc_sample, large_panel_data):
         time_fe_variable="time",
         fe_method="demeaned",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Check basic properties
     assert isinstance(result, cp.PanelRegression)
@@ -154,7 +157,7 @@ def test_panel_regression_skl_dummies(small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Check basic properties
     assert isinstance(result, cp.PanelRegression)
@@ -180,7 +183,7 @@ def test_panel_regression_skl_demeaned(large_panel_data):
         time_fe_variable="time",
         fe_method="demeaned",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Check basic properties
     assert isinstance(result, cp.PanelRegression)
@@ -312,7 +315,7 @@ def test_dummy_fe_labels_follow_patsy_term_metadata(small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=LinearRegression(),
-    )
+    ).fit()
 
     fe_labels = set(result._get_fe_labels("unit"))
     fe_labels.update(result._get_fe_labels("time"))
@@ -331,7 +334,7 @@ def test_interaction_labels_are_not_plain_fixed_effects(small_panel_data, capsys
         unit_fe_variable="unit",
         fe_method="dummies",
         model=LinearRegression(),
-    )
+    ).fit()
 
     unit_fe_labels = set(result._get_fe_labels("unit"))
     interaction_labels = {label for label in result.labels if ":" in label}
@@ -354,7 +357,7 @@ def test_panel_regression_plot_coefficients(mock_pymc_sample, small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     fig, ax = result.plot_coefficients()
     assert isinstance(fig, plt.Figure)
@@ -379,7 +382,7 @@ def test_panel_regression_plot_unit_effects(mock_pymc_sample, small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     fig, ax = result.plot_unit_effects()
     assert isinstance(fig, plt.Figure)
@@ -393,7 +396,7 @@ def test_panel_regression_plot_unit_effects(mock_pymc_sample, small_panel_data):
         time_fe_variable="time",
         fe_method="demeaned",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     with pytest.raises(ValueError, match="only available with fe_method='dummies'"):
         result_demeaned.plot_unit_effects()
@@ -409,7 +412,7 @@ def test_panel_regression_plot_trajectories(mock_pymc_sample, small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test with default random sampling
     fig, axes = result.plot_trajectories(n_sample=5)
@@ -437,7 +440,7 @@ def test_panel_regression_plot_trajectories(mock_pymc_sample, small_panel_data):
         unit_fe_variable="unit",
         fe_method="dummies",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     with pytest.raises(ValueError, match="requires time_fe_variable"):
         result_no_time.plot_trajectories()
@@ -456,7 +459,7 @@ def test_panel_regression_plot_residuals(mock_pymc_sample, small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test scatter plot
     fig, ax = result.plot_residuals(kind="scatter")
@@ -485,7 +488,7 @@ def test_panel_regression_get_plot_data(mock_pymc_sample, small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     plot_data = result_bayes.get_plot_data()
     assert isinstance(plot_data, pd.DataFrame)
@@ -504,7 +507,7 @@ def test_panel_regression_get_plot_data(mock_pymc_sample, small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=LinearRegression(),
-    )
+    ).fit()
 
     plot_data = result_ols.get_plot_data()
     assert isinstance(plot_data, pd.DataFrame)
@@ -577,7 +580,7 @@ def test_demean_transform_boolean_treatment():
         unit_fe_variable="unit",
         fe_method="demeaned",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # The treatment coefficient should be close to 2.0.  Without the bool
     # fix the variable would not be demeaned and the estimate would be biased.
@@ -598,7 +601,7 @@ def test_summary_ols_dummies_correct_coefficients(small_panel_data, capsys):
         time_fe_variable="time",
         fe_method="dummies",
         model=LinearRegression(),
-    )
+    ).fit()
 
     result.summary()
     captured = capsys.readouterr().out
@@ -632,7 +635,9 @@ def test_effect_summary_raises(small_panel_data):
         fe_method="demeaned",
         model=LinearRegression(),
     )
-    with pytest.raises(NotImplementedError, match="not yet implemented"):
+    with pytest.raises(
+        NotImplementedError, match=r"not yet implemented for PanelRegression"
+    ):
         result.effect_summary()
 
 
@@ -645,7 +650,7 @@ def test_plot_trajectories_select_extreme(small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=LinearRegression(),
-    )
+    ).fit()
     fig, axes = result.plot_trajectories(n_sample=4, select="extreme")
     assert isinstance(fig, plt.Figure)
     # Should have at least 4 visible subplots
@@ -663,7 +668,7 @@ def test_plot_trajectories_select_high_variance(small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=LinearRegression(),
-    )
+    ).fit()
     fig, axes = result.plot_trajectories(n_sample=4, select="high_variance")
     assert isinstance(fig, plt.Figure)
     visible = [ax for ax in axes if ax.get_visible()]
@@ -680,7 +685,7 @@ def test_plot_coefficients_with_var_names(small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=LinearRegression(),
-    )
+    ).fit()
     fig, ax = result.plot_coefficients(var_names=["treatment"])
     # Should have exactly one bar (horizontal bar chart)
     assert len(ax.patches) == 1
@@ -696,7 +701,7 @@ def test_plot_coefficients_rejects_invalid_hdi_prob(small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=LinearRegression(),
-    )
+    ).fit()
     with pytest.raises(ValueError, match="hdi_prob must be between 0 and 1"):
         result.plot_coefficients(hdi_prob=1.2)
 
@@ -711,13 +716,15 @@ def test_panel_coefficient_plots_reject_multiple_outcomes(
         time_fe_variable="time",
         fe_method="dummies",
         model=LinearRegression(),
-    )
+    ).fit()
     coefficients = result._model_backend.coefficients().isel(treated_units=0, drop=True)
     coefficients = xr.concat(
         [coefficients, coefficients],
         dim=xr.IndexVariable("treated_units", ["north", "south"]),
     ).transpose("chain", "draw", "coeffs", "treated_units")
-    monkeypatch.setattr(result._model_backend, "coefficients", lambda: coefficients)
+    monkeypatch.setattr(
+        result._model_backend, "coefficients", lambda *, group="posterior": coefficients
+    )
 
     with pytest.raises(ValueError, match="exactly one outcome unit"):
         result.plot_coefficients()
@@ -770,7 +777,7 @@ def test_plot_unit_effects_ols(small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=LinearRegression(),
-    )
+    ).fit()
 
     fig, ax = result.plot_unit_effects()
     assert isinstance(fig, plt.Figure)
@@ -788,7 +795,7 @@ def test_plot_residuals_ols(small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=LinearRegression(),
-    )
+    ).fit()
 
     fig, ax = result.plot_residuals(kind="scatter")
     assert isinstance(fig, plt.Figure)
@@ -804,7 +811,7 @@ def test_plot_trajectories_all_units(small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # n_sample=100 exceeds the 10 units, so all 10 should be plotted
     fig, axes = result.plot_trajectories(n_sample=100)
@@ -822,7 +829,7 @@ def test_plot_trajectories_single_unit(small_panel_data):
         time_fe_variable="time",
         fe_method="dummies",
         model=LinearRegression(),
-    )
+    ).fit()
 
     fig, axes = result.plot_trajectories(units=["unit_0"])
     assert isinstance(fig, plt.Figure)
@@ -839,7 +846,163 @@ def test_plot_unit_effects_no_fe_labels(small_panel_data):
         unit_fe_variable="unit",
         fe_method="dummies",
         model=LinearRegression(),
-    )
+    ).fit()
 
     with pytest.raises(ValueError, match="No unit fixed effects found"):
         result.plot_unit_effects()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("hdi_prob", [0.5, 0.94])
+def test_panel_bayesian_coefficient_forest_preserves_axes_and_hdi_bounds(
+    mock_pymc_sample,
+    small_panel_data,
+    hdi_prob,
+):
+    """Bayesian coefficient plotting stays on one Axes with explicit HDI bounds."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + C(time) + treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    ).fit()
+    coeff_names = ["treatment", "x1"]
+
+    fig, ax = result.plot_coefficients(var_names=coeff_names, hdi_prob=hdi_prob)
+
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, plt.Axes)
+    assert [tick.get_text() for tick in ax.get_yticklabels()] == coeff_names
+    assert f"{hdi_prob:.0%} HDI" in ax.get_title()
+
+    coefficients = result.model.idata.posterior["beta"].sel(coeffs=coeff_names)
+    coefficients = coefficients.squeeze("treated_units", drop=True)
+    lower, upper = hdi_bound_arrays(
+        coefficients,
+        prob=hdi_prob,
+        dim=["chain", "draw"],
+    )
+    error_segments = ax.collections[0].get_segments()
+    for segment, expected_lower, expected_upper in zip(
+        error_segments,
+        lower,
+        upper,
+        strict=True,
+    ):
+        np.testing.assert_allclose(
+            np.sort(segment[:, 0]),
+            [expected_lower, expected_upper],
+        )
+    marker_line = next(line for line in ax.lines if line.get_marker() == "o")
+    np.testing.assert_allclose(
+        marker_line.get_xdata(),
+        coefficients.mean(dim=["chain", "draw"]).values,
+    )
+    np.testing.assert_allclose(marker_line.get_ydata(), np.arange(len(coeff_names)))
+
+    plt.close(fig)
+
+
+def test_panel_plot_coefficients_rejects_empty_selection(small_panel_data):
+    """An empty requested coefficient list raises instead of creating a blank plot."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + C(time) + treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=LinearRegression(),
+    ).fit()
+
+    with pytest.raises(ValueError, match="at least one coefficient"):
+        result.plot_coefficients(var_names=[])
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("hdi_prob", [0.5, 0.94])
+@pytest.mark.parametrize("interval_type", ["mean", "predictive"])
+def test_panel_trajectory_hdi_band_preserves_fitted_line_and_legend(
+    mock_pymc_sample,
+    small_panel_data,
+    hdi_prob,
+    interval_type,
+):
+    """Trajectory bands use the selected interval without duplicating Fitted."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + C(time) + treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    ).fit()
+
+    fig, axes = result.plot_trajectories(
+        units=["unit_0"],
+        hdi_prob=hdi_prob,
+        interval_type=interval_type,
+    )
+
+    assert isinstance(axes, np.ndarray)
+    ax = axes[0]
+    fitted_lines = [line for line in ax.lines if line.get_label() == "Fitted"]
+    assert len(fitted_lines) == 1
+    assert [text.get_text() for text in ax.get_legend().get_texts()] == [
+        "Actual",
+        "Fitted",
+    ]
+
+    unit_indices = np.where(result.data["unit"] == "unit_0")[0]
+    sort_order = np.argsort(result.data.loc[result.data["unit"] == "unit_0", "time"])
+    sorted_indices = unit_indices[sort_order]
+    unit_mu = result.model.idata.posterior["mu"].isel(obs_ind=sorted_indices.tolist())
+    unit_mu = unit_mu.squeeze("treated_units", drop=True)
+    np.testing.assert_allclose(
+        fitted_lines[0].get_ydata(),
+        unit_mu.mean(dim=["chain", "draw"]).values,
+    )
+    interval_source = (
+        unit_mu
+        if interval_type == "mean"
+        else result.model.idata.posterior_predictive["y_hat"]
+        .isel(obs_ind=sorted_indices.tolist())
+        .squeeze("treated_units", drop=True)
+    )
+    lower, upper = hdi_bound_arrays(
+        interval_source,
+        prob=hdi_prob,
+        dim=["chain", "draw"],
+    )
+    band = next(
+        collection
+        for collection in ax.collections
+        if isinstance(collection, PolyCollection)
+    )
+    vertices = band.get_paths()[0].vertices[:, 1]
+    for bound in np.concatenate([lower, upper]):
+        assert np.isclose(vertices, bound).any()
+    np.testing.assert_allclose(
+        band.get_facecolor()[0],
+        to_rgba(fitted_lines[0].get_color(), alpha=0.2),
+    )
+    plt.close(fig)
+
+
+@pytest.mark.parametrize("select", ["random", "extreme", "high_variance"])
+def test_panel_plot_trajectories_rejects_empty_selection(small_panel_data, select):
+    """Every selection strategy rejects a non-positive sample size before plotting."""
+    result = cp.PanelRegression(
+        data=small_panel_data,
+        formula="y ~ C(unit) + C(time) + treatment + x1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=LinearRegression(),
+    ).fit()
+
+    with pytest.raises(ValueError, match="n_sample must be positive"):
+        result.plot_trajectories(n_sample=0, select=select)
+    with pytest.raises(ValueError, match="at least one unit"):
+        result.plot_trajectories(units=[])

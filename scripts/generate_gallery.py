@@ -126,6 +126,13 @@ def render_index_md(yaml_path: Path = GALLERY_YAML) -> str:
         "---",
         "html_theme.sidebar_secondary.remove: true",
     ]
+    # An optional ``description`` in gallery.yaml becomes the page's meta
+    # description. ``myst.html_meta.description`` renders the plain
+    # <meta name="description">; the top-level ``og:description`` key is the
+    # sphinxext-opengraph per-page override, which it reads from the page's
+    # metadata and uses in place of its auto-extracted <meta property=...>.
+    # Nesting og:description under html_meta does NOT work: MyST would emit it
+    # as name="og:description", which no social scraper reads.
     if description := data.get("description"):
         out.extend(
             [
