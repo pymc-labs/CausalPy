@@ -2,6 +2,18 @@
 
 Agent workflow for working in this repo. For codebase design and conventions, read [ARCHITECTURE.md](ARCHITECTURE.md) before core code changes. Do **not** load [CONTRIBUTING.md](CONTRIBUTING.md) by default — it is a long human-contributor guide (setup, permissions, PR etiquette). Consult it only when the task is explicitly about contributor workflow or onboarding humans.
 
+## Existing functionality and API gaps
+
+Before implementing an analysis, diagnostic, or documentation example, inspect the existing public API and relevant examples.
+
+If the requested behavior is unsupported, do not silently recreate or bypass existing functionality in notebook cells, scripts, wrappers, or helpers. Before implementing that workaround:
+
+1. Explain the specific API limitation, the evidence for it, and its consequences for the requested behavior or statistical interpretation.
+2. Offer the relevant options: a custom implementation, extending the API now, or filing an issue and deferring or adjusting the example.
+3. Wait for the user's choice unless that choice was already explicitly authorized.
+
+This applies to documentation-only work and implementations composed from lower-level public APIs. Architect agreement or independent review does not substitute for the user's choice. Ordinary setup, data reshaping, and plotting helpers that do not recreate or bypass analysis functionality do not require this escalation.
+
 ## Environment
 
 **uv is the default environment manager.** Use `uv run <command>` for commands that import project code, run tests, build docs, or use repo tooling — there is no environment to activate. If the project has not been synced yet in the current checkout, run `uv sync --locked --extra dev --extra docs --extra test --extra lint` first (see the [python-environment skill](.agents/skills/python-environment/SKILL.md) for full setup instructions).
