@@ -164,10 +164,10 @@ def test_impact_uses_observed_minus_counterfactual_and_post_outcomes_only() -> N
     assert not np.allclose(baseline.impact_post, shifted.impact_post)
     xr.testing.assert_allclose(shifted.impact_post, baseline.impact_post + 10.0)
     observed_post = _experiment().panel._treated_post()
-    xr.testing.assert_allclose(
-        baseline.impact_post,
-        observed_post - baseline.predictions_post,
+    manual = (observed_post - baseline.predictions_post).transpose(
+        ..., "obs_ind", "treated_units"
     )
+    xr.testing.assert_allclose(baseline.impact_post, manual)
 
 
 def test_score_matches_pre_period_bayesian_r2_only() -> None:
@@ -185,10 +185,10 @@ def test_score_matches_pre_period_bayesian_r2_only() -> None:
         assert result.score[f"unit_{i}_r2_std"] == pytest.approx(
             float(expected["r2_std"])
         )
-    post_only = pre_period_score(
-        result.predictions_post, experiment.panel._treated_post()
-    )
-    assert not np.allclose(result.score.to_numpy(), post_only.to_numpy())
+    both = xr.concat([result.predictions_pre, result.predictions_post], dim="obs_ind")
+    both_y = xr.concat([treated_pre, experiment.panel._treated_post()], dim="obs_ind")
+    leaked = pre_period_score(both, both_y)
+    assert not np.allclose(result.score.to_numpy(), leaked.to_numpy())
 
 
 def test_missing_used_values_are_rejected() -> None:
