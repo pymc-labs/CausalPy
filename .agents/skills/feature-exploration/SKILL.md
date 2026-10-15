@@ -5,7 +5,7 @@ description: Explore unfamiliar APIs, libraries, or implementation behavior with
 
 # Feature Exploration
 
-Use this developer skill when a task depends on API behavior that is unclear from memory or partially documented. The goal is to resolve uncertainty before changing production code.
+Use this developer skill when a task depends on API behavior that is unclear from memory or partially documented. The goal is to resolve uncertainty before changing production code or documentation examples.
 
 ## Workflow
 
@@ -14,8 +14,9 @@ Use this developer skill when a task depends on API behavior that is unclear fro
 3. Build the smallest reproducible example that answers the question.
 4. Run it in the project environment when it imports project code or dependencies.
 5. Iterate only until the behavior is understood.
-6. Record the finding in the final answer or in the durable project docs if it affects future work.
-7. Apply the production change using the confirmed behavior.
+6. If the requested behavior is unsupported, apply the [API-gap decision gate in AGENTS.md](../../../AGENTS.md#existing-functionality-and-api-gaps) before implementing a workaround or API extension, including in documentation or notebooks. Present the limitation and evidence to the user, offer the relevant options, and wait for their choice unless already explicitly authorized.
+7. Record the finding in the final answer or in the durable project docs if it affects future work. When the decision gate applies, also record the user's chosen approach.
+8. Implement the change using the confirmed behavior and the user's authorized approach.
 
 ## Guardrails
 
