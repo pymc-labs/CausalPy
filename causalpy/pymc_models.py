@@ -1324,6 +1324,16 @@ class MvWeightedSumFitter(PyMCModel):
     its auxiliary predictors. Only ``mu`` (the outcome) is used for the
     counterfactual, so ``predict`` / ``score`` and the impact calculation work
     unchanged: predictors inform the weights but are never forecast.
+
+    Examples
+    --------
+    The model is normally used through
+    :class:`~causalpy.experiments.multivariate_synthetic_control.MultivariateSyntheticControl`.
+
+    >>> import causalpy as cp
+    >>> model = cp.pymc_models.MvWeightedSumFitter(v_prior="uniform")
+    >>> model.v_prior
+    'uniform'
     """
 
     default_priors = {"y_hat": _LEGACY_Y_HAT_PRIOR}

@@ -73,6 +73,44 @@ class MultivariateSyntheticControl(SyntheticControl):
     weights but are never forecast, so they need not be observed after
     treatment (missing post-treatment predictor values are ignored).
     Predictors must be observed for every unit at every pre-treatment time.
+
+    Examples
+    --------
+    >>> import causalpy as cp
+    >>> import numpy as np
+    >>> import pandas as pd
+    >>> rng = np.random.default_rng(0)
+    >>> level = {"a": 0.0, "b": 1.0, "c": 2.0, "treated": 1.0}
+    >>> trend = np.cumsum(rng.normal(size=30)) / 3
+    >>> df = pd.DataFrame(
+    ...     [
+    ...         {
+    ...             "unit": unit,
+    ...             "year": year,
+    ...             "gdp": 10
+    ...             + (1 + 0.2 * lvl) * trend[year]
+    ...             + (2.0 if unit == "treated" and year >= 20 else 0.0)
+    ...             + rng.normal(0, 0.1),
+    ...             "wage": 5 + lvl + 0.3 * trend[year] + rng.normal(0, 0.1),
+    ...             "industry": 2 + 0.5 * lvl + rng.normal(0, 0.1),
+    ...         }
+    ...         for unit, lvl in level.items()
+    ...         for year in range(30)
+    ...     ]
+    ... )
+    >>> result = cp.MultivariateSyntheticControl(
+    ...     df,
+    ...     treatment_time=20,
+    ...     outcome="gdp",
+    ...     predictors=["wage", "industry"],
+    ...     control_units=["a", "b", "c"],
+    ...     treated_units=["treated"],
+    ...     unit_column="unit",
+    ...     time_column="year",
+    ...     model=cp.pymc_models.MvWeightedSumFitter(
+    ...         sample_kwargs={"random_seed": 42, "progressbar": False}
+    ...     ),
+    ... ).fit()
     """
 
     supports_ols = False
