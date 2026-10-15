@@ -223,3 +223,20 @@ def test_shrinkage_state_length_is_the_upper_bound_not_a_selected_rank() -> None
     parts["factors"] = parts["factors"].isel(factors=slice(0, 1))
     with pytest.raises(ValueError, match="max_factors"):
         experiment.compose_result(**parts)
+
+
+def test_factors_must_be_shared_across_treated_units() -> None:
+    experiment = _experiment()
+    parts = _components()
+    per_unit = parts["factors"].expand_dims(treated_units=["treated_a", "treated_b"])
+    per_unit = per_unit.copy()
+    per_unit.loc[{"treated_units": "treated_b"}] = 99.0
+    with pytest.raises(ValueError, match="shared"):
+        experiment.compose_result(**{**parts, "factors": per_unit})
+    with pytest.raises(ValueError, match="shared"):
+        untreated_counterfactual(
+            parts["unit_intercept"],
+            parts["time_intercept"],
+            parts["loadings"],
+            per_unit,
+        )

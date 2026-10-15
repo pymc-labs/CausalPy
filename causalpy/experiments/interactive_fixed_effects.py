@@ -210,6 +210,8 @@ class InteractiveFixedEffectsSyntheticControl:
             )
 
     def _require_factor_axis(self, array: xr.DataArray, name: str) -> None:
+        if name == "factors":
+            _require_shared_factors(array)
         if _FACTORS not in array.dims:
             raise ValueError(f"{name} must have a {_FACTORS!r} dimension.")
         if array.sizes[_FACTORS] != self.max_factors:
@@ -236,7 +238,9 @@ def untreated_counterfactual(
     loadings : xarray.DataArray
         Loadings with a ``factors`` dimension.
     factors : xarray.DataArray
-        Factors with a ``factors`` dimension aligned to ``loadings``.
+        Shared factors. Dimensions must be ``chain``, ``draw``, ``obs_ind``,
+        and ``factors``. A ``treated_units`` dimension is not a shared factor
+        fit.
 
     Returns
     -------
@@ -244,8 +248,23 @@ def untreated_counterfactual(
         Untreated counterfactual. Not the loading-factor product alone, and
         not the unit intercept alone.
     """
+    _require_shared_factors(factors)
     product = (loadings * factors).sum(dim=_FACTORS)
     return unit_intercept + time_intercept + product
+
+
+_SHARED_FACTOR_DIMS = frozenset((*_DRAW_DIMS, "obs_ind", _FACTORS))
+
+
+def _require_shared_factors(factors: xr.DataArray) -> None:
+    """Reject a factor array that is not shared across treated units."""
+    dims = set(factors.dims)
+    if dims != _SHARED_FACTOR_DIMS:
+        raise ValueError(
+            "factors must be the shared fit with dimensions "
+            "('chain', 'draw', 'obs_ind', 'factors'), "
+            f"got {tuple(factors.dims)}."
+        )
 
 
 def pre_period_score(
