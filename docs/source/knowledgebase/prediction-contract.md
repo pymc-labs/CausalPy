@@ -24,10 +24,12 @@ Every Bayesian backend that participates in impact calculation must expose outco
 | --- | --- | --- |
 | Native :class:`~causalpy.pymc_models.PyMCModel` subclasses (e.g. ``LinearRegression``) | ``Deterministic`` named ``mu`` in the PyMC graph | Identity-link Gaussian models satisfy the contract by construction. Custom subclasses must inverse-link before naming the node ``mu``. See {doc}`custom_pymc_models`. |
 | :class:`~causalpy.pymc_models.StateSpaceTimeSeries` | ``mu`` aliases the smoothed expected observation | Gaussian observation model; ``mu`` and ``y_hat`` coincide up to naming. |
-| :class:`~causalpy.pymc_forecast_models.PyMCForecastModel` | Upstream ``mu`` / ``mu_future`` latent passed to ``pymc_forecast.predict()`` | CausalPy treats these as outcome-scale expectations. For linked GLMs, pass the inverse-linked expectation as the latent until upstream exposes a dedicated expected-observation output (`pymc-forecast#52 <https://github.com/pymc-labs/pymc-forecast/issues/52>`_). ``StatespaceForecaster`` is rejected because upstream does not yet expose a separate noise-free expectation (`pymc-forecast#50 <https://github.com/pymc-labs/pymc-forecast/issues/50>`_). |
+| :class:`~causalpy.pymc_forecast_models.PyMCForecastModel` | Explicit upstream ``expected_observation`` / ``expected_observation_future`` when present; otherwise ``mu`` / ``mu_future`` | With pymc-forecast 0.3, pass the response-scale expectation to ``predict(..., expected_observation=...)``. The fallback latent must already be an outcome-scale expectation; CausalPy does not infer inverse links. ``StatespaceForecaster`` is rejected because upstream does not yet expose a separate noise-free expectation (`pymc-forecast#50 <https://github.com/pymc-labs/pymc-forecast/issues/50>`_). |
 | scikit-learn adapters | Point predictions on the outcome scale | OLS backends return fitted values in ``y`` units; no separate ``mu`` draw dimension. |
 
 sklearn backends compute impact as ``y_true - y_pred`` with the same outcome-scale requirement.
+
+When upgrading from pymc-forecast 0.2 to 0.3, change model-builder callbacks from ``(h, covariates)`` to ``(covariates, data=None)`` and construct the horizon inside the callback with ``Horizon.from_data(covariates, data)``. Replace the 0.2 ``time_series`` pattern with ``innovations`` for independent innovations or ``markov_series`` for recursive states. Both in-sample and future predictions are normalized at the wrapper boundary into the same ``posterior_predictive.mu`` and ``y_hat`` containers; observation noise remains in ``y_hat`` only. The {doc}`../notebooks/interrupted-time-series-covid` example combines these building blocks.
 
 ## Score container
 
