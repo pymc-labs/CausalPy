@@ -1,0 +1,43 @@
+causalpy/tests/test_pymc_forecast_damped_trend.py
+  s_f67402575a823d::t_bc1b962c344d8e 113,168
+  s_f67402575a823d::t_754f6b0db6cef7 51,88-90,120-121,145-150
+  s_f67402575a823d::t_43655f4c8471e0 72
+  s_f67402575a823d::t_e4fc103a70a393 40,48,137
+  s_f67402575a823d::t_3d05b4d1cbe0b0 161-167,169-195
+  s_f67402575a823d::t_38d690108e282c 1-39,41-47,49-50,52-71,73-87,91-112,114-119,122-136,138-144,151-160
+causalpy/tests/test_placebo_in_time.py
+  s_f67402575a823d::t_e5559039c495e8 2776-3269
+  s_f67402575a823d::t_8614d91806a1f8 3270-3302
+causalpy/checks/placebo_in_time.py
+  s_f67402575a823d::t_f2b8b96a5aca9a 15-17,47,63-64,71,75,82,162-163,172,312-323,364-369,432-484,722-731,938-1092,1359,1386,1397-1408,1410-1411,1413-1415,1423-1436,1464-1476,1487-1493,1497,1499-1512,1517,1520-1521,1527,1541-1542,1548,1581-1597,1609,1626,1640-1644,1661-1669,1748,1842-1844,1855-1915,1919-1962,2010-2013,2172-2173
+  s_f67402575a823d::t_b94b07d631441a 1572-1575
+  s_f67402575a823d::t_caaf1dafe9243f 36-39,229,238-239,1361-1366,1918
+  s_f67402575a823d::t_7c615defdc9844 1916-1917
+  s_f67402575a823d::t_d1aeed59f233cc 1360,1576-1577,2174-2175
+causalpy/tests/test_sensitivity_container.py
+  s_f67402575a823d::t_bf01744af69d9a 334-383
+ARCHITECTURE.md
+  s_f67402575a823d::t_e239d877733ddf 49-50,69-74
+causalpy/experiments/model_adapter.py
+  s_f67402575a823d::t_71184cbbfbca1d 21,23,44-133,312-318,1108-1117
+causalpy/tests/test_model_adapter.py
+  s_f67402575a823d::t_5923d18eb2d712 464-673
+causalpy/tests/test_pymc_forecast_adapter.py
+  s_f67402575a823d::t_eed567ee675d7b 890-1038
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0cff2213aa18bc0f55c24c3a0202d646c0063c69",
+  "prompts": {},
+  "sessions": {
+    "s_f67402575a823d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14015-7c0e-7ff3-b15f-ece3d15d41f9",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
