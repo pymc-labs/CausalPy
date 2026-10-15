@@ -1278,52 +1278,56 @@ class SoftmaxWeightedSumFitter(PyMCModel):
                 "y_hat", mu=mu, observed=y_data
             )
 
+
 class MvWeightedSumFitter(PyMCModel):
     r"""
     Multivariate weighted-sum model for synthetic control.
- 
+
     Donor weights are learned from the outcome trajectory **and** from
     additional predictors (e.g. industrialisation, wages, unemployment).
- 
-    Data layout
-    -----------
-    ``X`` has dims ``(obs_ind, coeffs, features)`` (donor units) and ``y`` has
-    dims ``(obs_ind, features, treated_units)``. By convention
-    ``features[0]`` is the outcome, left on its original scale; the remaining
-    "auxiliary" features are expected to be standardised by the experiment.
- 
-    Model
+
+    Parameters
+    ----------
+    v_prior : {"learned", "uniform"}, default "learned"
+        How much each auxiliary predictor counts when matching. With
+        ``"uniform"``, ``v_k = 1/K`` and every predictor counts equally. With
+        ``"learned"``, ``v ~ Dirichlet(1, ..., 1)`` is estimated from the data.
+        Because it is driven by the matching errors themselves, ``v_k``
+        measures how well predictor ``k`` *can be matched*, not how much it
+        matters for the outcome.
+    sample_kwargs : dict, optional
+        Keyword arguments for ``pm.sample``, as in :class:`PyMCModel`.
+    priors : dict, optional
+        Priors overriding the defaults, as in :class:`PyMCModel`.
+    prior_sample_kwargs : dict, optional
+        Keyword arguments for prior predictive sampling, as in
+        :class:`PyMCModel`.
+
+    Notes
     -----
+    The data layout is as follows. ``X`` has dims ``(obs_ind, coeffs,
+    features)`` (donor units) and ``y`` has dims ``(obs_ind, features,
+    treated_units)``. By convention ``features[0]`` is the outcome, left on its
+    original scale; the remaining "auxiliary" features are expected to be
+    standardised by the experiment.
+
+    The model is
+
     .. math::
         \beta_u &\sim \operatorname{Dirichlet}(1,\ldots,1) \\
         \mu_{tu} &= \sum_j \beta_{uj} X_{tj,0} \\
         y_{tu,0} &\sim \operatorname{Normal}(\mu_{tu}, \sigma_u) \\
         y_{tuk} &\sim \operatorname{Normal}\left(\sum_j \beta_{uj} X_{tjk},\;
             \frac{\sigma_f}{\sqrt{K v_k}}\right), \quad k = 1,\ldots,K
- 
+
     The donor weights ``beta`` must reproduce the treated unit's outcome *and*
     its auxiliary predictors. Only ``mu`` (the outcome) is used for the
     counterfactual, so ``predict`` / ``score`` and the impact calculation work
     unchanged: predictors inform the weights but are never forecast.
- 
-    Parameters
-    ----------
-    v_prior : {"learned", "uniform"}, default "learned"
-        How much each auxiliary predictor counts when matching.
- 
-        ``"uniform"``: ``v_k = 1/K``; every predictor counts equally.
- 
-        ``"learned"``: ``v ~ Dirichlet(1,...,1)`` is estimated from the data.
-        Because it is driven by the matching errors themselves, ``v_k``
-        measures how well predictor ``k`` *can be matched*, not how much it
-        matters for the outcome (a predictor that is easy to match can get a
-        large ``v_k`` even if it is irrelevant).
-    sample_kwargs, priors, prior_sample_kwargs
-        As in :class:`PyMCModel`.
     """
- 
+
     default_priors = {"y_hat": _LEGACY_Y_HAT_PRIOR}
- 
+
     def __init__(
         self,
         v_prior: Literal["learned", "uniform"] = "learned",
@@ -1337,9 +1341,11 @@ class MvWeightedSumFitter(PyMCModel):
             prior_sample_kwargs=prior_sample_kwargs,
         )
         if v_prior not in ("learned", "uniform"):
-            raise ValueError(f"v_prior must be 'learned' or 'uniform', got {v_prior!r}.")
+            raise ValueError(
+                f"v_prior must be 'learned' or 'uniform', got {v_prior!r}."
+            )
         self.v_prior = v_prior
- 
+
     def _clone(self, priors: dict[str, Any] | None = None) -> "PyMCModel":
         """Fresh, unfitted copy that keeps ``v_prior``."""
         return type(self)(
@@ -1348,10 +1354,10 @@ class MvWeightedSumFitter(PyMCModel):
             prior_sample_kwargs=dict(self.prior_sample_kwargs),
             priors=self._user_priors if priors is None else priors,
         )
- 
+
     def priors_from_data(self, X, y) -> dict[str, Any]:
         """Set data-dependent priors for donor weights, predictor weights and noise.
- 
+
         Parameters
         ----------
         X : xarray.DataArray
@@ -1378,7 +1384,7 @@ class MvWeightedSumFitter(PyMCModel):
         if _uses_stock_y_hat_default(self) and "y_hat" not in (self._user_priors or {}):
             priors["y_hat"] = _data_scaled_y_hat_prior(y.isel(features=0))
         return priors
- 
+
     def _data_setter(self, X: xr.DataArray) -> None:
         """Point the mutable data nodes at new donor data (3D ``X``, 3D ``y``)."""
         for name in ("X", "y"):
@@ -1392,7 +1398,7 @@ class MvWeightedSumFitter(PyMCModel):
                 {"X": X, "y": np.zeros((n_new, n_features, n_treated))},
                 coords={"obs_ind": np.arange(n_new)},
             )
- 
+
     def build_model(
         self,
         X: xr.DataArray,
@@ -1400,7 +1406,7 @@ class MvWeightedSumFitter(PyMCModel):
         coords: dict[str, Any] | None,
     ) -> None:
         """Define the PyMC model.
- 
+
         Parameters
         ----------
         X : xr.DataArray
@@ -1414,15 +1420,15 @@ class MvWeightedSumFitter(PyMCModel):
             raise ValueError("coords must include 'features' for MvWeightedSumFitter")
         features = list(coords["features"])
         n_aux = len(features) - 1
- 
+
         with self:
             coords = dict(coords)
             coords["features_aux"] = features[1:]
             self.add_coords(coords)
- 
+
             X = pm.Data("X", X, dims=["obs_ind", "coeffs", "features"])
             y = pm.Data("y", y, dims=["obs_ind", "features", "treated_units"])
- 
+
             beta = self.priors["beta"].create_variable("beta")
             sigma_feat = self.priors["sigma_feat"].create_variable("sigma_feat")
             if n_aux == 1 or self.v_prior == "uniform":
@@ -1431,7 +1437,7 @@ class MvWeightedSumFitter(PyMCModel):
                 )
             else:
                 v = self.priors["v"].create_variable("v")
- 
+
             # Outcome: the only quantity used for the counterfactual.
             mu = pm.Deterministic(
                 "mu", pt.dot(X[:, :, 0], beta.T), dims=["obs_ind", "treated_units"]
@@ -1439,7 +1445,7 @@ class MvWeightedSumFitter(PyMCModel):
             self.priors["y_hat"].create_likelihood_variable(
                 "y_hat", mu=mu, observed=y[:, 0, :]
             )
- 
+
             # Auxiliary predictors: only inform the weights.
             # tensordot over donors -> (obs_ind, features_aux, treated_units)
             mu_feat = pt.tensordot(X[:, :, 1:], beta, axes=[[1], [1]])
@@ -1451,6 +1457,7 @@ class MvWeightedSumFitter(PyMCModel):
                 observed=y[:, 1:, :],
                 dims=["obs_ind", "features_aux", "treated_units"],
             )
+
 
 class SyntheticDifferenceInDifferencesWeightFitter(PyMCModel):
     r"""

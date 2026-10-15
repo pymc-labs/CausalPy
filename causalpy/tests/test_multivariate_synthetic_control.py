@@ -142,9 +142,7 @@ def test_priors_from_data_requires_an_auxiliary_predictor():
     ("v_prior", "n_features", "has_v"),
     [("learned", 3, True), ("learned", 2, False), ("uniform", 3, False)],
 )
-def test_priors_from_data_creates_v_only_when_it_is_learned(
-    v_prior, n_features, has_v
-):
+def test_priors_from_data_creates_v_only_when_it_is_learned(v_prior, n_features, has_v):
     X, y = _arrays(n_features)
     priors = MvWeightedSumFitter(v_prior=v_prior).priors_from_data(X, y)
     assert ("v" in priors) is has_v
@@ -318,7 +316,9 @@ def test_fit_populates_results_and_predictor_weights(
 
 @pytest.mark.integration
 @pytest.mark.filterwarnings("ignore::UserWarning")
-@pytest.mark.parametrize(("v_prior", "expected"), [("learned", True), ("uniform", False)])
+@pytest.mark.parametrize(
+    ("v_prior", "expected"), [("learned", True), ("uniform", False)]
+)
 def test_summary_reports_predictor_weights_only_when_learned(
     mock_pymc_sample, capsys, v_prior, expected
 ):
@@ -375,7 +375,9 @@ def _make_exposure_scenario(seed=0, n_time=60, treatment_time=40, n_donors=10):
     rng = np.random.default_rng(seed)
     t = np.arange(n_time)
     common = np.cumsum(rng.normal(size=n_time)) / 3 + np.sin(t / 5)
-    shock = np.where(t >= treatment_time, 2.0 * (1 - np.exp(-(t - treatment_time) / 6)), 0.0)
+    shock = np.where(
+        t >= treatment_time, 2.0 * (1 - np.exp(-(t - treatment_time) / 6)), 0.0
+    )
     donors = [f"c{i}" for i in range(n_donors)]
     exposure = rng.permutation(np.linspace(-2, 4, n_donors))
     a = 10 + rng.normal(0, 0.03, n_donors)

@@ -60,9 +60,12 @@ class MultivariateSyntheticControl(SyntheticControl):
     model : PyMCModel or None, default None
         Defaults to :class:`~causalpy.pymc_models.MvWeightedSumFitter`.
         sklearn models are not supported.
-    min_donor_correlation, auto_scale_sigma
-        As in :class:`SyntheticControl`; donor correlations and the convex
-        hull check are computed on the outcome only.
+    min_donor_correlation : float, default 0.0
+        As in :class:`SyntheticControl`; donor correlations are computed on the
+        outcome only.
+    auto_scale_sigma : bool, default True
+        As in :class:`SyntheticControl`; the data-driven prior on the outcome
+        noise is based on the outcome only.
 
     Notes
     -----
@@ -160,7 +163,9 @@ class MultivariateSyntheticControl(SyntheticControl):
         super()._prepare_data()  # self.pre_design / self.post_design (outcome only)
         units = [*self.control_units, *self.treated_units]
         pre_idx, post_idx = self.datapre.index, self.datapost.index
-        pre_frames = {f: self._feature_frames[f].loc[pre_idx, units] for f in self.features}
+        pre_frames = {
+            f: self._feature_frames[f].loc[pre_idx, units] for f in self.features
+        }
         post_frames = {
             f: self._feature_frames[f].loc[post_idx, units] for f in self.features
         }
@@ -297,6 +302,11 @@ class MultivariateSyntheticControl(SyntheticControl):
 
         ``v`` measures how well each predictor can be matched, not how much it
         matters for the outcome.
+
+        Parameters
+        ----------
+        round_to : int or None, default None
+            Number of significant figures used when printing the values.
         """
         super().summary(round_to)
         if getattr(self.model, "v_prior", "learned") != "learned":
