@@ -887,3 +887,152 @@ def test_approximate_forecasters_fit_and_predict_canonical_containers(
         pd.testing.assert_index_equal(
             pd.Index(pred.obs_ind.values), expected_index, check_names=False
         )
+
+
+def test_sampling_diagnostics_use_full_forecast_fit_including_latents():
+    """Predictive thinning must not hide bad full-chain latent diagnostics."""
+    from types import SimpleNamespace
+
+    from causalpy.experiments.model_adapter import PyMCModelAdapter
+
+    rng = np.random.default_rng(123)
+    latent = rng.normal(size=(2, 80, 5))
+    latent[1, :, -1] += 10
+    posterior = xr.Dataset(
+        {
+            "beta": (("chain", "draw"), rng.normal(size=(2, 80))),
+            "latent": (("chain", "draw", "time"), latent),
+        }
+    )
+    full = xr.DataTree.from_dict(
+        {
+            "posterior": posterior,
+            "sample_stats": xr.Dataset(
+                {"diverging": (("chain", "draw"), np.ones((2, 80), dtype=bool))}
+            ),
+        }
+    )
+    model = make_forecast_model()
+    model.idata = xr.DataTree.from_dict(
+        {"posterior": posterior[["beta"]].isel(chain=slice(0, 1), draw=slice(0, 8))}
+    )
+    model.forecaster = SimpleNamespace(idata=full)
+    native_model = cp.pymc_models.LinearRegression()
+    native_model.idata = full
+
+    diagnostics = PyMCForecastAdapter(model).sampling_diagnostics()
+
+    assert diagnostics == PyMCModelAdapter(native_model).sampling_diagnostics()
+    assert diagnostics["divergences"] == 160
+    assert diagnostics["max_rhat"] > 1.1
+    assert diagnostics["diagnostics_status"] == "available"
+    assert model.idata.posterior.sizes["chain"] == 1
+    assert model.idata.posterior.sizes["draw"] == 8
+    assert "latent" not in model.idata.posterior
+
+
+@pytest.mark.parametrize("fitted_without_full_result", [False, True])
+def test_forecast_sampling_diagnostics_unavailable(fitted_without_full_result):
+    """Unfitted and variational backends do not report zero divergences."""
+    from types import SimpleNamespace
+
+    model = make_forecast_model()
+    if fitted_without_full_result:
+        model.idata = xr.DataTree.from_dict({"posterior": xr.Dataset()})
+        model.forecaster = SimpleNamespace()
+    diagnostics = PyMCForecastAdapter(model).sampling_diagnostics()
+    assert diagnostics["diagnostics_status"] == "unavailable"
+    assert diagnostics["diagnostics_reason"]
+    assert all(
+        diagnostics[key] is None for key in ("divergences", "max_rhat", "min_bulk_ess")
+    )
+
+
+@pytest.mark.integration
+def test_scheduled_descriptive_forecast_placebos_use_template_without_refitting_final(
+    its_data, forecast_result, monkeypatch
+):
+    """The public context path clones budgeted templates and isolates fold training."""
+    import arviz as az
+
+    df, treatment_time = its_data
+    dates = [df.index[30], df.index[45]]
+    template = make_fast_forecast_model()
+    final_idata = forecast_result.model.fit_idata
+    final_predictive = forecast_result.model.idata
+    clone_calls = []
+    original_clone = PyMCForecastModel._clone
+
+    def record_clone(self):
+        clone_calls.append((self, self.random_seed))
+        return original_clone(self)
+
+    monkeypatch.setattr(PyMCForecastModel, "_clone", record_clone)
+    context = cp.PipelineContext(
+        data=df,
+        experiment=forecast_result,
+        experiment_config={
+            "method": cp.InterruptedTimeSeries,
+            "treatment_time": treatment_time,
+            "formula": "y ~ 1 + t",
+            "model": template,
+        },
+    )
+    check = cp.checks.PlaceboInTime(
+        n_folds=2,
+        treatment_times=dates,
+        min_training_rows=30,
+        intervention_length=pd.Timedelta(days=7),
+        comparison_frequency="D",
+        calibrate=False,
+        random_seed=987,
+        make_figures=False,
+    )
+
+    result = check.run(forecast_result, context=context)
+
+    assert result.passed is None
+    assert result.table["status"].tolist() == ["completed", "completed"]
+    assert result.table["n_training"].tolist() == [30, 45]
+    assert result.table["n_comparison"].tolist() == [7, 7]
+    assert result.metadata["descriptive_summary"]["n_completed"] == 2
+    assert clone_calls == [(template, 987), (template, 988)]
+    assert template.idata is None
+    assert template.random_seed == 42
+    assert forecast_result.model.fit_idata is final_idata
+    assert forecast_result.model.idata is final_predictive
+    fold_models = []
+    for position, fold in enumerate(result.metadata["fold_results"]):
+        experiment = fold.experiment
+        model = experiment.model
+        fold_models.append(model)
+        assert model is not template and model is not forecast_result.model
+        assert model.random_seed == 987 + position
+        assert model.forecaster_kwargs == template.forecaster_kwargs
+        assert model.idata.posterior.sizes["draw"] == 50
+        assert model.fit_idata.posterior.sizes["draw"] == fast_sample_kwargs["draws"]
+        assert model.fit_idata.posterior.sizes["chain"] == 2
+        pd.testing.assert_index_equal(
+            experiment.datapre.index,
+            df.loc[df.index < dates[position]].index,
+            check_names=False,
+        )
+        assert experiment.datapost.index.max() == dates[position] + pd.Timedelta(days=6)
+        assert experiment.datapost.index.max() < treatment_time
+        np.testing.assert_array_equal(
+            model.forecaster._data.values.ravel(), experiment.datapre["y"].values
+        )
+        diagnostics = result.table.iloc[position]
+        full_rhat = az.rhat(model.fit_idata.posterior.to_dataset(), method="rank")
+        full_ess = az.ess(model.fit_idata.posterior.to_dataset(), method="bulk")
+        assert diagnostics["divergences"] == int(
+            model.fit_idata.sample_stats.diverging.sum()
+        )
+        assert diagnostics["max_rhat"] == pytest.approx(
+            max(float(variable.max()) for variable in full_rhat.data_vars.values())
+        )
+        assert diagnostics["min_bulk_ess"] == pytest.approx(
+            min(float(variable.min()) for variable in full_ess.data_vars.values())
+        )
+        assert diagnostics["diagnostics_status"] == "available"
+    assert fold_models[0] is not fold_models[1]
