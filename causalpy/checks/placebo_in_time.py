@@ -173,14 +173,14 @@ class PlaceboFoldResult:
 
 
 class PlaceboInTime:
-    """Placebo-in-time sensitivity check with hierarchical null model.
+    """Historical placebo refits with optional hierarchical calibration.
 
     Shifts the treatment time backward into the pre-intervention period
     to create ``n_folds`` placebo experiments.  Extracts the posterior
     cumulative impact from each fold, then fits a hierarchical Bayesian
     model to characterise the "status quo" distribution of effects when
     no intervention occurred.  The actual intervention's cumulative
-    effect is compared against this learned null.
+    effect is compared against this learned null. With ``calibrate=False``, report average historical differences and diagnostics without fitting a null or issuing a causal verdict.
 
     When ``expected_effect_prior`` and ``rope_half_width`` are provided,
     additionally computes exact closed-form Bayesian assurance (operating
@@ -201,6 +201,7 @@ class PlaceboInTime:
         * ``"random"`` — randomly sample eligible windows from the
           pre-intervention period, subject to ``min_training_pct``,
           ``min_gap``, and ``exclude_periods`` constraints.
+
         Every placebo fold must have at least one full intervention window
         of observed pre-treatment history. Sequential folds that do not meet
         this rule are skipped with a warning and deterministic
@@ -310,7 +311,6 @@ class PlaceboInTime:
         of the derived default.
     make_figures : bool, default True
         Whether :meth:`run` appends a figure to ``CheckResult.figures``. Calibrated runs use :meth:`plot_calibration`; descriptive runs use :meth:`plot_folds`. With this control enabled, ``figures[0]`` is available even when all fits fail.
-
     treatment_times : sequence or None, optional
         Explicit, strictly ascending unique starts, copied at construction and exactly ``n_folds`` long. Incompatible with random selection. Every historical window is validated before fitting. Overlapping scheduled windows require ``allow_overlap=True`` and ``calibrate=False``.
     min_training_rows : int or None, optional
