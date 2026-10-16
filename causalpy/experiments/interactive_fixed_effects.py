@@ -319,7 +319,7 @@ class InteractiveFixedEffectsSyntheticControl:
         plot_predictors: bool = False,
         figsize: tuple[float, float] = (7, 8),
         show: bool = True,
-    ) -> tuple[plt.Figure, np.ndarray]:
+    ) -> tuple[plt.Figure, list[plt.Axes] | np.ndarray]:
         """Plot the reconstructed untreated trajectory and impact panels.
 
         Requires :meth:`fit`. Bands are posterior intervals for the untreated
