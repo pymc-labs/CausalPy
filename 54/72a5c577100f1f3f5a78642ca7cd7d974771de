@@ -1,0 +1,18 @@
+causalpy/tests/known_truth_report.py
+  h_63db634213747e 1-187
+causalpy/tests/test_known_truth_report.py
+  h_63db634213747e 1-148
+docs/source/knowledgebase/bayesian_synthetic_control_known_truth_report.md
+  h_63db634213747e 1-145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5472a5c577100f1f3f5a78642ca7cd7d974771de",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
