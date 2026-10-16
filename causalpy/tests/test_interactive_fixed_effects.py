@@ -16,7 +16,9 @@
 from __future__ import annotations
 
 import inspect
+from unittest.mock import patch
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
@@ -26,6 +28,10 @@ from causalpy.experiments._results import CausalResult
 from causalpy.experiments.interactive_fixed_effects import (
     InteractiveFixedEffectsResult,
     InteractiveFixedEffectsSyntheticControl,
+    _as_dataset,
+    _control_initvals,
+    _scale_log_posterior,
+    _updated_residual_scale,
     untreated_counterfactual,
 )
 from causalpy.tests.known_truth_panels import donor_shock, latent_factor
@@ -409,3 +415,255 @@ def test_nightly_misspecified_donor_shock_still_marginalizes_shrinkage() -> None
     assert low.result.shrinkage_state.sizes["factors"] == 2
     assert high.result.shrinkage_state.sizes["factors"] == 4
     assert low.result.predictions_post.dims == high.result.predictions_post.dims
+
+
+def test_constructor_rejects_a_non_positive_integer_factor_bound() -> None:
+    """A factor bound is an integer count, not a rank, a bool, or a float."""
+    frame = _panel()
+    donors = ["donor_a", "donor_b"]
+    treated = ["treated_a"]
+    with pytest.raises(TypeError, match="not a selected rank"):
+        InteractiveFixedEffectsSyntheticControl(
+            frame, 2, donors, treated, max_factors=True
+        )
+    with pytest.raises(TypeError, match="not a selected rank"):
+        InteractiveFixedEffectsSyntheticControl(
+            frame, 2, donors, treated, max_factors=1.5
+        )
+    with pytest.raises(ValueError, match="at least 1"):
+        InteractiveFixedEffectsSyntheticControl(
+            frame, 2, donors, treated, max_factors=0
+        )
+    with pytest.raises(TypeError, match="DataFrame"):
+        InteractiveFixedEffectsSyntheticControl(frame.to_numpy(), 2, donors, treated)
+
+
+def test_constructor_rejects_empty_overlapping_or_missing_units() -> None:
+    """Donors and treated names must be non-empty, disjoint, and present."""
+    frame = _panel()
+    with pytest.raises(ValueError, match="one or more treated units"):
+        InteractiveFixedEffectsSyntheticControl(frame, 2, [], ["treated_a"])
+    with pytest.raises(ValueError, match="one or more treated units"):
+        InteractiveFixedEffectsSyntheticControl(frame, 2, ["donor_a"], [])
+    with pytest.raises(ValueError, match="overlap"):
+        InteractiveFixedEffectsSyntheticControl(
+            frame, 2, ["donor_a", "donor_b"], ["donor_a"]
+        )
+    with pytest.raises(KeyError, match="missing"):
+        InteractiveFixedEffectsSyntheticControl(frame, 2, ["donor_a"], ["absent"])
+
+
+def test_constructor_rejects_a_panel_missing_either_period() -> None:
+    """The treatment time must leave both a pre-period and a post-period."""
+    frame = _panel()
+    donors = ["donor_a", "donor_b"]
+    treated = ["treated_a"]
+    with pytest.raises(ValueError, match="both a pre-period and a post-period"):
+        InteractiveFixedEffectsSyntheticControl(frame, 0, donors, treated)
+    with pytest.raises(ValueError, match="both a pre-period and a post-period"):
+        InteractiveFixedEffectsSyntheticControl(frame, 4, donors, treated)
+
+
+def test_unit_names_follow_construction_order() -> None:
+    """Donor and treated properties keep the order supplied at construction."""
+    experiment = InteractiveFixedEffectsSyntheticControl(
+        _panel(),
+        2,
+        ["donor_b", "donor_a"],
+        ["treated_b", "treated_a"],
+    )
+    assert experiment.control_units == ("donor_b", "donor_a")
+    assert experiment.treated_units == ("treated_b", "treated_a")
+
+
+def test_build_reuses_the_control_graph() -> None:
+    """A second build returns the same graph instead of sampling a new one."""
+    experiment = _experiment()
+    first = experiment.build()
+    second = experiment.build()
+    assert first is experiment
+    assert second._control_model is first._control_model
+
+
+def test_plot_requires_a_result_and_honours_show() -> None:
+    """plot draws the composed posterior and calls show only when asked."""
+    experiment = _experiment()
+    with pytest.raises(RuntimeError, match=r"fit\(\)"):
+        experiment.plot(show=False)
+    experiment.result = experiment.compose_result(**_components())
+    with patch("causalpy.experiments.interactive_fixed_effects.plt.show") as show:
+        figure, axes = experiment.plot(
+            show=False, treated_unit="treated_b", round_to=2, plot_predictors=True
+        )
+        show.assert_not_called()
+        assert isinstance(figure, plt.Figure)
+        assert len(axes) == 3
+        plt.close(figure)
+        figure, _ = experiment.plot(show=True)
+        show.assert_called_once()
+        plt.close(figure)
+
+
+def test_compose_result_rejects_a_bad_shrinkage_or_factor_axis() -> None:
+    """Component draws must be scales on the shared factor axis, not a rank."""
+    experiment = _experiment()
+    parts = _components()
+    with pytest.raises(TypeError, match="DataArray of scales"):
+        experiment.compose_result(**{**parts, "shrinkage_state": [0.2, 0.3]})
+    wrong_dims = parts["shrinkage_state"].rename(factors="rank")
+    with pytest.raises(ValueError, match="shrinkage_state dims"):
+        experiment.compose_result(**{**parts, "shrinkage_state": wrong_dims})
+    short = parts["shrinkage_state"].isel(factors=slice(0, 1))
+    with pytest.raises(ValueError, match="one scale per factor"):
+        experiment.compose_result(**{**parts, "shrinkage_state": short})
+    loadings = parts["loadings"].rename(factors="rank")
+    with pytest.raises(ValueError, match="loadings must have a 'factors' dimension"):
+        experiment.compose_result(**{**parts, "loadings": loadings})
+    short_loadings = parts["loadings"].isel(factors=slice(0, 1))
+    with pytest.raises(ValueError, match="factor axis must have length"):
+        experiment.compose_result(**{**parts, "loadings": short_loadings})
+    factors = parts["factors"].isel(obs_ind=0, drop=True)
+    with pytest.raises(ValueError, match="shared fit"):
+        experiment.compose_result(**{**parts, "factors": factors})
+
+
+def test_control_initvals_skip_the_svd_fill_when_the_factor_axis_is_empty() -> None:
+    """A zero-length factor axis leaves the SVD start at zero."""
+
+    class _Factors:
+        def eval(self) -> int:
+            return 0
+
+    class _Model:
+        dim_lengths = {"factors": _Factors()}
+
+    control_y = xr.DataArray(
+        np.ones((3, 2)),
+        dims=("obs_ind", "control_units"),
+        coords={"obs_ind": [0, 1, 2], "control_units": ["a", "b"]},
+    )
+    start = _control_initvals(_Model(), control_y)
+    assert start["shared_factors"].shape == (3, 0)
+    assert start["control_loadings"].shape == (2, 0)
+    assert start["mgp_delta"].shape == (0,)
+
+
+def test_scale_posterior_rejects_a_non_positive_covariance() -> None:
+    """A singular or non-finite covariance does not enter the scale update."""
+    centered = np.ones((2, 1))
+    singular = _scale_log_posterior(
+        0.0,
+        gram=-np.eye(2),
+        centered=centered,
+        control_rss=1.0,
+        n_control=1,
+    )
+    with np.errstate(invalid="ignore"):
+        missing = _scale_log_posterior(
+            0.0,
+            gram=np.full((2, 2), np.nan),
+            centered=centered,
+            control_rss=1.0,
+            n_control=1,
+        )
+    assert singular == -1e300
+    assert missing == -1e300
+
+
+def test_non_finite_treated_pre_period_does_not_move_the_scale() -> None:
+    """A non-finite gradient stops the update and keeps the control-panel scale."""
+    sigma = np.array([1.0, 2.0])
+    updated = _updated_residual_scale(
+        sigma=sigma,
+        control_rss=np.array([1.0, 1.0]),
+        n_control=2,
+        factors_pre=np.zeros((2, 3, 1)),
+        shrinkage=np.ones((2, 1)),
+        treated_centered=np.full((2, 3, 1), np.nan),
+    )
+    np.testing.assert_allclose(updated, sigma)
+
+
+def test_flat_scale_posterior_uses_the_gradient_sign() -> None:
+    """A nearly flat posterior still takes a finite step instead of a Newton step."""
+    updated = _updated_residual_scale(
+        sigma=np.array([1e-8]),
+        control_rss=np.array([0.0]),
+        n_control=1,
+        factors_pre=np.zeros((1, 2, 1)),
+        shrinkage=np.ones((1, 1)),
+        treated_centered=np.zeros((1, 2, 1)),
+    )
+    assert np.isfinite(updated[0])
+    assert updated[0] > 0.0
+    assert updated[0] < 1e-8
+
+
+def test_failed_line_search_keeps_the_current_scale(monkeypatch) -> None:
+    """If no trial fraction improves the posterior, the scale draw stays put."""
+    start = float(np.log(1.0))
+
+    def _decline(log_scale: float, **kwargs: object) -> float:
+        if abs(log_scale - start) <= 1e-3:
+            return 0.0
+        return -1.0
+
+    monkeypatch.setattr(
+        "causalpy.experiments.interactive_fixed_effects._scale_log_posterior",
+        _decline,
+    )
+    updated = _updated_residual_scale(
+        sigma=np.array([1.0]),
+        control_rss=np.array([1.0]),
+        n_control=1,
+        factors_pre=np.zeros((1, 2, 1)),
+        shrinkage=np.ones((1, 1)),
+        treated_centered=np.zeros((1, 2, 1)),
+    )
+    assert updated[0] == pytest.approx(1.0)
+
+
+def test_non_finite_curvature_keeps_the_scale(monkeypatch) -> None:
+    """A finite gradient with a non-finite curvature does not move the scale."""
+    start = float(np.log(1.0))
+
+    def _curved(log_scale: float, **kwargs: object) -> float:
+        if abs(log_scale - start) < 1e-8:
+            return np.nan
+        return 0.0
+
+    monkeypatch.setattr(
+        "causalpy.experiments.interactive_fixed_effects._scale_log_posterior",
+        _curved,
+    )
+    updated = _updated_residual_scale(
+        sigma=np.array([1.0]),
+        control_rss=np.array([1.0]),
+        n_control=1,
+        factors_pre=np.zeros((1, 2, 1)),
+        shrinkage=np.ones((1, 1)),
+        treated_centered=np.zeros((1, 2, 1)),
+    )
+    assert updated[0] == pytest.approx(1.0)
+
+
+def test_control_posterior_coercion_accepts_a_mapping_and_rejects_other_objects() -> (
+    None
+):
+    """A posterior holder is a Dataset, a mapping of variables, or an error."""
+
+    class _Mapping(dict):
+        @property
+        def data_vars(self) -> dict:
+            return self
+
+    class _Holder:
+        def __init__(self, dataset: object) -> None:
+            self.dataset = dataset
+
+    got = _as_dataset(_Holder(_Mapping(x=("t", [1.0, 2.0]))))
+    assert got["x"].values.tolist() == [1.0, 2.0]
+    with pytest.raises(TypeError, match="control posterior"):
+        _as_dataset(object())
+    with pytest.raises(TypeError, match="control posterior"):
+        _as_dataset(_Holder(object()))
