@@ -1,0 +1,22 @@
+docs/source/notebooks/index.md
+  h_63db634213747e 91-97,440
+docs/source/knowledgebase/augmented-synthetic-control.md
+  h_63db634213747e 1-44
+docs/source/notebooks/augmented-synthetic-control-pymc.ipynb
+  h_63db634213747e 1-551
+docs/source/knowledgebase/index.md
+  h_63db634213747e 15
+docs/source/notebooks/gallery.yaml
+  h_63db634213747e 43-44
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e323626c3e2929e2b998b367a3c0308a722ab747",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
