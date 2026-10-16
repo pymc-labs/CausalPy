@@ -179,6 +179,115 @@ def test_control_graph_excludes_treated_post_outcomes() -> None:
     np.testing.assert_allclose(observed[:, 0], frame["donor_a"].to_numpy())
 
 
+def test_treated_pre_updates_scale_not_factors_or_time_intercepts(monkeypatch) -> None:
+    """Treated pre-period moves the shared scale, not factors or time intercepts.
+
+    Captures both ``pm.sample`` calls inside ``fit``: the control-panel sample
+    and the conditional sample. A joint factor update, or a residual scale held
+    fixed from the control panel, fails.
+    """
+    from pytensor.graph.traversal import ancestors
+
+    import causalpy.experiments.interactive_fixed_effects as ife
+
+    panel = latent_factor
+    baseline_frame = panel.data.copy()
+    shifted = baseline_frame.copy()
+    pre = shifted.index < panel.treatment_time
+    shifted.loc[pre, list(panel.treated_units)] += 25.0
+    shifted.loc[
+        shifted.index[shifted.index < panel.treatment_time][0], panel.treated_units[0]
+    ] = 12345.0
+    captured: list[tuple] = []
+    real_sample = ife.pm.sample
+
+    def spy(*args, **kwargs):
+        idata = real_sample(*args, **kwargs)
+        captured.append((kwargs["model"], idata))
+        return idata
+
+    monkeypatch.setattr(ife.pm, "sample", spy)
+
+    def fit(frame):
+        return ife.InteractiveFixedEffectsSyntheticControl(
+            frame,
+            panel.treatment_time,
+            panel.control_units,
+            panel.treated_units,
+            max_factors=3,
+        ).fit(**_FIT)
+
+    baseline = fit(baseline_frame)
+    moved = fit(shifted)
+    assert len(captured) == 4
+    base_control, base_conditional = captured[0], captured[1]
+    moved_control, moved_conditional = captured[2], captured[3]
+
+    def assert_split(control_model, conditional_model, frame) -> None:
+        assert {rv.name for rv in control_model.free_RVs} == {
+            "mgp_delta",
+            "sigma",
+            "control_unit_intercept",
+            "time_intercept",
+            "shared_factors",
+            "control_loadings",
+        }
+        assert {rv.name for rv in control_model.observed_RVs} == {"control_y"}
+        control_observed = control_model.rvs_to_values[
+            control_model["control_y"]
+        ].eval()
+        assert control_observed.shape[1] == len(panel.control_units)
+        assert not np.any(control_observed == 12345.0)
+        treated_pre = frame.loc[
+            frame.index < panel.treatment_time, list(panel.treated_units)
+        ]
+        assert not np.any(np.isin(control_observed, treated_pre.to_numpy()))
+        assert {rv.name for rv in conditional_model.free_RVs} == {
+            "sigma",
+            "unit_intercept",
+            "loadings",
+        }
+        assert {rv.name for rv in conditional_model.observed_RVs} == {
+            "control_resid",
+            "treated_pre",
+        }
+        assert "shared_factors" not in conditional_model.named_vars
+        assert "time_intercept" not in conditional_model.named_vars
+
+        sigma = conditional_model["sigma"]
+        assert sigma in set(ancestors([conditional_model["treated_pre"]]))
+        treated_observed = conditional_model.rvs_to_values[
+            conditional_model["treated_pre"]
+        ].eval()
+        if frame is baseline_frame:
+            assert not np.any(treated_observed == 12345.0)
+        else:
+            assert np.any(treated_observed == 12345.0)
+
+    assert_split(base_control[0], base_conditional[0], baseline_frame)
+    assert_split(moved_control[0], moved_conditional[0], shifted)
+
+    base_posterior = ife._as_dataset(base_control[1])
+    moved_posterior = ife._as_dataset(moved_control[1])
+    xr.testing.assert_allclose(
+        base_posterior["shared_factors"], moved_posterior["shared_factors"]
+    )
+    xr.testing.assert_allclose(
+        base_posterior["time_intercept"], moved_posterior["time_intercept"]
+    )
+    xr.testing.assert_allclose(
+        base_posterior["shrinkage_state"], moved_posterior["shrinkage_state"]
+    )
+    base_sigma = ife._as_dataset(base_conditional[1])["sigma"]
+    moved_sigma = ife._as_dataset(moved_conditional[1])["sigma"]
+    assert not np.allclose(base_sigma, moved_sigma)
+    assert float(moved_sigma.mean()) > float(base_sigma.mean())
+    assert baseline.result is not None and moved.result is not None
+    assert not np.allclose(
+        baseline.result.predictions_pre, moved.result.predictions_pre
+    )
+
+
 def test_known_truth_smoke_and_post_outcomes_do_not_move_the_trajectory() -> None:
     panel = latent_factor
     data = panel.data.copy()
