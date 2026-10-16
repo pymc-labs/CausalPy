@@ -190,7 +190,8 @@ def _build_model(panel: WidePanel) -> pm.Model:
     Likelihoods do not share observations: weights see treated pre-period
     outcomes only, and the prognostic regression sees donor outcomes only.
     The counterfactual and the treatment effect are deterministics of each
-    joint draw. Treated post-period outcomes are data for the effect only.
+    joint draw. Treated post-period outcomes are subtracted for the effect
+    only. Those arrays are constants taken from the panel.
     """
     n_pre = panel.pre.shape[0]
     donor_all = np.vstack(
@@ -201,6 +202,8 @@ def _build_model(panel: WidePanel) -> pm.Model:
     )
     treated_pre = _finite_matrix(panel.pre, panel.treated_units)
     treated_post = _finite_matrix(panel.post, panel.treated_units)
+    donor_pre = donor_all[:n_pre]
+    donor_post = donor_all[n_pre:]
     n_donors = len(panel.control_units)
     coords = {
         "treated_units": list(panel.treated_units),
@@ -211,21 +214,6 @@ def _build_model(panel: WidePanel) -> pm.Model:
     }
 
     with pm.Model(coords=coords) as model:
-        donor_outcomes = pm.Data(
-            "donor_outcomes_data",
-            donor_all,
-            dims=["time", "control_units"],
-        )
-        treated_pre_data = pm.Data(
-            "treated_pre_data",
-            treated_pre,
-            dims=["pre_time", "treated_units"],
-        )
-        treated_post_data = pm.Data(
-            "treated_post_data",
-            treated_post,
-            dims=["post_time", "treated_units"],
-        )
         tau = pm.HalfNormal("tau", sigma=1.0)
         beta = pm.Normal(
             "prognostic_coefficients",
@@ -239,17 +227,12 @@ def _build_model(panel: WidePanel) -> pm.Model:
             dims=["treated_units", "control_units"],
         )
 
-        donor_pre = donor_outcomes[:n_pre]
-        donor_post = donor_outcomes[n_pre:]
-        x_donors = donor_pre.T
-        x_treated = treated_pre_data.T
-
-        # Normal likelihood of pre-period treated outcomes on X_donors_pre @ w_u.
+        # Normal likelihood of pre-period treated outcomes on donor_pre @ w_u.
         pm.Normal(
             "treated_pre",
             mu=pt.dot(donor_pre, weights.T),
             sigma=_OBSERVATION_SCALE,
-            observed=treated_pre_data,
+            observed=treated_pre,
             dims=["pre_time", "treated_units"],
         )
         # Donor outcomes at each time, covariates = full pre-period vector.
@@ -258,22 +241,22 @@ def _build_model(panel: WidePanel) -> pm.Model:
             "donor_outcomes",
             mu=pt.dot(beta, donor_pre),
             sigma=_OBSERVATION_SCALE,
-            observed=donor_outcomes,
+            observed=donor_all,
             dims=["time", "control_units"],
         )
 
-        imbalance = x_treated - pt.dot(weights, x_donors)
+        # Panel layout is (time, unit). weights.T batches the recorded @ w_u.
+        imbalance = pt.as_tensor_variable(treated_pre) - pt.dot(donor_pre, weights.T)
         beta_post = beta[n_pre:]
-        correction = pt.dot(imbalance, beta_post.T)
-        weighted_donors = pt.dot(donor_post, weights.T)
+        weighted = pt.dot(donor_post, weights.T)
         counterfactual = pm.Deterministic(
             "counterfactual",
-            weighted_donors + correction.T,
+            weighted + pt.dot(beta_post, imbalance),
             dims=["post_time", "treated_units"],
         )
         pm.Deterministic(
             "treatment_effect",
-            treated_post_data - counterfactual,
+            pt.as_tensor_variable(treated_post) - counterfactual,
             dims=["post_time", "treated_units"],
         )
     return model
