@@ -19,9 +19,11 @@ selected. A multiplicative gamma process shrinks unused factor scales toward
 zero, and posterior intervals marginalize that prior.
 
 Shared factors and shared time intercepts are updated from the control panel
-only. Treated post-intervention outcomes never enter the likelihood. The one
-shared residual scale may also be updated from treated pre-period outcomes,
-without changing those factor or time-intercept draws.
+only. That graph does not contain a residual-scale random variable. The one
+shared residual scale is sampled after those draws are fixed, from control
+residuals and treated pre-period outcomes, without changing the factor or
+time-intercept draws. Treated post-intervention outcomes never enter the
+likelihood.
 """
 
 from __future__ import annotations
@@ -77,13 +79,14 @@ class InteractiveFixedEffectsSyntheticControl:
     are donors. There is no ``n_factors`` argument: ``max_factors`` is an upper
     bound, not a selected rank.
 
-    ``build`` constructs the control-panel graph. ``fit`` samples one joint
-    posterior: the control-panel posterior of the shared factors, shared time
-    intercepts, and per-factor shrinkage scales, then the conditional posterior
-    of each treated unit's intercept and loadings given those draws and that
-    unit's pre-period only. The conditional piece also updates the one shared
-    residual scale from the control residuals and the treated pre-period. It
-    does not move the factor or time-intercept draws.
+    ``build`` constructs the control-panel graph. That graph has no residual-scale
+    random variable. ``fit`` samples one joint posterior: the control-panel
+    posterior of the shared factors, shared time intercepts, and per-factor
+    shrinkage scales, then the conditional posterior of each treated unit's
+    intercept and loadings given those draws and that unit's pre-period only.
+    The conditional piece is the only residual-scale sample. It updates that one
+    shared scale from the control residuals and the treated pre-period. It does
+    not move the factor or time-intercept draws.
 
     The untreated counterfactual is not a donor-row prediction. Raw factors and
     raw loadings are not identifiers: a rotation or a sign flip leaves the
@@ -500,7 +503,12 @@ def _factor_names(max_factors: int) -> list[str]:
 
 
 def _control_model(control_y: xr.DataArray, max_factors: int) -> pm.Model:
-    """Gaussian factor graph on control cells only."""
+    """Gaussian factor graph on control cells only.
+
+    The observation scale is a fixed sampler constant, not a residual-scale
+    draw. A free scale here would be a second scale, estimated from the control
+    panel only. The one shared residual scale is sampled later.
+    """
     factor_names = _factor_names(max_factors)
     alpha = np.array([_MGP_A1 if i == 0 else _MGP_A2 for i in range(max_factors)])
     with pm.Model(
@@ -513,7 +521,7 @@ def _control_model(control_y: xr.DataArray, max_factors: int) -> pm.Model:
         delta = pm.Gamma("mgp_delta", alpha=alpha, beta=1.0, dims="factors")
         precision = pt.cumprod(delta)
         pm.Deterministic("shrinkage_state", 1.0 / pt.sqrt(precision), dims="factors")
-        sigma = pm.HalfCauchy("sigma", beta=_RESIDUAL_CAUCHY_BETA)
+        # Not a residual-scale draw. The one shared scale is sampled later.
         unit_intercept = pm.Normal(
             "control_unit_intercept", 0.0, _INTERCEPT_SD, dims="control_units"
         )
@@ -537,7 +545,7 @@ def _control_model(control_y: xr.DataArray, max_factors: int) -> pm.Model:
         pm.Normal(
             "control_y",
             mu,
-            sigma,
+            1.0,
             observed=observed.values,
             dims=("obs_ind", "control_units"),
         )
@@ -562,7 +570,6 @@ def _control_initvals(
     return {
         "shared_factors": factors,
         "control_loadings": loadings,
-        "sigma": np.array(0.5),
         "mgp_delta": np.array([1.0 if i == 0 else 1.5 for i in range(n_factors)]),
     }
 
@@ -575,11 +582,12 @@ def _sample_treated_conditional(
     random_seed: int | None,
     progressbar: bool,
 ) -> dict[str, xr.DataArray]:
-    """Sample treated intercepts, loadings, and the shared residual scale.
+    """Sample treated intercepts, loadings, and the one shared residual scale.
 
-    Factors and time intercepts are data from the control-panel posterior, not
-    random variables in this graph. Treated pre-period outcomes can move the
-    residual scale. They cannot move the factor or time-intercept draws.
+    This is the only residual-scale random variable. Factors and time intercepts
+    are data from the control-panel posterior, not random variables in this
+    graph. Control residuals and treated pre-period outcomes can move the scale.
+    Treated pre-period outcomes cannot move the factor or time-intercept draws.
     """
     posterior = _as_dataset(control_posterior)
     stacked = posterior.stack(sample=_DRAW_DIMS)

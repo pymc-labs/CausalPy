@@ -180,12 +180,14 @@ def test_control_graph_excludes_treated_post_outcomes() -> None:
 
 
 def test_treated_pre_updates_scale_not_factors_or_time_intercepts(monkeypatch) -> None:
-    """Treated pre-period can move the shared scale, not factors or time intercepts.
+    """Treated pre-period can move the one shared scale, not factors or intercepts.
 
-    Captures both ``pm.sample`` calls inside ``fit``: the control-panel sample
-    and the conditional sample. A joint factor update fails the posterior
-    comparison. A residual scale held fixed from the control panel fails the
-    treated-pre likelihood gradient, which does not depend on short-chain draws.
+    Captures both ``pm.sample`` calls inside ``fit``. A joint factor update
+    fails the posterior comparison. A second residual scale fails the free-RV
+    sets: the control graph has none, and the conditional graph has the only
+    one. A scale held fixed from the control panel fails the treated-pre
+    likelihood gradient. A scale that ignores control residuals fails the
+    control-residual gradient. Neither gradient depends on short-chain draws.
     """
     import pytensor.tensor as pt
     from pytensor.graph.traversal import ancestors
@@ -228,12 +230,12 @@ def test_treated_pre_updates_scale_not_factors_or_time_intercepts(monkeypatch) -
     def assert_split(control_model, conditional_model, frame) -> None:
         assert {rv.name for rv in control_model.free_RVs} == {
             "mgp_delta",
-            "sigma",
             "control_unit_intercept",
             "time_intercept",
             "shared_factors",
             "control_loadings",
         }
+        assert "sigma" not in control_model.named_vars
         assert {rv.name for rv in control_model.observed_RVs} == {"control_y"}
         control_observed = control_model.rvs_to_values[
             control_model["control_y"]
@@ -249,6 +251,9 @@ def test_treated_pre_updates_scale_not_factors_or_time_intercepts(monkeypatch) -
             "unit_intercept",
             "loadings",
         }
+        assert [name for name in conditional_model.named_vars if name == "sigma"] == [
+            "sigma"
+        ]
         assert {rv.name for rv in conditional_model.observed_RVs} == {
             "control_resid",
             "treated_pre",
@@ -257,16 +262,19 @@ def test_treated_pre_updates_scale_not_factors_or_time_intercepts(monkeypatch) -
         assert "time_intercept" not in conditional_model.named_vars
 
         sigma = conditional_model["sigma"]
-        assert sigma in set(ancestors([conditional_model["treated_pre"]]))
+        observed = [
+            conditional_model["treated_pre"],
+            conditional_model["control_resid"],
+        ]
+        assert sigma in set(ancestors(observed))
         sigma_value = conditional_model.rvs_to_values[sigma]
-        treated_logp = conditional_model.logp(
-            vars=[conditional_model["treated_pre"]], sum=True
-        )
-        sigma_gradient = conditional_model.compile_fn(
-            pt.grad(treated_logp, sigma_value)
-        )
-        gradient = np.asarray(sigma_gradient(conditional_model.initial_point()))
-        assert np.any(np.abs(gradient) > 0.0)
+        point = conditional_model.initial_point()
+        for observed_rv in observed:
+            logp = conditional_model.logp(vars=[observed_rv], sum=True)
+            gradient_fn = conditional_model.compile_fn(pt.grad(logp, sigma_value))
+            needed = {inp.name: point[inp.name] for inp in gradient_fn.f.maker.inputs}
+            gradient = np.asarray(gradient_fn(needed))
+            assert np.any(np.abs(gradient) > 0.0)
         treated_observed = conditional_model.rvs_to_values[
             conditional_model["treated_pre"]
         ].eval()

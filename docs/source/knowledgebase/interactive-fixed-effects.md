@@ -29,7 +29,7 @@ Observations are independent Gaussian noise around that mean, with one shared po
 
 Permissible cells are control units at every time, and each treated unit strictly before the shared treatment time. Treated post-intervention outcomes never enter the likelihood, the factor update, the loading update, the intercept update, the shrinkage update, or the residual-scale update. Changing them changes impacts only.
 
-Shared factors and shared time intercepts are informed by the control panel only. Each treated unit's intercept and loadings are informed by that unit's pre-period only, given those shared draws. Treated pre-period outcomes may update the one residual scale, including in the treated conditional step, so long as that update does not change the factor or time-intercept draws. Loadings and the untreated-trajectory intervals may depend on a scale the treated pre-period moved. There is one residual scale, not two, and the caller does not supply it.
+Shared factors and shared time intercepts are informed by the control panel only. The control-panel graph does not contain a residual-scale random variable. Each treated unit's intercept and loadings are informed by that unit's pre-period only, given those shared draws. The one residual scale is sampled after those draws are fixed, from control residuals and treated pre-period outcomes, including in the treated conditional step. That update does not change the factor or time-intercept draws. Loadings and the untreated-trajectory intervals may depend on a scale the treated pre-period moved. There is one residual scale, not two, and the caller does not supply it.
 
 ## Shrinkage, not a selected rank
 
