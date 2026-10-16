@@ -28,8 +28,7 @@ from causalpy.date_utils import validate_treatment_time_against_index
 from causalpy.experiments._panel_counterfactual import WidePanel
 from causalpy.input_data import DataFrameLike, to_pandas_with_time_index
 
-# The recorded Normal likelihoods name no observation-noise prior, so the
-# scale is a fixed part of the likelihood rather than another random variable.
+# Frozen observation scale for both Normal likelihoods. A fixed scale, not a prior.
 _OBSERVATION_SCALE = 1.0
 
 
@@ -40,14 +39,15 @@ class AugmentedSyntheticControl:
     correction. Credible intervals of the counterfactual and the treatment
     effect are Bayesian intervals for that full model, not a cut posterior.
 
-    Weights are independent across treated units. Each unit's weights have a
-    Normal likelihood on that unit's pre-period outcomes, with mean equal to
-    the donor pre-period matrix times the unit's weights. The prognostic
-    regression uses donor outcomes at each time as the response and that
-    donor's full pre-period outcome vector as covariates, with time-specific
-    coefficients and no intercept. Coefficients have a ``Normal(0, tau)``
-    prior and ``tau`` is a ``HalfNormal``. Both Normal likelihoods use
-    observation scale 1. All units share one ``treatment_time``.
+    Weights are independent across treated units. Each unit's weights are
+    ``Dirichlet`` with concentration ones, with a Normal likelihood on that
+    unit's pre-period outcomes and mean equal to the donor pre-period matrix
+    times the unit's weights. The prognostic regression uses donor outcomes at
+    each time as the response and that donor's full pre-period outcome vector
+    as covariates, with time-specific coefficients and no intercept.
+    Coefficients have a ``Normal(0, tau)`` prior and ``tau`` is ``HalfNormal``
+    with scale 1. Both Normal likelihoods use observation scale 1. All units
+    share one ``treatment_time``.
 
     Parameters
     ----------
