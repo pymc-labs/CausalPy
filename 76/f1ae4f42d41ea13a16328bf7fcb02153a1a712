@@ -1,0 +1,14 @@
+causalpy/tests/test_interactive_fixed_effects.py
+  h_63db634213747e 183,186-188,190,222-223,261-269
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "76f1ae4f42d41ea13a16328bf7fcb02153a1a712",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
