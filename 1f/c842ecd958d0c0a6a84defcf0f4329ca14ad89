@@ -1,0 +1,22 @@
+docs/source/knowledgebase/index.md
+  h_63db634213747e 14
+docs/source/knowledgebase/interactive-fixed-effects.md
+  h_63db634213747e 50
+docs/source/notebooks/gallery.yaml
+  h_63db634213747e 41-42
+docs/source/notebooks/index.md
+  h_63db634213747e 84-90,432
+docs/source/notebooks/interactive-fixed-effects-pymc.ipynb
+  h_63db634213747e 14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1fc842ecd958d0c0a6a84defcf0f4329ca14ad89",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
