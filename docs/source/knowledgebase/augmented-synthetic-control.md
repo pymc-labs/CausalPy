@@ -41,4 +41,4 @@ A posterior interval is uncertainty in this one model after integrating the Diri
 
 Simplex weights cannot reproduce a treated pre-period that sits outside the convex hull of the donors. The pre-intervention fit then stays imperfect. The prognostic term can still move the post-period counterfactual, because that term is a function of the pre-period imbalance and of coefficients learned from donors only. A shift in the posterior mean on one panel is not evidence that the interval has nominal coverage.
 
-The worked example is [the how-to notebook](../notebooks/augmented-synthetic-control-pymc.ipynb).
+The worked example is [the how-to notebook](../notebooks/augmented-synthetic-control-pymc.ipynb). The cross-model comparison is [Comparing Bayesian synthetic-control models](comparing-bayesian-synthetic-control.md).
