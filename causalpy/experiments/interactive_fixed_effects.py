@@ -19,11 +19,13 @@ selected. A multiplicative gamma process shrinks unused factor scales toward
 zero, and posterior intervals marginalize that prior.
 
 Shared factors and shared time intercepts are updated from the control panel
-only. That graph does not contain a residual-scale random variable. The one
-shared residual scale is sampled after those draws are fixed, from control
-residuals and treated pre-period outcomes, without changing the factor or
-time-intercept draws. Treated post-intervention outcomes never enter the
-likelihood.
+only. The control likelihood uses the one shared positive residual scale, not
+a unit observation scale. That is one random variable. Treated pre-period
+outcomes may update that scale's draws after the factor and time-intercept
+sample, and must not resample those draws. Loadings use the updated draws.
+The factor posterior is the control-panel posterior under that scale as
+informed by the control panel. It is not recomputed under the treated-pre
+update. Treated post-intervention outcomes never enter the likelihood.
 """
 
 from __future__ import annotations
@@ -51,6 +53,8 @@ _DEFAULT_MAX_FACTORS = 4
 _MGP_A1 = 2.0
 _MGP_A2 = 3.0
 _RESIDUAL_CAUCHY_BETA = 2.5
+_SCALE_UPDATE_STEPS = 12
+_SCALE_FD_STEP = 1e-4
 _INTERCEPT_SD = 5.0
 
 
@@ -79,14 +83,13 @@ class InteractiveFixedEffectsSyntheticControl:
     are donors. There is no ``n_factors`` argument: ``max_factors`` is an upper
     bound, not a selected rank.
 
-    ``build`` constructs the control-panel graph. That graph has no residual-scale
-    random variable. ``fit`` samples one joint posterior: the control-panel
-    posterior of the shared factors, shared time intercepts, and per-factor
-    shrinkage scales, then the conditional posterior of each treated unit's
-    intercept and loadings given those draws and that unit's pre-period only.
-    The conditional piece is the only residual-scale sample. It updates that one
-    shared scale from the control residuals and the treated pre-period. It does
-    not move the factor or time-intercept draws.
+    ``build`` constructs the control-panel graph. Its likelihood uses the one
+    shared positive residual scale, not a unit observation scale. ``fit``
+    samples the control-panel posterior of the shared factors, shared time
+    intercepts, per-factor shrinkage scales, and that one scale. Treated
+    pre-period outcomes may update the scale's draws after that sample. They
+    must not resample the factor or time-intercept draws. Loadings use the
+    updated draws.
 
     The untreated counterfactual is not a donor-row prediction. Raw factors and
     raw loadings are not identifiers: a rotation or a sign flip leaves the
@@ -190,8 +193,12 @@ class InteractiveFixedEffectsSyntheticControl:
 
         Keyword arguments are forwarded to the control-panel :func:`pymc.sample`
         call. The treated conditional sample is aligned to those draws: one
-        conditional draw per control-panel draw. It is not a second optimizer
-        and it does not take caller-supplied factor draws.
+        conditional draw per control-panel draw. Before that sample, the one
+        shared residual scale's draws are updated from treated pre-period
+        outcomes. The conditional sample uses those updated draws as the
+        loading likelihood scale. It does not resample the scale, the factors,
+        or the time intercepts, and it does not take caller-supplied factor
+        draws.
 
         Treated post-intervention outcomes are read only when impacts are
         aligned, after sampling. Changing them does not change the untreated
@@ -505,9 +512,9 @@ def _factor_names(max_factors: int) -> list[str]:
 def _control_model(control_y: xr.DataArray, max_factors: int) -> pm.Model:
     """Gaussian factor graph on control cells only.
 
-    The observation scale is a fixed sampler constant, not a residual-scale
-    draw. A free scale here would be a second scale, estimated from the control
-    panel only. The one shared residual scale is sampled later.
+    The likelihood uses the one shared positive residual scale. A unit
+    observation scale is not this model. Treated outcomes are not in this
+    graph, so they do not update these factor or time-intercept draws.
     """
     factor_names = _factor_names(max_factors)
     alpha = np.array([_MGP_A1 if i == 0 else _MGP_A2 for i in range(max_factors)])
@@ -521,7 +528,7 @@ def _control_model(control_y: xr.DataArray, max_factors: int) -> pm.Model:
         delta = pm.Gamma("mgp_delta", alpha=alpha, beta=1.0, dims="factors")
         precision = pt.cumprod(delta)
         pm.Deterministic("shrinkage_state", 1.0 / pt.sqrt(precision), dims="factors")
-        # Not a residual-scale draw. The one shared scale is sampled later.
+        sigma = pm.HalfCauchy("sigma", beta=_RESIDUAL_CAUCHY_BETA)
         unit_intercept = pm.Normal(
             "control_unit_intercept", 0.0, _INTERCEPT_SD, dims="control_units"
         )
@@ -545,7 +552,7 @@ def _control_model(control_y: xr.DataArray, max_factors: int) -> pm.Model:
         pm.Normal(
             "control_y",
             mu,
-            1.0,
+            sigma,
             observed=observed.values,
             dims=("obs_ind", "control_units"),
         )
@@ -571,7 +578,103 @@ def _control_initvals(
         "shared_factors": factors,
         "control_loadings": loadings,
         "mgp_delta": np.array([1.0 if i == 0 else 1.5 for i in range(n_factors)]),
+        "sigma": np.array(0.5),
     }
+
+
+def _scale_log_posterior(
+    log_scale: float,
+    *,
+    gram: np.ndarray,
+    centered: np.ndarray,
+    control_rss: float,
+    n_control: int,
+) -> float:
+    """Profile the one scale given factors, integrating intercepts and loadings."""
+    scale_sq = np.exp(2.0 * log_scale)
+    covariance = scale_sq * np.eye(gram.shape[0]) + gram
+    sign, logdet = np.linalg.slogdet(covariance)
+    if sign <= 0 or not np.isfinite(logdet):
+        return -1e300
+    solved = np.linalg.solve(covariance, centered)
+    quadratic = float(np.sum(centered * solved))
+    n_units = centered.shape[1]
+    prior = -np.log1p(scale_sq / _RESIDUAL_CAUCHY_BETA**2)
+    control = -n_control * log_scale - control_rss / (2.0 * scale_sq)
+    return -0.5 * n_units * logdet - 0.5 * quadratic + control + prior
+
+
+def _updated_residual_scale(
+    sigma: np.ndarray,
+    control_rss: np.ndarray,
+    n_control: int,
+    factors_pre: np.ndarray,
+    shrinkage: np.ndarray,
+    treated_centered: np.ndarray,
+) -> np.ndarray:
+    """Move each control-panel scale draw using treated pre-period outcomes.
+
+    The target conditions on the sampled factors. It uses the control residuals
+    at those draws and the treated pre-period after integrating the unit
+    intercept and loadings under their priors. Factors are not resampled. This
+    is not a second residual-scale random variable.
+    """
+    updated = np.empty(sigma.shape, dtype=float)
+    n_time = treated_centered.shape[1]
+    for index in range(sigma.shape[0]):
+        design = np.column_stack((np.ones(n_time), factors_pre[index]))
+        prior_sd = np.concatenate(([_INTERCEPT_SD], shrinkage[index]))
+        gram = (design * prior_sd**2) @ design.T
+        centered = treated_centered[index]
+        rss = float(control_rss[index])
+        log_s = float(np.log(max(float(sigma[index]), 1e-8)))
+        for _ in range(_SCALE_UPDATE_STEPS):
+            current = _scale_log_posterior(
+                log_s,
+                gram=gram,
+                centered=centered,
+                control_rss=rss,
+                n_control=n_control,
+            )
+            above = _scale_log_posterior(
+                log_s + _SCALE_FD_STEP,
+                gram=gram,
+                centered=centered,
+                control_rss=rss,
+                n_control=n_control,
+            )
+            below = _scale_log_posterior(
+                log_s - _SCALE_FD_STEP,
+                gram=gram,
+                centered=centered,
+                control_rss=rss,
+                n_control=n_control,
+            )
+            gradient = (above - below) / (2.0 * _SCALE_FD_STEP)
+            curvature = (above - 2.0 * current + below) / _SCALE_FD_STEP**2
+            if not np.isfinite(gradient) or not np.isfinite(curvature):
+                break
+            if curvature < -1e-6:
+                step = -gradient / curvature
+            else:
+                step = 0.5 if gradient > 0.0 else -0.5
+            step = float(np.clip(step, -1.5, 1.5))
+            accepted = log_s
+            for fraction in (1.0, 0.5, 0.25):
+                trial = log_s + fraction * step
+                trial_value = _scale_log_posterior(
+                    trial,
+                    gram=gram,
+                    centered=centered,
+                    control_rss=rss,
+                    n_control=n_control,
+                )
+                if trial_value >= current - 1e-6:
+                    accepted = trial
+                    break
+            log_s = accepted
+        updated[index] = float(np.exp(log_s))
+    return updated
 
 
 def _sample_treated_conditional(
@@ -582,12 +685,13 @@ def _sample_treated_conditional(
     random_seed: int | None,
     progressbar: bool,
 ) -> dict[str, xr.DataArray]:
-    """Sample treated intercepts, loadings, and the one shared residual scale.
+    """Sample treated intercepts and loadings at the updated residual scale.
 
-    This is the only residual-scale random variable. Factors and time intercepts
-    are data from the control-panel posterior, not random variables in this
-    graph. Control residuals and treated pre-period outcomes can move the scale.
-    Treated pre-period outcomes cannot move the factor or time-intercept draws.
+    Factors and time intercepts are data from the control-panel posterior.
+    The one shared residual scale is not a random variable here: its draws are
+    updated from treated pre-period outcomes, then held fixed. Loadings use
+    those updated draws. Treated pre-period outcomes cannot move the factor or
+    time-intercept draws.
     """
     posterior = _as_dataset(control_posterior)
     stacked = posterior.stack(sample=_DRAW_DIMS)
@@ -600,9 +704,25 @@ def _sample_treated_conditional(
     shrinkage = stacked["shrinkage_state"].transpose("sample", "factors")
     control_mu = _control_mean(stacked)
     residuals = control_y - control_mu
+    control_rss = (residuals**2).sum(("obs_ind", "control_units")).values
+    n_control = int(control_y.sizes["obs_ind"] * control_y.sizes["control_units"])
     pre_times = treated_pre.coords["obs_ind"]
+    factor_pre = (
+        factors.sel(obs_ind=pre_times).transpose("sample", "obs_ind", "factors").values
+    )
+    xi_pre = time_intercept.sel(obs_ind=pre_times).transpose("sample", "obs_ind").values
+    treated_values = treated_pre.transpose("obs_ind", "treated_units").values
+    treated_centered = treated_values[None, :, :] - xi_pre[:, :, None]
+    updated_scale = _updated_residual_scale(
+        np.asarray(stacked["sigma"].values, dtype=float),
+        np.asarray(control_rss, dtype=float),
+        n_control,
+        factor_pre,
+        np.asarray(shrinkage.values, dtype=float),
+        treated_centered,
+    )
     treated_observed = np.broadcast_to(
-        treated_pre.transpose("obs_ind", "treated_units").values,
+        treated_values,
         (
             factors.sizes["sample"],
             treated_pre.sizes["obs_ind"],
@@ -612,21 +732,12 @@ def _sample_treated_conditional(
     with pm.Model(
         coords={
             "sample": factors.coords["sample"].values,
-            "obs_ind": control_y.coords["obs_ind"].values,
-            "pre_ind": pre_times.values,
-            "control_units": control_y.coords["control_units"].values,
             "treated_units": treated_pre.coords["treated_units"].values,
             "factors": factors.coords["factors"].values,
         }
     ) as model:
-        sigma = pm.HalfCauchy("sigma", beta=_RESIDUAL_CAUCHY_BETA, dims="sample")
-        sigma_panel = sigma.dimshuffle(0, "x", "x")
-        pm.Normal(
-            "control_resid",
-            0.0,
-            sigma_panel,
-            observed=residuals.transpose("sample", "obs_ind", "control_units").values,
-        )
+        residual_scale = pm.Data("residual_scale", updated_scale, dims="sample")
+        scale = residual_scale.dimshuffle(0, "x", "x")
         unit_intercept = pm.Normal(
             "unit_intercept",
             0.0,
@@ -647,14 +758,6 @@ def _sample_treated_conditional(
             shrink,
             dims=("sample", "treated_units", "factors"),
         )
-        factor_pre = (
-            factors.sel(obs_ind=pre_times)
-            .transpose("sample", "obs_ind", "factors")
-            .values
-        )
-        xi_pre = (
-            time_intercept.sel(obs_ind=pre_times).transpose("sample", "obs_ind").values
-        )
         mu = (
             unit_intercept.dimshuffle(0, "x", 1)
             + xi_pre[:, :, None]
@@ -662,7 +765,7 @@ def _sample_treated_conditional(
                 loadings.dimshuffle(0, "x", 1, 2) * factor_pre[:, :, None, :], axis=3
             )
         )
-        pm.Normal("treated_pre", mu, sigma_panel, observed=treated_observed)
+        pm.Normal("treated_pre", mu, scale, observed=treated_observed)
         idata = pm.sample(
             draws=1,
             tune=40,
@@ -677,7 +780,6 @@ def _sample_treated_conditional(
     return {
         "unit_intercept": _restore_draws(drawn["unit_intercept"], draw_index),
         "loadings": _restore_draws(drawn["loadings"], draw_index),
-        "sigma": _restore_draws(drawn["sigma"], draw_index),
     }
 
 
