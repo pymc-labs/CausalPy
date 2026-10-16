@@ -42,6 +42,8 @@ groups:
             notebook: interactive-fixed-effects-pymc
           - title: Bayesian augmented synthetic control
             notebook: augmented-synthetic-control-pymc
+          - title: Comparing Bayesian synthetic-control models
+            notebook: comparing-bayesian-synthetic-control-pymc
           - title: "Choosing the right counterfactual: ITS vs. synthetic control"
             notebook: interrupted-time-series-causalpy-vs-causalimpact
       - title: Geographical lift testing
