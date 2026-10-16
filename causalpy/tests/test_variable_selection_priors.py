@@ -107,11 +107,11 @@ def _create_spike_and_slab_prior(
     return vs_prior._prior_instance
 
 
-def test_expected_num_nonzero_instance_pair_resolves_sparse_prior():
+def test_expected_model_size_instance_pair_resolves_sparse_prior():
     """Instance-level expected size maps to the requested Beta parameters."""
     prior = _create_spike_and_slab_prior(
         instance_hyperparams={
-            "expected_num_nonzero": 1,
+            "expected_model_size": 1,
             "pi_concentration": 40,
         }
     )
@@ -120,11 +120,11 @@ def test_expected_num_nonzero_instance_pair_resolves_sparse_prior():
     assert prior.pi_beta == pytest.approx(38)
 
 
-def test_expected_num_nonzero_call_pair_allows_boundary_heavy_prior():
+def test_expected_model_size_call_pair_allows_boundary_heavy_prior():
     """An explicit low concentration may intentionally produce alpha below one."""
     prior = _create_spike_and_slab_prior(
         call_hyperparams={
-            "expected_num_nonzero": 1,
+            "expected_model_size": 1,
             "pi_concentration": 4,
         }
     )
@@ -133,10 +133,10 @@ def test_expected_num_nonzero_call_pair_allows_boundary_heavy_prior():
     assert prior.pi_beta == pytest.approx(3.8)
 
 
-def test_expected_num_nonzero_pair_can_be_split_across_layers():
+def test_expected_model_size_pair_can_be_split_across_layers():
     """Instance and call values combine using the ordinary precedence rules."""
     prior = _create_spike_and_slab_prior(
-        instance_hyperparams={"expected_num_nonzero": 1},
+        instance_hyperparams={"expected_model_size": 1},
         call_hyperparams={"pi_concentration": 40},
     )
 
@@ -148,7 +148,7 @@ def test_call_hyperparams_override_one_expected_size_pair_member():
     """Call-level values override the matching instance-level value."""
     prior = _create_spike_and_slab_prior(
         instance_hyperparams={
-            "expected_num_nonzero": 1,
+            "expected_model_size": 1,
             "pi_concentration": 40,
         },
         call_hyperparams={"pi_concentration": 4},
@@ -166,7 +166,7 @@ def test_default_spike_and_slab_parameters_are_unchanged():
     assert prior.pi_beta == 2
 
 
-@pytest.mark.parametrize("missing_key", ["expected_num_nonzero", "pi_concentration"])
+@pytest.mark.parametrize("missing_key", ["expected_model_size", "pi_concentration"])
 def test_expected_size_pair_is_mandatory(missing_key):
     """Supplying only one convenience value is an error."""
     with pytest.raises(ValueError, match="must be provided together"):
@@ -179,7 +179,7 @@ def test_expected_size_pair_conflicts_with_explicit_beta_shapes(explicit_key):
     with pytest.raises(ValueError, match="cannot be combined"):
         _create_spike_and_slab_prior(
             instance_hyperparams={
-                "expected_num_nonzero": 1,
+                "expected_model_size": 1,
                 "pi_concentration": 40,
                 explicit_key: 2,
             }
@@ -189,11 +189,11 @@ def test_expected_size_pair_conflicts_with_explicit_beta_shapes(explicit_key):
 @pytest.mark.parametrize(
     "key,value,match",
     [
-        ("expected_num_nonzero", 0, "greater than 0"),
-        ("expected_num_nonzero", 20, "less than n_params"),
-        ("expected_num_nonzero", np.nan, "finite numeric"),
-        ("expected_num_nonzero", np.inf, "finite numeric"),
-        ("expected_num_nonzero", "1", "finite numeric"),
+        ("expected_model_size", 0, "greater than 0"),
+        ("expected_model_size", 20, "less than n_params"),
+        ("expected_model_size", np.nan, "finite numeric"),
+        ("expected_model_size", np.inf, "finite numeric"),
+        ("expected_model_size", "1", "finite numeric"),
         ("pi_concentration", 0, "positive finite"),
         ("pi_concentration", -1, "positive finite"),
         ("pi_concentration", np.nan, "positive finite"),
@@ -203,7 +203,7 @@ def test_expected_size_pair_conflicts_with_explicit_beta_shapes(explicit_key):
 )
 def test_expected_size_pair_validates_values(key, value, match):
     """The convenience values must be finite and within their valid ranges."""
-    hyperparams = {"expected_num_nonzero": 1, "pi_concentration": 40}
+    hyperparams = {"expected_model_size": 1, "pi_concentration": 40}
     hyperparams[key] = value
 
     with pytest.raises(ValueError, match=match):

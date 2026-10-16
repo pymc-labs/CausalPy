@@ -580,7 +580,7 @@ def test_iv_variable_selection_priors(
     """Test that variable selection priors create expected model variables."""
     vs_hyperparams = {"outcome": True}
     if vs_prior_type == "spike_and_slab":
-        vs_hyperparams.update({"expected_num_nonzero": 1, "pi_concentration": 4})
+        vs_hyperparams.update({"expected_model_size": 1, "pi_concentration": 4})
     result = cp.InstrumentalVariable(
         instruments_data=iv_data["instruments_data"],
         data=iv_data["data"],
