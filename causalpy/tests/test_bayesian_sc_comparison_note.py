@@ -55,7 +55,8 @@ def test_methods_note_cites_phase_2_and_does_not_reopen_dropped_quantities():
     assert "bayesian_synthetic_control_known_truth_report.md" in text
     assert "latent_factor" in text
     assert "donor_shock" in text
-    assert "does not by itself establish causal validity" in text
+    assert "causalpy.tests" not in notebook
+    assert "known_truth_panels" not in notebook
     assert "nominal coverage" in text
     assert "WeightedSumFitter" in text
     assert "not a frequentist coverage rate" in text
