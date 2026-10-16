@@ -70,6 +70,8 @@ groups:
             notebook: interrupted-time-series-sklearn
           - title: Interrupted Time Series (ITS) with `pymc` models
             notebook: interrupted-time-series-pymc
+          - title: Bayesian structural time series with state space models
+            notebook: interrupted-time-series-bsts
           - title: Interrupted Time Series for fixed-period interventions
             notebook: interrupted-time-series-post-intervention-analysis
           - title: Estimating excess deaths during COVID-19 in England and Wales
