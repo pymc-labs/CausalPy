@@ -38,6 +38,8 @@ groups:
             notebook: synthetic-control-brexit-pymc
           - title: Synthetic Difference-in-Differences with `pymc` models
             notebook: synthetic-difference-in-differences-pymc
+          - title: Bayesian interactive fixed-effects synthetic control
+            notebook: interactive-fixed-effects-pymc
           - title: "Choosing the right counterfactual: ITS vs. synthetic control"
             notebook: interrupted-time-series-causalpy-vs-causalimpact
       - title: Geographical lift testing

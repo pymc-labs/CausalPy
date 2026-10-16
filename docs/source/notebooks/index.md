@@ -81,6 +81,13 @@ The synthetic control method is a statistical method used to evaluate the effect
 :link-type: doc
 :::
 
+:::{grid-item-card} Bayesian interactive fixed-effects synthetic control
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/interactive-fixed-effects-pymc.png
+:link: interactive-fixed-effects-pymc
+:link-type: doc
+:::
+
 :::{grid-item-card} Choosing the right counterfactual: ITS vs. synthetic control
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/interrupted-time-series-causalpy-vs-causalimpact.png
@@ -422,6 +429,7 @@ synthetic-control-sklearn.ipynb
 synthetic-control-pymc.ipynb
 synthetic-control-brexit-pymc.ipynb
 synthetic-difference-in-differences-pymc.ipynb
+interactive-fixed-effects-pymc.ipynb
 interrupted-time-series-causalpy-vs-causalimpact.ipynb
 :::
 
