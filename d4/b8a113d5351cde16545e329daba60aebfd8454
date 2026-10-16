@@ -1,0 +1,16 @@
+causalpy/tests/test_bayesian_sc_comparison_note.py
+  h_63db634213747e 58-59
+docs/source/notebooks/comparing-bayesian-synthetic-control-pymc.ipynb
+  h_63db634213747e 377,385-401,404,407,413,419,431,436
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d4b8a113d5351cde16545e329daba60aebfd8454",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
