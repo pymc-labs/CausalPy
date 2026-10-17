@@ -142,6 +142,11 @@ class PlaceboInSpace:
     remaining controls as donors.  If the placebo effects are as large
     as the actual effect, the causal claim is weakened.
 
+    Parameters
+    ----------
+    make_figures : bool, default True
+        Attach the MSPE ratio figure to ``CheckResult.figures`` for inclusion in generated reports. If no placebo fit produces an MSPE ratio, or no unit has a finite ratio, skip the figure and explain why in ``CheckResult.text`` while retaining the statistical results.
+
     Examples
     --------
     >>> import causalpy as cp  # doctest: +SKIP
@@ -149,6 +154,9 @@ class PlaceboInSpace:
     """
 
     applicable_methods: set[type[BaseExperiment]] = {SyntheticControl}
+
+    def __init__(self, *, make_figures: bool = True) -> None:
+        self.make_figures = make_figures
 
     def validate(self, experiment: BaseExperiment) -> None:
         """Verify the experiment is a SyntheticControl instance.
@@ -276,13 +284,29 @@ class PlaceboInSpace:
                 "`PlaceboInSpace.plot_mspe_ratio`."
             )
 
-        return CheckResult(
+        result = CheckResult(
             check_name="PlaceboInSpace",
             passed=None,
             table=table,
             text=text,
             metadata={"baseline_mspe": baseline_mspe},
         )
+        if self.make_figures:
+            if table is None or "mspe_ratio" not in table.columns:
+                result.text += (
+                    " No MSPE ratio figure was generated because no placebo "
+                    "fit produced an MSPE ratio."
+                )
+            elif not np.isfinite(table["mspe_ratio"]).any() and not any(
+                np.isfinite(stats["mspe_ratio"]) for stats in baseline_mspe.values()
+            ):
+                result.text += (
+                    " No MSPE ratio figure was generated because no unit has "
+                    "a finite MSPE ratio."
+                )
+            else:
+                result.figures.append(self.plot_mspe_ratio(result))
+        return result
 
     @staticmethod
     def plot_mspe_ratio(
