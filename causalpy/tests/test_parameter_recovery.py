@@ -113,15 +113,7 @@ harness = _load_harness_module()
 
 @pytest.fixture(scope="module", autouse=True)
 def real_pymc_sampling():
-    """Undo the session-scoped ``mock_pymc_sample`` patch for this module.
-
-    The conftest registers PyMC's ``mock_sample`` (prior sampling instead of
-    MCMC) session-wide, so once any earlier test module requests it,
-    ``pm.sample`` stays mocked for the rest of the run. These tests recover
-    known data-generating parameters from real NUTS posteriors and the harness
-    extraction requires a ``sample_stats`` group, which mock sampling does not
-    produce — restore the real sampler for this module only.
-    """
+    """Use genuine posterior draws for this parameter-recovery module."""
     import pymc.sampling.mcmc
 
     patched = pm.sample

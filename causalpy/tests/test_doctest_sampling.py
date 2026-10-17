@@ -230,20 +230,9 @@ def _sentinel(qualified_name):
 def _pin_sampling_globals(monkeypatch):
     """Pin every global the plugin patches to a unique sentinel, for one test.
 
-    The in-process hook tests assert that install *replaces* these globals and
-    that restore puts back *exactly* what was there. Read against whatever the
-    live values happen to be, both halves of that are order-dependent and can
-    pass vacuously: ``mock_pymc_sample`` in ``causalpy/tests/conftest.py`` is
-    session-scoped, so the first test file that uses it leaves ``pm.sample`` set
-    to ``mock_sample`` for the rest of the session. A test that then asserted
-    ``pm.sample.__name__ != "mock_sample"`` after restore would fail even though
-    the plugin behaved perfectly -- it restored the mock it was correctly handed
-    as the original.
+    The in-process hook tests assert that install replaces these globals and restore returns exactly the original bindings. Those bindings can already be mocked by another fixture, so checking a restored function's name can reject a correct restoration.
 
-    Sentinels remove the coupling. Each is a fresh object that cannot collide
-    with ``mock_sample`` or with the real PyMC callables, so "install swapped
-    it" and "restore returned this exact object" are both decidable no matter
-    what ran earlier. ``monkeypatch`` reverts the pinning at teardown.
+    Each sentinel is a fresh object distinct from the real and mocked callables. Identity assertions therefore verify replacement and restoration independently of earlier patches. ``monkeypatch`` reverts the pinning at teardown.
 
     Parameters
     ----------
