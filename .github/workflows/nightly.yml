@@ -58,6 +58,14 @@ jobs:
         run: uv run --no-sync pytest --doctest-modules -p causalpy.tests.doctest_sampling --ignore=causalpy/tests/ causalpy/ --no-cov -m nightly
       - name: Run nightly tests
         run: uv run --no-sync pytest --no-cov -m "nightly and not correctness"
+      - name: Check basis-expansion priors with PyMC-Marketing
+        if: matrix.python-version == '3.12' && matrix.pandas-version == '3.x'
+        # The basis-expansion model requires optional PyMC-Marketing components. Run its numerical checks in an isolated environment with the docs pin so they cannot silently skip, while preserving the locked environment used by the other matrix checks.
+        env:
+          PYTENSOR_FLAGS: base_compiledir=${{ runner.temp }}/pytensor-basis-expansion
+        run: |
+          uv run --isolated --extra test --with-requirements docs/requirements.txt python -c "from pymc_marketing.mmm import LinearTrend, YearlyFourier"
+          uv run --isolated --extra test --with-requirements docs/requirements.txt python -m pytest causalpy/tests/test_basis_expansion_prior_scale.py -m "" --no-cov
       - name: Run statistical correctness tests
         # A cold, job-local compiledir keeps these exact reproducibility tests independent of any cached C modules.
         env:
