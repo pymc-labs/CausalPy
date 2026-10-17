@@ -801,8 +801,7 @@ class TestStateSpaceTimeSeriesCoverage:
         """Spike-and-slab on covariates: selection variables in the
         posterior and a well-formed inclusion-probability table.
 
-        Structure-only by design: the suite mocks pm.sample session-wide,
-        so posterior values are prior draws.
+        Structure-only by design: the requested mock makes posterior values prior draws.
         """
         y_da = sample_data
         n = len(y_da)
@@ -835,7 +834,7 @@ class TestStateSpaceTimeSeriesCoverage:
     def test_vs_horseshoe_structure(self, sample_data, mock_pymc_sample):
         """Horseshoe on covariates: shrinkage factor table is well formed.
 
-        Structure-only by design: the suite mocks pm.sample session-wide.
+        Structure-only by design: this test requests mocked sampling.
         """
         y_da = sample_data
         n = len(y_da)
@@ -869,9 +868,7 @@ class TestStateSpaceTimeSeriesCoverage:
     def test_vs_normal_structure(self, sample_data, mock_pymc_sample):
         """Normal "selection" prior: a plain Normal on beta_exog, no selection.
 
-        Structure-only by design: the suite mocks pm.sample session-wide.
-        The factory builds neither the spike-and-slab indicators nor the
-        horseshoe scales for this option, so both diagnostics must refuse.
+        Structure-only by design: this test requests mocked sampling. The factory builds neither the spike-and-slab indicators nor the horseshoe scales for this option, so both diagnostics must refuse.
         """
         y_da = sample_data
         n = len(y_da)

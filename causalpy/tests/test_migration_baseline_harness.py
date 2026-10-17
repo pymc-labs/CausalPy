@@ -38,15 +38,7 @@ REPORT_TEMPLATE_PATH = (
     REPO_ROOT / "scripts" / "migration_baseline" / "REPORT_TEMPLATE.md"
 )
 
-# The shared ``conftest`` registers ``mock_pymc_sample`` at *session* scope, so
-# once any earlier test in the run triggers it, ``pymc.sample`` (and
-# ``pymc.Flat`` / ``pymc.HalfFlat``) stay monkeypatched to the fast
-# prior-predictive mock for the remainder of the session. That mock produces no
-# ``sample_stats`` group, which the baseline harness requires, so the capture
-# test below would fail purely because of suite ordering. Capture the genuine
-# callables at import time -- collection always completes before any fixture
-# runs -- so the capture test can restore real reduced MCMC regardless of which
-# tests ran before it.
+# Capture genuine PyMC callables during collection, before sampling fixtures run. The baseline harness requires real MCMC and its sample_stats group, so the capture test restores these callables even when a mock is active in the current module.
 _GENUINE_PYMC_SAMPLING = {
     name: getattr(pm, name) for name in ("sample", "Flat", "HalfFlat")
 }
@@ -54,7 +46,7 @@ _GENUINE_PYMC_SAMPLING = {
 
 @pytest.fixture
 def genuine_pymc_sampling():
-    """Force real PyMC sampling for a test despite the session-scoped mock."""
+    """Force genuine PyMC sampling for a test despite an active sampling mock."""
     saved = {name: getattr(pm, name) for name in _GENUINE_PYMC_SAMPLING}
     for name, value in _GENUINE_PYMC_SAMPLING.items():
         setattr(pm, name, value)
