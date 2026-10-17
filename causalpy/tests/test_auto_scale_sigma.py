@@ -579,10 +579,7 @@ class _ExtraArgWeightedSumFitter(WeightedSumFitter):
     """A weighted-sum subclass that, like the real time-series fitters, carries
     an extra ``__init__`` parameter and a matching ``_clone`` override.
 
-    It inherits ``default_priors = {"y_hat": _LEGACY_Y_HAT_PRIOR}`` from
-    ``WeightedSumFitter``, so -- unlike ``BayesianBasisExpansionTimeSeries``,
-    whose ``default_priors`` is empty -- the ``auto_scale_sigma=False`` opt-out
-    actually fires for it, exercising the clone path with real extra config.
+    It inherits the stock ``y_hat`` prior from ``WeightedSumFitter``, so ``auto_scale_sigma=False`` exercises the clone path with real extra configuration.
     """
 
     def __init__(self, marker="default", **kwargs):
