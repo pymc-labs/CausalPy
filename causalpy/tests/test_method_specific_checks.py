@@ -536,7 +536,7 @@ class TestPlaceboInSpaceEdgeCases:
 
 
 def _run_placebo_in_space(
-    fit=True, treated=("actual",), config_treated=None, failing=()
+    fit=True, treated=("actual",), config_treated=None, failing=(), check=None
 ):
     """Run the check on the bundled synthetic-control data.
 
@@ -575,7 +575,9 @@ def _run_placebo_in_space(
         real_init(self, *args, **kwargs)
 
     with patch.object(SyntheticControl, "__init__", init):
-        return PlaceboInSpace().run(sc, ctx)
+        if check is None:
+            check = PlaceboInSpace()
+        return check.run(sc, ctx)
 
 
 def _fake_result(pre_residuals, post_residuals, unit="actual"):
@@ -999,3 +1001,40 @@ class TestPlaceboInSpaceMspeRatio:
 
         assert _permutation_pvalue(ratios, 2.0) == pytest.approx(0.75)
         assert _permutation_pvalue(ratios, 4.0) == pytest.approx(0.25)
+
+
+def test_placebo_in_space_attaches_figure_to_report():
+    """Automatic figures reach reports, while opting out preserves statistics."""
+    result = _run_placebo_in_space()
+    context = PipelineContext(data=pd.DataFrame(), sensitivity_results=[result])
+
+    report = cp.GenerateReport().run(context).report
+
+    assert len(result.figures) == 1
+    assert "PlaceboInSpace figure" in report
+    assert "data:image/png;base64," in report
+    plt.close(result.figures[0])
+
+    disabled = _run_placebo_in_space(check=PlaceboInSpace(make_figures=False))
+    assert disabled.figures == []
+    pd.testing.assert_frame_equal(disabled.table, result.table)
+
+
+@pytest.mark.parametrize("ratio", [np.nan, np.inf], ids=["undefined", "infinite"])
+def test_placebo_in_space_skips_figure_without_finite_ratios(ratio):
+    """Non-finite ratios remain in the result with an explanation for the missing figure."""
+    stats = {
+        "pre_mspe": 0.0,
+        "post_mspe": 1.0 if np.isinf(ratio) else 0.0,
+        "mspe_ratio": ratio,
+    }
+    with patch("causalpy.checks.placebo_in_space._mspe_stats", return_value=stats):
+        result = _run_placebo_in_space()
+
+    assert result.figures == []
+    assert result.passed is None
+    assert "no unit has a finite MSPE ratio" in result.text
+    np.testing.assert_equal(result.table["mspe_ratio"].to_numpy(), [ratio] * 3)
+    np.testing.assert_equal(
+        result.metadata["baseline_mspe"]["actual"]["mspe_ratio"], ratio
+    )
