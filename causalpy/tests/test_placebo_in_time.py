@@ -2773,3 +2773,530 @@ def test_run_without_figures_leaves_figures_empty(mock_pymc_sample):
     result = check.run(experiment)
 
     assert result.figures == []
+
+
+_DESCRIPTIVE_COLUMNS = [
+    "fold",
+    "pseudo_treatment_time",
+    "comparison_end",
+    "n_training",
+    "n_comparison",
+    "status",
+    "reason",
+    "mean",
+    "hdi_lower",
+    "hdi_upper",
+    "hdi_prob",
+    "divergences",
+    "max_rhat",
+    "min_bulk_ess",
+    "diagnostics_status",
+    "diagnostics_reason",
+]
+
+
+def _monthly_descriptive_check(**overrides):
+    """Configure the approved annual historical comparison without sampling."""
+    kwargs = {
+        "n_folds": 8,
+        "treatment_times": pd.date_range("2010-01-01", "2017-01-01", freq="YS"),
+        "intervention_length": pd.DateOffset(months=29),
+        "min_training_rows": 48,
+        "comparison_frequency": "MS",
+        "allow_overlap": True,
+        "calibrate": False,
+        "hdi_prob": 0.95,
+        "random_seed": 42,
+        "make_figures": False,
+        "experiment_factory": _make_fake_bayesian_experiment,
+    }
+    kwargs.update(overrides)
+    return PlaceboInTime(**kwargs)
+
+
+def _monthly_descriptive_experiment():
+    """Monthly history with a deliberately short actual post-period."""
+    data = pd.DataFrame(
+        {"y": 0.0}, index=pd.date_range("2006-01-01", "2020-03-01", freq="MS")
+    )
+    return _make_fake_bayesian_experiment(data, pd.Timestamp("2020-01-01"))
+
+
+def test_descriptive_exact_annual_geometry_and_schema(monkeypatch):
+    """Eight requested windows retain their observed and exclusive endpoints."""
+    experiment = _monthly_descriptive_experiment()
+    check = _monthly_descriptive_check()
+    result = check.run(experiment)
+    assert result.passed is None
+    assert list(result.table) == _DESCRIPTIVE_COLUMNS
+    assert result.table.n_training.tolist() == list(range(48, 133, 12))
+    assert result.table.n_comparison.tolist() == [29] * 8
+    assert result.table.comparison_end.iloc[-1] == pd.Timestamp("2019-05-01")
+    assert result.metadata["schedule"][-1]["window_end_exclusive"] == pd.Timestamp(
+        "2019-06-01"
+    )
+    assert result.metadata["analysis_mode"] == "descriptive"
+    assert result.metadata["calibration_status"] == "not_requested"
+    assert result.metadata["descriptive_summary"] == {
+        "n_requested": 8,
+        "n_completed": 8,
+        "mean_difference": 1.0,
+        "mean_absolute_difference": 1.0,
+        "mean_interval_width": 0.0,
+        "intervals_excluding_zero": 8,
+    }
+    assert result.metadata["fold_results"][0].fold_mean == 29.0
+
+
+@pytest.mark.parametrize(
+    "damage", ["missing", "off_grid", "duplicate", "absent_start", "cross_boundary"]
+)
+def test_descriptive_schedule_preflight_spends_no_fits(damage):
+    """Malformed requests fail as a group before the first refit."""
+    experiment = _monthly_descriptive_experiment()
+    if damage in {"missing", "off_grid", "duplicate", "absent_start"}:
+        date = pd.Timestamp("2010-01-01" if damage == "absent_start" else "2014-06-01")
+        experiment.data = experiment.data.drop(date)
+        if damage == "off_grid":
+            experiment.data.loc[date + pd.Timedelta(days=1)] = 0.0
+            experiment.data = experiment.data.sort_index()
+        elif damage == "duplicate":
+            experiment.data = pd.concat(
+                [experiment.data, experiment.data.loc[[pd.Timestamp("2014-07-01")]]]
+            ).sort_index()
+    calls = []
+
+    def factory(data, treatment_time):
+        calls.append(treatment_time)
+        return _make_fake_bayesian_experiment(data, treatment_time)
+
+    overrides = {"experiment_factory": factory}
+    if damage == "cross_boundary":
+        overrides["intervention_length"] = pd.DateOffset(months=37)
+    with pytest.raises(ValueError):
+        _monthly_descriptive_check(**overrides).run(experiment)
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"treatment_times": []},
+        {"n_folds": 7},
+        {"treatment_times": [3, 2, 1], "n_folds": 3},
+        {"treatment_times": [1, 1], "n_folds": 2},
+        {"selection_method": "random"},
+        {"min_training_rows": True},
+        {"min_training_rows": -1},
+        {"min_training_rows": 1.5},
+        {"calibrate": 1},
+        {"hdi_prob": True},
+        {"hdi_prob": float("nan")},
+        {"hdi_prob": 1},
+        {"comparison_frequency": "invalid"},
+        {"rope_half_width": 1},
+        {"expected_effect_prior": np.ones(2), "rope_half_width": 1},
+        {"n_design_replications": 10},
+    ],
+)
+def test_descriptive_invalid_configuration(kwargs):
+    """New controls reject invalid or silently ignored configurations."""
+    with pytest.raises((TypeError, ValueError)):
+        _monthly_descriptive_check(**kwargs)
+
+
+@pytest.mark.parametrize("calibrate,allow_overlap", [(True, True), (False, False)])
+def test_explicit_overlapping_schedule_requires_descriptive_opt_in(
+    calibrate, allow_overlap
+):
+    with pytest.raises(ValueError, match="overlap"):
+        _monthly_descriptive_check(
+            calibrate=calibrate, allow_overlap=allow_overlap
+        ).run(_monthly_descriptive_experiment())
+
+
+def test_descriptive_never_extracts_actual_or_calibrates(monkeypatch):
+    """One completed fold is useful descriptively without an actual effect."""
+    experiment = _monthly_descriptive_experiment()
+    del experiment.result
+    check = _monthly_descriptive_check(
+        n_folds=1, treatment_times=[pd.Timestamp("2010-01-01")]
+    )
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Descriptive checks must not calculate calibration")
+
+    monkeypatch.setattr(check, "_build_status_quo_model", forbidden)
+    monkeypatch.setattr(check, "_compute_assurance", forbidden)
+    result = check.run(experiment)
+    assert result.table.status.tolist() == ["completed"]
+    assert (
+        not {
+            "actual_cumulative_samples",
+            "actual_cumulative_mean",
+            "null_samples",
+            "status_quo_idata",
+            "p_effect_outside_null",
+            "assurance",
+            "assurance_result",
+        }
+        & result.metadata.keys()
+    )
+    with pytest.raises(ValueError, match="calibration was not requested"):
+        check.plot_calibration(result)
+
+
+def test_descriptive_training_uses_historical_horizon_with_short_actual_period():
+    """Three actual months cannot weaken the historical 29-month safeguard."""
+    experiment = _monthly_descriptive_experiment()
+    experiment.data = experiment.data.loc["2007-09-01":]
+    result = _monthly_descriptive_check(
+        n_folds=1,
+        treatment_times=[pd.Timestamp("2010-01-01")],
+        min_training_rows=0,
+    ).run(experiment)
+    assert result.table.n_training.tolist() == [28]
+    assert result.table.n_comparison.tolist() == [29]
+    assert result.table.status.tolist() == ["ineligible"]
+
+
+def test_descriptive_explicit_minimum_and_failed_rows_remain_visible():
+    """History and fit failures preserve original positions and known counts."""
+    experiment = _monthly_descriptive_experiment()
+    experiment.data = experiment.data.iloc[1:]
+
+    def fail(data, treatment_time):
+        raise RuntimeError("deliberate sampler failure")
+
+    result = _monthly_descriptive_check(experiment_factory=fail).run(experiment)
+    assert result.table.status.tolist() == ["ineligible"] + ["failed"] * 7
+    assert result.table.fold.tolist() == list(range(1, 9))
+    assert result.table.n_comparison.tolist() == [29] * 8
+    assert result.table.hdi_prob.tolist() == [0.95] * 8
+    assert (
+        result.table[
+            [
+                "mean",
+                "hdi_lower",
+                "hdi_upper",
+                "divergences",
+                "max_rhat",
+                "min_bulk_ess",
+            ]
+        ]
+        .isna()
+        .all()
+        .all()
+    )
+    assert "deliberate sampler failure" in result.table.reason.iloc[1]
+    assert result.metadata["descriptive_summary"] == {
+        "n_requested": 8,
+        "n_completed": 0,
+        "mean_difference": None,
+        "mean_absolute_difference": None,
+        "mean_interval_width": None,
+        "intervals_excluding_zero": None,
+    }
+    assert "no completed placebo fits" in result.text.lower()
+    figure = PlaceboInTime.plot_folds({"failed model": result})
+    assert any(
+        "No completed placebo fits" in t.get_text() for t in figure.findobj(Text)
+    )
+    plt.close(figure)
+
+
+def test_descriptive_hdi_averages_correlated_draws_and_retains_weak_fit():
+    """Opposing monthly draws cancel before interval construction."""
+
+    def factory(data, treatment_time):
+        fold = _make_fake_bayesian_experiment(data, treatment_time)
+        draws = np.arange(100.0)
+        impacts = np.stack([draws, 2 - draws], axis=-1)[None, :, :, None]
+        fold.result.impact_post = xr.DataArray(
+            impacts, dims=("chain", "draw", "obs_ind", "treated_units")
+        )
+        fold._model_backend.sampling_diagnostics = lambda: {
+            "divergences": 9,
+            "max_rhat": 1.2,
+            "min_bulk_ess": 3.0,
+            "diagnostics_status": "available",
+            "diagnostics_reason": None,
+        }
+        return fold
+
+    data = pd.DataFrame({"y": 0.0}, index=np.arange(20))
+    result = PlaceboInTime(
+        n_folds=1,
+        treatment_times=[10],
+        intervention_length=2,
+        calibrate=False,
+        experiment_factory=factory,
+        make_figures=False,
+    ).run(_make_fake_bayesian_experiment(data, 18))
+    row = result.table.iloc[0]
+    assert row.status == "completed"
+    assert (row["mean"], row.hdi_lower, row.hdi_upper) == (1, 1, 1)
+    assert (row.divergences, row.max_rhat, row.min_bulk_ess) == (9, 1.2, 3)
+    assert result.metadata["descriptive_summary"]["n_completed"] == 1
+    fold = result.metadata["fold_results"][0]
+    np.testing.assert_allclose(
+        fold.cumulative_impact_samples, 2 * fold.average_impact_samples
+    )
+
+
+@pytest.mark.parametrize("selection_method", ["sequential", "random"])
+def test_descriptive_generated_selection_applies_explicit_minimum(selection_method):
+    data = pd.DataFrame({"y": 0.0}, index=np.arange(100))
+    result = PlaceboInTime(
+        n_folds=3,
+        selection_method=selection_method,
+        min_training_rows=70,
+        intervention_length=10,
+        random_seed=42,
+        calibrate=False,
+        experiment_factory=_make_fake_bayesian_experiment,
+        make_figures=False,
+    ).run(_make_fake_bayesian_experiment(data, 90))
+    assert len(result.table) == 3
+    assert (
+        result.table.loc[result.table.status == "completed", "n_training"] >= 70
+    ).all()
+
+
+def test_descriptive_context_clones_and_preserves_failure_seed_positions():
+    experiment = _monthly_descriptive_experiment()
+    template = SimpleNamespace(
+        sample_kwargs={"random_seed": 100}, priors={"scale": [2, 3]}
+    )
+    fitted_models = []
+
+    def method(data, treatment_time, model):
+        fitted_models.append(model)
+        if treatment_time.year == 2011:
+            raise RuntimeError("failed second date")
+        return _make_fake_bayesian_experiment(data, treatment_time)
+
+    context = PipelineContext(data=experiment.data, experiment=experiment)
+    context.experiment_config = {"method": method, "model": template}
+    result = _monthly_descriptive_check(experiment_factory=None).run(
+        experiment, context
+    )
+    assert [m.sample_kwargs["random_seed"] for m in fitted_models] == list(
+        range(42, 50)
+    )
+    assert len({id(m) for m in fitted_models}) == 8
+    assert template.sample_kwargs == {"random_seed": 100}
+    assert all(
+        m.priors == template.priors and m.priors is not template.priors
+        for m in fitted_models
+    )
+    assert result.table.status.tolist() == ["completed", "failed"] + ["completed"] * 6
+
+
+def test_descriptive_paired_plot_validates_windows_and_annotates_failures():
+    experiment = _monthly_descriptive_experiment()
+    good = _monthly_descriptive_check().run(experiment)
+
+    def fail(data, treatment_time):
+        raise RuntimeError("failed")
+
+    bad = _monthly_descriptive_check(experiment_factory=fail).run(experiment)
+    figure = PlaceboInTime.plot_folds({"good": good, "bad": bad})
+    labels = [t.get_text() for t in figure.findobj(Text)]
+    assert any("failed" in label.lower() for label in labels)
+    assert any("Average difference" in label for label in labels)
+    plt.close(figure)
+    bad.metadata["schedule"][0]["window_end_exclusive"] += pd.Timedelta(days=1)
+    with pytest.raises(ValueError, match="matching.*schedule|matching.*window"):
+        PlaceboInTime.plot_folds({"good": good, "bad": bad})
+
+
+@pytest.mark.integration
+@pytest.mark.correctness
+def test_descriptive_native_refit_never_learns_comparison_or_after_window_outcomes(
+    real_pymc_sampling,
+):
+    """Real posterior/forecasts ignore held-out outcomes and every later row."""
+    rng = np.random.default_rng(14)
+    data = pd.DataFrame({"t": np.arange(24) / 12})
+    data["y"] = 10 + 2 * data.t + rng.normal(0, 0.3, len(data))
+    altered = data.copy()
+    altered.loc[12:15, "y"] += 1000
+    altered.loc[16:, "y"] -= 5000
+    template = cp.pymc_models.LinearRegression(
+        sample_kwargs={
+            "chains": 2,
+            "cores": 1,
+            "draws": 40,
+            "tune": 40,
+            "progressbar": False,
+        }
+    )
+    check = PlaceboInTime(
+        n_folds=1,
+        treatment_times=[12],
+        intervention_length=4,
+        calibrate=False,
+        random_seed=31,
+        make_figures=False,
+    )
+    results = []
+    for frame in (data, altered):
+        experiment = _make_fake_bayesian_experiment(frame, treatment_time=22)
+        context = PipelineContext(data=frame, experiment=experiment)
+        context.experiment_config = {
+            "method": InterruptedTimeSeries,
+            "formula": "y ~ 1 + t",
+            "model": template,
+        }
+        results.append(check.run(experiment, context))
+    assert [result.table.status.tolist() for result in results] == [
+        ["completed"],
+        ["completed"],
+    ]
+    original, perturbed = [result.metadata["fold_results"][0] for result in results]
+    xr.testing.assert_equal(
+        original.experiment.model.idata.posterior,
+        perturbed.experiment.model.idata.posterior,
+    )
+    xr.testing.assert_equal(
+        original.experiment.result.predictions_post,
+        perturbed.experiment.result.predictions_post,
+    )
+    np.testing.assert_allclose(
+        perturbed.experiment.result.impact_post
+        - original.experiment.result.impact_post,
+        1000,
+    )
+    assert original.experiment.data.index.max() == 15
+    assert original.experiment.model is not template
+    assert perturbed.experiment.model is not original.experiment.model
+    assert "random_seed" not in template.sample_kwargs
+
+
+def test_descriptive_calendar_window_handles_leap_day_and_boundary_equality():
+    """A calendar offset ending on the real boundary remains half-open."""
+    start = pd.Timestamp("2012-02-29")
+    boundary = pd.Timestamp("2013-02-28")
+    data = pd.DataFrame(
+        {"y": 0.0}, index=pd.date_range("2011-01-01", boundary, freq="D")
+    )
+    result = PlaceboInTime(
+        n_folds=1,
+        treatment_times=[start],
+        intervention_length=pd.DateOffset(years=1),
+        comparison_frequency="D",
+        calibrate=False,
+        make_figures=False,
+        experiment_factory=_make_fake_bayesian_experiment,
+    ).run(_make_fake_bayesian_experiment(data, boundary))
+    assert result.table.status.tolist() == ["completed"]
+    assert result.table.n_comparison.tolist() == [365]
+    assert result.table.comparison_end.iloc[0] == pd.Timestamp("2013-02-27")
+    assert result.metadata["schedule"][0]["window_end_exclusive"] == boundary
+
+
+def test_descriptive_copies_schedule_and_automatic_figure_preserves_recorded_hdis():
+    """A mutable caller schedule cannot alter the check or its recorded plot."""
+    starts = [pd.Timestamp("2010-01-01")]
+    check = _monthly_descriptive_check(
+        n_folds=1, treatment_times=starts, make_figures=True
+    )
+    starts[0] = pd.Timestamp("2017-01-01")
+    result = check.run(_monthly_descriptive_experiment())
+    assert result.table.pseudo_treatment_time.tolist() == [pd.Timestamp("2010-01-01")]
+    assert len(result.figures) == 1
+    assert isinstance(result.figures[0], Figure)
+    assert tuple(result.figures[0].get_size_inches()) == (7.0, 6.0)
+    assert all(
+        figure is not result.figures[0] for figure in map(plt.figure, plt.get_fignums())
+    )
+    plt.close(result.figures[0])
+
+
+def test_comparison_frequency_requires_datetime_index():
+    data = pd.DataFrame({"y": 0.0}, index=np.arange(20))
+    check = PlaceboInTime(
+        n_folds=1,
+        treatment_times=[10],
+        intervention_length=2,
+        comparison_frequency="MS",
+        calibrate=False,
+        make_figures=False,
+        experiment_factory=_make_fake_bayesian_experiment,
+    )
+    with pytest.raises(ValueError, match="DatetimeIndex"):
+        check.run(_make_fake_bayesian_experiment(data, 18))
+
+
+def test_comparison_frequency_is_enforced_for_generated_calibrated_windows(monkeypatch):
+    """An explicitly requested grid is not silently ignored by generated folds."""
+    experiment = _monthly_descriptive_experiment()
+    experiment.data = experiment.data.drop(pd.Timestamp("2018-01-01"))
+    calls = []
+
+    def factory(data, treatment_time):
+        calls.append(treatment_time)
+        return _make_fake_bayesian_experiment(data, treatment_time)
+
+    check = PlaceboInTime(
+        n_folds=1,
+        intervention_length=pd.DateOffset(months=29),
+        comparison_frequency="MS",
+        experiment_factory=factory,
+        make_figures=False,
+    )
+    result = check.run(experiment)
+    assert calls == []
+    assert (
+        result.metadata["skipped_folds"][0]["reason"]
+        == "comparison index does not match the complete requested frequency grid"
+    )
+
+
+def test_descriptive_plot_accepts_property_cycle_without_colors():
+    """A valid linestyle-only rc cycle must not break automatic check figures."""
+    import matplotlib as mpl
+    from cycler import cycler
+
+    with mpl.rc_context({"axes.prop_cycle": cycler(linestyle=["-", "--"])}):
+        result = _monthly_descriptive_check(make_figures=True).run(
+            _monthly_descriptive_experiment()
+        )
+    assert result.table.status.tolist() == ["completed"] * 8
+    assert len(result.figures) == 1
+    assert isinstance(result.figures[0], Figure)
+    plt.close(result.figures[0])
+
+
+@pytest.mark.parametrize("invalid", [np.nan, np.inf])
+def test_descriptive_nonfinite_impacts_are_failed_not_zero_differences(invalid):
+    """Missing forecasts cannot become reassuring zero impacts through skipna."""
+
+    def invalid_factory(data, treatment_time):
+        experiment = _make_fake_bayesian_experiment(data, treatment_time)
+        experiment.result.impact_post[:] = invalid
+        return experiment
+
+    result = _monthly_descriptive_check(experiment_factory=invalid_factory).run(
+        _monthly_descriptive_experiment()
+    )
+    assert result.table.status.tolist() == ["failed"] * 8
+    assert result.table["mean"].isna().all()
+    assert result.table.hdi_lower.isna().all()
+    assert result.metadata["descriptive_summary"]["n_completed"] == 0
+    assert result.metadata["descriptive_summary"]["intervals_excluding_zero"] is None
+
+
+def test_descriptive_figure_labels_can_be_customized_without_duplicate_axes():
+    """Documented Figure customization must work for figure- or axes-level text."""
+    result = _monthly_descriptive_check().run(_monthly_descriptive_experiment())
+    figure = PlaceboInTime.plot_folds({"Model": result})
+    for text in figure.findobj(match=Text):
+        if text.get_text() == "Average difference (outcome units)":
+            text.set_text("Average difference (deaths/month)")
+    figure.canvas.draw()
+    labels = [text.get_text() for text in figure.findobj(match=Text)]
+    assert labels.count("Average difference (deaths/month)") == 1
+    assert "Average difference (outcome units)" not in labels
+    plt.close(figure)

@@ -42,17 +42,7 @@ causalpy[forecast]``).
 
 Notes
 -----
-Causal impact is computed from upstream ``mu`` / ``mu_future``, which CausalPy
-interprets as the conditional expected outcome in observed outcome units:
-parameter and latent uncertainty, excluding observation-level noise. Models
-using a link function must therefore apply the inverse link before passing the
-latent to ``pymc_forecast.predict``. Passing a link-scale linear predictor
-would make CausalPy subtract quantities in incompatible units and is not
-supported. The draw-level posterior predictive of the observed variable is
-reported separately as ``y_hat``. One posterior subsample is drawn at fit time
-and shared by every predictive call, so draw *i* of the pre-period fit and draw
-*i* of the counterfactual come from the same parameter draw (upstream
-``posterior=`` passthrough).
+Causal impact uses upstream ``expected_observation`` / ``expected_observation_future`` when provided: the conditional expected outcome in observed units, including parameter and latent uncertainty but excluding observation-level noise. Otherwise CausalPy uses ``mu`` / ``mu_future`` under the model author's responsibility that this latent is already an outcome-scale expectation. Models with a link function should pass ``expected_observation=inverse_link(latent)`` to ``pymc_forecast.predict``. The adapter never infers or inverts links. The draw-level posterior predictive of the observed variable is reported separately as ``y_hat``. One posterior subsample is drawn at fit time and shared by every predictive call, so draw *i* of the pre-period fit and draw *i* of the counterfactual come from the same parameter draw (upstream ``posterior=`` passthrough).
 
 ``StatespaceForecaster`` models are rejected for now: their upstream outputs
 carry no separate noise-free latent, so the impact convention above cannot be
@@ -89,7 +79,7 @@ def _import_pymc_forecast():
         raise ImportError(
             "PyMCForecastModel requires the optional dependency 'pymc-forecast'. "
             "Install it with `pip install causalpy[forecast]` or "
-            "`pip install 'pymc-forecast[extras]>=0.2,<0.3'`."
+            "`pip install 'pymc-forecast[extras]>=0.3,<0.4'`."
         ) from err
     return pymc_forecast
 
@@ -100,10 +90,7 @@ class PyMCForecastModel:
     Parameters
     ----------
     model_fn : callable or pymc_forecast.ForecastingModel
-        The forecasting model body ``(Horizon, covariates) -> None`` or a
-        :class:`pymc_forecast.ForecastingModel` instance. Priors flow through
-        this object (pymc-extras ``Prior``), preserving the transparent-prior
-        ethos.
+        The upstream 0.3 forecasting model body ``(covariates, data=None) -> None`` or a :class:`pymc_forecast.ForecastingModel` instance. Priors flow through this object (pymc-extras ``Prior``), preserving the transparent-prior ethos.
     forecaster : type, optional
         The ``pymc_forecast`` forecaster class used to fit the model. Defaults
         to :class:`pymc_forecast.HMCForecaster` (NUTS), matching CausalPy's
@@ -133,17 +120,15 @@ class PyMCForecastModel:
     >>> import pymc as pm
     >>> import pytensor.tensor as pt
     >>> import pymc_forecast  # doctest: +SKIP
-    >>> def local_level(h, covariates):  # doctest: +SKIP
-    ...     drift = pymc_forecast.time_series(
-    ...         h, "drift", lambda name, dims: pm.Normal(name, 0, 0.1, dims=dims)
-    ...     )
+    >>> def local_level(covariates, data=None):  # doctest: +SKIP
+    ...     h = pymc_forecast.Horizon.from_data(covariates, data)
+    ...     drift = pymc_forecast.innovations(h, "drift", pm.Normal.dist(0, 0.1))
     ...     sigma = pm.HalfNormal("sigma", 1)
     ...     pymc_forecast.predict(
     ...         h,
-    ...         lambda name, mu, dims, observed: pm.Normal(
-    ...             name, mu, sigma, dims=dims, observed=observed
-    ...         ),
+    ...         pm.Normal.dist(0, sigma),
     ...         pt.cumsum(drift),
+    ...         expected_observation=pt.cumsum(drift),
     ...     )
     >>> result = cp.InterruptedTimeSeries(  # doctest: +SKIP
     ...     df,
@@ -321,10 +306,7 @@ class PyMCForecastModel:
         Returns
         -------
         xr.DataTree
-            With a ``posterior_predictive`` group holding draw-level ``mu``
-            (the noise-free latent predictor) and ``y_hat`` (the posterior
-            predictive of the observed variable) with dims
-            ``(chain, draw, obs_ind, treated_units)``.
+            With a ``posterior_predictive`` group holding draw-level ``mu`` (the outcome-scale expectation, preferring the explicit upstream expected observation) and ``y_hat`` (the posterior predictive of the observed variable) with dims ``(chain, draw, obs_ind, treated_units)``.
         """
         if self._posterior is None:
             raise RuntimeError("Model has not been fit yet.")
@@ -342,17 +324,23 @@ class PyMCForecastModel:
                     random_seed=self.random_seed,
                 )
             samples = self._pf.prediction_samples(result)
-            y_hat = samples[self._pf.FORECAST_VAR]
-            mu = samples[self._pf.MU_FORECAST_VAR]
+            observation_var = self._pf.FORECAST_VAR
+            latent_var = self._pf.MU_FORECAST_VAR
+            expected_var = self._pf.EXPECTED_OBSERVATION_FORECAST_VAR
             time_dim = self._pf.FUTURE_DIM
         else:
             result = self.forecaster.predict_in_sample(
                 posterior=self._posterior, random_seed=self.random_seed
             )
             samples = self._pf.prediction_samples(result)
-            y_hat = samples[self._pf.OBS_VAR]
-            mu = samples[self._pf.MU_VAR]
+            observation_var = self._pf.OBS_VAR
+            latent_var = self._pf.MU_VAR
+            expected_var = self._pf.EXPECTED_OBSERVATION_VAR
             time_dim = self._pf.TIME_DIM
+        y_hat = samples[observation_var]
+        # Normalize upstream prediction semantics once at this adapter seam.
+        # Without an explicit expectation, the author must supply response-scale mu.
+        mu = samples[expected_var if expected_var in samples else latent_var]
         mu = mu.rename({time_dim: "obs_ind"})
         y_hat = y_hat.rename({time_dim: "obs_ind"})
         return self._to_inference_data(mu, y_hat, X.obs_ind.values)

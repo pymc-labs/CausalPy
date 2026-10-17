@@ -18,8 +18,9 @@ from __future__ import annotations
 import copy
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
+import arviz as az
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -38,6 +39,96 @@ from causalpy.skl_models import create_causalpy_compatible_class
 from causalpy.utils import _design_fingerprint, round_num
 
 BackendKind = Literal["pymc", "sklearn", "pymc-forecast"]
+
+
+class _SamplingDiagnostics(TypedDict):
+    """Canonical fit-diagnostic values, without a sampling-quality verdict."""
+
+    divergences: int | None
+    max_rhat: float | None
+    min_bulk_ess: float | None
+    diagnostics_status: Literal["available", "partial", "unavailable"]
+    diagnostics_reason: str | None
+
+
+def _sampling_diagnostics(idata: xr.DataTree | None) -> _SamplingDiagnostics:
+    """Summarize every posterior variable in a full inference result."""
+    result: _SamplingDiagnostics = {
+        "divergences": None,
+        "max_rhat": None,
+        "min_bulk_ess": None,
+        "diagnostics_status": "unavailable",
+        "diagnostics_reason": None,
+    }
+    reasons: list[str] = []
+    if idata is None:
+        result["diagnostics_reason"] = "Full fit inference data are unavailable."
+        return result
+
+    if "sample_stats" in idata and "diverging" in idata["sample_stats"]:
+        divergent = np.asarray(idata["sample_stats"]["diverging"].values)
+        if divergent.size and np.isin(divergent, [0, 1]).all():
+            result["divergences"] = int(divergent.sum())
+        else:
+            reasons.append("Divergence indicators are empty or invalid.")
+    else:
+        reasons.append("Divergence indicators are unavailable.")
+
+    if "posterior" not in idata or not idata["posterior"].data_vars:
+        reasons.append("Posterior draws are unavailable.")
+    else:
+        posterior = idata["posterior"].to_dataset()
+        for key, diagnostic, method, minimum_chains, reducer in (
+            ("max_rhat", az.rhat, "rank", 2, np.max),
+            ("min_bulk_ess", az.ess, "bulk", 1, np.min),
+        ):
+            values: list[float] = []
+            incomplete: list[str] = []
+            for name, variable in posterior.data_vars.items():
+                if (
+                    variable.sizes.get("chain", 0) < minimum_chains
+                    or variable.sizes.get("draw", 0) < 4
+                ):
+                    incomplete.append(str(name))
+                    continue
+                try:
+                    estimates = np.asarray(diagnostic(variable, method=method).values)
+                except (
+                    ValueError,
+                    TypeError,
+                    KeyError,
+                    AttributeError,
+                    ZeroDivisionError,
+                ):
+                    incomplete.append(str(name))
+                    continue
+                finite = estimates[np.isfinite(estimates)]
+                if finite.size:
+                    values.append(float(reducer(finite)))
+                if finite.size != estimates.size or not estimates.size:
+                    incomplete.append(str(name))
+            if values:
+                if key == "max_rhat":
+                    result["max_rhat"] = float(reducer(values))
+                else:
+                    result["min_bulk_ess"] = float(reducer(values))
+            if incomplete:
+                reasons.append(
+                    f"{key} is unavailable or non-finite for: {', '.join(incomplete)}."
+                )
+
+    available = sum(
+        result[key] is not None for key in ("divergences", "max_rhat", "min_bulk_ess")
+    )
+    result["diagnostics_status"] = (
+        "available"
+        if available == 3 and not reasons
+        else "partial"
+        if available
+        else "unavailable"
+    )
+    result["diagnostics_reason"] = " ".join(reasons) or None
+    return result
 
 
 def build_coords(
@@ -217,6 +308,13 @@ class ModelAdapter(ABC):
     @abstractmethod
     def idata(self) -> xr.DataTree | None:
         """Return a fitted inference-result DataTree when supported, otherwise ``None``."""
+
+    def sampling_diagnostics(self) -> _SamplingDiagnostics:
+        """Return full-fit sampling diagnostics in a backend-independent dict.
+
+        Missing diagnostics remain ``None``. Extrema include every posterior variable, including latent states; non-finite or unavailable components are explained in ``diagnostics_reason`` and never imply a well-sampled fit.
+        """
+        return _sampling_diagnostics(self.idata)
 
     def require_idata(self) -> xr.DataTree:
         """Return fitted inference-result DataTree or raise an explicit capability error."""
@@ -1006,6 +1104,16 @@ class PyMCForecastAdapter(ModelAdapter):
     def idata(self) -> xr.DataTree | None:
         """Return the model's DataTree when fitted."""
         return self._model.idata
+
+    def sampling_diagnostics(self) -> _SamplingDiagnostics:
+        """Use the complete fit result rather than the predictive subsample."""
+        try:
+            fit_idata = self._model.fit_idata
+        except (RuntimeError, AttributeError) as error:
+            result = _sampling_diagnostics(None)
+            result["diagnostics_reason"] = str(error)
+            return result
+        return _sampling_diagnostics(fit_idata)
 
     @property
     def is_built(self) -> bool:
