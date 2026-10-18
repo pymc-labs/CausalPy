@@ -18,6 +18,7 @@ import subprocess
 import sys
 import textwrap
 
+import pymc as pm
 import pytest
 
 _PROBES = {
@@ -66,6 +67,37 @@ _PROBES = {
             assert pm.HalfFlat is HalfFlat
     """,
 }
+
+
+@pytest.mark.parametrize(
+    "sampling_fixture, has_sample_stats",
+    [("mock_pymc_sample", False), ("genuine_pymc_sampling", True)],
+)
+def test_sampling_fixtures_return_expected_diagnostics(
+    mock_pymc_sample, request, sampling_fixture, has_sample_stats
+):
+    """The genuine guard restores posterior draws while the module mock is active."""
+    pytest.importorskip("pymc.testing")
+    request.getfixturevalue(sampling_fixture)
+
+    with pm.Model():
+        mu = pm.Normal("mu")
+        pm.Normal("y", mu=mu, sigma=1, observed=[0.2, 0.4, 0.6])
+        idata = pm.sample(
+            draws=10,
+            tune=10,
+            chains=1,
+            cores=1,
+            progressbar=False,
+            compute_convergence_checks=False,
+            random_seed=42,
+        )
+
+    assert idata.posterior.sizes["draw"] == 10
+    assert ("sample_stats" in idata) == has_sample_stats
+    if has_sample_stats:
+        assert "lp" in idata.sample_stats
+        assert idata.sample_stats.sizes["draw"] == 10
 
 
 def _run_fixture_probes(tmp_path, sources):
