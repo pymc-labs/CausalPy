@@ -1918,6 +1918,122 @@ def test_random_fold_treatment_times_reproducible():
     assert times1 == times2
 
 
+@pytest.mark.parametrize("random_seed", range(5))
+@pytest.mark.parametrize("calibrate", [True, False])
+def test_random_calendar_eligibility_precedes_selection(random_seed, calibrate):
+    """A missing day cannot consume a slot while complete alternatives exist."""
+    index = pd.date_range("2010-01-01", periods=100, freq="D")
+    data = pd.DataFrame({"y": 0.0}, index=index.drop(pd.Timestamp("2010-03-17")))
+    treatment = index[90]
+    fitted_times = []
+
+    def factory(fold_data, treatment_time):
+        fitted_times.append(treatment_time)
+        return _make_fake_bayesian_experiment(fold_data, treatment_time)
+
+    check = PlaceboInTime(
+        n_folds=1,
+        selection_method="random",
+        intervention_length=pd.Timedelta(days=10),
+        comparison_frequency="D",
+        min_training_rows=20,
+        calibrate=calibrate,
+        random_seed=random_seed,
+        experiment_factory=factory,
+    )
+    result = check.run(_make_fake_bayesian_experiment(data, treatment))
+    assert result.metadata["n_folds_completed"] == 1
+    assert result.metadata["skipped_folds"] == []
+    start = fitted_times[0]
+    comparison = data.loc[
+        (data.index >= start) & (data.index < start + pd.Timedelta(days=10))
+    ]
+    assert comparison.index.equals(pd.date_range(start, periods=10, freq="D"))
+
+
+@pytest.mark.parametrize(
+    "random_seed,expected_day",
+    [(0, "2010-03-14"), (2, "2010-03-13"), (3, "2010-03-12")],
+)
+def test_random_without_calendar_constraint_preserves_seeded_selection(
+    random_seed, expected_day
+):
+    """The calendar repair does not change legacy selection on irregular data."""
+    index = pd.date_range("2010-01-01", periods=100, freq="D")
+    data = pd.DataFrame({"y": 0.0}, index=index.drop(pd.Timestamp("2010-03-17")))
+    check = PlaceboInTime(
+        n_folds=1,
+        selection_method="random",
+        intervention_length=pd.Timedelta(days=10),
+        min_training_rows=20,
+        calibrate=False,
+        random_seed=random_seed,
+    )
+    assert check._compute_random_fold_treatment_times(
+        data, index[90], pd.Timedelta(days=10)
+    ) == [pd.Timestamp(expected_day)]
+
+
+@pytest.mark.parametrize("calibrate", [True, False])
+def test_mixed_fold_outcomes_keep_public_views_consistent(monkeypatch, calibrate):
+    """Every requested position contributes once to metadata, tables and prose."""
+    data = pd.DataFrame({"y": 0.0}, index=np.arange(100))
+
+    def factory(fold_data, treatment_time):
+        if treatment_time == 20:
+            raise RuntimeError("deliberate failure")
+        return _make_fake_bayesian_experiment(fold_data, treatment_time)
+
+    check = PlaceboInTime(
+        n_folds=4,
+        selection_method="random",
+        intervention_length=10,
+        min_training_rows=20,
+        calibrate=calibrate,
+        experiment_factory=factory,
+    )
+    monkeypatch.setattr(
+        check, "_compute_random_fold_treatment_times", lambda *a: [5, 20, 40]
+    )
+    with pytest.warns(UserWarning, match="required training minimum.*only 3 of 4"):
+        result = check.run(_make_fake_bayesian_experiment(data, 90))
+    assert result.metadata["n_folds_completed"] == 1
+    assert [fold.fold for fold in result.metadata["fold_results"]] == [3]
+    skipped = result.metadata["skipped_folds"]
+    assert [fold["fold_index"] for fold in skipped] == [3, 0, 1]
+    assert [fold["reason"] for fold in skipped] == [
+        "insufficient_feasible_random_folds",
+        "insufficient_pre_period",
+        "experiment_failed_to_fit",
+    ]
+    if calibrate:
+        assert result.passed is None
+        assert "INCONCLUSIVE" in result.text
+        assert (
+            result.text.index("Fold 1:")
+            < result.text.index("Fold 2:")
+            < result.text.index("Fold 3:")
+            < result.text.index("Fold 4:")
+        )
+    else:
+        assert result.table.fold.tolist() == [1, 2, 3, 4]
+        assert result.table.status.tolist() == [
+            "ineligible",
+            "failed",
+            "completed",
+            "ineligible",
+        ]
+        assert "deliberate failure" in result.table.reason.iloc[1]
+        assert result.table.loc[result.table.status != "completed", "mean"].isna().all()
+        assert result.metadata["descriptive_summary"]["n_completed"] == 1
+        assert [window["reason"] for window in result.metadata["schedule"]] == [
+            None,
+            None,
+            None,
+            "insufficient_feasible_random_folds",
+        ]
+
+
 def test_random_fold_different_seeds_differ():
     """Different seeds produce different selections."""
     n = 200
@@ -3300,3 +3416,119 @@ def test_descriptive_figure_labels_can_be_customized_without_duplicate_axes():
     assert labels.count("Average difference (deaths/month)") == 1
     assert "Average difference (outcome units)" not in labels
     plt.close(figure)
+
+
+@pytest.mark.parametrize("calibrate", [True, False])
+def test_too_small_fold_retains_geometry_without_attempting_fit(monkeypatch, calibrate):
+    """A short eligible history still needs the minimum total fitting data."""
+    data = pd.DataFrame({"y": 0.0}, index=np.arange(5))
+    fitted_times = []
+
+    def factory(fold_data, treatment_time):
+        fitted_times.append(treatment_time)
+        return _make_fake_bayesian_experiment(fold_data, treatment_time)
+
+    check = PlaceboInTime(
+        n_folds=3,
+        intervention_length=1,
+        calibrate=calibrate,
+        experiment_factory=factory,
+    )
+    monkeypatch.setattr(check, "_build_status_quo_model", _fake_status_quo_result)
+    result = check.run(_make_fake_bayesian_experiment(data, 4))
+    assert fitted_times == [2, 3]
+    assert result.metadata["n_folds_completed"] == 2
+    assert result.metadata["skipped_folds"] == [
+        {
+            "fold_index": 0,
+            "pseudo_treatment_time": 1,
+            "observed_pre_period_rows": 1,
+            "required_pre_period_rows": 1,
+            "reason": "insufficient_fold_observations",
+        }
+    ]
+    if calibrate:
+        assert "Fold 1: SKIPPED (only 2 observations, need >= 3)" in result.text
+    else:
+        assert result.table.status.tolist() == ["ineligible", "completed", "completed"]
+        assert result.table.n_training.tolist() == [1, 2, 3]
+        assert result.table.n_comparison.tolist() == [1, 1, 1]
+        assert result.metadata["schedule"][0]["reason"] is None
+
+
+def test_random_calendar_shortfall_counts_only_complete_windows():
+    """Maximum-feasible selection excludes the missing-day window too."""
+    index = pd.date_range("2010-01-01", periods=100, freq="D")
+    data = pd.DataFrame({"y": 0.0}, index=index.drop(index[75]))
+    fitted_times = []
+
+    def factory(fold_data, treatment_time):
+        fitted_times.append(treatment_time)
+        return _make_fake_bayesian_experiment(fold_data, treatment_time)
+
+    check = PlaceboInTime(
+        n_folds=7,
+        selection_method="random",
+        min_training_pct=0.1,
+        min_training_rows=20,
+        intervention_length=pd.Timedelta(days=10),
+        comparison_frequency="D",
+        calibrate=False,
+        experiment_factory=factory,
+        make_figures=False,
+    )
+    with pytest.warns(UserWarning, match="only 6 of 7"):
+        result = check.run(_make_fake_bayesian_experiment(data, index[90]))
+    assert fitted_times == index[[20, 30, 40, 50, 60, 76]].tolist()
+    assert result.table.status.tolist() == ["completed"] * 6 + ["ineligible"]
+    assert result.table.n_comparison.iloc[:6].tolist() == [10] * 6
+    assert (
+        result.metadata["skipped_folds"][0]["reason"]
+        == "insufficient_feasible_random_folds"
+    )
+
+
+def test_random_calendar_requires_datetime_even_without_candidates():
+    """An empty candidate pool does not make calendar semantics valid on integers."""
+    data = pd.DataFrame({"y": 0.0}, index=np.arange(100))
+
+    def factory(fold_data, treatment_time):  # pragma: no cover - must not fit
+        raise AssertionError("Invalid calendar data must not reach the factory")
+
+    check = PlaceboInTime(
+        n_folds=1,
+        selection_method="random",
+        min_training_pct=0.9,
+        intervention_length=10,
+        comparison_frequency="D",
+        calibrate=False,
+        experiment_factory=factory,
+    )
+    with pytest.raises(
+        ValueError, match="comparison_frequency requires a DatetimeIndex"
+    ):
+        check.run(_make_fake_bayesian_experiment(data, 50))
+
+
+@pytest.mark.parametrize("empty_dimension", ["chain", "draw"])
+def test_descriptive_empty_posterior_is_a_failed_fold(empty_dimension):
+    """An empty fitted posterior must remain a failed row rather than abort the run."""
+
+    def factory(data, treatment_time):
+        experiment = _make_fake_bayesian_experiment(data, treatment_time)
+        experiment.result.impact_post = experiment.result.impact_post.isel(
+            {empty_dimension: slice(0, 0)}
+        )
+        return experiment
+
+    result = _monthly_descriptive_check(
+        n_folds=1,
+        treatment_times=[pd.Timestamp("2010-01-01")],
+        experiment_factory=factory,
+        make_figures=False,
+    ).run(_monthly_descriptive_experiment())
+    assert result.table.status.tolist() == ["failed"]
+    assert result.table.n_comparison.tolist() == [29]
+    assert result.table["mean"].isna().all()
+    assert result.metadata["descriptive_summary"]["n_completed"] == 0
+    assert result.metadata["skipped_folds"][0]["reason"] == "experiment_failed_to_fit"
