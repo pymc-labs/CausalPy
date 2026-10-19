@@ -45,7 +45,7 @@ jobs:
           # Security: do not set to true — prevents credential leakage (GitHub Advanced Security).
           persist-credentials: false
       - name: Install uv
-        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
         with:
           enable-cache: true
       - name: Install Python ${{ matrix.python-version }}
@@ -58,6 +58,14 @@ jobs:
         run: uv run --no-sync pytest --doctest-modules -p causalpy.tests.doctest_sampling --ignore=causalpy/tests/ causalpy/ --no-cov -m nightly
       - name: Run nightly tests
         run: uv run --no-sync pytest --no-cov -m "nightly and not correctness"
+      - name: Check basis-expansion priors with PyMC-Marketing
+        if: matrix.python-version == '3.12' && matrix.pandas-version == '3.x'
+        # The basis-expansion model requires optional PyMC-Marketing components. Run its numerical checks in an isolated environment with the docs pin so they cannot silently skip, while preserving the locked environment used by the other matrix checks.
+        env:
+          PYTENSOR_FLAGS: base_compiledir=${{ runner.temp }}/pytensor-basis-expansion
+        run: |
+          uv run --isolated --extra test --with-requirements docs/requirements.txt python -c "from pymc_marketing.mmm import LinearTrend, YearlyFourier"
+          uv run --isolated --extra test --with-requirements docs/requirements.txt python -m pytest causalpy/tests/test_basis_expansion_prior_scale.py -m "" --no-cov
       - name: Run statistical correctness tests
         # A cold, job-local compiledir keeps these exact reproducibility tests independent of any cached C modules.
         env:

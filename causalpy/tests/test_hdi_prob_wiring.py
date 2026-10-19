@@ -337,7 +337,7 @@ _ITS_TARGETS: list[_SpyTarget] = [
     ("causalpy.experiments.interrupted_time_series.plot_posterior_over_x", "ci_prob"),
 ]
 _SC_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.synthetic_control.plot_posterior_over_x", "ci_prob"),
+    ("causalpy.experiments._panel_counterfactual.plot_posterior_over_x", "ci_prob"),
 ]
 _DID_TARGETS: list[_SpyTarget] = [
     ("causalpy.experiments.diff_in_diff.plot_posterior_over_x", "ci_prob"),

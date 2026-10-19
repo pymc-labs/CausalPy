@@ -2284,7 +2284,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         The number of changepoints for the linear trend component. Defaults to 10.
         Only used if trend_component is None.
     prior_sigma : float, optional
-        Prior standard deviation for the observation noise. Defaults to 5.
+        Explicit scale of the HalfNormal observation-noise prior. If None, use the fitted outcome scale when ``auto_scale_priors=True``, or the legacy scale 5 otherwise. A ``sigma`` entry in ``priors`` takes precedence.
     trend_component : Optional[Any], optional
         A custom trend component model. If None, the default pymc-marketing LinearTrend component is used.
         Must have an `apply(time_data)` method that returns a PyMC tensor.
@@ -2295,25 +2295,43 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         A dictionary of kwargs that get unpacked and passed to the
         :func:`pymc.sample` function. Defaults to an empty dictionary.
     priors : dict, optional
-        Dictionary of priors for the model. Defaults to ``None``, in which
-        case default priors are used.
+        Explicit :class:`pymc_extras.prior.Prior` overrides keyed by ``beta`` (dimensions ``coeffs``), ``sigma`` (``treated_units``), ``delta`` (``changepoint``), or ``fourier_beta`` (``fourier``). Component overrides apply only to the built-in components; custom components retain their own priors.
     prior_sample_kwargs : dict, optional
         A dictionary of kwargs that get unpacked and passed to the
         :func:`pymc.sample_prior_predictive` function when the prior phase
         runs. Defaults to ``{"draws": 500}`` plus the posterior
         ``random_seed`` if ``None``.
+    auto_scale_priors : bool, optional
+        Calibrate built-in priors using the fitted data only. Defaults to True. Set False to retain the legacy fixed scales, including HalfNormal(5) noise unless explicitly overridden.
+
+    Notes
+    -----
+    Automatic calibration is an empirical-Bayes reference default, not a substitute for prior predictive checks or domain knowledge. In an InterruptedTimeSeries experiment only pre-intervention data reach this model. Let ``s`` be the fitted outcome sample standard deviation and ``s_t`` the sample standard deviation of fitted elapsed times in years. Noise uses HalfNormal(s), using total outcome variation as a reference scale rather than estimating residual noise. Regression coefficient scales use the largest absolute outcome divided by each design column's root mean square, including an intercept; each coefficient's individual fitted RMS contribution then has that outcome-magnitude scale.
+
+    Fourier coefficients use Laplace scale ``s / sqrt(2 * n_order)``. Since each sine/cosine pair has squared basis norm 1 and a Laplace variance is twice its squared scale, the pointwise seasonal prior SD is ``s``. For ``M = n_changepoints_trend``, the initial slope uses Laplace scale ``s / (sqrt(2) * s_t)``, making its expected sample variance over the fitted dates equal to ``s**2``, independently of ``M``. The remaining ``M - 1`` slope changes use scale ``s / (sqrt(2 * (M - 1)) * s_t)``. Each hinge has sample SD at most ``s_t``, so their aggregate expected sample variance is at most ``s**2``, and total trend expected sample variance is at most ``2 * s**2``. A single distinct fitted date uses a one-day time scale. These are reference scales for component contributions, not guarantees of local coefficient recovery or calibrated uncertainty.
+
+    A constant, numerically constant, or singleton outcome has no estimable spread: its largest absolute value is used instead, or 1 for an all-zero outcome, with a warning. This fallback keeps prior scales finite; it does not ensure an identifiable or well-behaved posterior for noiseless data. Zero design columns use a denominator of 1. Predictions retain the original outcome units. Custom components are never rescaled; their priors must be calibrated by the caller.
     """  # noqa: W605
+
+    default_priors = {
+        "beta": Prior("Normal", mu=0, sigma=10, dims="coeffs"),
+        "sigma": Prior("HalfNormal", sigma=5, dims="treated_units"),
+        "delta": Prior("Laplace", mu=0, b=0.25, dims="changepoint"),
+        "fourier_beta": Prior("Laplace", mu=0, b=1, dims="fourier"),
+    }
 
     def __init__(
         self,
         n_order: int = 3,
         n_changepoints_trend: int = 10,
-        prior_sigma: float = 5,
+        prior_sigma: float | None = None,
         trend_component: Any | None = None,
         seasonality_component: Any | None = None,
         sample_kwargs: dict[str, Any] | None = None,
         priors: dict[str, Any] | None = None,
         prior_sample_kwargs: dict[str, Any] | None = None,
+        *,
+        auto_scale_priors: bool = True,
     ):
         super().__init__(
             sample_kwargs=sample_kwargs,
@@ -2333,6 +2351,15 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         self.n_order = n_order
         self.n_changepoints_trend = n_changepoints_trend
         self.prior_sigma = prior_sigma
+        if prior_sigma is not None and (
+            not np.isfinite(prior_sigma) or prior_sigma <= 0
+        ):
+            raise ValueError("prior_sigma must be finite and strictly positive.")
+        if prior_sigma is not None and "sigma" not in (priors or {}):
+            self.priors["sigma"] = Prior(
+                "HalfNormal", sigma=prior_sigma, dims="treated_units"
+            )
+        self.auto_scale_priors = auto_scale_priors
         self._first_fit_timestamp: pd.Timestamp | None = None
         self._exog_var_names: list[str] | None = None
 
@@ -2360,7 +2387,110 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             sample_kwargs=dict(self.sample_kwargs),
             prior_sample_kwargs=dict(self.prior_sample_kwargs),
             priors=self._user_priors if priors is None else priors,
+            auto_scale_priors=self.auto_scale_priors,
         )
+
+    def priors_from_data(self, X, y) -> dict[str, Any]:
+        """Calibrate stock priors from fitted inputs, preserving explicit choices.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Fitted design with datetime ``obs_ind`` and ``coeffs`` dimensions.
+        y : xarray.DataArray
+            Fitted single-outcome observations.
+
+        Returns
+        -------
+        dict[str, Prior]
+            Data-dependent defaults. User overrides are merged last by ``build``.
+        """
+        priors = {}
+        if self.auto_scale_priors:
+            if isinstance(X, dict) or isinstance(y, dict):
+                raise TypeError(
+                    "BayesianBasisExpansionTimeSeries requires DataArray inputs"
+                )
+            values = np.asarray(y, dtype=float)
+            design = np.asarray(X, dtype=float)
+            if (
+                values.size == 0
+                or not np.isfinite(values).all()
+                or not np.isfinite(design).all()
+            ):
+                raise ValueError(
+                    "Prior calibration requires non-empty, finite fitted outcomes and finite predictors."
+                )
+            if values.ndim != 2 or values.shape[1] != 1:
+                raise ValueError(
+                    "BayesianBasisExpansionTimeSeries requires one treated outcome."
+                )
+            magnitude = float(np.max(np.abs(values)))
+            # Normalize first so squares do not overflow for large outcome units.
+            relative_spread = (
+                float(np.std(values / magnitude, ddof=1))
+                if magnitude > 0 and len(values) > 1
+                else 0.0
+            )
+            spread = magnitude * relative_spread
+            if relative_spread <= np.finfo(float).eps:
+                spread = magnitude or 1.0
+                warnings.warn(
+                    "Cannot estimate the fitted outcome spread: the series is constant, numerically constant, or has fewer than two observations. Using its absolute magnitude (or 1 for all-zero data) to calibrate priors.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            level_scale = magnitude or spread
+            column_magnitudes = np.max(np.abs(design), axis=0)
+            safe_magnitudes = np.where(column_magnitudes > 0, column_magnitudes, 1.0)
+            rms = safe_magnitudes * np.sqrt(
+                np.mean((design / safe_magnitudes) ** 2, axis=0)
+            )
+            rms = np.where(rms > 0, rms, 1.0)
+            dates = pd.DatetimeIndex(X.coords["obs_ind"].values)
+            time_scale = (
+                float(np.std((dates - dates[0]).days / 365.25, ddof=1))
+                if len(dates) > 1
+                else 0.0
+            )
+            time_scale = time_scale or 1 / 365.25
+            priors = {
+                "beta": Prior("Normal", mu=0, sigma=level_scale / rms, dims="coeffs"),
+                "sigma": Prior("HalfNormal", sigma=spread, dims="treated_units"),
+            }
+            if self._custom_trend_component is None:
+                n_changes = self.n_changepoints_trend - 1
+                trend_scales = np.full(
+                    self.n_changepoints_trend,
+                    spread / time_scale / np.sqrt(2 * max(n_changes, 1)),
+                )
+                # The initial slope is not a changepoint increment: its contribution scale is independent of how many knots are added.
+                trend_scales[0] = spread / time_scale / np.sqrt(2)
+                priors["delta"] = Prior(
+                    "Laplace",
+                    mu=0,
+                    b=xr.DataArray(trend_scales, dims="changepoint"),
+                    dims="changepoint",
+                )
+            if self._custom_seasonality_component is None:
+                priors["fourier_beta"] = Prior(
+                    "Laplace",
+                    mu=0,
+                    b=spread / np.sqrt(2 * self.n_order),
+                    dims="fourier",
+                )
+            # A subclass's declared default is itself an explicit modeling choice.
+            priors = {
+                key: value
+                for key, value in priors.items()
+                if self.default_priors.get(key)
+                is BayesianBasisExpansionTimeSeries.default_priors[key]
+            }
+        if self.prior_sigma is not None:
+            priors["sigma"] = Prior(
+                "HalfNormal", sigma=self.prior_sigma, dims="treated_units"
+            )
+        return priors
 
     def _validate_and_initialize_components(self):
         """
@@ -2399,7 +2529,8 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
                     "component is used. Install it with `pip install pymc-marketing`."
                 ) from err
             self._trend_component = LinearTrend(
-                n_changepoints=self.n_changepoints_trend
+                n_changepoints=self.n_changepoints_trend,
+                priors={"delta": deepcopy(self.priors["delta"])},
             )
         return self._trend_component
 
@@ -2417,7 +2548,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
                     "BayesianBasisExpansionTimeSeries requires pymc-marketing when default seasonality "
                     "component is used. Install it with `pip install pymc-marketing`."
                 ) from err
-            self._seasonality_component = YearlyFourier(n_order=self.n_order)
+            self._seasonality_component = YearlyFourier(
+                n_order=self.n_order, prior=deepcopy(self.priors["fourier_beta"])
+            )
         return self._seasonality_component
 
     def _prepare_time_and_exog_features(
@@ -2543,6 +2676,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
         :meth:`_rearm_fit_data`.
         """
         already_built = self._built
+        if not already_built:
+            self._trend_component = None
+            self._seasonality_component = None
         super().build(X=X, y=y, coords=coords)
         if already_built:
             # Base build() was a no-op (graph exists); reading back shared
@@ -2649,7 +2785,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
             if X_for_pymc is not None:
                 # Use xarray directly with pm.Data
                 X_data = pm.Data("X", X_for_pymc, dims=["obs_ind", "coeffs"])
-                beta = pm.Normal("beta", mu=0, sigma=10, dims="coeffs")
+                beta = self.priors["beta"].create_variable("beta")
                 mu_ = mu_ + pm.math.dot(X_data, beta)
 
             # Make mu_ an explicit deterministic variable with treated_units dimension
@@ -2658,7 +2794,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
             # Likelihood - also with treated_units dimension
             # Use xarray directly with pm.Data
-            sigma = pm.HalfNormal("sigma", sigma=self.prior_sigma, dims="treated_units")
+            sigma = self.priors["sigma"].create_variable("sigma")
             y_data = pm.Data("y", y, dims=["obs_ind", "treated_units"])
             pm.Normal(
                 "y_hat",

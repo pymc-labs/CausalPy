@@ -243,7 +243,10 @@ def test_sc_datetime_treatment_time_plot(geolift1_data):
 
 @pytest.mark.parametrize("error_type", [TypeError, ValueError])
 def test_sc_convert_treatment_time_for_axis_fallback(error_type):
-    """Return original treatment_time when axis conversion raises."""
+    """The figure's axis helper returns the original time when conversion raises."""
+    from causalpy.experiments._panel_counterfactual import (
+        _convert_treatment_time_for_axis,
+    )
 
     class FailingXAxis:
         def convert_units(self, _value):
@@ -253,9 +256,7 @@ def test_sc_convert_treatment_time_for_axis_fallback(error_type):
         xaxis = FailingXAxis()
 
     treatment_time = pd.Timestamp("2022-01-01")
-    converted = cp.SyntheticControl._convert_treatment_time_for_axis(
-        FailingAxis(), treatment_time
-    )
+    converted = _convert_treatment_time_for_axis(FailingAxis(), treatment_time)
 
     assert converted is treatment_time
 
