@@ -1,0 +1,21 @@
+pyproject.toml
+  s_a747d347e0c25c::t_1f9faaabf2cee4 156
+uv.lock
+  s_a747d347e0c25c::t_420ffb6e65a56d 432-433,480-481,558,561,637,1391-1392,2482-2483,2768-2769,3326-3384,3389-3402,3404-3406,3651-3652,3674-3675,4168-4169,4380-4388,4847-4848,5213-5214,5700-5701
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "26a7902e104fd28babd2c06cd6cae7b1f57fe616",
+  "prompts": {},
+  "sessions": {
+    "s_a747d347e0c25c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15314-a9f8-7120-a815-1e3aaf98e6ac",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
