@@ -86,7 +86,10 @@ test-patch-cov: ## Run tests and fail if patch coverage versus the base branch i
 	diff-cover coverage.xml --compare-branch=$(DIFF_COVER_COMPARE_BRANCH) --fail-under=$(DIFF_COVER_FAIL_UNDER) --exclude '$(DIFF_COVER_EXCLUDE)'
 
 uml: ## Generate UML diagrams from code
-	pyreverse -o png --no-signatures causalpy --output-directory docs/source/_static --ignore tests
+	pyreverse -o dot --no-signatures causalpy --output-directory docs/source/_static --ignore tests
+	unflatten -l 6 -f -c 12 docs/source/_static/classes.dot | dot -Tpng -o docs/source/_static/classes.png
+	dot -Tpng docs/source/_static/packages.dot -o docs/source/_static/packages.png
+	rm docs/source/_static/classes.dot docs/source/_static/packages.dot
 
 gallery: ## Regenerate index.md and thumbnails from gallery.yaml
 	python scripts/generate_gallery.py
