@@ -153,7 +153,7 @@ marimo = { pip = true }
 # CI so a single uv.lock can hold both pandas 2.3 and pandas 3.x resolutions
 # (the base `dependencies` pandas constraint stays broad: >=2.3,<4).
 [dependency-groups]
-pandas2 = ["pandas>=2.3,<4"]
+pandas2 = ["pandas>=2.3,<3"]
 pandas3 = ["pandas<4,>=3"]
 
 [tool.uv]
