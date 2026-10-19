@@ -1411,8 +1411,8 @@ class MvWeightedSumFitter(PyMCModel):
 
     def build_model(
         self,
-        X: xr.DataArray,
-        y: xr.DataArray,
+        X: xr.DataArray | dict[str, xr.DataArray],
+        y: xr.DataArray | dict[str, xr.DataArray],
         coords: dict[str, Any] | None,
     ) -> None:
         """Define the PyMC model.
@@ -1428,6 +1428,8 @@ class MvWeightedSumFitter(PyMCModel):
         """
         if not coords or "features" not in coords:
             raise ValueError("coords must include 'features' for MvWeightedSumFitter")
+        if isinstance(X, dict) or isinstance(y, dict):
+            raise TypeError("MvWeightedSumFitter expects single DataArray inputs.")
         features = list(coords["features"])
         n_aux = len(features) - 1
 
@@ -1436,8 +1438,8 @@ class MvWeightedSumFitter(PyMCModel):
             coords["features_aux"] = features[1:]
             self.add_coords(coords)
 
-            X = pm.Data("X", X, dims=["obs_ind", "coeffs", "features"])
-            y = pm.Data("y", y, dims=["obs_ind", "features", "treated_units"])
+            X_data = pm.Data("X", X, dims=["obs_ind", "coeffs", "features"])
+            y_data = pm.Data("y", y, dims=["obs_ind", "features", "treated_units"])
 
             beta = self.priors["beta"].create_variable("beta")
             sigma_feat = self.priors["sigma_feat"].create_variable("sigma_feat")
@@ -1450,21 +1452,21 @@ class MvWeightedSumFitter(PyMCModel):
 
             # Outcome: the only quantity used for the counterfactual.
             mu = pm.Deterministic(
-                "mu", pt.dot(X[:, :, 0], beta.T), dims=["obs_ind", "treated_units"]
+                "mu", pt.dot(X_data[:, :, 0], beta.T), dims=["obs_ind", "treated_units"]
             )
             self.priors["y_hat"].create_likelihood_variable(
-                "y_hat", mu=mu, observed=y[:, 0, :]
+                "y_hat", mu=mu, observed=y_data[:, 0, :]
             )
 
             # Auxiliary predictors: only inform the weights.
             # tensordot over donors -> (obs_ind, features_aux, treated_units)
-            mu_feat = pt.tensordot(X[:, :, 1:], beta, axes=[[1], [1]])
+            mu_feat = pt.tensordot(X_data[:, :, 1:], beta, axes=[[1], [1]])
             scale = sigma_feat / pt.sqrt(n_aux * v)
             pm.Normal(
                 "y_feat",
                 mu=mu_feat,
                 sigma=scale[None, :, None],
-                observed=y[:, 1:, :],
+                observed=y_data[:, 1:, :],
                 dims=["obs_ind", "features_aux", "treated_units"],
             )
 

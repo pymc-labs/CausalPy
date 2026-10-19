@@ -115,7 +115,7 @@ class MultivariateSyntheticControl(SyntheticControl):
 
     supports_ols = False
     supports_bayes = True
-    _default_model_class = MvWeightedSumFitter
+    _default_model_class = MvWeightedSumFitter  # type: ignore[assignment]
 
     def __init__(
         self,
@@ -333,7 +333,7 @@ class MultivariateSyntheticControl(SyntheticControl):
                 f"No posterior draws are available. Call {type(self).__name__}.fit() first.",
                 group="posterior",
             )
-        return self.model.require_group("posterior")["v"]
+        return self.model.require_group("posterior")["v"]  # type: ignore[union-attr]
 
     def summary(self, round_to: int | None = None) -> None:
         """Print the usual summary, plus ``v`` when it is learned.
