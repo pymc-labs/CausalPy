@@ -1,0 +1,27 @@
+causalpy/tests/test_placebo_in_time.py
+  s_bba9faafcdc630::t_9a973789d049d4 1921-2015,2023,2028,2031,2036
+  s_bba9faafcdc630::t_f1014e0f401516 2016-2022,2024-2027,2029-2030,2032-2035,3419-3534
+causalpy/checks/placebo_in_time.py
+  s_bba9faafcdc630::t_06ae76be70ff52 804,1057-1060,1140,1144,1187,1189-1191,1194,1602-1607,1609-1612,1615-1616,1618-1619,1642,1654-1669
+  s_bba9faafcdc630::t_9a973789d049d4 206-210,234-236,799-800,802,805,995,1000-1003,1008-1016,1029-1056,1061-1063,1065-1066,1068-1072,1081-1089,1091-1098,1100-1101,1112-1122,1461-1502,1505-1531,1596-1597,1599-1600,1613-1614,1620-1627
+  s_bba9faafcdc630::t_2931e920c6b126 175-205,211-233,237-255
+  s_bba9faafcdc630::t_3712775623fcb9 1503-1504,1651
+ARCHITECTURE.md
+  s_bba9faafcdc630::t_1ccf111a0808a3 71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8716ec8ea689f04909b4b8000b00f942d55f5c47",
+  "prompts": {},
+  "sessions": {
+    "s_bba9faafcdc630": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15323-8638-7831-b4be-b48f7fa921bc",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
