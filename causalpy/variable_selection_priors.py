@@ -257,12 +257,11 @@ class VariableSelectionPrior:
             - expected_model_size: float, optional - Prior expected number of
               coefficients whose relaxed inclusion indicator satisfies
               ``gamma > 0.5``, equal to ``n_params * E[pi]``. The relaxed
-              indicators do not make coefficients exactly zero. Must be supplied
-              with ``pi_concentration`` and cannot be combined with ``pi_alpha``
-              or ``pi_beta``.
+              indicators do not make coefficients exactly zero. Cannot be combined with ``pi_alpha`` or ``pi_beta`` at either
+              the instance or call level; validation uses the merged configuration.
             - pi_concentration: float, optional - Beta prior concentration used
-              with ``expected_model_size``. Must be supplied explicitly so the
-              prior strength is not chosen silently.
+              with ``expected_model_size`` (default=4, matching the strength of
+              the existing ``Beta(2, 2)`` prior). Requires ``expected_model_size``.
             - slab_sigma: float (default=2) - SD of slab (non-zero) component
             - temperature: float (default=0.1) - Relaxation parameter for binary approximation
 
@@ -371,22 +370,20 @@ class VariableSelectionPrior:
         if not supplied_convenience_keys:
             return merged_hyperparams
 
-        if supplied_convenience_keys != convenience_keys:
-            raise ValueError(
-                "expected_model_size and pi_concentration must be provided together"
-            )
+        if "expected_model_size" not in supplied_convenience_keys:
+            raise ValueError("pi_concentration requires expected_model_size")
 
         if user_keys & {"pi_alpha", "pi_beta"}:
             raise ValueError(
                 "expected_model_size and pi_concentration cannot be combined "
-                "with pi_alpha or pi_beta"
+                "with pi_alpha or pi_beta at either the instance or call level"
             )
 
         expected_model_size = call_hyperparams.get(
             "expected_model_size", self.hyperparams.get("expected_model_size")
         )
         pi_concentration = call_hyperparams.get(
-            "pi_concentration", self.hyperparams.get("pi_concentration")
+            "pi_concentration", self.hyperparams.get("pi_concentration", 4)
         )
 
         numeric_types = (int, float, np.integer, np.floating)
@@ -441,8 +438,12 @@ class VariableSelectionPrior:
         hyperparams : dict, optional
             Override default hyperparameters for this specific prior instance
 
-            For spike-and-slab priors, ``expected_model_size`` and
-            ``pi_concentration`` form a mandatory pair. ``expected_model_size``
+            For spike-and-slab priors, ``expected_model_size`` optionally uses
+            ``pi_concentration`` (default 4, the strength of ``Beta(2, 2)``).
+            Instance and call values are merged before validation: ``pi_alpha``
+            or ``pi_beta`` at either level conflicts with ``expected_model_size``
+            at either level, even when the call is intended as an override.
+            ``expected_model_size``
             is the prior expected number of coefficients whose relaxed inclusion
             indicator satisfies ``gamma > 0.5``, equal to
             ``n_params * E[pi]``. The concentration controls the strength of the

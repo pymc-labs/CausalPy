@@ -166,11 +166,31 @@ def test_default_spike_and_slab_parameters_are_unchanged():
     assert prior.pi_beta == 2
 
 
-@pytest.mark.parametrize("missing_key", ["expected_model_size", "pi_concentration"])
-def test_expected_size_pair_is_mandatory(missing_key):
-    """Supplying only one convenience value is an error."""
-    with pytest.raises(ValueError, match="must be provided together"):
-        _create_spike_and_slab_prior(instance_hyperparams={missing_key: 1})
+@pytest.mark.parametrize("layer", ["instance_hyperparams", "call_hyperparams"])
+def test_expected_model_size_defaults_to_concentration_four(layer):
+    """One expected-size key preserves the default Beta prior strength."""
+    prior = _create_spike_and_slab_prior(**{layer: {"expected_model_size": 2}})
+    assert prior.pi_alpha == pytest.approx(0.4)
+    assert prior.pi_beta == pytest.approx(3.6)
+
+
+def test_concentration_requires_expected_model_size():
+    """Concentration alone does not silently select a target mean."""
+    with pytest.raises(ValueError, match="requires expected_model_size"):
+        _create_spike_and_slab_prior(instance_hyperparams={"pi_concentration": 4})
+
+
+@pytest.mark.parametrize("shape_key", ["pi_alpha", "pi_beta"])
+@pytest.mark.parametrize("shape_on_instance", [False, True])
+def test_expected_size_conflicts_across_layers(shape_key, shape_on_instance):
+    """Neither layer silently replaces a different prior parameterization."""
+    shapes = {shape_key: 1}
+    size = {"expected_model_size": 2}
+    instance, call = (shapes, size) if shape_on_instance else (size, shapes)
+    with pytest.raises(ValueError, match="either the instance or call level"):
+        _create_spike_and_slab_prior(
+            instance_hyperparams=instance, call_hyperparams=call
+        )
 
 
 @pytest.mark.parametrize("explicit_key", ["pi_alpha", "pi_beta"])

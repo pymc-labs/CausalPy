@@ -580,7 +580,7 @@ def test_iv_variable_selection_priors(
     """Test that variable selection priors create expected model variables."""
     vs_hyperparams = {"outcome": True}
     if vs_prior_type == "spike_and_slab":
-        vs_hyperparams.update({"expected_model_size": 1, "pi_concentration": 4})
+        vs_hyperparams.update({"pi_alpha": 2, "pi_beta": 2})
     result = cp.InstrumentalVariable(
         instruments_data=iv_data["instruments_data"],
         data=iv_data["data"],
@@ -597,8 +597,7 @@ def test_iv_variable_selection_priors(
     assert expected_var in result.model.named_vars
     if vs_prior_type == "spike_and_slab":
         prior = result.model.vs_prior_treatment._prior_instance
-        n_instruments = len(result.model.coords["instruments"])
-        expected_pi = 1 / n_instruments
+        expected_pi = 0.5
         assert prior.pi_alpha == pytest.approx(expected_pi * 4)
         assert prior.pi_beta == pytest.approx((1 - expected_pi) * 4)
 
@@ -888,3 +887,31 @@ def test_iv_build_preserves_predictive_sampler(
     with pytest.warns(UserWarning, match="Refitting"):
         experiment.fit(draws=8)
     assert experiment.idata["posterior_predictive"].sizes["draw"] == 8
+
+
+@pytest.mark.parametrize("outcome", [False, True])
+def test_iv_expected_size_unequal_equation_widths(outcome):
+    """Absolute expected sizes apply only to the treatment equation."""
+    rng = np.random.default_rng(42)
+    Z = rng.normal(size=(12, 5))
+    X = rng.normal(size=(12, 2))
+    model = cp.pymc_models.InstrumentalVariableRegression()
+    kwargs = {
+        "X": X,
+        "Z": Z,
+        "y": rng.normal(size=12),
+        "t": rng.normal(size=12),
+        "coords": {"instruments": list(range(5)), "covariates": list(range(2))},
+        "priors": {"mus": [0, 0], "sigmas": [1, 1], "eta": 2, "lkj_sd": 2},
+        "vs_prior_type": "spike_and_slab",
+        "vs_hyperparams": {"outcome": outcome, "expected_model_size": 2},
+    }
+    if outcome:
+        with pytest.raises(ValueError, match="unsupported.*outcome=True"):
+            model.build_model(**kwargs)
+    else:
+        model.build_model(**kwargs)
+        prior = model.vs_prior_treatment._prior_instance
+        assert prior.pi_alpha == pytest.approx(1.6)
+        assert prior.pi_beta == pytest.approx(2.4)
+        assert "gamma_beta_z" not in model.named_vars
