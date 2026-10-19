@@ -2473,7 +2473,7 @@ wheels = [
 
 [[package]]
 name = "maketables"
-version = "0.1.8"
+version = "0.1.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "great-tables" },
@@ -2484,9 +2484,9 @@ dependencies = [
     { name = "python-docx" },
     { name = "tabulate" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/7a/70/82a24141e18b25b1c70ad3b8389f28c3d49a56f289be4b0247977a7202d1/maketables-0.1.8.tar.gz", hash = "sha256:aa4b3776fd9bac6d6f881866824e6a13b9e647f8c87f234d9a24463242ad19f1", size = 69225, upload-time = "2026-03-05T10:31:57.057Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/9a/cd/a61ab0cd638ca311367eec31d8ef633600322d8de4780de44ae781352d6f/maketables-0.1.9.tar.gz", hash = "sha256:6701266f815b92b5612c057a10580d07e77c66c69a77e68139d441bf14c3429c", size = 73216, upload-time = "2026-10-02T10:25:44.712Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ac/cb/7ef3503279a4d2dc6b7fed0d0c53a9d97d98f7c28166ebfcc45eef64fe29/maketables-0.1.8-py3-none-any.whl", hash = "sha256:d79aeb0c08ae8ed7d78978b5676ff1a5236517abbbd287b04986602504b0bfb5", size = 72305, upload-time = "2026-03-05T10:31:55.998Z" },
+    { url = "https://files.pythonhosted.org/packages/2a/90/f666d68aef8c01a50d88fa86e5ff4ffc68f0ecb785a076d58f4ffaab85f3/maketables-0.1.9-py3-none-any.whl", hash = "sha256:a577b29d7da1ae226409c4d4975e7f1f67947e7cd1cbf8d09a344aafb8269ccc", size = 76201, upload-time = "2026-10-02T10:25:43.572Z" },
 ]
 
 [[package]]
