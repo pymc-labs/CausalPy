@@ -3024,14 +3024,6 @@ class StateSpaceTimeSeries(PyMCModel):
             prior_sample_kwargs=prior_sample_kwargs,
         )
 
-        # Warn that this is experimental
-        warnings.warn(
-            "StateSpaceTimeSeries is experimental and its API may change in future versions. "
-            "Not recommended for production use.",
-            FutureWarning,
-            stacklevel=2,
-        )
-
         self._custom_trend_component = trend_component
         self._custom_seasonality_component = seasonality_component
         self.level_order = level_order
