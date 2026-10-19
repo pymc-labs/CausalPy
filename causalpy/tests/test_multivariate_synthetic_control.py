@@ -116,6 +116,20 @@ def test_invalid_v_prior_is_rejected():
         MvWeightedSumFitter(v_prior="sparse")  # type: ignore[arg-type]
 
 
+def test_build_model_rejects_dict_inputs():
+    donors = xr.DataArray(np.zeros((3, 2, 2)), dims=["obs_ind", "coeffs", "features"])
+    treated = xr.DataArray(
+        np.zeros((3, 2, 1)), dims=["obs_ind", "features", "treated_units"]
+    )
+    model = MvWeightedSumFitter()
+    with pytest.raises(TypeError, match="single DataArray"):
+        model.build_model(
+            {"donors": donors},
+            {"treated": treated},
+            coords={"features": ["outcome", "predictor"]},
+        )
+
+
 def test_clone_preserves_v_prior_and_sample_kwargs():
     model = MvWeightedSumFitter(v_prior="uniform", sample_kwargs=sample_kwargs)
     clone = model._clone()
