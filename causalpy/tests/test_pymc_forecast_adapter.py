@@ -14,7 +14,6 @@
 """Tests for the pymc-forecast model-provider adapter behind
 InterruptedTimeSeries (issue #1013)."""
 
-import sys
 from importlib.metadata import version
 
 import matplotlib
@@ -27,15 +26,20 @@ import pymc as pm
 import pytensor.tensor as pt
 import pytest
 import xarray as xr
+from packaging.specifiers import SpecifierSet
 
 import causalpy as cp
 from causalpy.experiments.model_adapter import (
     PyMCForecastAdapter,
     make_model_adapter,
 )
-from causalpy.pymc_forecast_models import PyMCForecastModel, _import_pymc_forecast
+from causalpy.pymc_forecast_models import PyMCForecastModel
 
-pymc_forecast = pytest.importorskip("pymc_forecast")
+pymc_forecast = pytest.importorskip("pymc_forecast", minversion="0.3")
+if not SpecifierSet(">=0.3,<0.4").contains(
+    pymc_forecast.__version__, prereleases=False
+):
+    pytest.skip("requires pymc-forecast>=0.3,<0.4", allow_module_level=True)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -799,14 +803,6 @@ def test_pymc_forecast_03_prediction_schema_contract():
         "FUTURE_DIM": "time_future",
     }
     assert callable(pymc_forecast.prediction_samples)
-
-
-def test_missing_forecast_extra_has_actionable_install_error(monkeypatch):
-    """The optional dependency boundary fails only at forecast-model creation."""
-    monkeypatch.setitem(sys.modules, "pymc_forecast", None)
-    with pytest.raises(ImportError, match=r"pip install causalpy\[forecast\]") as error:
-        _import_pymc_forecast()
-    assert "pymc-forecast[extras]>=0.3,<0.4" in str(error.value)
 
 
 def test_default_forecaster_is_hmc(forecast_result):

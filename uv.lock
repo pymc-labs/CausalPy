@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.15' and sys_platform == 'win32' and extra != 'group-8-causalpy-pandas2' and extra == 'group-8-causalpy-pandas3'",
@@ -477,6 +477,7 @@ dependencies = [
     { name = "matplotlib" },
     { name = "narwhals" },
     { name = "numpy" },
+    { name = "packaging" },
     { name = "pandas", version = "2.3.3", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-8-causalpy-pandas2'" },
     { name = "pandas", version = "3.0.6", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'group-8-causalpy-pandas3' or extra != 'group-8-causalpy-pandas2'" },
     { name = "patsy" },
@@ -589,6 +590,7 @@ requires-dist = [
     { name = "nbformat", marker = "extra == 'docs'" },
     { name = "nbformat", marker = "extra == 'test'" },
     { name = "numpy" },
+    { name = "packaging" },
     { name = "pandas", specifier = ">=2.3,<4" },
     { name = "papermill", marker = "extra == 'test'" },
     { name = "patsy" },
