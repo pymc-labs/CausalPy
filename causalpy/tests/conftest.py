@@ -58,27 +58,38 @@ def rng() -> np.random.Generator:
 
 
 if _HAVE_PYMC_TESTING:
-    mock_pymc_sample = pytest.fixture(mock_sample_setup_and_teardown, scope="session")
+    mock_pymc_sample = pytest.fixture(mock_sample_setup_and_teardown, scope="module")
 else:
 
-    @pytest.fixture(scope="session")
+    @pytest.fixture(scope="module")
     def mock_pymc_sample():  # pragma: no cover - compatibility no-op
         # No-op fixture to satisfy tests when PyMC testing helpers are unavailable
         yield
 
 
+def _set_genuine_pymc_sampling(monkeypatch):
+    """Restore all globals replaced by PyMC's mock sampler."""
+    import pymc as pm
+    from pymc.distributions.continuous import Flat, HalfFlat
+    from pymc.sampling.mcmc import sample
+
+    monkeypatch.setattr(pm, "sample", sample)
+    monkeypatch.setattr(pm, "Flat", Flat)
+    monkeypatch.setattr(pm, "HalfFlat", HalfFlat)
+
+
 @pytest.fixture(scope="module")
 def real_pymc_sampling(mock_pymc_sample):
-    """Use genuine posterior draws regardless of which module ran first."""
-    import pymc as pm
-    import pymc.sampling.mcmc
-
-    patched = pm.sample
-    pm.sample = pymc.sampling.mcmc.sample
-    try:
+    """Use genuine sampling and prior classes throughout one module."""
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _set_genuine_pymc_sampling(monkeypatch)
         yield
-    finally:
-        pm.sample = patched
+
+
+@pytest.fixture
+def genuine_pymc_sampling(monkeypatch):
+    """Restore genuine PyMC sampling and prior classes for one test."""
+    _set_genuine_pymc_sampling(monkeypatch)
 
 
 @pytest.fixture(scope="session")

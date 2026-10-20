@@ -186,7 +186,7 @@ def test_iv_default_model_uses_safe_sampling_kwargs(monkeypatch, iv_data):
     assert sampled_kwargs["cores"] == 1
 
 
-def test_iv_default_sampling_completes_with_two_chains(iv_data):
+def test_iv_default_sampling_completes_with_two_chains(iv_data, genuine_pymc_sampling):
     """Test default IV sampling completes safely with two sequential chains."""
     model = cp.pymc_models.InstrumentalVariableRegression(
         sample_kwargs={
@@ -208,6 +208,7 @@ def test_iv_default_sampling_completes_with_two_chains(iv_data):
     ).fit()
 
     assert model.sample_kwargs["cores"] == 1
+    assert "sample_stats" in result.idata
     assert result.idata.posterior.sizes["chain"] == 2
     assert result.idata.posterior.sizes["draw"] == 5
 

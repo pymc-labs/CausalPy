@@ -297,8 +297,7 @@ def test_its_with_state_space_covariates(mock_pymc_sample):
 def test_its_with_state_space_variable_selection(mock_pymc_sample):
     """ITS + StateSpaceTimeSeries with spike-and-slab covariate selection.
 
-    Structure-only assertions: the suite mocks pm.sample session-wide,
-    so posterior values come from the prior.
+    Structure-only assertions: the requested mock makes posterior values prior draws.
     """
     try:
         from pymc_extras.statespace import structural  # noqa: F401
@@ -350,15 +349,10 @@ def test_its_with_state_space_variable_selection(mock_pymc_sample):
 @pytest.mark.correctness
 # About 6 minutes on CI runners, so it runs in the nightly workflow rather than the PR correctness step.
 @pytest.mark.nightly
-def test_its_state_space_variable_selection_recovery():
+def test_its_state_space_variable_selection_recovery(genuine_pymc_sampling):
     """Irrelevant covariates shrink out under the spike-and-slab prior.
 
-    Real NUTS, no pm.sample mock: correctness-marked tests run in their own
-    lane (`make test-correctness`), where the session mock is never
-    instantiated. Selection is asserted through the inclusion-probability
-    ranking, not `beta_exog` point estimates, because the state-space `P0`
-    lets the regression states drift from the parameter, which attenuates
-    the point estimates without affecting the ranking.
+    The genuine-sampling guard also applies when mocked structural tests run earlier in this module. Selection is asserted through the inclusion-probability ranking, not `beta_exog` point estimates, because the state-space `P0` lets the regression states drift from the parameter, which attenuates the point estimates without affecting the ranking.
     """
     try:
         from pymc_extras.statespace import structural  # noqa: F401
@@ -392,6 +386,9 @@ def test_its_state_space_variable_selection_recovery():
         formula="y ~ 0 + x1 + x2 + x3 + x4 + x5 + x6",
         model=model,
     ).fit()
+
+    assert model.idata is not None
+    assert "sample_stats" in model.idata
 
     # x1, x2 are in the DGP, x3-x6 are noise. The attenuation documented in
     # the class docstring pulls every inclusion probability toward the
