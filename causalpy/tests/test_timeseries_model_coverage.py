@@ -797,7 +797,10 @@ class TestStateSpaceTimeSeriesCoverage:
         with pytest.raises(RuntimeError, match="must be fit first"):
             unfit.get_shrinkage_factors()
 
-    def test_vs_spike_and_slab_structure(self, sample_data, mock_pymc_sample):
+    @pytest.mark.parametrize("vs_hyperparams", [None, {"expected_model_size": 1}])
+    def test_vs_spike_and_slab_structure(
+        self, sample_data, mock_pymc_sample, vs_hyperparams
+    ):
         """Spike-and-slab on covariates: selection variables in the
         posterior and a well-formed inclusion-probability table.
 
@@ -806,9 +809,12 @@ class TestStateSpaceTimeSeriesCoverage:
         y_da = sample_data
         n = len(y_da)
         X = xr.DataArray(
-            np.random.randn(n, 2),
+            np.random.default_rng(42).normal(size=(n, 4)),
             dims=["obs_ind", "coeffs"],
-            coords={"obs_ind": y_da.coords["obs_ind"], "coeffs": ["x1", "x2"]},
+            coords={
+                "obs_ind": y_da.coords["obs_ind"],
+                "coeffs": ["x1", "x2", "x3", "x4"],
+            },
         )
         model = cp.pymc_models.StateSpaceTimeSeries(
             level_order=1,
@@ -820,16 +826,21 @@ class TestStateSpaceTimeSeriesCoverage:
                 "progressbar": False,
             },
             vs_prior_type="spike_and_slab",
+            vs_hyperparams=vs_hyperparams,
         )
         model.fit(X=X, y=y_da)
 
         assert "beta_exog" in model.idata.posterior
         assert "gamma_beta_exog" in model.idata.posterior
 
+        prior = model.vs_prior._prior_instance
+        assert prior.pi_alpha == pytest.approx(1 if vs_hyperparams else 2)
+        assert prior.pi_beta == pytest.approx(3 if vs_hyperparams else 2)
+
         incl = model.get_inclusion_probabilities()
         assert isinstance(incl, pd.DataFrame)
         assert list(incl.columns) == ["prob", "selected", "gamma_mean"]
-        assert list(incl.index) == ["x1", "x2"]
+        assert list(incl.index) == ["x1", "x2", "x3", "x4"]
 
     def test_vs_horseshoe_structure(self, sample_data, mock_pymc_sample):
         """Horseshoe on covariates: shrinkage factor table is well formed.

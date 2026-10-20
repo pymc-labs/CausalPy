@@ -88,6 +88,148 @@ def test_create_prior_spike_and_slab(coords):
         assert beta.name == "beta"
 
 
+def _create_spike_and_slab_prior(
+    *, n_params=20, instance_hyperparams=None, call_hyperparams=None
+):
+    """Create a spike-and-slab prior and return its resolved implementation."""
+    coords = {"features": [f"x_{i}" for i in range(n_params)]}
+    vs_prior = VariableSelectionPrior(
+        "spike_and_slab", hyperparams=instance_hyperparams
+    )
+    with pm.Model(coords=coords):
+        vs_prior.create_prior(
+            name="beta",
+            n_params=n_params,
+            dims="features",
+            hyperparams=call_hyperparams,
+        )
+    assert isinstance(vs_prior._prior_instance, SpikeAndSlabPrior)
+    return vs_prior._prior_instance
+
+
+def test_expected_model_size_instance_pair_resolves_sparse_prior():
+    """Instance-level expected size maps to the requested Beta parameters."""
+    prior = _create_spike_and_slab_prior(
+        instance_hyperparams={
+            "expected_model_size": 1,
+            "pi_concentration": 40,
+        }
+    )
+
+    assert prior.pi_alpha == pytest.approx(2)
+    assert prior.pi_beta == pytest.approx(38)
+
+
+def test_expected_model_size_call_pair_allows_boundary_heavy_prior():
+    """An explicit low concentration may intentionally produce alpha below one."""
+    prior = _create_spike_and_slab_prior(
+        call_hyperparams={
+            "expected_model_size": 1,
+            "pi_concentration": 4,
+        }
+    )
+
+    assert prior.pi_alpha == pytest.approx(0.2)
+    assert prior.pi_beta == pytest.approx(3.8)
+
+
+def test_expected_model_size_pair_can_be_split_across_layers():
+    """Instance and call values combine using the ordinary precedence rules."""
+    prior = _create_spike_and_slab_prior(
+        instance_hyperparams={"expected_model_size": 1},
+        call_hyperparams={"pi_concentration": 40},
+    )
+
+    assert prior.pi_alpha == pytest.approx(2)
+    assert prior.pi_beta == pytest.approx(38)
+
+
+def test_call_hyperparams_override_one_expected_size_pair_member():
+    """Call-level values override the matching instance-level value."""
+    prior = _create_spike_and_slab_prior(
+        instance_hyperparams={
+            "expected_model_size": 1,
+            "pi_concentration": 40,
+        },
+        call_hyperparams={"pi_concentration": 4},
+    )
+
+    assert prior.pi_alpha == pytest.approx(0.2)
+    assert prior.pi_beta == pytest.approx(3.8)
+
+
+def test_default_spike_and_slab_parameters_are_unchanged():
+    """The convenience pair does not change the existing default prior."""
+    prior = _create_spike_and_slab_prior()
+
+    assert prior.pi_alpha == 2
+    assert prior.pi_beta == 2
+
+
+@pytest.mark.parametrize("layer", ["instance_hyperparams", "call_hyperparams"])
+def test_expected_model_size_defaults_to_concentration_four(layer):
+    """One expected-size key preserves the default Beta prior strength."""
+    prior = _create_spike_and_slab_prior(**{layer: {"expected_model_size": 2}})
+    assert prior.pi_alpha == pytest.approx(0.4)
+    assert prior.pi_beta == pytest.approx(3.6)
+
+
+def test_concentration_requires_expected_model_size():
+    """Concentration alone does not silently select a target mean."""
+    with pytest.raises(ValueError, match="requires expected_model_size"):
+        _create_spike_and_slab_prior(instance_hyperparams={"pi_concentration": 4})
+
+
+@pytest.mark.parametrize("shape_key", ["pi_alpha", "pi_beta"])
+@pytest.mark.parametrize("shape_on_instance", [False, True])
+def test_expected_size_conflicts_across_layers(shape_key, shape_on_instance):
+    """Neither layer silently replaces a different prior parameterization."""
+    shapes = {shape_key: 1}
+    size = {"expected_model_size": 2}
+    instance, call = (shapes, size) if shape_on_instance else (size, shapes)
+    with pytest.raises(ValueError, match="either the instance or call level"):
+        _create_spike_and_slab_prior(
+            instance_hyperparams=instance, call_hyperparams=call
+        )
+
+
+@pytest.mark.parametrize("explicit_key", ["pi_alpha", "pi_beta"])
+def test_expected_size_pair_conflicts_with_explicit_beta_shapes(explicit_key):
+    """Explicit shape keys conflict even when their value equals a default."""
+    with pytest.raises(ValueError, match="cannot be combined"):
+        _create_spike_and_slab_prior(
+            instance_hyperparams={
+                "expected_model_size": 1,
+                "pi_concentration": 40,
+                explicit_key: 2,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "key,value,match",
+    [
+        ("expected_model_size", 0, "greater than 0"),
+        ("expected_model_size", 20, "less than n_params"),
+        ("expected_model_size", np.nan, "finite numeric"),
+        ("expected_model_size", np.inf, "finite numeric"),
+        ("expected_model_size", "1", "finite numeric"),
+        ("pi_concentration", 0, "positive finite"),
+        ("pi_concentration", -1, "positive finite"),
+        ("pi_concentration", np.nan, "positive finite"),
+        ("pi_concentration", np.inf, "positive finite"),
+        ("pi_concentration", "40", "positive finite"),
+    ],
+)
+def test_expected_size_pair_validates_values(key, value, match):
+    """The convenience values must be finite and within their valid ranges."""
+    hyperparams = {"expected_model_size": 1, "pi_concentration": 40}
+    hyperparams[key] = value
+
+    with pytest.raises(ValueError, match=match):
+        _create_spike_and_slab_prior(instance_hyperparams=hyperparams)
+
+
 def test_create_prior_horseshoe(coords, sample_data):
     """Test create_prior for horseshoe."""
     vs_prior = VariableSelectionPrior("horseshoe")

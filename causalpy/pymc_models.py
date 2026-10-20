@@ -1612,7 +1612,11 @@ class InstrumentalVariableRegression(PyMCModel):
             standard normal priors.
         vs_hyperparams : dict, optional
             Hyperparameters for the variable-selection prior. Only consulted
-            when ``vs_prior_type`` is set.
+            when ``vs_prior_type`` is set. With ``outcome=True``, spike-and-slab
+            uses shared ``pi_alpha``/``pi_beta`` inclusion-probability shapes;
+            ``expected_model_size`` is unsupported because an absolute count
+            cannot be shared across equations. Use ``outcome=False`` to apply
+            an expected size to the treatment equation only.
         binary_treatment : bool, default False
             Whether the treatment ``t`` is binary; selects the relevant
             likelihood term.
@@ -1636,6 +1640,19 @@ class InstrumentalVariableRegression(PyMCModel):
             if vs_prior_type:
                 if vs_hyperparams is None:
                     vs_hyperparams = {}
+                if (
+                    vs_prior_type == "spike_and_slab"
+                    and vs_hyperparams.get("outcome", False)
+                    and {"expected_model_size", "pi_concentration"}
+                    & vs_hyperparams.keys()
+                ):
+                    raise ValueError(
+                        "expected_model_size and pi_concentration are unsupported "
+                        "with outcome=True: an absolute expected count cannot be "
+                        "shared across treatment and outcome equations. Use "
+                        "pi_alpha/pi_beta for a shared inclusion-probability prior, "
+                        "or outcome=False for treatment-only selection."
+                    )
                 # Use variable selection priors
                 self.vs_prior_treatment = VariableSelectionPrior(
                     vs_prior_type, vs_hyperparams
@@ -2927,7 +2944,9 @@ class StateSpaceTimeSeries(PyMCModel):
         of ``min(5, p / 2)`` and the sample size (Piironen & Vehtari, 2017),
         holding the residual scale of that rule at 1, while spike-and-slab
         uses a ``Beta(2, 2)`` inclusion prior (prior inclusion probability
-        centered on 0.5, no expected-model-size knob). Pass ``tau0`` in
+        centered on 0.5). Pass ``expected_model_size`` to center that probability
+        on ``expected_model_size / p``; ``pi_concentration`` optionally sets
+        its strength (default 4). Pass ``tau0`` in
         ``vs_hyperparams`` when the residuals are not close to unit scale.
         The ``normal`` option is a plain ``Normal(0, 1)`` on each coefficient,
         with no selection. That is much tighter than the ``Normal(0, 50)``
