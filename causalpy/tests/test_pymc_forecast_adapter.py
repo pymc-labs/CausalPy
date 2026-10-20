@@ -40,14 +40,7 @@ pymc_forecast = pytest.importorskip("pymc_forecast")
 
 @pytest.fixture(scope="module", autouse=True)
 def real_pymc_sampling():
-    """Undo the session-scoped ``mock_pymc_sample`` patch for this module.
-
-    The conftest registers PyMC's ``mock_sample`` (prior sampling instead of
-    MCMC) session-wide, so once any earlier test module requests it,
-    ``pm.sample`` stays mocked for the rest of the run. The round-trip tests
-    here assert effect recovery against ground truth, which is meaningless
-    under prior sampling — restore the real sampler for this module only.
-    """
+    """Use genuine posterior draws for this forecast-adapter module."""
     import pymc as pm
     import pymc.sampling.mcmc
 
@@ -76,8 +69,9 @@ fast_sample_kwargs = {
 TRUE_EFFECT = 2.0
 
 
-def linear_model(h, covariates):
+def linear_model(covariates, data=None):
     """Static regression on the patsy design matrix (intercept + trend)."""
+    h = pymc_forecast.Horizon.from_data(covariates, data)
     beta = pm.Normal("beta", 0.0, 2.0, dims="covariate")
     sigma = pm.HalfNormal("sigma", 1.0)
     mu = pt.dot(covariates.values, beta)
@@ -93,10 +87,8 @@ def linear_model(h, covariates):
 class LocalLevel(pymc_forecast.ForecastingModel):  # type: ignore[name-defined]
     """Covariate-free local-level (random-walk drift) model."""
 
-    def model(self, h, covariates):
-        drift = self.time_series(
-            "drift", lambda name, dims: pm.Normal(name, 0.0, 0.1, dims=dims)
-        )
+    def model(self, covariates, data=None):
+        drift = self.innovations("drift", pm.Normal.dist(0.0, 0.1))
         sigma = pm.HalfNormal("sigma", 1.0)
         self.predict(
             lambda name, m, dims, observed: pm.Normal(
@@ -332,6 +324,134 @@ def test_covariate_free_future_index_path(its_data):
     # level shift must dominate the impact estimate.
     mean_impact = float(result.result.impact_post.mean(("chain", "draw")).mean())
     assert mean_impact > TRUE_EFFECT / 2
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("explicit_expectation", [True, False])
+def test_linked_predictions_use_outcome_scale_expectations(explicit_expectation):
+    """An explicit count expectation wins over log mu; inverse-linked mu remains a supported fallback."""
+
+    def count_model(covariates, data=None):
+        h = pymc_forecast.Horizon.from_data(covariates, data)
+        beta = pm.Normal("beta", 0, 2, dims="covariate")
+        eta = pt.dot(covariates.values, beta)
+        expected = pt.exp(eta)
+        if explicit_expectation:
+            pymc_forecast.predict(
+                h,
+                lambda latent: pm.Poisson.dist(mu=pt.exp(latent)),
+                eta,
+                expected_observation=expected,
+            )
+        else:
+            pymc_forecast.predict(h, lambda mu: pm.Poisson.dist(mu=mu), expected)
+
+    dates = pd.date_range("2020-01-01", periods=40, freq="D")
+    x = np.linspace(-1, 1, len(dates))
+    frame = pd.DataFrame(
+        {"y": np.random.default_rng(8).poisson(np.exp(1 + 0.2 * x)), "x": x},
+        index=dates,
+    )
+    result = cp.InterruptedTimeSeries(
+        frame,
+        dates[30],
+        formula="y ~ 1 + x",
+        model=PyMCForecastModel(
+            count_model,
+            forecaster_kwargs=dict(fast_sample_kwargs),
+            num_samples=50,
+            random_seed=42,
+        ),
+    ).fit()
+    posterior = result.model.idata.posterior
+    for design, prediction, future in (
+        (result.pre_design, result.result.predictions_pre, False),
+        (result.post_design, result.result.predictions_post, True),
+    ):
+        eta = xr.dot(
+            posterior["beta"],
+            design["X"].rename({"coeffs": "covariate"}),
+            dim="covariate",
+        ).transpose("chain", "draw", "obs_ind")
+        expected = np.exp(eta.values)
+        np.testing.assert_allclose(prediction.isel(treated_units=0), expected)
+        full = result.model.predict(design["X"], out_of_sample=future)
+        assert full.posterior_predictive.mu.dims == (
+            "chain",
+            "draw",
+            "obs_ind",
+            "treated_units",
+        )
+        assert full.posterior_predictive.mu.name == "mu"
+        noisy = full.posterior_predictive.y_hat.isel(treated_units=0).values
+        assert not np.allclose(noisy, expected)
+    xr.testing.assert_allclose(
+        result.result.impact_post,
+        (
+            result.post_design["y"].isel(treated_units=0)
+            - result.result.predictions_post.isel(treated_units=0)
+        ).transpose("chain", "draw", "obs_ind"),
+    )
+
+
+@pytest.mark.integration
+def test_post_period_outcomes_do_not_change_forecasts(its_data, forecast_result):
+    """Changing comparison outcomes changes impacts, never the fitted posterior or counterfactual."""
+    frame, treatment_time = its_data
+    perturbed = frame.copy()
+    perturbed.loc[perturbed.index >= treatment_time, "y"] += 1_000_000
+    result = cp.InterruptedTimeSeries(
+        perturbed,
+        treatment_time,
+        formula="y ~ 1 + t",
+        model=make_forecast_model(),
+    ).fit()
+    xr.testing.assert_equal(
+        result.model.idata.posterior, forecast_result.model.idata.posterior
+    )
+    xr.testing.assert_equal(
+        result.result.predictions_pre, forecast_result.result.predictions_pre
+    )
+    xr.testing.assert_equal(
+        result.result.predictions_post, forecast_result.result.predictions_post
+    )
+    np.testing.assert_allclose(
+        result.result.impact_post - forecast_result.result.impact_post, 1_000_000
+    )
+
+
+@pytest.mark.integration
+def test_markov_forecast_continues_terminal_posterior_state():
+    """AR forecasts obey their transition from each shared posterior terminal state, with fresh innovations."""
+
+    def ar_model(covariates, data=None):
+        h = pymc_forecast.Horizon.from_data(covariates, data)
+        ar = pymc_forecast.markov_series(
+            h, "ar", 0.0, lambda previous: pm.Normal.dist(0.8 * previous, 0.2)
+        )
+        pymc_forecast.predict(
+            h, pm.Normal.dist(0, 0.1), 5 + ar, expected_observation=5 + ar
+        )
+
+    dates = pd.date_range("2020-01-01", periods=32, freq="D")
+    frame = pd.DataFrame({"y": 5 + np.linspace(0, 4.8, len(dates))}, index=dates)
+    result = cp.InterruptedTimeSeries(
+        frame,
+        dates[20],
+        formula="y ~ 0",
+        model=PyMCForecastModel(
+            ar_model,
+            forecaster_kwargs=dict(fast_sample_kwargs),
+            num_samples=400,
+            random_seed=42,
+        ),
+    ).fit()
+    terminal = result.model.idata.posterior["ar"].isel(time=-1).values
+    future = result.result.predictions_post.isel(treated_units=0).values - 5
+    previous = np.concatenate([terminal[..., None], future[..., :-1]], axis=-1)
+    innovations = future - 0.8 * previous
+    assert abs(innovations.mean()) < 0.03
+    assert innovations.std() == pytest.approx(0.2, rel=0.1)
 
 
 def _design_arrays(n_units: int = 1):
@@ -649,14 +769,16 @@ class TestPlaceboInTime:
         assert fold_model.idata is not None
 
 
-def test_pymc_forecast_02_prediction_schema_contract():
-    """The optional extra's pinned 0.2 schema matches adapter consumption."""
-    assert version("pymc-forecast").startswith("0.2.")
+def test_pymc_forecast_03_prediction_schema_contract():
+    """The optional extra's pinned 0.3 schema matches adapter consumption."""
+    assert version("pymc-forecast").startswith("0.3.")
     assert {
         "OBS_VAR": pymc_forecast.OBS_VAR,
         "MU_VAR": pymc_forecast.MU_VAR,
         "FORECAST_VAR": pymc_forecast.FORECAST_VAR,
         "MU_FORECAST_VAR": pymc_forecast.MU_FORECAST_VAR,
+        "EXPECTED_OBSERVATION_VAR": pymc_forecast.EXPECTED_OBSERVATION_VAR,
+        "EXPECTED_OBSERVATION_FORECAST_VAR": pymc_forecast.EXPECTED_OBSERVATION_FORECAST_VAR,
         "TIME_DIM": pymc_forecast.TIME_DIM,
         "FUTURE_DIM": pymc_forecast.FUTURE_DIM,
     } == {
@@ -664,6 +786,8 @@ def test_pymc_forecast_02_prediction_schema_contract():
         "MU_VAR": "mu",
         "FORECAST_VAR": "forecast",
         "MU_FORECAST_VAR": "mu_future",
+        "EXPECTED_OBSERVATION_VAR": "expected_observation",
+        "EXPECTED_OBSERVATION_FORECAST_VAR": "expected_observation_future",
         "TIME_DIM": "time",
         "FUTURE_DIM": "time_future",
     }
@@ -675,7 +799,7 @@ def test_missing_forecast_extra_has_actionable_install_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "pymc_forecast", None)
     with pytest.raises(ImportError, match=r"pip install causalpy\[forecast\]") as error:
         _import_pymc_forecast()
-    assert "pymc-forecast[extras]>=0.2,<0.3" in str(error.value)
+    assert "pymc-forecast[extras]>=0.3,<0.4" in str(error.value)
 
 
 def test_default_forecaster_is_hmc(forecast_result):
@@ -756,3 +880,152 @@ def test_approximate_forecasters_fit_and_predict_canonical_containers(
         pd.testing.assert_index_equal(
             pd.Index(pred.obs_ind.values), expected_index, check_names=False
         )
+
+
+def test_sampling_diagnostics_use_full_forecast_fit_including_latents():
+    """Predictive thinning must not hide bad full-chain latent diagnostics."""
+    from types import SimpleNamespace
+
+    from causalpy.experiments.model_adapter import PyMCModelAdapter
+
+    rng = np.random.default_rng(123)
+    latent = rng.normal(size=(2, 80, 5))
+    latent[1, :, -1] += 10
+    posterior = xr.Dataset(
+        {
+            "beta": (("chain", "draw"), rng.normal(size=(2, 80))),
+            "latent": (("chain", "draw", "time"), latent),
+        }
+    )
+    full = xr.DataTree.from_dict(
+        {
+            "posterior": posterior,
+            "sample_stats": xr.Dataset(
+                {"diverging": (("chain", "draw"), np.ones((2, 80), dtype=bool))}
+            ),
+        }
+    )
+    model = make_forecast_model()
+    model.idata = xr.DataTree.from_dict(
+        {"posterior": posterior[["beta"]].isel(chain=slice(0, 1), draw=slice(0, 8))}
+    )
+    model.forecaster = SimpleNamespace(idata=full)
+    native_model = cp.pymc_models.LinearRegression()
+    native_model.idata = full
+
+    diagnostics = PyMCForecastAdapter(model).sampling_diagnostics()
+
+    assert diagnostics == PyMCModelAdapter(native_model).sampling_diagnostics()
+    assert diagnostics["divergences"] == 160
+    assert diagnostics["max_rhat"] > 1.1
+    assert diagnostics["diagnostics_status"] == "available"
+    assert model.idata.posterior.sizes["chain"] == 1
+    assert model.idata.posterior.sizes["draw"] == 8
+    assert "latent" not in model.idata.posterior
+
+
+@pytest.mark.parametrize("fitted_without_full_result", [False, True])
+def test_forecast_sampling_diagnostics_unavailable(fitted_without_full_result):
+    """Unfitted and variational backends do not report zero divergences."""
+    from types import SimpleNamespace
+
+    model = make_forecast_model()
+    if fitted_without_full_result:
+        model.idata = xr.DataTree.from_dict({"posterior": xr.Dataset()})
+        model.forecaster = SimpleNamespace()
+    diagnostics = PyMCForecastAdapter(model).sampling_diagnostics()
+    assert diagnostics["diagnostics_status"] == "unavailable"
+    assert diagnostics["diagnostics_reason"]
+    assert all(
+        diagnostics[key] is None for key in ("divergences", "max_rhat", "min_bulk_ess")
+    )
+
+
+@pytest.mark.integration
+def test_scheduled_descriptive_forecast_placebos_use_template_without_refitting_final(
+    its_data, forecast_result, monkeypatch
+):
+    """The public context path clones budgeted templates and isolates fold training."""
+    import arviz as az
+
+    df, treatment_time = its_data
+    dates = [df.index[30], df.index[45]]
+    template = make_fast_forecast_model()
+    final_idata = forecast_result.model.fit_idata
+    final_predictive = forecast_result.model.idata
+    clone_calls = []
+    original_clone = PyMCForecastModel._clone
+
+    def record_clone(self):
+        clone_calls.append((self, self.random_seed))
+        return original_clone(self)
+
+    monkeypatch.setattr(PyMCForecastModel, "_clone", record_clone)
+    context = cp.PipelineContext(
+        data=df,
+        experiment=forecast_result,
+        experiment_config={
+            "method": cp.InterruptedTimeSeries,
+            "treatment_time": treatment_time,
+            "formula": "y ~ 1 + t",
+            "model": template,
+        },
+    )
+    check = cp.checks.PlaceboInTime(
+        n_folds=2,
+        treatment_times=dates,
+        min_training_rows=30,
+        intervention_length=pd.Timedelta(days=7),
+        comparison_frequency="D",
+        calibrate=False,
+        random_seed=987,
+        make_figures=False,
+    )
+
+    result = check.run(forecast_result, context=context)
+
+    assert result.passed is None
+    assert result.table["status"].tolist() == ["completed", "completed"]
+    assert result.table["n_training"].tolist() == [30, 45]
+    assert result.table["n_comparison"].tolist() == [7, 7]
+    assert result.metadata["descriptive_summary"]["n_completed"] == 2
+    assert clone_calls == [(template, 987), (template, 988)]
+    assert template.idata is None
+    assert template.random_seed == 42
+    assert forecast_result.model.fit_idata is final_idata
+    assert forecast_result.model.idata is final_predictive
+    fold_models = []
+    for position, fold in enumerate(result.metadata["fold_results"]):
+        experiment = fold.experiment
+        model = experiment.model
+        fold_models.append(model)
+        assert model is not template and model is not forecast_result.model
+        assert model.random_seed == 987 + position
+        assert model.forecaster_kwargs == template.forecaster_kwargs
+        assert model.idata.posterior.sizes["draw"] == 50
+        assert model.fit_idata.posterior.sizes["draw"] == fast_sample_kwargs["draws"]
+        assert model.fit_idata.posterior.sizes["chain"] == 2
+        pd.testing.assert_index_equal(
+            experiment.datapre.index,
+            df.loc[df.index < dates[position]].index,
+            check_names=False,
+        )
+        assert experiment.datapost.index.max() == dates[position] + pd.Timedelta(days=6)
+        assert experiment.datapost.index.max() < treatment_time
+        np.testing.assert_array_equal(
+            model.forecaster._data.values.ravel(), experiment.datapre["y"].values
+        )
+        diagnostics = result.table.iloc[position]
+        full_rhat = az.rhat(model.fit_idata.posterior.to_dataset(), method="rank")
+        full_ess = az.ess(model.fit_idata.posterior.to_dataset(), method="bulk")
+        assert diagnostics["divergences"] == int(
+            model.fit_idata.sample_stats.diverging.sum()
+        )
+        assert diagnostics["max_rhat"] == pytest.approx(
+            max(float(variable.max()) for variable in full_rhat.data_vars.values())
+        )
+        assert diagnostics["min_bulk_ess"] == pytest.approx(
+            min(float(variable.min()) for variable in full_ess.data_vars.values())
+        )
+        assert diagnostics["diagnostics_status"] == "available"
+    assert fold_models[0] is not fold_models[1]

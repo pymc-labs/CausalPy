@@ -461,3 +461,213 @@ def test_sklearn_adapter_explicit_prediction_and_score_controls():
     )
     with pytest.raises(TypeError):
         adapter.score(X, y, unexpected=True)
+
+
+@pytest.fixture
+def diagnostic_fit_idata():
+    """Full chains include a poorly mixed latent omitted by scalar summaries."""
+    rng = np.random.default_rng(231)
+    beta = rng.normal(size=(2, 80))
+    latent = rng.normal(size=(2, 80, 3))
+    latent[1, :, 2] += 5
+    return xr.DataTree.from_dict(
+        {
+            "posterior": xr.Dataset(
+                {
+                    "beta": (("chain", "draw"), beta),
+                    "latent": (("chain", "draw", "time"), latent),
+                }
+            ),
+            "sample_stats": xr.Dataset(
+                {"diverging": (("chain", "draw"), np.eye(2, 80, dtype=bool))}
+            ),
+        }
+    )
+
+
+def test_sampling_diagnostics_include_all_latent_coordinates(diagnostic_fit_idata):
+    import arviz as az
+
+    model = PyMCLinearRegression()
+    model.idata = diagnostic_fit_idata
+    result = PyMCModelAdapter(model).sampling_diagnostics()
+    expected_rhat = az.rhat(diagnostic_fit_idata.posterior.to_dataset(), method="rank")
+    expected_ess = az.ess(diagnostic_fit_idata.posterior.to_dataset(), method="bulk")
+
+    assert set(result) == {
+        "divergences",
+        "max_rhat",
+        "min_bulk_ess",
+        "diagnostics_status",
+        "diagnostics_reason",
+    }
+    assert result["divergences"] == 2
+    assert result["max_rhat"] == pytest.approx(
+        max(float(variable.max()) for variable in expected_rhat.data_vars.values())
+    )
+    assert result["max_rhat"] > 1.1
+    assert result["min_bulk_ess"] == pytest.approx(
+        min(float(variable.min()) for variable in expected_ess.data_vars.values())
+    )
+    assert result["diagnostics_status"] == "available"
+    assert result["diagnostics_reason"] is None
+
+
+@pytest.mark.parametrize("backend", ["pymc", "sklearn"])
+def test_sampling_diagnostics_unavailable_before_fit(backend):
+    adapter = (
+        PyMCModelAdapter(PyMCLinearRegression())
+        if backend == "pymc"
+        else SklearnModelAdapter(LinearRegression())
+    )
+    result = adapter.sampling_diagnostics()
+    assert result["diagnostics_status"] == "unavailable"
+    assert result["diagnostics_reason"]
+    assert all(
+        result[key] is None for key in ("divergences", "max_rhat", "min_bulk_ess")
+    )
+
+
+def test_sampling_diagnostics_missing_sample_stats_is_partial(diagnostic_fit_idata):
+    model = PyMCLinearRegression()
+    model.idata = xr.DataTree.from_dict(
+        {"posterior": diagnostic_fit_idata.posterior.to_dataset()}
+    )
+    result = PyMCModelAdapter(model).sampling_diagnostics()
+    assert result["divergences"] is None
+    assert result["max_rhat"] is not None
+    assert result["min_bulk_ess"] is not None
+    assert result["diagnostics_status"] == "partial"
+    assert "Divergence" in result["diagnostics_reason"]
+
+
+def test_sampling_diagnostics_single_chain_does_not_invent_rhat(diagnostic_fit_idata):
+    model = PyMCLinearRegression()
+    model.idata = diagnostic_fit_idata.isel(chain=slice(0, 1))
+    result = PyMCModelAdapter(model).sampling_diagnostics()
+    assert result["max_rhat"] is None
+    assert result["min_bulk_ess"] is not None
+    assert result["diagnostics_status"] == "partial"
+    assert "max_rhat" in result["diagnostics_reason"]
+
+
+def test_sampling_diagnostics_nonfinite_components_are_reported(diagnostic_fit_idata):
+    model = PyMCLinearRegression()
+    model.idata = diagnostic_fit_idata.copy(deep=True)
+    model.idata.posterior["invalid"] = xr.DataArray(
+        np.full((2, 80), np.nan), dims=("chain", "draw")
+    )
+    model.idata.sample_stats["diverging"] = xr.DataArray(
+        np.full((2, 80), np.nan), dims=("chain", "draw")
+    )
+    result = PyMCModelAdapter(model).sampling_diagnostics()
+    assert result["divergences"] is None
+    assert np.isfinite(result["max_rhat"])
+    assert np.isfinite(result["min_bulk_ess"])
+    assert result["diagnostics_status"] == "partial"
+    assert "invalid" in result["diagnostics_reason"]
+
+
+@pytest.mark.parametrize(
+    "idata",
+    [
+        xr.DataTree(),
+        xr.DataTree.from_dict({"posterior": xr.Dataset()}),
+        xr.DataTree.from_dict(
+            {"posterior": xr.Dataset({"beta": (("chain", "draw"), [[0.0, 1.0]])})}
+        ),
+    ],
+)
+def test_sampling_diagnostics_empty_or_too_short_results_are_unavailable(idata):
+    model = PyMCLinearRegression()
+    model.idata = idata
+    result = PyMCModelAdapter(model).sampling_diagnostics()
+    assert result["diagnostics_status"] == "unavailable"
+    assert result["diagnostics_reason"]
+
+
+def test_sampling_diagnostics_numerical_failure_preserves_other_values(
+    diagnostic_fit_idata, monkeypatch
+):
+    import arviz as az
+
+    model = PyMCLinearRegression()
+    model.idata = diagnostic_fit_idata
+
+    def unavailable_rhat(*args, **kwargs):
+        raise ValueError("unsupported posterior")
+
+    monkeypatch.setattr(az, "rhat", unavailable_rhat)
+    result = PyMCModelAdapter(model).sampling_diagnostics()
+    assert result["divergences"] == 2
+    assert result["max_rhat"] is None
+    assert result["min_bulk_ess"] is not None
+    assert result["diagnostics_status"] == "partial"
+    assert "beta, latent" in result["diagnostics_reason"]
+
+
+@pytest.mark.integration
+def test_scheduled_descriptive_native_placebos_preserve_context_and_full_diagnostics(
+    real_pymc_sampling,
+):
+    """A descriptive check uses its fold horizon and a fresh native model budget."""
+    import causalpy as cp
+
+    rng = np.random.default_rng(291)
+    t = np.linspace(-1, 1, 40)
+    data = pd.DataFrame({"y": 2 + 0.1 * t + rng.normal(0, 0.1, 40), "t": t})
+    budget = {
+        "draws": 20,
+        "tune": 30,
+        "chains": 2,
+        "cores": 1,
+        "progressbar": False,
+        "random_seed": 81,
+    }
+    final = cp.InterruptedTimeSeries(
+        data,
+        treatment_time=30,
+        formula="y ~ 1 + t",
+        model=PyMCLinearRegression(sample_kwargs=budget),
+    ).fit()
+    template = PyMCLinearRegression(sample_kwargs=budget)
+    context = cp.PipelineContext(
+        data=data,
+        experiment=final,
+        experiment_config={
+            "method": cp.InterruptedTimeSeries,
+            "treatment_time": 30,
+            "formula": "y ~ 1 + t",
+            "model": template,
+        },
+    )
+    original_idata = final.model.idata
+    result = cp.checks.PlaceboInTime(
+        n_folds=2,
+        treatment_times=[10, 18],
+        min_training_rows=10,
+        intervention_length=5,
+        calibrate=False,
+        random_seed=991,
+        make_figures=False,
+    ).run(final, context=context)
+
+    assert result.passed is None
+    assert result.table["status"].tolist() == ["completed", "completed"]
+    assert result.table["n_training"].tolist() == [10, 18]
+    assert result.table["n_comparison"].tolist() == [5, 5]
+    assert template.idata is None
+    assert template.sample_kwargs == budget
+    assert final.model.idata is original_idata
+    for index, fold in enumerate(result.metadata["fold_results"]):
+        model = fold.experiment.model
+        assert model is not template and model is not final.model
+        assert model.sample_kwargs["random_seed"] == 991 + index
+        assert model.idata.posterior.sizes["draw"] == budget["draws"]
+        assert fold.experiment.datapre.index.max() < [10, 18][index]
+        assert fold.experiment.datapost.index.max() == [14, 22][index]
+        diagnostics = fold.experiment._model_backend.sampling_diagnostics()
+        assert diagnostics["diagnostics_status"] == "available"
+        assert result.table.iloc[index]["divergences"] == diagnostics["divergences"]
+        assert result.table.iloc[index]["max_rhat"] == diagnostics["max_rhat"]
+        assert result.table.iloc[index]["min_bulk_ess"] == diagnostics["min_bulk_ess"]

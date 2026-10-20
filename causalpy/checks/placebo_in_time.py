@@ -12,7 +12,9 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 """
-Placebo-in-time sensitivity check with hierarchical null model.
+Placebo-in-time calibration and descriptive historical comparisons.
+
+Explicit historical schedules can report average observed-minus-expected differences without calibration. The default retains hierarchical calibration of cumulative effects.
 
 Builds a hierarchical Bayesian model of the "status quo" (no-effect)
 distribution from placebo folds, then compares the actual intervention
@@ -31,6 +33,10 @@ Supports two fold-selection strategies:
 Supports experiments with a ``treatment_time`` parameter
 (InterruptedTimeSeries, SyntheticControl).  Requires a Bayesian model
 backend (PyMC or pymc-forecast) for posterior extraction.
+
+Explicit ``treatment_times`` can schedule historical windows independently of
+their length. With ``calibrate=False``, report average historical differences
+and sampling diagnostics without fitting a null or issuing a causal verdict.
 """
 
 from __future__ import annotations
@@ -38,6 +44,7 @@ from __future__ import annotations
 import inspect
 import logging
 import warnings
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from numbers import Integral
 from typing import Any, Literal, cast
@@ -53,21 +60,26 @@ from plotnine import (
     aes,
     after_stat,
     geom_histogram,
+    geom_point,
+    geom_segment,
     geom_text,
     geom_vline,
     ggplot,
     labs,
     scale_colour_manual,
     scale_fill_manual,
+    scale_y_continuous,
     theme_void,
 )
 
+from causalpy._arviz_compat import hdi
 from causalpy.checks._plot_helpers import draw_figure
 from causalpy.checks.base import CheckResult, clone_model
 from causalpy.checks.operating_characteristics import (
     AssuranceResult,
     compute_assurance_rates,
 )
+from causalpy.constants import HDI_PROB
 from causalpy.experiments.base import BaseExperiment
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.experiments.synthetic_control import SyntheticControl
@@ -147,6 +159,8 @@ class PlaceboFoldResult:
         Posterior mean of the cumulative impact.
     fold_sd : float
         Posterior standard deviation of the cumulative impact.
+    average_impact_samples : xr.DataArray or None, default None
+        Posterior samples of the average impact across comparison observations, populated for descriptive runs. Cumulative fields retain their summed-impact meaning.
     """
 
     fold: int
@@ -155,17 +169,99 @@ class PlaceboFoldResult:
     cumulative_impact_samples: xr.DataArray
     fold_mean: float
     fold_sd: float
+    average_impact_samples: xr.DataArray | None = None
+
+
+@dataclass(frozen=True)
+class _FoldPlan:
+    """Geometry and training requirement for one requested fold."""
+
+    fold: int
+    start: Any
+    end: Any
+    comparison_end: Any
+    n_training: int | None
+    n_comparison: int | None
+    required_training: int
+
+
+@dataclass
+class _FoldRecord:
+    """Single execution record from which all public fold views are derived."""
+
+    plan: _FoldPlan
+    status: Literal["ineligible", "failed", "completed"] = "ineligible"
+    reason: str | None = None
+    result: PlaceboFoldResult | None = None
+
+    def schedule(self) -> dict[str, Any]:
+        """Expose requested geometry; fit failures do not alter the plan."""
+        return {
+            "fold": self.plan.fold,
+            "pseudo_treatment_time": self.plan.start,
+            "comparison_end": self.plan.comparison_end,
+            "window_end_exclusive": self.plan.end,
+            "n_training": self.plan.n_training,
+            "n_comparison": self.plan.n_comparison,
+            "reason": self.reason
+            if self.status == "ineligible"
+            and self.reason
+            not in {"insufficient_pre_period", "insufficient_fold_observations"}
+            else None,
+        }
+
+    def skipped_metadata(self) -> dict[str, Any]:
+        """Preserve the calibrated skipped-fold metadata contract."""
+        return {
+            "fold_index": self.plan.fold - 1,
+            "pseudo_treatment_time": self.plan.start,
+            "observed_pre_period_rows": self.plan.n_training,
+            "required_pre_period_rows": self.plan.required_training,
+            "reason": "experiment_failed_to_fit"
+            if self.status == "failed"
+            else self.reason,
+        }
+
+    def summary(self) -> str:
+        """Render the legacy per-fold prose from the recorded outcome."""
+        prefix = f"Fold {self.plan.fold}: "
+        if self.result is not None:
+            return (
+                prefix + f"pseudo treatment at {self.plan.start} "
+                f"— mean={self.result.fold_mean:.2f}, sd={self.result.fold_sd:.2f}"
+            )
+        if self.status == "failed":
+            detail = (
+                f"experiment failed to fit at pseudo treatment time {self.plan.start}"
+            )
+        elif self.reason == "insufficient_pre_period":
+            detail = (
+                f"only {self.plan.n_training} pre-treatment observations, "
+                f"need >= {self.plan.required_training} for one full intervention window"
+            )
+        elif self.reason == "insufficient_fold_observations":
+            assert self.plan.n_training is not None
+            assert self.plan.n_comparison is not None
+            detail = (
+                f"only {self.plan.n_training + self.plan.n_comparison} "
+                f"observations, need >= {MIN_FOLD_OBSERVATIONS}"
+            )
+        elif self.reason == "insufficient_feasible_random_folds":
+            detail = "no feasible pseudo treatment time after random eligibility and geometry constraints"
+        else:
+            detail = str(self.reason)
+        return prefix + f"SKIPPED ({detail})"
 
 
 class PlaceboInTime:
-    """Placebo-in-time sensitivity check with hierarchical null model.
+    """Historical placebo refits with optional hierarchical calibration.
 
     Shifts the treatment time backward into the pre-intervention period
     to create ``n_folds`` placebo experiments.  Extracts the posterior
     cumulative impact from each fold, then fits a hierarchical Bayesian
     model to characterise the "status quo" distribution of effects when
     no intervention occurred.  The actual intervention's cumulative
-    effect is compared against this learned null.
+    effect is compared against this learned null. With ``calibrate=False``, report average historical differences and diagnostics without fitting a null or issuing a causal verdict.
 
     When ``expected_effect_prior`` and ``rope_half_width`` are provided,
     additionally computes exact closed-form Bayesian assurance (operating
@@ -186,6 +282,7 @@ class PlaceboInTime:
         * ``"random"`` — randomly sample eligible windows from the
           pre-intervention period, subject to ``min_training_pct``,
           ``min_gap``, and ``exclude_periods`` constraints.
+
         Every placebo fold must have at least one full intervention window
         of observed pre-treatment history. Sequential folds that do not meet
         this rule are skipped with a warning and deterministic
@@ -211,7 +308,7 @@ class PlaceboInTime:
         is ``False`` (the default) non-overlap of pseudo-intervention
         windows is enforced independently of ``min_gap``.
     allow_overlap : bool, default False
-        *(random mode only)* If ``False`` (the default), selected
+        In random selection, if ``False`` (the default), selected
         pseudo-intervention windows are required to be non-overlapping
         in index/time units.  Two folds at times ``t_a`` and ``t_b``
         are considered non-overlapping when
@@ -220,6 +317,8 @@ class PlaceboInTime:
         cost of violating the exchangeability assumption of the
         hierarchical status-quo model (each fold mean is treated as an
         independent draw from a common ``mu_status_quo``).
+        Explicitly scheduled overlapping windows also require this flag and
+        ``calibrate=False``; calibrated explicit schedules cannot overlap.
     exclude_periods : set[str] | None, default None
         *(random mode only)* Set of period labels to exclude from
         candidate selection. For datetime-indexed data, use
@@ -292,10 +391,17 @@ class PlaceboInTime:
         disagree by more than the one-observation half-open-window artefact
         of the derived default.
     make_figures : bool, default True
-        Whether :meth:`run` appends the calibration figure produced by
-        :meth:`plot_calibration` to ``CheckResult.figures``.  Every run
-        produces one, so ``figures[0]`` is safe to read; a run that reaches
-        no verdict gets the annotated placeholder instead of the panels.
+        Whether :meth:`run` appends a figure to ``CheckResult.figures``. Calibrated runs use :meth:`plot_calibration`; descriptive runs use :meth:`plot_folds`. With this control enabled, ``figures[0]`` is available even when all fits fail.
+    treatment_times : sequence or None, optional
+        Explicit, strictly ascending unique starts, copied at construction and exactly ``n_folds`` long. Incompatible with random selection. Every historical window is validated before fitting. Overlapping scheduled windows require ``allow_overlap=True`` and ``calibrate=False``.
+    min_training_rows : int or None, optional
+        Nonnegative minimum fitting-history count in every selection mode. Descriptive folds additionally require at least their planned comparison count in training rows; calibrated folds retain the original actual-window history requirement.
+    comparison_frequency : str or None, optional
+        Pandas calendar frequency for complete historical comparison grids (for example, ``"MS"``). Requires a datetime index. Each observed half-open window must exactly match its requested grid.
+    calibrate : bool, default True
+        Fit the hierarchical null and compare the real cumulative effect. With ``False``, report informational average historical differences, retain failed/ineligible rows, and omit actual-effect extraction, null fitting and assurance. Expected-effect/ROPE assurance configuration is incompatible with descriptive runs.
+    hdi_prob : float, default HDI_PROB
+        Probability mass for descriptive average-difference HDIs. Defaults to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
 
     Examples
     --------
@@ -336,6 +442,12 @@ class PlaceboInTime:
         random_seed: int | None = None,
         intervention_length: Any | None = None,
         make_figures: bool = True,
+        *,
+        treatment_times: Sequence[Any] | None = None,
+        min_training_rows: int | None = None,
+        comparison_frequency: str | None = None,
+        calibrate: bool = True,
+        hdi_prob: float = HDI_PROB,
     ) -> None:
         if n_folds < 1:
             raise ValueError("n_folds must be >= 1")
@@ -398,6 +510,59 @@ class PlaceboInTime:
                 "n_design_replications must be a positive non-bool int when "
                 f"provided, got {n_design_replications!r}"
             )
+        if not isinstance(calibrate, bool):
+            raise ValueError("calibrate must be a bool")
+        if min_training_rows is not None and (
+            isinstance(min_training_rows, (bool, np.bool_))
+            or not isinstance(min_training_rows, Integral)
+            or min_training_rows < 0
+        ):
+            raise ValueError("min_training_rows must be a nonnegative integer or None")
+        if (
+            isinstance(hdi_prob, (bool, np.bool_))
+            or not isinstance(hdi_prob, (int, float, np.integer, np.floating))
+            or not np.isfinite(hdi_prob)
+            or not 0 < hdi_prob < 1
+        ):
+            raise ValueError("hdi_prob must be a finite probability in (0, 1)")
+        if comparison_frequency is not None:
+            if not isinstance(comparison_frequency, str) or not comparison_frequency:
+                raise ValueError(
+                    "comparison_frequency must be a pandas frequency string"
+                )
+            pd.tseries.frequencies.to_offset(comparison_frequency)
+        if not calibrate and any(
+            value is not None
+            for value in (expected_effect_prior, rope_half_width, n_design_replications)
+        ):
+            raise ValueError("Assurance configuration requires calibrate=True")
+        times = None
+        if treatment_times is not None:
+            if isinstance(treatment_times, (str, bytes, Mapping)):
+                raise TypeError(
+                    "treatment_times must be a sequence of requested starts"
+                )
+            times = tuple(treatment_times)
+            if not times or len(times) != n_folds:
+                raise ValueError(
+                    "treatment_times must be nonempty and have length n_folds"
+                )
+            if any(
+                not earlier < later
+                for earlier, later in zip(times, times[1:], strict=False)
+            ):
+                raise ValueError(
+                    "treatment_times must be strictly ascending and unique"
+                )
+            if selection_method == "random":
+                raise ValueError(
+                    "treatment_times is incompatible with random selection"
+                )
+        self.treatment_times = times
+        self.min_training_rows = min_training_rows
+        self.comparison_frequency = comparison_frequency
+        self.calibrate = calibrate
+        self.hdi_prob = float(hdi_prob)
         self.n_folds = n_folds
         self.selection_method = selection_method
         self.min_training_pct = min_training_pct
@@ -612,9 +777,6 @@ class PlaceboInTime:
         n_total = len(all_indices)
         min_training = int(np.ceil(self.min_training_pct * n_total))
         exclude = self.exclude_periods or set()
-        required_pre_period_rows = self._get_intervention_window_observation_count(
-            data, treatment_time, intervention_length
-        )
 
         # Each candidate carries its position in ``all_indices`` so
         # ``min_gap`` can be enforced as an observation-count distance
@@ -634,8 +796,13 @@ class PlaceboInTime:
             pseudo_end = idx_val + intervention_length
             if pseudo_end > treatment_time:
                 continue
-            pre_period_rows = int(all_indices.searchsorted(idx_val, side="left"))
-            if pre_period_rows < required_pre_period_rows:
+            candidate = self._plan_window(
+                data, treatment_time, intervention_length, idx_val, 0
+            )
+            if candidate.reason is not None:
+                continue
+            assert candidate.plan.n_training is not None
+            if candidate.plan.n_training < candidate.plan.required_training:
                 continue
 
             candidates.append((pos, idx_val))
@@ -810,23 +977,6 @@ class PlaceboInTime:
         return observed_pre_period_rows, required_pre_period_rows
 
     @staticmethod
-    def _make_skipped_fold_metadata(
-        fold_index: int,
-        pseudo_treatment_time: Any,
-        observed_pre_period_rows: int | None,
-        required_pre_period_rows: int | None,
-        reason: str,
-    ) -> dict[str, Any]:
-        """Build deterministic metadata for a skipped placebo fold."""
-        return {
-            "fold_index": fold_index,
-            "pseudo_treatment_time": pseudo_treatment_time,
-            "observed_pre_period_rows": observed_pre_period_rows,
-            "required_pre_period_rows": required_pre_period_rows,
-            "reason": reason,
-        }
-
-    @staticmethod
     def _extract_cumulative_impact(experiment: BaseExperiment) -> xr.DataArray:
         """Extract posterior cumulative impact from a fitted experiment.
 
@@ -841,6 +991,211 @@ class PlaceboInTime:
 
         cumulative = post_impact.sum("obs_ind")
         return cumulative.stack(sample=("chain", "draw"))
+
+    def _plan_window(
+        self,
+        data: pd.DataFrame,
+        treatment_time: Any,
+        intervention_length: Any,
+        start: Any,
+        fold: int,
+    ) -> _FoldRecord:
+        """Calculate geometry once for candidate eligibility and execution."""
+        if self.comparison_frequency is not None and not isinstance(
+            data.index, pd.DatetimeIndex
+        ):
+            raise ValueError("comparison_frequency requires a DatetimeIndex")
+        end = start + intervention_length
+        observed = data.index[(data.index >= start) & (data.index < end)]
+        reason = None
+        # Default calibrated callers retain their historical eligibility rules.
+        if (
+            self.treatment_times is not None
+            or not self.calibrate
+            or self.comparison_frequency is not None
+        ):
+            if start not in data.index:
+                reason = "requested start is absent from the data index"
+            elif end <= start or end > treatment_time:
+                reason = "window must have positive length and end no later than the real intervention"
+            elif len(observed) == 0:
+                reason = "comparison window is empty"
+            elif self.comparison_frequency is not None:
+                expected = pd.date_range(
+                    start, end, freq=self.comparison_frequency, inclusive="left"
+                )
+                if not observed.equals(expected):
+                    reason = "comparison index does not match the complete requested frequency grid"
+        required_rows = (
+            self._get_intervention_window_observation_count(
+                data, treatment_time, intervention_length
+            )
+            if self.calibrate
+            else len(observed)
+        )
+        return _FoldRecord(
+            plan=_FoldPlan(
+                fold=fold,
+                start=start,
+                end=end,
+                comparison_end=observed[-1] if len(observed) else None,
+                n_training=int((data.index < start).sum()),
+                n_comparison=len(observed),
+                required_training=max(self.min_training_rows or 0, required_rows),
+            ),
+            reason=reason,
+        )
+
+    def _plan_windows(
+        self,
+        data: pd.DataFrame,
+        treatment_time: Any,
+        intervention_length: Any,
+        starts: list[Any],
+    ) -> list[_FoldRecord]:
+        """Preflight all requested geometry before spending any fitting budget."""
+        if self.comparison_frequency is not None and not isinstance(
+            data.index, pd.DatetimeIndex
+        ):
+            raise ValueError("comparison_frequency requires a DatetimeIndex")
+        records = [
+            self._plan_window(
+                data, treatment_time, intervention_length, start, position
+            )
+            for position, start in enumerate(starts, start=1)
+        ]
+        if self.treatment_times is not None:
+            for record in records:
+                if record.reason is not None:
+                    raise ValueError(
+                        f"Invalid placebo window at {record.plan.start!r}: {record.reason}"
+                    )
+            overlaps = any(
+                self._windows_overlap(earlier, later, intervention_length)
+                for earlier, later in zip(starts, starts[1:], strict=False)
+            )
+            if overlaps and (not self.allow_overlap or self.calibrate):
+                raise ValueError(
+                    "Scheduled overlapping windows require allow_overlap=True and calibrate=False"
+                )
+        required_rows = self._get_intervention_window_observation_count(
+            data, treatment_time, intervention_length
+        )
+        for fold in range(len(records) + 1, self.n_folds + 1):
+            records.append(
+                _FoldRecord(
+                    plan=_FoldPlan(fold, None, None, None, None, None, required_rows),
+                    reason="insufficient_feasible_random_folds",
+                )
+            )
+        return records
+
+    def _descriptive_row(self, record: _FoldRecord) -> dict[str, Any]:
+        """Derive one table row from a fold's plan and optional fitted result."""
+        row = {
+            key: value
+            for key, value in record.schedule().items()
+            if key not in {"window_end_exclusive", "reason"}
+        } | {
+            "status": record.status,
+            "reason": record.reason,
+            "mean": np.nan,
+            "hdi_lower": np.nan,
+            "hdi_upper": np.nan,
+            "hdi_prob": self.hdi_prob,
+            "divergences": None,
+            "max_rhat": None,
+            "min_bulk_ess": None,
+            "diagnostics_status": "unavailable",
+            "diagnostics_reason": "No completed placebo fit",
+        }
+        if record.result is not None:
+            samples = record.result.average_impact_samples
+            assert samples is not None
+            bounds = hdi(samples, prob=self.hdi_prob, dim="sample")
+            row.update(
+                mean=float(samples.mean().values),
+                hdi_lower=float(bounds.sel(hdi="lower").values),
+                hdi_upper=float(bounds.sel(hdi="higher").values),
+            )
+            row.update(self._fold_diagnostics(record.result.experiment))
+        return row
+
+    @staticmethod
+    def _fold_diagnostics(experiment: BaseExperiment) -> dict[str, Any]:
+        """Consume the adapter's full-fit diagnostic contract without backend dispatch."""
+        try:
+            return dict(experiment._model_backend.sampling_diagnostics())
+        except Exception as error:
+            return {
+                "divergences": None,
+                "max_rhat": None,
+                "min_bulk_ess": None,
+                "diagnostics_status": "unavailable",
+                "diagnostics_reason": f"Sampling diagnostics unavailable: {type(error).__name__}: {error}",
+            }
+
+    def _descriptive_result(
+        self,
+        records: list[_FoldRecord],
+        intervention_length: Any,
+    ) -> CheckResult:
+        """Summarize historical average differences without constructing a null."""
+        table = pd.DataFrame([self._descriptive_row(record) for record in records])
+        completed = table.loc[table.status == "completed"]
+        count = len(completed)
+        summary = {
+            "n_requested": self.n_folds,
+            "n_completed": count,
+            "mean_difference": float(completed["mean"].mean()) if count else None,
+            "mean_absolute_difference": float(completed["mean"].abs().mean())
+            if count
+            else None,
+            "mean_interval_width": float(
+                (completed.hdi_upper - completed.hdi_lower).mean()
+            )
+            if count
+            else None,
+            "intervals_excluding_zero": int(
+                ((completed.hdi_lower > 0) | (completed.hdi_upper < 0)).sum()
+            )
+            if count
+            else None,
+        }
+        text = (
+            f"Historical placebo differences: {count} of {self.n_folds} requested fits completed. "
+            "Calibration was not requested."
+        )
+        if count:
+            text += (
+                f" Mean average difference across completed fits: {summary['mean_difference']:.2f}; "
+                f"mean absolute average difference: {summary['mean_absolute_difference']:.2f}; "
+                f"{summary['intervals_excluding_zero']} of {count} HDIs exclude zero. "
+                "These are descriptive differences, not a false-positive rate; overlapping windows and shared training histories are dependent."
+            )
+        else:
+            text += " No completed placebo fits; differences and interval summaries are unavailable."
+        return self._attach_figures(
+            CheckResult(
+                check_name="PlaceboInTime",
+                passed=None,
+                table=table,
+                text=text,
+                metadata={
+                    "analysis_mode": "descriptive",
+                    "calibration_status": "not_requested",
+                    "schedule": [record.schedule() for record in records],
+                    "descriptive_summary": summary,
+                    "fold_results": [
+                        record.result for record in records if record.result is not None
+                    ],
+                    "n_folds_requested": self.n_folds,
+                    "n_folds_completed": count,
+                    "skipped_folds": self._skipped_fold_metadata(records),
+                    "intervention_length": intervention_length,
+                },
+            )
+        )
 
     def _build_status_quo_model(
         self,
@@ -1103,18 +1458,90 @@ class PlaceboInTime:
             prior,
         )
 
+    def _execute_fold(
+        self,
+        record: _FoldRecord,
+        data: pd.DataFrame,
+        factory: Any,
+    ) -> None:
+        """Execute one eligible plan and record its outcome in place."""
+        plan = record.plan
+        if record.reason is not None:
+            return
+        assert plan.n_training is not None and plan.n_comparison is not None
+        logger.info(
+            "PlaceboInTime fold %d/%d: pseudo_treatment_time=%s",
+            plan.fold,
+            self.n_folds,
+            plan.start,
+        )
+        if plan.n_training < plan.required_training:
+            record.reason = "insufficient_pre_period"
+            return
+        fold_data = data.loc[data.index < plan.end].copy()
+        if len(fold_data) < MIN_FOLD_OBSERVATIONS:
+            logger.warning(
+                "Fold %d has only %d observations (minimum %d), skipping.",
+                plan.fold,
+                len(fold_data),
+                MIN_FOLD_OBSERVATIONS,
+            )
+            record.reason = "insufficient_fold_observations"
+            return
+        try:
+            fold_random_seed = (
+                None
+                if self.random_seed is None
+                else int(self.random_seed) + plan.fold - 1
+            )
+            if self.experiment_factory is None:
+                experiment = factory(
+                    fold_data, plan.start, fold_random_seed=fold_random_seed
+                )
+            else:
+                experiment = factory(fold_data, plan.start)
+            if not self.calibrate and experiment.result.impact_post.size == 0:
+                raise ValueError("Historical impact draws contain no posterior samples")
+            if not self.calibrate and not bool(
+                np.isfinite(experiment.result.impact_post).all().values
+            ):
+                raise ValueError("Historical impact draws contain non-finite values")
+            cumulative = self._extract_cumulative_impact(experiment)
+            record.result = PlaceboFoldResult(
+                fold=plan.fold,
+                pseudo_treatment_time=plan.start,
+                experiment=experiment,
+                cumulative_impact_samples=cumulative,
+                fold_mean=float(cumulative.mean().values),
+                fold_sd=float(cumulative.std().values),
+                average_impact_samples=None
+                if self.calibrate
+                else cumulative / plan.n_comparison,
+            )
+            record.status = "completed"
+        except Exception as error:
+            record.status = "failed"
+            record.reason = f"{type(error).__name__}: {error}"
+            logger.warning(
+                "Fold %d failed to fit (pseudo_treatment_time=%s), skipping.",
+                plan.fold,
+                plan.start,
+                exc_info=True,
+            )
+
     def run(
         self,
         experiment: BaseExperiment,
         context: PipelineContext | None = None,
     ) -> CheckResult:
-        """Run placebo-in-time analysis with hierarchical null model.
+        """Run historical placebo refits and optional hierarchical calibration.
 
-        Creates ``n_folds`` placebo experiments by shifting the treatment
-        time backward.  Extracts posterior cumulative impact from each
-        fold, then fits a hierarchical Bayesian model to characterise
-        the status-quo distribution.  Compares the actual intervention
-        effect against this null.
+        Creates ``n_folds`` historical experiments at generated or explicit
+        treatment times. By default, extracts posterior cumulative impact
+        from each fold, fits a hierarchical Bayesian status-quo model, and
+        compares the actual intervention effect against this null. With
+        ``calibrate=False``, reports draw-wise average historical impacts
+        and sampling diagnostics without extracting the real effect.
         When ``expected_effect_prior`` was provided at construction,
         also runs exact closed-form Bayesian assurance calculations.
 
@@ -1134,12 +1561,9 @@ class PlaceboInTime:
         Returns
         -------
         CheckResult
-            With ``passed`` indicating whether the actual effect is
-            clearly outside the null distribution, and rich metadata
-            including the null samples and optional assurance results.
+            Calibrated results indicate whether the actual cumulative effect is clearly outside the learned null. Descriptive results have ``passed=None``, an average-difference table with one row per planned fold, schedule geometry and completed-fit aggregates, with no calibration quantities. Failed or ineligible folds keep their original positions and seeds. Descriptive summaries include weak completed fits; their diagnostics remain visible.
         """
         self.validate(experiment)
-        unseeded_custom_priors: list[dict[str, str]] = []
         factory = self._get_factory(context)
         treatment_time = experiment.treatment_time  # type: ignore[attr-defined]
         data = experiment.data
@@ -1147,21 +1571,21 @@ class PlaceboInTime:
         required_pre_period_rows = self._get_intervention_window_observation_count(
             data, treatment_time, intervention_length
         )
-        if required_pre_period_rows < 1:
-            raise ValueError(
-                f"intervention_length={intervention_length!r} spans no "
-                f"observations at treatment_time={treatment_time!r}, so no "
-                "placebo window can be built. Pass a longer "
-                "intervention_length."
+        comparison_window = None
+        if self.calibrate:
+            if required_pre_period_rows < 1:
+                raise ValueError(
+                    f"intervention_length={intervention_length!r} spans no "
+                    f"observations at treatment_time={treatment_time!r}, so no "
+                    "placebo window can be built. Pass a longer intervention_length."
+                )
+            comparison_window = self._describe_comparison_window(
+                data, treatment_time, required_pre_period_rows
             )
-        comparison_window = self._describe_comparison_window(
-            data, treatment_time, required_pre_period_rows
-        )
 
-        actual_cumulative = self._extract_cumulative_impact(experiment)
-        actual_cumulative_mean = float(actual_cumulative.mean().values)
-
-        if self.selection_method == "random":
+        if self.treatment_times is not None:
+            fold_treatment_times = list(self.treatment_times)
+        elif self.selection_method == "random":
             fold_treatment_times = self._compute_random_fold_treatment_times(
                 data, treatment_time, intervention_length
             )
@@ -1169,156 +1593,53 @@ class PlaceboInTime:
             fold_treatment_times = self._compute_fold_treatment_times(
                 treatment_time, intervention_length
             )
+        records = self._plan_windows(
+            data, treatment_time, intervention_length, fold_treatment_times
+        )
+        for record in records:
+            self._execute_fold(record, data, factory)
 
-        fold_results: list[PlaceboFoldResult] = []
-        fold_summaries: list[str] = []
-        skipped_folds: list[dict[str, Any]] = []
-        insufficient_pre_period_folds: list[dict[str, Any]] = []
-        random_selection_shortfall_folds: list[dict[str, Any]] = []
-        random_selection_shortfall_summaries: list[str] = []
-        if (
-            self.selection_method == "random"
-            and len(fold_treatment_times) < self.n_folds
-        ):
-            for fold_idx in range(len(fold_treatment_times), self.n_folds):
-                random_selection_shortfall_folds.append(
-                    self._make_skipped_fold_metadata(
-                        fold_idx,
-                        None,
-                        None,
-                        required_pre_period_rows,
-                        "insufficient_feasible_random_folds",
-                    )
-                )
-                random_selection_shortfall_summaries.append(
-                    f"Fold {fold_idx + 1}: SKIPPED (no feasible pseudo "
-                    "treatment time after random eligibility and geometry "
-                    "constraints)"
-                )
-            skipped_folds.extend(random_selection_shortfall_folds)
+        self._warn_skipped_folds(records)
+        if not self.calibrate:
+            return self._descriptive_result(records, intervention_length)
+        return self._calibrated_result(
+            experiment, records, intervention_length, comparison_window
+        )
 
-        for fold_idx, pseudo_tt in enumerate(fold_treatment_times):
-            fold_num = fold_idx + 1
-            logger.info(
-                "PlaceboInTime fold %d/%d: pseudo_treatment_time=%s",
-                fold_num,
-                self.n_folds,
-                pseudo_tt,
-            )
+    @staticmethod
+    def _skipped_fold_metadata(records: list[_FoldRecord]) -> list[dict[str, Any]]:
+        """Derive skips in legacy order: random shortfalls, then attempted folds."""
+        skipped = sorted(
+            (record for record in records if record.status != "completed"),
+            key=lambda record: record.plan.start is not None,
+        )
+        return [record.skipped_metadata() for record in skipped]
 
-            observed_pre_period_rows, _ = self._get_fold_pre_period_observation_counts(
-                data,
-                pseudo_tt,
-                required_pre_period_rows,
-            )
-            if observed_pre_period_rows < required_pre_period_rows:
-                skipped_fold = self._make_skipped_fold_metadata(
-                    fold_idx,
-                    pseudo_tt,
-                    observed_pre_period_rows,
-                    required_pre_period_rows,
-                    "insufficient_pre_period",
-                )
-                skipped_folds.append(skipped_fold)
-                insufficient_pre_period_folds.append(skipped_fold)
-                fold_summaries.append(
-                    f"Fold {fold_num}: SKIPPED (only "
-                    f"{observed_pre_period_rows} pre-treatment observations, "
-                    f"need >= {required_pre_period_rows} for one full "
-                    f"intervention window)"
-                )
-                continue
-
-            fold_data = self._get_fold_data(data, pseudo_tt, intervention_length)
-
-            if len(fold_data) < MIN_FOLD_OBSERVATIONS:
-                logger.warning(
-                    "Fold %d has only %d observations (minimum %d), skipping.",
-                    fold_num,
-                    len(fold_data),
-                    MIN_FOLD_OBSERVATIONS,
-                )
-                skipped_folds.append(
-                    self._make_skipped_fold_metadata(
-                        fold_idx,
-                        pseudo_tt,
-                        observed_pre_period_rows,
-                        required_pre_period_rows,
-                        "insufficient_fold_observations",
-                    )
-                )
-                fold_summaries.append(
-                    f"Fold {fold_num}: SKIPPED (only {len(fold_data)} "
-                    f"observations, need >= {MIN_FOLD_OBSERVATIONS})"
-                )
-                continue
-
-            try:
-                fold_random_seed = (
-                    None
-                    if self.random_seed is None
-                    else int(self.random_seed) + fold_idx
-                )
-                if self.experiment_factory is None:
-                    fold_experiment = factory(
-                        fold_data,
-                        pseudo_tt,
-                        fold_random_seed=fold_random_seed,
-                    )
-                else:
-                    fold_experiment = factory(fold_data, pseudo_tt)
-                cum_samples = self._extract_cumulative_impact(fold_experiment)
-                f_mean = float(cum_samples.mean().values)
-                f_sd = float(cum_samples.std().values)
-            except Exception:
-                logger.warning(
-                    "Fold %d failed to fit (pseudo_treatment_time=%s), skipping.",
-                    fold_num,
-                    pseudo_tt,
-                    exc_info=True,
-                )
-                skipped_folds.append(
-                    self._make_skipped_fold_metadata(
-                        fold_idx,
-                        pseudo_tt,
-                        observed_pre_period_rows,
-                        required_pre_period_rows,
-                        "experiment_failed_to_fit",
-                    )
-                )
-                fold_summaries.append(
-                    f"Fold {fold_num}: SKIPPED (experiment failed to fit "
-                    f"at pseudo treatment time {pseudo_tt})"
-                )
-                continue
-
-            fold_result = PlaceboFoldResult(
-                fold=fold_num,
-                pseudo_treatment_time=pseudo_tt,
-                experiment=fold_experiment,
-                cumulative_impact_samples=cum_samples,
-                fold_mean=f_mean,
-                fold_sd=f_sd,
-            )
-            fold_results.append(fold_result)
-            fold_summaries.append(
-                f"Fold {fold_num}: pseudo treatment at {pseudo_tt} "
-                f"— mean={f_mean:.2f}, sd={f_sd:.2f}"
-            )
-
-        fold_summaries.extend(random_selection_shortfall_summaries)
+    def _warn_skipped_folds(self, records: list[_FoldRecord]) -> None:
+        """Explain training and selection shortfalls from recorded outcomes."""
+        insufficient_pre_period_folds = [
+            record for record in records if record.reason == "insufficient_pre_period"
+        ]
+        random_selection_shortfall_folds = [
+            record
+            for record in records
+            if record.reason == "insufficient_feasible_random_folds"
+        ]
         if insufficient_pre_period_folds or random_selection_shortfall_folds:
             warning_parts: list[str] = []
             if insufficient_pre_period_folds:
                 warning_parts.append(
                     f"{len(insufficient_pre_period_folds)} fold(s) had "
-                    "pre-treatment history shorter than one full intervention "
-                    "window"
+                    + (
+                        "pre-treatment history below the required training minimum"
+                        if self.min_training_rows is not None
+                        else "pre-treatment history shorter than one full intervention window"
+                    )
                 )
             if random_selection_shortfall_folds:
                 warning_parts.append(
                     f"random selection yielded only "
-                    f"{len(fold_treatment_times)} of {self.n_folds} requested "
+                    f"{sum(record.plan.start is not None for record in records)} of {self.n_folds} requested "
                     "feasible fold(s) after eligibility and geometry constraints"
                 )
             warnings.warn(
@@ -1327,9 +1648,25 @@ class PlaceboInTime:
                 + ". Use fewer folds or an experiment_factory tailored to "
                 "the eligible fold data; skipped_folds metadata records the "
                 "observed and required pre-period rows.",
-                stacklevel=2,
+                stacklevel=3,
             )
 
+    def _calibrated_result(
+        self,
+        experiment: BaseExperiment,
+        records: list[_FoldRecord],
+        intervention_length: Any,
+        comparison_window: dict[str, int] | None,
+    ) -> CheckResult:
+        """Calibrate completed cumulative effects while retaining legacy outputs."""
+        unseeded_custom_priors: list[dict[str, str]] = []
+        actual_cumulative = self._extract_cumulative_impact(experiment)
+        actual_cumulative_mean = float(actual_cumulative.mean().values)
+        fold_results = [
+            record.result for record in records if record.result is not None
+        ]
+        skipped_folds = self._skipped_fold_metadata(records)
+        fold_summaries = [record.summary() for record in records]
         n_completed = len(fold_results)
         n_skipped = len(skipped_folds)
 
@@ -1408,6 +1745,7 @@ class PlaceboInTime:
         # Reaching here means the null model was built successfully.
         assert idata is not None and theta_new_samples is not None
 
+        assert actual_cumulative is not None and actual_cumulative_mean is not None
         p_outside = float(
             (np.abs(actual_cumulative_mean) > np.abs(theta_new_samples)).mean()
         )
@@ -1501,7 +1839,9 @@ class PlaceboInTime:
         read ``figures[0]`` without first checking whether the run reached a
         verdict; an inconclusive run gets the annotated placeholder.
         """
-        if self.make_figures:
+        if self.make_figures and result.metadata.get("analysis_mode") == "descriptive":
+            result.figures.append(self.plot_folds({"Placebo": result}))
+        elif self.make_figures:
             result.figures.append(
                 self._calibration_figure(
                     result,
@@ -1511,6 +1851,114 @@ class PlaceboInTime:
                 )
             )
         return result
+
+    @staticmethod
+    def plot_folds(
+        results: Mapping[str, CheckResult],
+        *,
+        title: str = "Historical placebo differences",
+        figsize: tuple[float, float] = (7.0, 6.0),
+    ) -> Figure:
+        """Plot recorded average differences and HDIs for matching historical windows.
+
+        Parameters
+        ----------
+        results : Mapping[str, CheckResult]
+            Labelled descriptive results returned by :meth:`run`. Requested schedules and window geometry must match, including failed fits.
+        title : str, default "Historical placebo differences"
+            Figure title.
+        figsize : tuple of float, default (7, 6)
+            Figure size in inches.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            Shared-axis comparison with a zero reference and failed-fold annotations.
+        """
+        if not results:
+            raise ValueError(
+                "plot_folds requires at least one labelled descriptive result"
+            )
+        frames = []
+        reference = None
+        date_labels = None
+        for model_position, (label, result) in enumerate(results.items()):
+            if (
+                result.metadata.get("analysis_mode") != "descriptive"
+                or result.table is None
+            ):
+                raise ValueError(
+                    "plot_folds requires descriptive PlaceboInTime results"
+                )
+            schedule = pd.DataFrame(result.metadata["schedule"]).drop(columns="reason")
+            if reference is None:
+                reference = schedule
+                date_labels = [
+                    str(value.date()) if hasattr(value, "date") else str(value)
+                    for value in schedule.pseudo_treatment_time
+                ]
+            elif not reference.equals(schedule):
+                raise ValueError(
+                    "Paired results require matching requested schedules and windows"
+                )
+            frame = result.table.copy()
+            frame["model"] = label
+            frame["position"] = -frame["fold"] + (
+                model_position - (len(results) - 1) / 2
+            ) * 0.6 / len(results)
+            frame["annotation"] = [
+                f"{label}: {status}" if status != "completed" else ""
+                for status in frame.status
+            ]
+            frames.append(frame)
+        frame = pd.concat(frames, ignore_index=True)
+        completed = frame.loc[frame.status == "completed"]
+        missing = frame.loc[frame.status != "completed"]
+        assert reference is not None and date_labels is not None
+        cycle = cast(Any, mpl.rcParams["axes.prop_cycle"]).by_key().get("color")
+        if not cycle:
+            cycle = cast(Any, mpl.rcParamsDefault["axes.prop_cycle"]).by_key()["color"]
+        model_colors = {
+            label: to_hex(cycle[position % len(cycle)])
+            for position, label in enumerate(results)
+        }
+        plot = (
+            ggplot(frame)
+            + geom_vline(xintercept=0, linetype="dashed", colour="black")
+            + geom_segment(
+                data=completed,
+                mapping=aes(
+                    x="hdi_lower",
+                    xend="hdi_upper",
+                    y="position",
+                    yend="position",
+                    colour="model",
+                ),
+            )
+            + geom_point(
+                data=completed, mapping=aes(x="mean", y="position", colour="model")
+            )
+            + geom_text(
+                data=missing,
+                mapping=aes(x=0, y="position", label="annotation", colour="model"),
+                size=8,
+                ha="left",
+                show_legend=False,
+            )
+            + scale_y_continuous(
+                breaks=[-int(fold) for fold in reference.fold], labels=date_labels
+            )
+            + scale_colour_manual(values=model_colors)
+            + labs(
+                x="Average difference (outcome units)",
+                y="Requested placebo start",
+                colour="Model",
+                caption="Recorded expected-path HDIs; dependent historical windows.",
+            )
+        )
+        if completed.empty:
+            plot += labs(subtitle="No completed placebo fits")
+        return PlaceboInTime._draw(plot, title, figsize)
 
     @staticmethod
     def plot_calibration(
@@ -1559,6 +2007,10 @@ class PlaceboInTime:
         call to :meth:`plot_calibration` has no such context and gets it.
         """
         metadata = check_result.metadata
+        if metadata.get("calibration_status") == "not_requested":
+            raise ValueError(
+                "Cannot plot calibration: calibration was not requested for this descriptive result"
+            )
         fold_results = metadata["fold_results"]
 
         if "null_samples" not in metadata:
@@ -1717,6 +2169,10 @@ class PlaceboInTime:
     def __repr__(self) -> str:
         """Return a string representation of the check."""
         parts = [f"n_folds={self.n_folds}"]
+        if not self.calibrate:
+            parts.append("calibrate=False")
+        if self.treatment_times is not None:
+            parts.append(f"treatment_times={self.treatment_times!r}")
         if self.intervention_length is not None:
             parts.append(f"intervention_length={self.intervention_length!r}")
         if self.selection_method != "sequential":
