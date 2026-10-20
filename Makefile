@@ -87,8 +87,8 @@ test-patch-cov: ## Run tests and fail if patch coverage versus the base branch i
 
 uml: ## Generate UML diagrams from code
 	pyreverse -o dot --no-signatures causalpy --output-directory docs/source/_static --ignore tests
-	unflatten -l 6 -f -c 12 docs/source/_static/classes.dot | dot -Tpng -o docs/source/_static/classes.png
-	dot -Tpng docs/source/_static/packages.dot -o docs/source/_static/packages.png
+	unflatten -l 6 -f -c 12 docs/source/_static/classes.dot | dot -Tsvg:cairo -o docs/source/_static/classes.svg
+	dot -Tsvg:cairo docs/source/_static/packages.dot -o docs/source/_static/packages.svg
 	rm docs/source/_static/classes.dot docs/source/_static/packages.dot
 
 gallery: ## Regenerate index.md and thumbnails from gallery.yaml

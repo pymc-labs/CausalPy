@@ -342,10 +342,10 @@ For a prose overview of CausalPy's design — the layered architecture, the `Bas
 The auto-generated UML diagrams below complement that overview:
 
 Classes
-![](docs/source/_static/classes.png)
+![](docs/source/_static/classes.svg)
 
 Packages
-![](docs/source/_static/packages.png)
+![](docs/source/_static/packages.svg)
 
 UML diagrams can be created with the command below.
 

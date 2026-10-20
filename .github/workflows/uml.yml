@@ -60,7 +60,7 @@ jobs:
           branch: update-uml-diagrams
           delete-branch: true
           add-paths: |
-            docs/source/_static/classes.png
-            docs/source/_static/packages.png
+            docs/source/_static/classes.svg
+            docs/source/_static/packages.svg
           labels: no releasenotes
           reviewers: drbenvincent
