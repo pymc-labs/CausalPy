@@ -641,7 +641,7 @@ requires-dist = [
     { name = "prek", marker = "extra == 'dev'" },
     { name = "prek", marker = "extra == 'lint'" },
     { name = "pyarrow", marker = "extra == 'test'" },
-    { name = "pylint", marker = "extra == 'docs'" },
+    { name = "pylint", marker = "extra == 'docs'", specifier = ">=4.1.1" },
     { name = "pymc", specifier = ">=6.0.1,<7" },
     { name = "pymc-bart", marker = "extra == 'docs'" },
     { name = "pymc-extras", specifier = ">=0.11" },
