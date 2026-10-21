@@ -730,34 +730,52 @@ class TestStateSpaceTimeSeriesCoverage:
         pred = model.predict(X=None)
         assert pred.posterior_predictive["y_hat"].sizes["obs_ind"] == 25
 
-    @pytest.mark.parametrize("level_order", [0, -1])
-    def test_level_order_below_one_raises(self, level_order):
-        """level_order below 1 is rejected with a clear error.
+    @pytest.mark.parametrize("level_order", [0, -1, 1.0, 1.5, True])
+    def test_level_order_not_positive_integer_raises(self, level_order):
+        """level_order outside the positive integers is rejected with a clear error.
 
-        Left to pymc-extras these fail at build time with `IndexError: index
-        -1 is out of bounds` and `negative dimensions are not allowed`.
+        Left to pymc-extras, 0 and -1 fail at build time with `IndexError:
+        index -1 is out of bounds` and `negative dimensions are not allowed`;
+        floats such as 1.0 pass a plain lower-bound check and fail with
+        `TypeError: len() of unsized object`.
         """
-        with pytest.raises(ValueError, match="level_order must be at least 1"):
+        with pytest.raises(ValueError, match="level_order must be an integer"):
             cp.pymc_models.StateSpaceTimeSeries(
                 level_order=level_order,
                 sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
             )
 
-    @pytest.mark.parametrize("seasonal_length", [1, 0, -1])
-    def test_seasonal_length_below_two_raises(self, seasonal_length):
-        """seasonal_length below 2 is rejected with a clear error.
+    @pytest.mark.parametrize("seasonal_length", [1, 0, -1, 7.0, 7.5])
+    def test_seasonal_length_not_integer_above_one_raises(self, seasonal_length):
+        """seasonal_length outside the integers above 1 is rejected with a clear error.
 
         The message must not offer a seasonality-free model: `build_model`
-        always adds a seasonal component, so there is no such path.
+        always adds a seasonal component, so there is no such path. Floats
+        are rejected because pymc-extras silently accepts a period like 7.5.
         """
         with pytest.raises(
-            ValueError, match="seasonal_length must be at least 2"
+            ValueError, match="seasonal_length must be an integer"
         ) as err:
             cp.pymc_models.StateSpaceTimeSeries(
                 seasonal_length=seasonal_length,
                 sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
             )
         assert "always carries a seasonal component" in str(err.value)
+
+    def test_numpy_integer_orders_are_cast_to_int(self, sample_data, mock_pymc_sample):
+        """numpy integers are accepted and cast, since pymc-extras rejects them.
+
+        Without the cast, `np.int64(7)` fails inside pymc-extras with
+        `season_length must be a positive number, got 7`.
+        """
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=np.int64(1),
+            seasonal_length=np.int64(7),
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        model.fit(X=None, y=sample_data)
+        assert type(model.level_order) is int
+        assert type(model.seasonal_length) is int
 
     def test_integer_index_without_datetime_raises(self):
         """Integer obs_ind without a datetime_index fallback is rejected."""

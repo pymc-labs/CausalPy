@@ -3101,25 +3101,35 @@ class StateSpaceTimeSeries(PyMCModel):
                         f"got {type(component).__name__}."
                     )
 
-        # Validate the orders the default components are built with.
-        if self._custom_trend_component is None and self.level_order < 1:
+        # Validate the orders the default components are built with. pymc-extras
+        # wants plain Python ints: floats such as 1.0 fail inside it with
+        # "len() of unsized object" and numpy integers with "season_length must
+        # be a positive number", so reject non-integers and cast the rest.
+        def _is_integer(value: Any) -> bool:
+            return isinstance(value, (int, np.integer)) and not isinstance(value, bool)
+
+        if self._custom_trend_component is None:
             # LevelTrend needs at least the level state; order=0 fails with an
             # obscure IndexError inside pymc-extras, and negative orders with
             # "negative dimensions are not allowed"
-            raise ValueError(
-                "level_order must be at least 1 (1 for a local level, 2 for a "
-                "local linear trend)."
-            )
-        if self._custom_seasonality_component is None and self.seasonal_length < 2:
+            if not _is_integer(self.level_order) or self.level_order < 1:
+                raise ValueError(
+                    "level_order must be an integer of at least 1 (1 for a local "
+                    f"level, 2 for a local linear trend), got {self.level_order!r}."
+                )
+            self.level_order = int(self.level_order)
+        if self._custom_seasonality_component is None:
             # FrequencySeasonality needs at least one harmonic; season_length=1
             # fails inside pymc-extras with "n must be a positive integer, got 0"
-            raise ValueError(
-                "seasonal_length must be at least 2, since the default "
-                "FrequencySeasonality component needs at least one harmonic. "
-                "The model always carries a seasonal component; pass "
-                "seasonality_component to swap the default for a different "
-                "pymc-extras component."
-            )
+            if not _is_integer(self.seasonal_length) or self.seasonal_length < 2:
+                raise ValueError(
+                    "seasonal_length must be an integer of at least 2, since the "
+                    "default FrequencySeasonality component needs at least one "
+                    f"harmonic, got {self.seasonal_length!r}. The model always "
+                    "carries a seasonal component; pass seasonality_component to "
+                    "swap the default for a different pymc-extras component."
+                )
+            self.seasonal_length = int(self.seasonal_length)
 
         # Initialize components
         self._trend_component = None
