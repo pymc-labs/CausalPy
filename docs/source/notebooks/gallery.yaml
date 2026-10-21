@@ -34,6 +34,8 @@ groups:
             notebook: synthetic-control-sklearn
           - title: Synthetic control with `pymc` models
             notebook: synthetic-control-pymc
+          - title: Multivariate synthetic control with `pymc` models
+            notebook: synthetic-control-multivariate-pymc
           - title: The effects of Brexit
             notebook: synthetic-control-brexit-pymc
           - title: Synthetic Difference-in-Differences with `pymc` models
