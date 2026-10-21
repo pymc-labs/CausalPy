@@ -102,6 +102,9 @@ def build(payload: dict, day: str, mention: str | None) -> dict:
         )
         and (hard is None or f["number"] != hard["number"])
     ]
+    # Same cost-of-waiting key as pick_hard_item, so "queued behind this one"
+    # lists the next-oldest decisions, not gh pr list's newest-first order.
+    other_hard.sort(key=lambda f: f["age_days"], reverse=True)
 
     hard_numbers = {f["number"] for f in other_hard}
     if hard is not None:
