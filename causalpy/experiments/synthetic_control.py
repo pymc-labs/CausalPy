@@ -825,7 +825,12 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         self, sample_kwargs: dict[str, Any] | None
     ) -> dict[str, Any]:
         """Merge a design refit's sampling overrides onto the parent model."""
-        refit_kwargs = dict(self.model.sample_kwargs)
+        model = self.model
+        if not isinstance(model, PyMCModel):
+            raise TypeError(
+                f"Design refits require a PyMC model. Got {type(model).__name__}."
+            )
+        refit_kwargs = dict(model.sample_kwargs)
         if sample_kwargs is not None:
             refit_kwargs.update(sample_kwargs)
         refit_kwargs.setdefault("progressbar", False)
@@ -1145,8 +1150,12 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         residual_std: float,
         rng: np.random.Generator,
         sample_kwargs: dict[str, Any] | None,
-    ) -> Self:
-        """Fit a design-only experiment on a noisy copy of the pre-period."""
+    ) -> "SyntheticControl":
+        """Fit a design-only SyntheticControl on a noisy copy of the pre-period.
+
+        Always returns this class, not a subclass. ``UpDownGeoLift`` does not
+        accept the unit arguments this constructor passes.
+        """
         noisy = pre.copy()
         noise = rng.normal(0, residual_std, size=len(pre))
         for column in self.treated_units:
