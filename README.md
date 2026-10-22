@@ -130,7 +130,7 @@ CausalPy provides methods for common causal inference decision contexts:
 | Decision context | Methods |
 | --- | --- |
 | Focussed testing on certain units (geos, products) | Synthetic control, Geographical lift |
-| Evaluate before/after changes, launches, policy changes | Differences in Differences, Staggered DiD, Interrupted time series |
+| Evaluate before/after changes, launches, policy changes | Differences in Differences, Event Study, Staggered DiD, Interrupted time series |
 | Exploit cutoff rules, score-based eligibility (credit, age) | Regression discontinuity, Regression kink |
 | Can't randomize, correct for selection | Instrumental variables, Inverse propensity weighting |
 | Group differences, control for covariates | ANCOVA |
@@ -143,6 +143,7 @@ CausalPy provides methods for common causal inference decision contexts:
 | Geographical lift | Measures the impact of an intervention in a specific geographic area by comparing it to similar areas without the intervention. Commonly used in marketing to assess regional campaigns. |
 | ANCOVA | Analysis of Covariance combines ANOVA and regression to control for the effects of one or more quantitative covariates. Used when comparing group means while controlling for other variables. |
 | Differences in Differences | Compares the changes in outcomes over time between a treatment group and a control group. Used in observational studies to estimate causal effects by accounting for time trends. |
+| Event Study | Estimates how a treatment effect evolves with time since a common treatment date, relative to a reference event time. Staggered adoption is a separate estimator. |
 | Staggered Difference-in-Differences | Estimates event-time treatment effects when different units adopt treatment at different times, using an imputation approach that models untreated outcomes and compares observed outcomes to counterfactual predictions. |
 | Regression discontinuity | Identifies causal effects by exploiting a cutoff or threshold in an assignment variable. Used when treatment is assigned based on a threshold value of an observed variable, allowing comparison just above and below the cutoff. |
 | Regression kink designs | Focuses on changes in the slope (kinks) of the relationship between variables rather than jumps at cutoff points. Used to identify causal effects when treatment intensity changes at a threshold. |

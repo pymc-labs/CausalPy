@@ -29,6 +29,7 @@ The `effect_summary()` method is available for the following experiment types:
 | Experiment Type | PyMC Models | Scikit-learn (OLS) Models |
 | --- | --- | --- |
 | Difference-in-Differences | ✅ Full support | ✅ Full support |
+| Event Study | ✅ Full support | ✅ Point estimates only |
 | Regression Discontinuity | ✅ Full support | ✅ Full support |
 | Regression Kink | ✅ Full support | ❌ Not implemented |
 | Interrupted Time Series | ✅ Full support | ✅ Full support |
