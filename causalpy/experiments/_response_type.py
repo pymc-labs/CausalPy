@@ -19,6 +19,8 @@ mutating that stored bundle.
 """
 
 import logging
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any, Literal
 
 from matplotlib.figure import Figure
@@ -28,14 +30,15 @@ Quantity = Literal["mu", "y_hat"]
 
 logger = logging.getLogger(__name__)
 
-_logged = {"plot": False, "summary": False}
+_logged = {"emitted": False}
 
 _RESPONSE_LOG = (
     "response_type selects the uncertainty quantity. "
     "'expectation' (default) uses the conditional mean mu and excludes "
-    "observation noise. 'prediction' uses posterior predictive y_hat and "
-    "includes observation noise, so intervals are wider. Stored impacts "
-    "remain the conditional expectation."
+    "observation noise. 'prediction' uses posterior predictive y_hat. "
+    "Where that series includes observation noise, intervals are wider. "
+    "Backends whose y_hat aliases mu reject prediction mode. "
+    "Stored impacts remain the conditional expectation."
 )
 
 _PREDICTION_SUMMARY_NOTE = (
@@ -83,23 +86,63 @@ def quantity_for(response_type: str) -> Quantity:
 
 
 def reset_response_type_log() -> None:
-    """Clear the once-per-process plot and summary log flags. For tests."""
-    _logged["plot"] = False
-    _logged["summary"] = False
+    """Clear the once-per-process plot and summary log flag. For tests."""
+    _logged["emitted"] = False
 
 
 def log_response_type_once(where: Literal["plot", "summary"]) -> None:
-    """Explain the response-type choice once per process and call site.
+    """Explain the response-type choice once per process.
+
+    The first plot or summary call consumes the flag. A later call site
+    does not log again.
 
     Parameters
     ----------
     where : {"plot", "summary"}
-        Which once-per-process flag to consume.
+        Call site. Both values share one process-wide flag.
     """
-    if _logged[where]:
+    if where not in ("plot", "summary"):
+        raise ValueError(f"where must be 'plot' or 'summary', got {where!r}")
+    if _logged["emitted"]:
         return
-    _logged[where] = True
+    _logged["emitted"] = True
     logger.info(_RESPONSE_LOG)
+
+
+@contextmanager
+def independent_predict_seed(model: Any, offset: int = 1) -> Iterator[None]:
+    """Shift a seeded model's predictive seed for one call, then restore it.
+
+    ``PyMCModel.predict`` reseeds posterior-predictive sampling from
+    ``sample_kwargs["random_seed"]`` on every call. Two equal-length
+    designs therefore share one observation-noise sequence, and a
+    fitted-minus-counterfactual contrast cancels that noise. An integer
+    seed is shifted for the duration of the context. Missing or
+    non-integer seeds are left alone.
+
+    Parameters
+    ----------
+    model : object
+        Object with ``sample_kwargs["random_seed"]``. Other objects are ignored.
+    offset : int, default 1
+        Added to an integer seed while the context is active.
+
+    Yields
+    ------
+    None
+        Control returns with the seed shifted. The original seed is restored
+        on exit, including when the body raises.
+    """
+    kwargs = getattr(model, "sample_kwargs", None)
+    seed = kwargs.get("random_seed") if isinstance(kwargs, dict) else None
+    if not isinstance(seed, int):
+        yield
+        return
+    kwargs["random_seed"] = seed + offset
+    try:
+        yield
+    finally:
+        kwargs["random_seed"] = seed
 
 
 def annotation_text(

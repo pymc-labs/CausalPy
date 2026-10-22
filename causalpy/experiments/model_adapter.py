@@ -166,10 +166,11 @@ def _extract_response(
     """Extract response-scale ``mu`` or ``y_hat`` from a prediction container.
 
     ``mu`` is the conditional expected outcome. ``y_hat`` is the posterior
-    predictive of the observed variable and includes observation noise.
-    Both are returned with the canonical prediction dimensions. Stray
-    non-dimension coordinates are dropped so they cannot leak into impact
-    containers.
+    predictive of the observed variable and includes observation noise when
+    the backend actually draws it. A series that aliases ``mu`` raises
+    rather than being returned under the prediction name. Both successful
+    results use the canonical prediction dimensions. Stray non-dimension
+    coordinates are dropped so they cannot leak into impact containers.
     """
     if quantity not in ("mu", "y_hat"):
         raise ValueError(f"quantity must be 'mu' or 'y_hat', got {quantity!r}")
@@ -180,6 +181,14 @@ def _extract_response(
             "response_type='prediction' requires y_hat."
         )
     draws = group[quantity].transpose("chain", "draw", "obs_ind", "treated_units")
+    if quantity == "y_hat" and "mu" in group:
+        mu = group["mu"].transpose("chain", "draw", "obs_ind", "treated_units")
+        if draws.sizes == mu.sizes and np.array_equal(draws.values, mu.values):
+            raise ValueError(
+                "y_hat aliases mu on this backend, so response_type='prediction' "
+                "has no observation-noise draws to show. State-space models store "
+                "the same series under both names."
+            )
     return draws.drop_vars([name for name in draws.coords if name not in draws.dims])
 
 
@@ -1386,8 +1395,8 @@ class PyMCForecastAdapter(ModelAdapter):
             Design matrix for which to generate predictions.
         quantity : {"mu", "y_hat"}, default "mu"
             ``"mu"`` is the conditional expected outcome. ``"y_hat"``
-            includes observation noise. On state-space models the two
-            series coincide because the observation model is deterministic.
+            includes observation noise when the backend draws it. A series
+            that aliases ``mu`` raises ``ValueError``.
         coords : dict, optional
             Coordinate metadata accepted by the forecasting backend but not
             used by its forecasting implementation.

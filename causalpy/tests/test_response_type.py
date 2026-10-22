@@ -35,6 +35,7 @@ from causalpy.experiments._response_type import (
 from causalpy.experiments._results import CausalResult
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.experiments.model_adapter import PyMCModelAdapter
+from causalpy.experiments.piecewise_its import PiecewiseITS
 
 
 def _draws(values, name):
@@ -115,12 +116,12 @@ def test_annotation_lands_on_the_figure_and_can_be_suppressed():
 
 
 def test_response_type_log_fires_once_per_process(caplog):
-    """Repeating the default selection must not spam the log."""
+    """The first plot or summary explains the choice; the other call site stays quiet."""
     reset_response_type_log()
     logger_name = "causalpy.experiments._response_type"
     with caplog.at_level(logging.INFO, logger=logger_name):
         log_response_type_once("plot")
-        log_response_type_once("plot")
+        log_response_type_once("summary")
     messages = [
         record.getMessage() for record in caplog.records if record.name == logger_name
     ]
@@ -154,6 +155,26 @@ def test_pymc_predict_response_selects_mu_or_y_hat_without_changing_predict():
     xr.testing.assert_equal(adapter.predict(np.ones((2, 1))), mu)
     with pytest.raises(ValueError, match="y_hat"):
         adapter.predict_response(np.ones((2, 1)), quantity="missing", group="posterior")
+
+
+def test_aliased_y_hat_is_rejected_instead_of_labeled_as_noise():
+    """A backend that stores mu under both names must not claim observation noise."""
+    mu = _draws([[4.0, 4.0], [4.0, 4.0]], "mu")
+    tree = xr.DataTree()
+    tree["posterior_predictive"] = xr.Dataset({"mu": mu, "y_hat": mu.copy()})
+
+    class _Model:
+        def predict(self, X, *, coords=None, out_of_sample=False, group="posterior"):
+            return tree
+
+    adapter = PyMCModelAdapter.__new__(PyMCModelAdapter)
+    adapter._model = _Model()
+    with pytest.raises(ValueError, match="aliases mu"):
+        adapter.predict_response(np.ones((2, 1)), quantity="y_hat", group="posterior")
+    xr.testing.assert_equal(
+        adapter.predict_response(np.ones((2, 1)), quantity="mu", group="posterior"),
+        mu,
+    )
 
 
 def test_its_prediction_bundle_uses_y_hat_and_leaves_the_stored_result():
@@ -201,6 +222,66 @@ def test_its_prediction_bundle_uses_y_hat_and_leaves_the_stored_result():
         ("y_hat", "posterior", False),
         ("y_hat", "posterior", True),
     ]
+
+
+def test_piecewise_prediction_contrast_keeps_independent_observation_noise():
+    """Equal-length fitted and counterfactual draws must not share one noise sequence."""
+    n = 4
+    design = np.column_stack(
+        [np.arange(n, dtype=float), np.array([0.0, 0.0, 1.0, 1.0])]
+    )
+
+    class _Model:
+        def __init__(self):
+            self.sample_kwargs = {"random_seed": 1}
+
+    class _Backend:
+        def __init__(self):
+            self._model = _Model()
+
+        def predict_response(self, X, *, quantity, group, out_of_sample=False):
+            seed = self._model.sample_kwargs["random_seed"]
+            mu = np.asarray(X, dtype=float)[:, 0]
+            noise = 0.0 if quantity == "mu" else float(seed)
+            values = np.broadcast_to(
+                (mu + noise)[None, None, :, None], (1, 1, n, 1)
+            ).copy()
+            return xr.DataArray(
+                values,
+                dims=("chain", "draw", "obs_ind", "treated_units"),
+                coords={
+                    "chain": [0],
+                    "draw": [0],
+                    "obs_ind": np.arange(n),
+                    "treated_units": ["unit_0"],
+                },
+            )
+
+    backend = _Backend()
+    experiment = PiecewiseITS.__new__(PiecewiseITS)
+    experiment.design = {"X": design}
+    experiment._interruption_cols = [1]
+    experiment.time_col = "t"
+    experiment.interruption_times = [2]
+    experiment.data = pd.DataFrame({"t": np.arange(n)})
+    experiment.datapost = experiment.data.iloc[2:]
+    experiment._model_backend = backend
+    stored = CausalResult(
+        predictions_pre=None,
+        predictions_post=None,
+        impact_pre=None,
+        impact_post=None,
+        impact_post_cumulative=None,
+        score=None,
+    )
+    copied = experiment._bundle_for_response(
+        stored, response_type="prediction", group="posterior"
+    )
+    # Same seed would cancel and leave a zero contrast, because the mean
+    # depends only on the unshifted column. Independent noise leaves the
+    # seed difference.
+    np.testing.assert_allclose(copied.impact_pre.values, -1.0)
+    assert backend._model.sample_kwargs["random_seed"] == 1
 
 
 def _sklearn_its():

@@ -442,8 +442,9 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
             to 50. Ignored for other kinds.
         response_type : {"expectation", "prediction"}, default "expectation"
             Which quantity the fitted curve represents. ``"expectation"``
-            uses the conditional mean ``mu``. ``"prediction"`` uses posterior
-            predictive ``y_hat``. The reported discontinuity stays the stored
+            uses the conditional mean ``mu`` and excludes observation noise.
+            ``"prediction"`` uses posterior predictive ``y_hat`` and includes
+            observation noise. The reported discontinuity stays the stored
             conditional-expectation contrast. Point-estimate backends reject
             ``"prediction"``.
         show_response_annotation : bool, optional

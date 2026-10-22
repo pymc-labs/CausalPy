@@ -398,9 +398,10 @@ class RegressionKink(BaseExperiment[KinkResult]):
             to 50. Ignored for other kinds.
         response_type : {"expectation", "prediction"}, default "expectation"
             Which quantity the fitted curve represents. ``"expectation"``
-            uses the conditional mean ``mu``. ``"prediction"`` uses posterior
-            predictive ``y_hat``. The reported gradient change stays the
-            stored kink contrast. Point-estimate backends reject
+            uses the conditional mean ``mu`` and excludes observation noise.
+            ``"prediction"`` uses posterior predictive ``y_hat`` and includes
+            observation noise. The reported gradient change stays the stored
+            kink contrast. Point-estimate backends reject
             ``"prediction"``.
         show_response_annotation : bool, optional
             Whether to add a small figure note naming the quantity and, for

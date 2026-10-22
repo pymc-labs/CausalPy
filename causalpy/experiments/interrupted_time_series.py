@@ -1096,8 +1096,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             Ignored when the prediction container has no draws.
         response_type : {"expectation", "prediction"}, default "expectation"
             Which quantity the returned prediction and impact columns use.
-            ``"prediction"`` rebuilds them from posterior predictive draws.
-            Stored results stay on ``mu``.
+            ``"prediction"`` rebuilds them from posterior predictive draws,
+            which include observation noise. Stored results stay on ``mu``.
 
         Returns
         -------
@@ -1176,7 +1176,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             Direction for tail probability calculation (Bayesian models only)
         response_type : {"expectation", "prediction"}, default "expectation"
             ``"prediction"`` recomputes the persistence contrast from
-            posterior predictive draws. Stored results stay on ``mu``.
+            posterior predictive draws and includes observation noise.
+            Stored results stay on ``mu``.
             Point-estimate backends reject ``"prediction"``.
 
         Returns

@@ -31,6 +31,7 @@ from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments._response_type import (
     check_response_type,
     finish_response_plot,
+    independent_predict_seed,
     log_response_type_once,
     note_prediction_summary,
     quantity_for,
@@ -463,9 +464,10 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
         X_cf = X.copy()
         for idx in self._interruption_cols:
             X_cf[:, idx] = 0
-        y_counterfactual = self._model_backend.predict_response(
-            X=X_cf, quantity=quantity, group=group
-        )
+        with independent_predict_seed(getattr(self._model_backend, "_model", None)):
+            y_counterfactual = self._model_backend.predict_response(
+                X=X_cf, quantity=quantity, group=group
+            )
         effect = predictions.isel(treated_units=0) - y_counterfactual.isel(
             treated_units=0
         )
@@ -881,7 +883,8 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
             when the prediction container has no posterior draws.
         response_type : {"expectation", "prediction"}, default "expectation"
             Which quantity the returned columns use. ``"prediction"`` rebuilds
-            them from posterior predictive draws. Stored results stay on ``mu``.
+            them from posterior predictive draws, which include observation noise.
+            Stored results stay on ``mu``.
             Point-estimate backends reject ``"prediction"``.
 
         Returns

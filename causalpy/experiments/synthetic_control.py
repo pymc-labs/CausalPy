@@ -700,9 +700,9 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             of the treated unit. If ``None``, uses the first treated unit.
         response_type : {"expectation", "prediction"}, default "expectation"
             Which quantity the returned prediction and impact columns use.
-            ``"prediction"`` rebuilds them from posterior predictive draws.
-            Stored results stay on ``mu``. Point-estimate backends reject
-            ``"prediction"``.
+            ``"prediction"`` rebuilds them from posterior predictive draws,
+            which include observation noise. Stored results stay on ``mu``.
+            Point-estimate backends reject ``"prediction"``.
 
         Returns
         -------
