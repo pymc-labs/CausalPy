@@ -1,0 +1,20 @@
+causalpy/experiments/model_adapter.py
+  h_63db634213747e 358,381-385,892,908-910,926-930,1251,1269-1272,1286-1290
+causalpy/pymc_models.py
+  h_63db634213747e 20,113,1165-1173,1176,1252-1256,1259,4034-4059,4067,4088-4091,4105,4165
+causalpy/tests/test_glm.py
+  h_63db634213747e 455-490
+causalpy/tests/test_pymc_models.py
+  h_63db634213747e 1468-1489
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0a2c96aebce79a3037a0a4c6a0128638ff3363e3",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
