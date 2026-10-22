@@ -1,0 +1,36 @@
+ARCHITECTURE.md
+  h_63db634213747e 123
+causalpy/experiments/_response_type.py
+  h_63db634213747e 1-301
+causalpy/experiments/diff_in_diff.py
+  h_63db634213747e 16,31-35,378-429,439-440,480-491,523-524,537-538,569-573,581-593,776-785
+causalpy/experiments/interrupted_time_series.py
+  h_63db634213747e 16,33-39,554-590,600-601,639-649,682-683,738-739,767-771,778,780-792,1007-1016,1078,1097-1100,1108-1112,1157-1158,1177-1180,1227-1232,1361,1375-1379,1438-1443,1451-1454,1471-1477,1491,1504-1505
+causalpy/experiments/model_adapter.py
+  h_63db634213747e 163-185,188,405-457,761-800,1372-1419
+causalpy/experiments/piecewise_its.py
+  h_63db634213747e 18,31-37,444-491,501-502,540-550,581-582,595-596,632-636,644-656,786-795,864,882-885,893-897,957,988-992,1007-1013,1024,1037-1038
+causalpy/experiments/prepostnegd.py
+  h_63db634213747e 16,29-33,40,332-367,377-378,418-429,460-461,474-475,502-506,514-526,586-595
+causalpy/experiments/regression_discontinuity.py
+  h_63db634213747e 18,40-44,374-394,404-405,443-453,484-485,498-499,530-534,542-554,681-690
+causalpy/experiments/regression_kink.py
+  h_63db634213747e 30-34,39,49,330-350,360-361,399-409,440-441,454-455,480-484,492-504,552-561
+causalpy/experiments/synthetic_control.py
+  h_63db634213747e 17,29-35,450-482,493-494,537-547,585-586,601-602,636-640,653,662-671,679,701-705,716-720,767,804-808,825,827-833,845-846
+causalpy/tests/test_response_type.py
+  h_63db634213747e 1-272
+docs/source/knowledgebase/prediction-contract.md
+  h_63db634213747e 13,15-25
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d33d7a2314a9886d08214121fec5d0cfa26bc421",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
