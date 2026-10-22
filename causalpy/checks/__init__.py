@@ -16,6 +16,7 @@
 from causalpy.checks.bandwidth import BandwidthSensitivity
 from causalpy.checks.base import Check, CheckResult
 from causalpy.checks.convex_hull import ConvexHullCheck
+from causalpy.checks.dress_rehearsal import DressRehearsalCheck
 from causalpy.checks.leave_one_out import LeaveOneOut
 from causalpy.checks.mccrary import McCraryDensityTest
 from causalpy.checks.operating_characteristics import (
@@ -40,6 +41,7 @@ __all__ = [
     "Check",
     "CheckResult",
     "ConvexHullCheck",
+    "DressRehearsalCheck",
     "FalsificationResult",
     "LeaveOneOut",
     "McCraryDensityTest",
