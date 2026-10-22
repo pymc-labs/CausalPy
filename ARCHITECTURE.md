@@ -14,7 +14,7 @@ CausalPy implements 10+ quasi-experimental causal inference methods over two cor
 | `causalpy/reporting.py` | `EffectSummary`, statistics and prose for both backends |
 | `causalpy/pipeline.py` | `Pipeline`, `PipelineContext`, `PipelineResult`, `Step` protocol |
 | `causalpy/steps/` | `EstimateEffect`, `SensitivityAnalysis`, `GenerateReport` |
-| `causalpy/checks/` | Diagnostic checks (`PlaceboInTime`, `LeaveOneOut`, `ConvexHullCheck`, etc.) |
+| `causalpy/checks/` | Diagnostic checks (`PlaceboInTime`, `LeaveOneOut`, `ConvexHullCheck`, `DressRehearsalCheck`, etc.) |
 | `causalpy/transforms.py` | Patsy `step()` / `ramp()` transforms for piecewise ITS |
 | `causalpy/data/` | `load_data()` and synthetic dataset generators |
 | `causalpy/tests/` | pytest suite |
