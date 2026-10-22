@@ -19,7 +19,7 @@ mutating that stored bundle.
 """
 
 import logging
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any, Literal
 
@@ -110,62 +110,50 @@ def log_response_type_once(where: Literal["plot", "summary"]) -> None:
     logger.info(_RESPONSE_LOG)
 
 
-def _shifted_replay_seed(seed: Any, offset: int) -> Any | None:
-    """Return a different seed when PyMC would replay ``seed``, else None.
+def _replays_predictive_draws(seed: Any) -> bool:
+    """Return whether a second predict call would redraw the same noise.
 
-    ``int``, numpy integers, and one-dimensional integer sequences are
-    replayed by ``sample_posterior_predictive``. ``None`` and a
-    ``Generator`` are not, so they need no offset.
+    ``sample_posterior_predictive`` restarts from ``random_seed`` unless it
+    is missing, ``None``, or a generator. Bool, float, integer, and
+    array-like seeds all replay, including ``True``.
     """
-    if isinstance(seed, bool):
-        return None
-    if isinstance(seed, (int, np.integer)):
-        return int(seed) + offset
-    values = None
-    if isinstance(seed, np.ndarray):
-        values = seed
-    elif isinstance(seed, Sequence) and not isinstance(seed, (str, bytes)):
-        values = np.asarray(seed)
-    if values is None or values.dtype.kind not in "iu" or values.size == 0:
-        return None
-    if values.ndim == 0:
-        return int(values) + offset
-    if values.ndim != 1:
-        return None
-    return (values.astype(int) + offset).tolist()
+    if seed is None:
+        return False
+    return not isinstance(seed, (np.random.Generator, np.random.RandomState))
 
 
 @contextmanager
-def independent_predict_seed(model: Any, offset: int = 1) -> Iterator[None]:
-    """Shift a seeded model's predictive seed for one call, then restore it.
+def independent_predict_seed(model: Any) -> Iterator[None]:
+    """Drop a replayed predictive seed for one call, then restore it.
 
     ``PyMCModel.predict`` reseeds posterior-predictive sampling from
     ``sample_kwargs["random_seed"]`` on every call. Two equal-length
     designs therefore share one observation-noise sequence, and a
-    fitted-minus-counterfactual contrast cancels that noise. Integer
-    seeds and chain-length integer sequences are shifted for the
-    duration of the context. Missing seeds and generators are left alone.
+    fitted-minus-counterfactual contrast cancels that noise. A replayed
+    seed is replaced with ``None`` for the duration of the context, so
+    the next draw is not a restart of the first. The caller's seed is
+    restored on exit. Missing seeds and generators are left alone.
 
     Parameters
     ----------
     model : object
         Object with ``sample_kwargs["random_seed"]``. Other objects are ignored.
-    offset : int, default 1
-        Added to a replayed seed while the context is active.
 
     Yields
     ------
     None
-        Control returns with the seed shifted. The original seed is restored
-        on exit, including when the body raises.
+        Control returns with a replayed seed cleared. The original seed is
+        restored on exit, including when the body raises.
     """
     kwargs = getattr(model, "sample_kwargs", None)
-    seed = kwargs.get("random_seed") if isinstance(kwargs, dict) else None
-    shifted = _shifted_replay_seed(seed, offset)
-    if shifted is None:
+    if not isinstance(kwargs, dict) or "random_seed" not in kwargs:
         yield
         return
-    kwargs["random_seed"] = shifted
+    seed = kwargs["random_seed"]
+    if not _replays_predictive_draws(seed):
+        yield
+        return
+    kwargs["random_seed"] = None
     try:
         yield
     finally:

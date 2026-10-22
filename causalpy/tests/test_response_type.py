@@ -194,26 +194,25 @@ def test_aliased_y_hat_with_nan_is_rejected():
         adapter.predict_response(np.ones((2, 1)), quantity="y_hat", group="posterior")
 
 
-def test_independent_predict_seed_shifts_replayed_seeds_only():
-    """Numpy integers and chain seeds move; a generator is not replayed."""
+def test_independent_predict_seed_clears_replayed_seeds_only():
+    """Any replayed seed, including bool, is cleared; a generator is not."""
 
     class _Model:
         def __init__(self, seed):
             self.sample_kwargs = {"random_seed": seed}
 
-    for seed, expected in (
-        (np.int64(7), 8),
-        ([11], [12]),
-        (np.array([3, 5]), [4, 6]),
-    ):
+    for seed in (1, True, 7.0, np.int64(7), [11], np.array([[11]])):
         model = _Model(seed)
         with independent_predict_seed(model):
-            assert model.sample_kwargs["random_seed"] == expected
+            assert model.sample_kwargs["random_seed"] is None
         assert model.sample_kwargs["random_seed"] is seed
     generator = np.random.default_rng(0)
     model = _Model(generator)
     with independent_predict_seed(model):
         assert model.sample_kwargs["random_seed"] is generator
+    model = _Model(None)
+    with independent_predict_seed(model):
+        assert model.sample_kwargs["random_seed"] is None
 
 
 def test_its_prediction_bundle_uses_y_hat_and_leaves_the_stored_result():
@@ -263,7 +262,7 @@ def test_its_prediction_bundle_uses_y_hat_and_leaves_the_stored_result():
     ]
 
 
-@pytest.mark.parametrize("seed", [1, np.int64(7), [11]])
+@pytest.mark.parametrize("seed", [1, True, np.int64(7), [11], 7.0])
 def test_piecewise_prediction_contrast_keeps_independent_observation_noise(seed):
     """Equal-length fitted and counterfactual draws must not share one noise sequence."""
     n = 4
@@ -281,7 +280,9 @@ def test_piecewise_prediction_contrast_keeps_independent_observation_noise(seed)
 
         def predict_response(self, X, *, quantity, group, out_of_sample=False):
             used = self._model.sample_kwargs["random_seed"]
-            if isinstance(used, (list, tuple, np.ndarray)):
+            if used is None:
+                noise_seed = 100.0
+            elif isinstance(used, (list, tuple, np.ndarray)):
                 noise_seed = float(np.asarray(used).reshape(-1)[0])
             else:
                 noise_seed = float(used)
@@ -322,9 +323,12 @@ def test_piecewise_prediction_contrast_keeps_independent_observation_noise(seed)
         stored, response_type="prediction", group="posterior"
     )
     # Same seed would cancel and leave a zero contrast, because the mean
-    # depends only on the unshifted column. Independent noise leaves the
-    # seed difference.
-    np.testing.assert_allclose(copied.impact_pre.values, -1.0)
+    # depends only on the unshifted column. Clearing the seed uses 100.
+    if isinstance(seed, (list, tuple, np.ndarray)):
+        fitted_noise = float(np.asarray(seed).reshape(-1)[0])
+    else:
+        fitted_noise = float(seed)
+    np.testing.assert_allclose(copied.impact_pre.values, fitted_noise - 100.0)
     assert backend._model.sample_kwargs["random_seed"] is seed
 
 
