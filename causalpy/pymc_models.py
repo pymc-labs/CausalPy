@@ -28,6 +28,7 @@ import xarray as xr
 from patsy import dmatrix
 from pymc_extras.prior import Prior
 
+from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import GroupNotSampledException
 from causalpy.utils import _bayesian_r2_score, _design_fingerprint, round_num
@@ -1097,12 +1098,11 @@ class GeneralizedLinearRegression(PyMCModel):
             max_label_length: int, name: str, coeff_samples: xr.DataArray, round_to: int
         ) -> None:
             formatted_name = f"  {name: <{max_label_length}}"
-            lower_q = (1 - HDI_PROB) / 2
+            lower, upper = hdi_bounds(coeff_samples, prob=HDI_PROB, dim="sample")
             formatted_val = (
                 f"{round_num(coeff_samples.mean().data, round_to)}, "
                 f"{HDI_PROB * 100:.0f}% HDI "
-                f"[{round_num(coeff_samples.quantile(lower_q).data, round_to)}, "
-                f"{round_num(coeff_samples.quantile(1 - lower_q).data, round_to)}]"
+                f"[{round_num(lower, round_to)}, {round_num(upper, round_to)}]"
             )
             print(f"  {formatted_name}  {formatted_val}")
 

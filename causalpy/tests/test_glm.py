@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import arviz as az
 import numpy as np
 import pandas as pd
 import pymc as pm
@@ -871,6 +872,45 @@ def test_glr_print_coefficients_requires_fit():
     model = GeneralizedLinearRegression(family="poisson")
     with pytest.raises(RuntimeError, match="Model has not been fit"):
         model.print_coefficients(["x0"])
+
+
+def test_glr_print_coefficients_reports_hdi_not_equal_tailed_quantiles(capsys):
+    """Skewed posterior summaries use the highest-density interval, not quantiles."""
+    from causalpy._arviz_compat import hdi_bounds
+    from causalpy.constants import HDI_PROB
+    from causalpy.utils import round_num
+
+    draws = np.concatenate([np.full(97, 1.0), np.full(3, 1000.0)])
+    posterior = xr.Dataset(
+        {
+            "beta": xr.DataArray(
+                np.ones((1, draws.size, 1, 1)),
+                dims=["chain", "draw", "treated_units", "coeffs"],
+                coords={"treated_units": ["unit_0"], "coeffs": ["x0"]},
+            ),
+            "alpha": xr.DataArray(
+                draws[None, :, None],
+                dims=["chain", "draw", "treated_units"],
+                coords={"treated_units": ["unit_0"]},
+            ),
+        }
+    )
+    model = GeneralizedLinearRegression(family="negative_binomial")
+    model.idata = xr.DataTree.from_dict({"posterior": posterior})
+    model.print_coefficients(["x0"], round_to=2)
+    printed = capsys.readouterr().out
+    alpha = az.extract(model.idata, group="posterior", var_names="alpha").sel(
+        treated_units="unit_0"
+    )
+    lower, upper = hdi_bounds(alpha, prob=HDI_PROB, dim="sample")
+    hdi_interval = f"[{round_num(lower, 2)}, {round_num(upper, 2)}]"
+    quantile_interval = (
+        f"[{round_num(alpha.quantile(0.03).data, 2)}, "
+        f"{round_num(alpha.quantile(0.97).data, 2)}]"
+    )
+    assert hdi_interval != quantile_interval
+    assert hdi_interval in printed
+    assert quantile_interval not in printed
 
 
 def test_glr_gaussian_print_coefficients_includes_sigma(capsys, rng, mock_pymc_sample):
