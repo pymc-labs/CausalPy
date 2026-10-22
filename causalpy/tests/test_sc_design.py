@@ -136,6 +136,42 @@ def test_design_methods_reject_an_ols_model(method):
             design.donor_pool_quality()
 
 
+def test_design_sample_kwargs_merges_parent_settings_and_rejects_non_pymc():
+    panel = _tiny_panel()
+    treatment_time = panel.index.max() + pd.Timedelta(days=1)
+    design = cp.SyntheticControl(
+        panel,
+        treatment_time,
+        ["a", "b", "c"],
+        ["y"],
+        model=cp.pymc_models.WeightedSumFitter(
+            sample_kwargs={"draws": 11, "progressbar": True}
+        ),
+    )
+    merged = design._design_sample_kwargs({"tune": 3})
+    assert merged["draws"] == 11
+    assert merged["tune"] == 3
+    assert merged["progressbar"] is True
+
+    bare = cp.SyntheticControl(
+        panel,
+        treatment_time,
+        ["a", "b", "c"],
+        ["y"],
+        model=cp.pymc_models.WeightedSumFitter(sample_kwargs={"draws": 11}),
+    )
+    assert bare._design_sample_kwargs(None)["progressbar"] is False
+
+    ols = cp.SyntheticControl.from_pre_period(
+        panel,
+        ["a", "b", "c"],
+        ["y"],
+        model=LinearRegression(),
+    )
+    with pytest.raises(TypeError, match="PyMC model"):
+        ols._design_sample_kwargs(None)
+
+
 def test_validate_design_rejects_a_holdout_that_leaves_too_little_pre_period(design_sc):
     with pytest.raises(ValueError, match="need >= 10"):
         design_sc.validate_design(0.1, holdout_periods=35)
