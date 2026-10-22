@@ -1713,6 +1713,7 @@ def test_piecewise_plot_data_uses_hdi_for_skewed_draws(monkeypatch):
         ),
         _require_bundle=lambda group: bundle,
     )
+    result._bundle_for_response = cp.PiecewiseITS._bundle_for_response.__get__(result)
     from causalpy.experiments import piecewise_its as piecewise_module
 
     probabilities = []
