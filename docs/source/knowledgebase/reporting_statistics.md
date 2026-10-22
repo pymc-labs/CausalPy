@@ -1,3 +1,10 @@
+---
+myst:
+  html_meta:
+    description: "How to report Bayesian causal effect estimates: posterior means, credible intervals (HDI), ROPE, and Bayesian tail probabilities."
+"og:description": "How to report Bayesian causal effect estimates: posterior means, credible intervals (HDI), ROPE, and Bayesian tail probabilities."
+---
+
 # Statistical Reporting in CausalPy
 
 This page explains the statistical concepts used in CausalPy's reporting layer. The reporting functions automatically compute and present statistics appropriate to your model type.
@@ -7,7 +14,7 @@ This page explains the statistical concepts used in CausalPy's reporting layer. 
 CausalPy supports two modeling frameworks, each with its own statistical paradigm:
 
 | Model Framework | Statistical Approach | Statistics Reported |
-|----------------|---------------------|---------------------|
+| --- | --- | --- |
 | PyMC models | Bayesian | Mean, Median, HDI, Tail Probabilities, ROPE |
 | Scikit-learn models | Frequentist (OLS) | Mean, Confidence Intervals, p-values |
 
@@ -20,13 +27,13 @@ The reporting layer automatically detects which type of model you're using and g
 The `effect_summary()` method is available for the following experiment types:
 
 | Experiment Type | PyMC Models | Scikit-learn (OLS) Models |
-|----------------|-------------|---------------------------|
+| --- | --- | --- |
 | Difference-in-Differences | ✅ Full support | ✅ Full support |
 | Regression Discontinuity | ✅ Full support | ✅ Full support |
 | Regression Kink | ✅ Full support | ❌ Not implemented |
 | Interrupted Time Series | ✅ Full support | ✅ Full support |
 | Synthetic Control | ✅ Full support | ✅ Full support |
-| PrePostNEGD | ❌ Use `.summary()` instead | ❌ Use `.summary()` instead |
+| PrePostNEGD | ✅ Full support | ❌ Not implemented |
 | Instrumental Variable | ❌ Not available | ❌ Not available |
 | Inverse Propensity Weighting | ❌ Not available | ❌ Not available |
 
@@ -43,12 +50,14 @@ When you use PyMC models, CausalPy performs Bayesian inference, yielding posteri
 ### Point Estimates
 
 **Mean**
+
 - The average of the posterior distribution
 - Represents the expected value of the causal effect
 - **When to use:** Most commonly reported point estimate; balances all posterior information
 - **Interpretation:** "The average estimated effect is X"
 
 **Median**
+
 - The middle value of the posterior distribution (50th percentile)
 - Divides the posterior probability mass in half
 - **When to use:** Preferred when the posterior is skewed; more robust to outliers
@@ -61,6 +70,7 @@ For symmetric posteriors, mean and median are nearly identical. For skewed poste
 ### Uncertainty Quantification
 
 **HDI (Highest Density Interval)**
+
 - A {term}`credible interval` containing the specified percentage of posterior probability (default: 95%)
 - Reported as `hdi_lower` and `hdi_upper` in summary tables
 - The narrowest interval containing the specified probability mass
@@ -68,66 +78,72 @@ For symmetric posteriors, mean and median are nearly identical. For skewed poste
 - **Key difference from CI:** This is a probability statement about the parameter itself, not about the procedure
 
 :::{note}
-The `hdi_prob` parameter controls the interval width (e.g., 0.95 for 95% HDI, 0.90 for 90% HDI). Wider intervals (higher probability) provide more certainty but less precision.
+Public `effect_summary()` methods take `alpha`, not `hdi_prob`: their HDI coverage is `1 - alpha`. The default `alpha=0.05` therefore reports a 95% HDI, while `alpha=0.025` reports a 97.5% HDI. This is independent of the project-wide `HDI_PROB = 0.94` setting used by other reporting and plotting APIs, so one experiment can legitimately show a 95% summary HDI and 94% plot bands.
 :::
 
 **Example interpretation:**
-```
+
+```text
 mean: 2.5, 95% HDI: [1.2, 3.8]
 ```
+
 "The estimated effect is 2.5 on average, and we can be 95% certain the true effect lies between 1.2 and 3.8."
 
-### Hypothesis Testing
+### Posterior Tail Summaries
 
-Bayesian hypothesis testing uses posterior probabilities directly, making the interpretation more intuitive than traditional p-values.
+`direction` selects the tail summary that `effect_summary()` reports; it does not infer a direction from the posterior mean and does not change the HDI+ROPE conclusion.
 
-**Directional Tests**
-- `p_gt_0`: {term}`Posterior probability` that the effect is greater than zero (positive effect)
-- `p_lt_0`: Posterior probability that the effect is less than zero (negative effect)
-- **Interpretation:** Direct probability statements about the hypothesis
-- **Example:** If `p_gt_0 = 0.95`, there's a 95% probability the effect is positive
+- `direction="increase"` reports `p_gt_0 = P(effect > 0)`.
+- `direction="decrease"` reports `p_lt_0 = P(effect < 0)`.
+- `direction="two-sided"` reports `p_two_sided = 2 × min(P(effect > 0), P(effect < 0))` as a two-sided tail probability.
 
-**Two-Sided Tests**
-- `p_two_sided`: Probability of observing an effect at least this extreme in either direction
-  - **Calculation:** `2 × min(P(effect > 0), P(effect < 0))`
-  - This mirrors the frequentist two-sided p-value approach
-  - Example: If 97% of posterior is > 0 and 3% is < 0, then p_two_sided = 2 × 0.03 = 0.06
-- `prob_of_effect`: Probability of a non-zero effect in either direction (1 - p_two_sided)
-  - Continuing the example: prob_of_effect = 1 - 0.06 = 0.94 (94% probability of some effect)
-- **When to use:** When you don't have a directional hypothesis
-- **Interpretation:** `prob_of_effect = 0.95` means 95% probability of a non-zero effect
+The table also retains `prob_of_effect = 1 - p_two_sided` for compatibility. This is a tail-derived score, not a posterior probability that the effect is non-zero: with a continuous posterior, `P(effect != 0)` is generally one regardless of that score. Tail summaries are descriptive evidence, not a binary credible/not-credible verdict.
 
-:::{note}
-Unlike frequentist p-values, Bayesian posterior probabilities answer the question you actually care about: "What's the probability of this hypothesis given the data?"
-:::
+### ROPE and Practical Significance
 
-**Decision guidance:**
-- `p_gt_0 > 0.95` or `p_lt_0 > 0.95`: Strong evidence for directional effect
-- `prob_of_effect > 0.95`: Strong evidence for any effect (two-sided)
-- Values close to 0.5: Weak or no evidence for the effect
+`min_effect` is the smallest absolute effect that is practically meaningful. It must be finite and non-negative; `0` is valid and creates the point ROPE `[0, 0]`.
 
-### Effect Size Assessment
+#### The `p_rope` table column
 
-**ROPE (Region of Practical Equivalence)**
-- Tests whether the effect exceeds a minimum meaningful threshold (`min_effect`)
-- Reported as `p_rope` in summary tables
-- **Purpose:** Distinguish statistical significance from practical significance
-- **Interpretation:** Probability that the effect exceeds the threshold you care about
+For compatibility, the optional `p_rope` column is a direction-sensitive strict exceedance probability:
 
-**How it works:**
-1. You specify `min_effect` (the smallest effect size you consider meaningful)
-2. For "increase" direction: `p_rope` = P(effect > min_effect)
-3. For "decrease" direction: `p_rope` = P(effect < -min_effect)
-4. For "two-sided" direction: `p_rope` = P(|effect| > min_effect)
+1. `direction="increase"`: `P(effect > min_effect)`.
+2. `direction="decrease"`: `P(effect < -min_effect)`.
+3. `direction="two-sided"`: `P(|effect| > min_effect)`.
 
-**Example:**
+It is not the probability mass inside the ROPE and is not the input to CausalPy's prose conclusion.
+
+#### The HDI+ROPE conclusion
+
+When you supply `min_effect`, CausalPy instead uses the closed, symmetric ROPE `[-min_effect, min_effect]` and compares the reported HDI `[L, U]` with it.
+
+- If `U < -min_effect` or `L > min_effect`, the HDI is entirely outside the ROPE: the effect is **practically significant**.
+- If `-min_effect <= L` and `U <= min_effect`, the HDI is entirely inside the ROPE: the effect is **practically equivalent to zero**.
+- Otherwise the HDI overlaps the ROPE: the result is **inconclusive**.
+
+Because the ROPE is closed, an HDI that only touches `-min_effect` or `min_effect` is inconclusive unless it is wholly inside. The report gives the posterior mass below, inside, and above the ROPE; samples exactly on a boundary count as inside, so those three masses partition the finite posterior draws. For time-series summaries with `cumulative=True`, CausalPy reports the same decision and mass breakdown separately for the average and cumulative effects.
+Non-finite posterior draws are excluded consistently from the reported mean, median, HDI, tail summary, ROPE masses, and conclusion; CausalPy raises `ValueError` if no finite posterior draws remain.
+
+Without `min_effect`, `effect_summary()` remains strictly descriptive: it reports the interval, the requested tail summary, and any requested relative effect, but gives no binary or practical-significance verdict.
+
+#### Scope of the HDI+ROPE verdict
+
+The HDI+ROPE verdict accounts for only part of the relevant uncertainty. It is a within-model statement: it propagates posterior uncertainty about the effect parameter conditional on the model, its priors, and the observed data—and nothing else. Thus, a practically significant, practically equivalent, or inconclusive verdict describes practical significance only within those modelling assumptions.
+
+It does not represent design or identification uncertainty: whether the counterfactual is credible, whether parallel trends hold, whether a synthetic-control donor reconstruction holds, or how much a comparable period or unit moves when no intervention happened at all.
+
+`PlaceboInTime` can calibrate that missing uncertainty when it identifies a placebo null: it re-fits the analysis at pre-treatment placebo dates, where no intervention occurred, and learns how the design and estimator behave under that status quo. This calibration complements, rather than replaces, HDI+ROPE. Use HDI+ROPE for the within-model practical/sign statement and the identified placebo null to assess whether that conclusion remains distinctive after design and identification uncertainty are included. A valid placebo null is not always available: `PlaceboInTime` returns **INCONCLUSIVE** when it cannot identify one, for example because too few folds are usable or the usable folds do not identify a between-fold spread.
+
+For a check with an identified null, `cp.checks.operating_characteristics()` gives the exact, deterministic operating curve of the calibrated design. Conditional on each true effect size, its curve separates correct detection, wrong-sign misclassification, and indeterminate outcomes under the same ROPE decision rule. This is different from assurance: assurance is that conditional detection curve integrated against an explicit expected-effect prior. See {doc}`sensitivity checks <../notebooks/sensitivity_checks>` for the placebo workflow and its availability conditions.
+
 ```python
-result.effect_summary(direction="increase", min_effect=1.0)
+summary = result.effect_summary(direction="increase", min_effect=1.0)
+print(summary.table["p_rope"])  # P(effect > 1.0)
+print(summary.text)  # HDI+ROPE conclusion and below/inside/above masses
 ```
-If `p_rope = 0.85`, there's an 85% probability the effect exceeds your meaningful threshold of 1.0.
 
 :::{important}
-ROPE analysis requires domain knowledge to set `min_effect`. Consider: What's the smallest effect that would justify the intervention cost? What effect size is scientifically or practically meaningful?
+Choose `min_effect` from domain knowledge: it should reflect the smallest effect that would justify the intervention cost or be scientifically meaningful.
 :::
 
 ---
@@ -139,6 +155,7 @@ When you use scikit-learn models (OLS regression), CausalPy performs classical f
 ### Point Estimates
 
 **Mean / Coefficient Estimate**
+
 - The estimated causal effect from the regression model
 - For scalar effects (DiD, RD): the coefficient of interest
 - For time-series effects (ITS, SC): the average or cumulative impact
@@ -151,21 +168,25 @@ Unlike Bayesian estimates, frequentist point estimates don't come with a probabi
 ### Uncertainty Quantification
 
 **Confidence Intervals (CI)**
+
 - Reported as `ci_lower` and `ci_upper` in summary tables
 - Computed using t-distribution critical values at the specified significance level (default: α = 0.05 for 95% CI)
 - **Interpretation:** "If we repeated this experiment many times, 95% of such intervals would contain the true effect"
 - **Key difference from HDI:** This is a statement about the procedure, not about the parameter
 
 **Standard Errors**
+
 - Measure of uncertainty in the coefficient estimate
 - Used to construct confidence intervals and compute p-values
 - Derived from the residual variance and design matrix
 - **Larger standard errors** → wider confidence intervals → more uncertainty
 
 **Example interpretation:**
-```
+
+```text
 mean: 2.5, 95% CI: [1.1, 3.9]
 ```
+
 "The estimated effect is 2.5. If we repeated this study many times, 95% of such confidence intervals would contain the true effect."
 
 :::{important}
@@ -175,22 +196,26 @@ mean: 2.5, 95% CI: [1.1, 3.9]
 ### Hypothesis Testing
 
 **p-values**
+
 - The probability of observing data at least as extreme as what we observed, assuming the null hypothesis (no effect) is true
 - Reported as `p_value` in summary tables
 - **Common threshold:** p < 0.05 is often used as evidence against the null hypothesis
 - **Interpretation:** Lower p-values indicate stronger evidence against no effect
 
 **Correct interpretation:**
+
 - p = 0.03: "If there were truly no effect, we'd observe data this extreme only 3% of the time"
 - **NOT:** "There's a 97% probability of an effect" (this is a Bayesian interpretation)
 
 **Common pitfalls to avoid:**
+
 1. ❌ "p = 0.06 means no effect" → The p-value doesn't prove the null hypothesis
 2. ❌ "p < 0.05 means the effect is important" → Statistical significance ≠ practical significance
 3. ❌ "p = 0.01 is better than p = 0.04" → Both provide evidence against the null; the effect size matters more
 4. ❌ "p > 0.05 proves no effect" → Absence of evidence is not evidence of absence
 
 **Decision guidance:**
+
 - p < 0.05: Conventional threshold for "statistical significance"
 - p < 0.01: Stronger evidence against the null
 - p > 0.05: Insufficient evidence to reject the null (but doesn't prove no effect)
@@ -200,6 +225,7 @@ Always report the actual p-value and effect size, not just whether p < 0.05. The
 :::
 
 **t-statistics and degrees of freedom**
+
 - t-statistic = coefficient / standard error
 - Measures how many standard errors the estimate is from zero
 - Degrees of freedom (df) = n - p, where n = sample size, p = number of parameters
@@ -210,6 +236,7 @@ Always report the actual p-value and effect size, not just whether p < 0.05. The
 ## Choosing Between Approaches
 
 ### When to use Bayesian inference (PyMC models):
+
 - ✅ You want direct probability statements about effects
 - ✅ You have prior information to incorporate
 - ✅ You need uncertainty quantification for complex hierarchical models
@@ -217,6 +244,7 @@ Always report the actual p-value and effect size, not just whether p < 0.05. The
 - ✅ Small to moderate sample sizes where uncertainty matters
 
 ### When to use Frequentist inference (OLS models):
+
 - ✅ You need computational speed (OLS is faster)
 - ✅ Your audience expects classical statistical inference
 - ✅ Large sample sizes where approaches converge
@@ -232,24 +260,30 @@ Both approaches are valid and will often lead to similar conclusions, especially
 ## Summary Statistics by Effect Type
 
 ### Scalar Effects (DiD, RD, Regression Kink)
+
 For experiments with a single causal effect parameter:
 
 **Bayesian output:**
+
 - One row with: mean, median, hdi_lower, hdi_upper
 - Tail probabilities: p_gt_0 (or p_lt_0, or p_two_sided + prob_of_effect)
 - Optional: p_rope (if min_effect specified)
 
 **Frequentist output:**
+
 - One row with: mean, ci_lower, ci_upper, p_value
 
 ### Time-Series Effects (ITS, Synthetic Control)
+
 For experiments with multiple post-treatment time points:
 
 **Two aggregation levels:**
+
 1. **Average effect:** Mean effect across the post-treatment window
 2. **Cumulative effect:** Sum of effects across the post-treatment window
 
 **Additional statistics:**
+
 - **Relative effects:** Percentage change relative to counterfactual
   - `relative_mean`: Effect size as percentage of counterfactual
   - `relative_hdi_lower` / `relative_hdi_upper` (Bayesian)
@@ -278,11 +312,11 @@ Returns a human-readable interpretation ready for reports:
 
 ```python
 print(summary.text)
-# Output: "The average treatment effect was 2.50 (95% HDI [1.20, 3.80]),
-#          with a posterior probability of an increase of 0.975."
+# Output: "The average treatment effect was 2.50 (95% HDI [1.20, 3.80]). The posterior probability of an increase is 0.975."
 ```
 
 ### Basic usage (default Bayesian):
+
 ```python
 import causalpy as cp
 
@@ -296,6 +330,7 @@ print(summary.table)  # Numerical summary
 ```
 
 ### With directional hypothesis:
+
 ```python
 # Test for an increase
 summary = result.effect_summary(direction="increase")  # Reports p_gt_0
@@ -303,23 +338,24 @@ summary = result.effect_summary(direction="increase")  # Reports p_gt_0
 # Test for a decrease
 summary = result.effect_summary(direction="decrease")  # Reports p_lt_0
 
-# Two-sided test
-summary = result.effect_summary(direction="two-sided")  # Reports prob_of_effect
+# Two-sided tail summary
+summary = result.effect_summary(direction="two-sided")  # Reports p_two_sided
 ```
 
-### With practical significance threshold:
+### With a practical significance threshold:
+
 ```python
-# Only care about effects > 2.0
+# Define effects smaller than 2.0 in magnitude as practically equivalent.
 summary = result.effect_summary(
     direction="increase",
-    min_effect=2.0  # ROPE analysis
+    min_effect=2.0,
 )
-# Access results
-print(summary.table)  # p_rope column included
-print(summary.text)   # Prose interpretation
+print(summary.table)  # Includes the legacy direction-sensitive p_rope column.
+print(summary.text)  # Reports an HDI+ROPE verdict and posterior ROPE masses.
 ```
 
 ### For time-series experiments with custom window:
+
 ```python
 # ITS or Synthetic Control result
 summary = result.effect_summary(
@@ -341,7 +377,9 @@ For deeper understanding of these statistical concepts:
 - **Practical application:** Explore the example notebooks in our documentation showing these concepts in action
 
 :::{seealso}
+
 - :doc:`glossary` - Quick reference for statistical terms
 - :doc:`causal_written_resources` - Books and articles on causal inference
 - API documentation for the `effect_summary()` method
+
 :::

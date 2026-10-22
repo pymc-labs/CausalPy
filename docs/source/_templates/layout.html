@@ -1,0 +1,25 @@
+{%- extends "!layout.html" %}
+{#- Add Schema.org structured data for the project on the landing page. -#}
+{%- block extrahead %}
+  {{ super() }}
+  {%- if pagename == "index" %}
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareSourceCode",
+    "name": "CausalPy",
+    "description": "CausalPy is a Python library for Bayesian causal inference in quasi-experiments: synthetic control, difference-in-differences, interrupted time series, regression discontinuity, instrumental variables, and inverse propensity score weighting.",
+    "url": "https://causalpy.readthedocs.io/",
+    "codeRepository": "https://github.com/pymc-labs/CausalPy",
+    "programmingLanguage": "Python",
+    "runtimePlatform": "Python 3",
+    "license": "https://www.apache.org/licenses/LICENSE-2.0",
+    "author": {
+      "@type": "Organization",
+      "name": "PyMC Labs",
+      "url": "https://www.pymc-labs.com"
+    }
+  }
+  </script>
+  {%- endif %}
+{%- endblock extrahead %}

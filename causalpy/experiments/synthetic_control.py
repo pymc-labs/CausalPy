@@ -11,59 +11,92 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Synthetic Control Experiment
-"""
+"""Synthetic Control Experiment."""
 
 import warnings
 from typing import Any, Literal
 
-import arviz as az
 import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
-from causalpy.custom_exceptions import BadIndexException
-from causalpy.date_utils import _combine_datetime_indices, format_date_axes
-from causalpy.plot_utils import (
-    ResponseType,
-    _log_response_type_effect_summary_once,
-    _log_response_type_info_once,
-    add_hdi_annotation,
-    get_hdi_to_df,
-    plot_xY,
+from causalpy.constants import HDI_PROB
+from causalpy.date_utils import validate_treatment_time_against_index
+from causalpy.experiments._panel_counterfactual import WidePanel, resolve_treated_unit
+from causalpy.experiments._results import CausalResult
+from causalpy.experiments.model_adapter import PyMCModelAdapter, build_coords
+from causalpy.input_data import DataFrameLike, to_pandas_with_time_index
+from causalpy.plot_utils import _PosteriorPlotStyle, format_r2_score
+from causalpy.pymc_models import (
+    _LEGACY_Y_HAT_PRIOR,
+    PyMCModel,
+    WeightedSumFitter,
+    _uses_stock_y_hat_default,
 )
-from causalpy.pymc_models import PyMCModel, WeightedSumFitter
 from causalpy.reporting import EffectSummary
-from causalpy.utils import check_convex_hull_violation, round_num
+from causalpy.utils import check_convex_hull_violation, has_posterior_draws
 
 from .base import BaseExperiment
 
-LEGEND_FONT_SIZE = 12
 
-
-class SyntheticControl(BaseExperiment):
+class SyntheticControl(BaseExperiment[CausalResult]):
     """The class for the synthetic control experiment.
 
-    :param data:
-        A pandas dataframe
-    :param treatment_time:
-        The time when treatment occurred, should be in reference to the data index
-    :param control_units:
-        A list of control units to be used in the experiment
-    :param treated_units:
-        A list of treated units to be used in the experiment
-    :param model:
-        A PyMC or sklearn model. Defaults to WeightedSumFitter.
-    :param min_donor_correlation:
+    Parameters
+    ----------
+    data : dataframe-like
+        Any eager dataframe Narwhals supports. For a pandas dataframe the index
+        carries the time axis. Dataframes from other libraries have no index,
+        so those callers must pass ``time_column``.
+    treatment_time : int, float, or pd.Timestamp
+        The time when treatment occurred, in reference to the data index.
+    control_units : list of str
+        A list of control units to be used in the experiment.
+    treated_units : list of str
+        A list of treated units to be used in the experiment.
+    model : PyMCModel, RegressorMixin, or None, default None
+        A PyMC or sklearn model. Defaults to :class:`WeightedSumFitter`.
+    min_donor_correlation : float, default 0.0
         Minimum acceptable Pearson correlation between each control unit and
         treated unit in the pre-treatment period. Control units below this
         threshold trigger a ``UserWarning``. Defaults to ``0.0`` (warn on
         negatively correlated donors).
+    auto_scale_sigma : bool, default True
+        If ``True`` (default) and the model still carries the weighted-sum
+        fitters' stock ``y_hat`` prior, that ``sigma ~ HalfNormal(1)`` default is
+        replaced by ``sigma ~ Exponential(2/s)``. The scale is computed per
+        treated unit, with *s* the standard deviation of that unit's
+        pre-treatment data, so units on different scales are each calibrated
+        separately. Set to ``False`` to keep the original ``HalfNormal(1)``
+        default; the experiment then fits a copy of the model with that prior
+        pinned explicitly, leaving the instance you passed in untouched. A model
+        constructed with an explicit ``y_hat`` prior is never rescaled either
+        way.
+    time_column : str, optional
+        Column holding the time axis. It becomes the index of the data. Required
+        for non-pandas inputs, which carry no index. If None (default), the
+        pandas index of ``data`` is used. Passing it for data that already has a
+        meaningful index raises, since only one of the two can be the time axis.
 
-    Example
+    Notes
+    -----
+    **Lazy lifecycle**
+
+    Construction only validates input and builds the control/treated design
+    matrices — nothing is sampled. Call :meth:`fit` to run posterior inference
+    (it returns ``self``, so construction and fitting chain in one
+    expression), and optionally :meth:`sample_prior_predictive` first for
+    prior predictive checks (``plot(group="prior")``,
+    ``effect_summary(group="prior")``). Results live on ``exp.result`` /
+    ``exp.prior_result``.
+
+    **Estimate extraction**
+
+    The model learns control-unit weights from pre-intervention outcomes and applies them to post-intervention controls to construct a synthetic untreated trajectory. Pointwise impact is the observed treated outcome minus this synthetic counterfactual, and cumulative impact is its running sum. Bayesian backends subtract the posterior conditional expectation ``mu`` rather than noisy posterior-predictive draws ``y_hat``; OLS subtracts its weighted point prediction.
+
+    Examples
     --------
     >>> import causalpy as cp
     >>> df = cp.load_data("sc")
@@ -81,40 +114,47 @@ class SyntheticControl(BaseExperiment):
     ...             "progressbar": False,
     ...         }
     ...     ),
-    ... )
-
-    Notes
-    -----
-    For Bayesian models, the causal impact is calculated using the posterior expectation
-    (``mu``) rather than the posterior predictive (``y_hat``). This means the impact and
-    its uncertainty represent the systematic causal effect, excluding observation-level
-    noise. The uncertainty bands in the plots reflect parameter uncertainty and
-    counterfactual prediction uncertainty, but not individual observation variability.
+    ... ).fit()
     """
 
     supports_ols = True
     supports_bayes = True
     _default_model_class = WeightedSumFitter
+    _panel: WidePanel
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        data: DataFrameLike,
         treatment_time: int | float | pd.Timestamp,
         control_units: list[str],
         treated_units: list[str],
         model: PyMCModel | RegressorMixin | None = None,
         min_donor_correlation: float = 0.0,
-        **kwargs: dict,
+        auto_scale_sigma: bool = True,
+        time_column: str | None = None,
     ) -> None:
         super().__init__(model=model)
-        # rename the index to "obs_ind"
-        data.index.name = "obs_ind"
-        self.data = data
-        self.input_validation(data, treatment_time)
+        # to_pandas_with_time_index returns a copy, so index metadata is normalized on an owned frame rather than the caller's.
+        pandas_data = to_pandas_with_time_index(data, time_column)
+        pandas_data.index.name = "obs_ind"
+        self.data = pandas_data
+        self.input_validation(pandas_data, treatment_time)
         self.treatment_time = treatment_time
         self.control_units = control_units
         self.labels = control_units
         self.treated_units = treated_units
+        self.auto_scale_sigma = auto_scale_sigma
+        if not auto_scale_sigma:
+            self._pin_legacy_sigma_prior()
+        # Backend-identity check is justified here: constructor-time
+        # capability validation (trust boundary), not statistical dispatch.
+        if self._model_backend.is_ols and len(treated_units) > 1:
+            raise ValueError(
+                "OLS/sklearn synthetic control supports only a single treated "
+                f"unit, but {len(treated_units)} were given: {treated_units}. "
+                "Use a PyMC model (e.g. WeightedSumFitter) for multiple treated "
+                "units, or run a separate experiment per treated unit."
+            )
         if not (-1 <= min_donor_correlation <= 1):
             raise ValueError(
                 f"min_donor_correlation must be between -1 and 1, "
@@ -125,7 +165,6 @@ class SyntheticControl(BaseExperiment):
         self._prepare_data()
         self._check_donor_correlations()
         self._check_convex_hull()
-        self.algorithm()
 
     def _check_convex_hull(self) -> None:
         """Check convex hull assumption and warn if violated."""
@@ -134,12 +173,12 @@ class SyntheticControl(BaseExperiment):
         total_above = 0
         total_below = 0
         n_units = len(self.treated_units)
-        n_pre_points = self.datapre_treated.shape[0]
+        n_pre_points = self.pre_design["treated"].shape[0]
 
         for i in range(n_units):
             unit_check = check_convex_hull_violation(
-                self.datapre_treated.isel(treated_units=i).values,
-                self.datapre_control.values,
+                self.pre_design["treated"].isel(treated_units=i),
+                self.pre_design["control"],
             )
             total_violations += unit_check["n_violations"]
             total_above += unit_check["pct_above"] * n_pre_points / 100
@@ -217,131 +256,150 @@ class SyntheticControl(BaseExperiment):
     def datapre(self) -> pd.DataFrame:
         """Data from before the treatment time (exclusive).
 
-        Pre-period: index < treatment_time
+        Pre-period: index < treatment_time. This re-splits ``self.data``, so a
+        later write there is visible on the next read. The frame is a copy:
+        in-place writes do not change ``self.data`` or the stored panel that
+        fit, design, and impact use.
         """
-        return self.data[self.data.index < self.treatment_time]
+        return self.data.loc[self.data.index < self.treatment_time].copy()
 
     @property
     def datapost(self) -> pd.DataFrame:
         """Data from on or after the treatment time (inclusive).
 
-        Post-period: index >= treatment_time
+        Post-period: index >= treatment_time. This re-splits ``self.data``, so a
+        later write there is visible on the next read. The frame is a copy:
+        in-place writes do not change ``self.data`` or the stored panel that
+        fit, design, and impact use.
         """
-        return self.data[self.data.index >= self.treatment_time]
+        return self.data.loc[self.data.index >= self.treatment_time].copy()
 
     def _prepare_data(self) -> None:
-        """Prepare xarray DataArrays for control and treated units in pre/post periods."""
-        # split data into the 4 quadrants (pre/post, control/treated) and store as
-        # xarray.DataArray objects.
-        # NOTE: if we have renamed/ensured the index is named "obs_ind", then it will
-        # make constructing the xarray DataArray objects easier.
-        self.datapre_control = xr.DataArray(
-            self.datapre[self.control_units],
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapre[self.control_units].index,
-                "coeffs": self.control_units,
-            },
+        """Store the wide panel and the weighted-sum design views."""
+        self._panel = WidePanel.from_frame(
+            self.data,
+            self.treatment_time,
+            self.control_units,
+            self.treated_units,
         )
-        self.datapre_treated = xr.DataArray(
-            self.datapre[self.treated_units],
-            dims=["obs_ind", "treated_units"],
-            coords={
-                "obs_ind": self.datapre[self.treated_units].index,
-                "treated_units": self.treated_units,
-            },
-        )
-        self.datapost_control = xr.DataArray(
-            self.datapost[self.control_units],
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": self.datapost[self.control_units].index,
-                "coeffs": self.control_units,
-            },
-        )
-        self.datapost_treated = xr.DataArray(
-            self.datapost[self.treated_units],
-            dims=["obs_ind", "treated_units"],
-            coords={
-                "obs_ind": self.datapost[self.treated_units].index,
-                "treated_units": self.treated_units,
-            },
-        )
+        self.pre_design = self._weighted_sum_design("pre")
+        self.post_design = self._weighted_sum_design("post")
 
-    def algorithm(self) -> None:
-        """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
-        # fit the model to the observed (pre-intervention) data
-        if isinstance(self.model, PyMCModel):
-            COORDS = {
-                # key must stay as "coeffs" unless we can find a way to auto identify
-                # the predictor dimension name. "coeffs" is assumed by
-                # PyMCModel.print_coefficients for example.
-                "coeffs": self.control_units,
-                "treated_units": self.treated_units,
-                "obs_ind": np.arange(self.datapre.shape[0]),
-            }
-            self.model.fit(
-                X=self.datapre_control,
-                y=self.datapre_treated,
-                coords=COORDS,
-            )
-        elif isinstance(self.model, RegressorMixin):
-            self.model.fit(
-                X=self.datapre_control.data,
-                y=self.datapre_treated.isel(treated_units=0).data,
-            )
+    def _weighted_sum_design(self, period: Literal["pre", "post"]) -> xr.Dataset:
+        """Rename the donor axis to ``coeffs`` for ``WeightedSumFitter``.
+
+        The shared panel keeps ``control_units``. Post-period treated outcomes
+        come from :meth:`WidePanel._treated_post`, so ``post_design["treated"]``
+        cannot drift from what impact subtracts. That method stays private.
+        New experiments use :meth:`WidePanel.impacts`.
+        """
+        control = self._panel.control(period).rename({"control_units": "coeffs"})
+        if period == "pre":
+            treated = self._panel.treated_pre
         else:
-            raise ValueError("Model type not recognized")
+            treated = self._panel._treated_post()
+        return xr.Dataset({"control": control, "treated": treated})
 
-        # score the goodness of fit to the pre-intervention data
-        self.score = self.model.score(
-            X=self.datapre_control,
-            y=self.datapre_treated,
+    def _pin_legacy_sigma_prior(self) -> None:
+        """Swap in a model that carries the legacy noise prior explicitly.
+
+        Automatic scaling only reaches models that still declare the stock
+        ``y_hat`` default and were not given an explicit ``y_hat`` prior, so
+        those are the only models the opt-out has to touch. Expressing the
+        opt-out as an ordinary user prior on a fresh instance — rather than as a
+        fit-local flag — means it survives refits and later clones, such as the
+        ones the sensitivity checks make, and leaves the caller's own model
+        untouched.
+        """
+        model = self.model
+        if not isinstance(model, PyMCModel) or not _uses_stock_y_hat_default(model):
+            return
+        user_priors = model._user_priors or {}
+        if "y_hat" in user_priors:
+            return
+        # Route the opt-out through ``_clone`` rather than ``type(model)(...)``:
+        # subclasses with extra ``__init__`` parameters carry them through their
+        # ``_clone`` override, so a direct reconstruction here would silently
+        # drop that configuration. ``_clone`` takes the pinned prior set as an
+        # override, keeping the sole re-instantiation site inside ``_clone``.
+        pinned = model._clone(priors={**user_priors, "y_hat": _LEGACY_Y_HAT_PRIOR})
+        self.model = pinned
+        self._model_backend = PyMCModelAdapter(pinned)
+
+    def _fit_inputs(
+        self,
+    ) -> tuple[xr.DataArray, xr.DataArray, dict[str, Any]]:
+        """Return the pre-period control/treated matrices and coordinates for build.
+
+        Post-period treated outcomes are excluded. They stay on the panel and
+        on ``post_design`` for impact and display, and are not a fit or tuning
+        input. ``pre_design["control"]`` is the donor array renamed to
+        ``coeffs`` for ``WeightedSumFitter``.
+        """
+        control_pre = self.pre_design["control"]
+        return (
+            control_pre,
+            self.pre_design["treated"],
+            build_coords(
+                self.control_units,
+                len(self._panel.pre),
+                treated_units=self.treated_units,
+            ),
         )
 
-        # get the model predictions of the observed (pre-intervention) data
-        self.pre_pred = self.model.predict(X=self.datapre_control)
+    def _finalize(self, group: Literal["prior", "posterior"]) -> None:
+        """Compute the group's result bundle from its draws and assign it.
 
-        # Calculate the counterfactual
-        self.post_pred = self.model.predict(X=self.datapost_control)
+        The body is the historical ``algorithm()`` with the draw group
+        threaded through prediction and scoring. Posterior fits score against
+        the observed pre-period; prior draws are not scored (R² against
+        observed data is not informative under a prior).
+        """
+        control_pre = self.pre_design["control"]
+        treated_pre = self.pre_design["treated"]
 
-        # TODO: REFACTOR TARGET - Currently, stored impacts use the model expectation
-        # (mu) by default. When users request response_type="prediction" in plot(), the
-        # y_hat-based impact is calculated on-the-fly in _bayesian_plot(). This works
-        # but is not ideal: consider storing both mu and y_hat based impacts, or
-        # refactoring to always calculate on-demand. See calculate_impact() for details.
-        self.pre_impact = self.model.calculate_impact(
-            self.datapre_treated, self.pre_pred
+        predictions_pre = self._model_backend.predict(X=control_pre, group=group)
+        predictions_post = self._model_backend.predict(
+            X=self.post_design["control"], group=group
+        )
+        impact_pre, impact_post, impact_post_cumulative = self._panel.impacts(
+            predictions_pre, predictions_post
         )
 
-        self.post_impact = self.model.calculate_impact(
-            self.datapost_treated, self.post_pred
-        )
+        score = None
+        if group == "posterior":
+            # score the goodness of fit to the pre-intervention data
+            score = self._model_backend.score(X=control_pre, y=treated_pre)
 
-        self.post_impact_cumulative = self.model.calculate_cumulative_impact(
-            self.post_impact
+        bundle = CausalResult(
+            predictions_pre=predictions_pre,
+            predictions_post=predictions_post,
+            impact_pre=impact_pre,
+            impact_post=impact_post,
+            impact_post_cumulative=impact_post_cumulative,
+            score=score,
         )
+        self._assign_bundle(group, bundle)
 
     def input_validation(
         self, data: pd.DataFrame, treatment_time: int | float | pd.Timestamp
     ) -> None:
-        """Validate the input data and model formula for correctness"""
-        if isinstance(data.index, pd.DatetimeIndex) and not isinstance(
-            treatment_time, pd.Timestamp
-        ):
-            raise BadIndexException(
-                "If data.index is DatetimeIndex, treatment_time must be pd.Timestamp."
-            )
-        if not isinstance(data.index, pd.DatetimeIndex) and isinstance(
-            treatment_time, pd.Timestamp
-        ):
-            raise BadIndexException(
-                "If data.index is not DatetimeIndex, treatment_time must be pd.Timestamp."  # noqa: E501
-            )
+        """Validate the input data and model formula for correctness.
+
+        Parameters
+        ----------
+        data : pd.DataFrame
+            The experiment data.
+        treatment_time : int, float, or pd.Timestamp
+            The treatment time, expected to be compatible with ``data.index``.
+        """
+        validate_treatment_time_against_index(data.index, treatment_time)
 
     def _pre_treatment_correlations(self) -> dict[str, float]:
         """Compute Pearson correlation between each treated unit and its
         synthetic control prediction in the pre-treatment period.
+
+        Posterior-only: reads the fitted posterior bundle.
 
         Returns
         -------
@@ -350,24 +408,25 @@ class SyntheticControl(BaseExperiment):
         """
         correlations: dict[str, float] = {}
         for unit in self.treated_units:
-            observed = self.datapre_treated.sel(treated_units=unit).values.flatten()
-            if isinstance(self.model, PyMCModel):
-                predicted = (
-                    self.pre_pred["posterior_predictive"]["mu"]
-                    .sel(treated_units=unit)
-                    .mean(dim=["chain", "draw"])
-                    .values.flatten()
-                )
-            else:
-                predicted = np.asarray(self.pre_pred).flatten()
+            observed = (
+                self.pre_design["treated"].sel(treated_units=unit).values.flatten()
+            )
+            predicted = (
+                self.result.predictions_pre.sel(treated_units=unit)
+                .mean(dim=["chain", "draw"])
+                .values.flatten()
+            )
             correlations[unit] = float(np.corrcoef(observed, predicted)[0, 1])
         return correlations
 
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results and model coefficients.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers
+        Parameters
+        ----------
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to 2. Use
+            ``None`` to return raw numbers.
         """
         print(f"{self.expt_type:=^80}")
         print(f"Control units: {self.control_units}")
@@ -380,515 +439,240 @@ class SyntheticControl(BaseExperiment):
         for unit, r in corrs.items():
             print(f"Pre-treatment correlation ({unit}): {r:.4f}")
 
-    @staticmethod
-    def _convert_treatment_time_for_axis(
-        axis: plt.Axes, treatment_time: int | float | pd.Timestamp
-    ) -> int | float | pd.Timestamp:
-        """
-        Convert treatment time into the plotting units expected by a specific axis.
-        """
-        try:
-            return axis.xaxis.convert_units(treatment_time)
-        except (TypeError, ValueError):
-            return treatment_time
-
-    def _bayesian_plot(
+    def plot(
         self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
         round_to: int | None = None,
         treated_unit: str | None = None,
-        response_type: ResponseType = "expectation",
-        show_hdi_annotation: bool = False,
-        **kwargs: dict,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
-        """
-        Plot the results for a specific treated unit
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
+        plot_predictors: bool = False,
+        figsize: tuple[float, float] = (7, 8),
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> tuple[plt.Figure, list[plt.Axes]] | tuple[plt.Figure, np.ndarray]:
+        """Plot the synthetic control results for a specific treated unit.
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to plot. ``"prior"`` renders the reduced
+            prior-check panel set — the prior-implied counterfactual against
+            the observed series only — and requires
+            :meth:`sample_prior_predictive`; ``"posterior"`` (default)
+            renders the full three-panel layout and requires :meth:`fit`.
+            The two groups intentionally return different axes layouts.
+            Uncertainty styling, ``figsize``, and ``plot_predictors`` apply to both groups; ``round_to`` only affects posterior annotations.
         round_to : int, optional
-            Number of decimals used to round results. Defaults to 2.
-            Use None to return raw numbers.
+            Number of decimals used to round numerical results in the figure
+            title (e.g. the Bayesian :math:`R^2`). Defaults to ``None``,
+            in which case 2 significant figures are used.
         treated_unit : str, optional
-            Which treated unit to plot. Must be a string name of the treated unit.
-            If None, plots the first treated unit.
-        response_type : {"expectation", "prediction"}, default="expectation"
-            The response type to display in the HDI band:
+            Which treated unit to plot. Must be one of the names supplied
+            via ``treated_units`` at construction time. Defaults to ``None``,
+            which selects the first treated unit.
+        ci_prob : float
+            Probability mass of the highest density interval drawn around the
+            posterior predictive, causal impact, and cumulative impact bands.
+            Must be in ``(0, 1]``. Ignored for OLS models. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered via
+            :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
+            For ``"spaghetti"``, legends use draw lines rather than a shaded
+            band. For ``"histogram"``, uncertainty is shown as a 2D density
+            heatmap with a mean line overlay (no ribbon patch for legends).
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to
+            ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults
+            to 50. Ignored for other kinds.
 
-            - ``"expectation"``: HDI of the model expectation (μ). This shows
-              uncertainty from model parameters only, excluding observation noise.
-              Results in narrower intervals that represent the uncertainty in
-              the expected value of the outcome.
-            - ``"prediction"``: HDI of the posterior predictive (ŷ). This includes
-              observation noise (σ) in addition to parameter uncertainty, resulting
-              in wider intervals that represent the full predictive uncertainty
-              for new observations.
-        show_hdi_annotation : bool, default=False
-            Whether to display a text annotation at the bottom of the figure
-            explaining what the HDI represents. Set to False to hide the annotation.
-        **kwargs : dict
-            Additional keyword arguments.
+        plot_predictors : bool
+            Whether to overlay the donor (control) unit trajectories on the
+            top panel. Defaults to ``False``.
+        figsize : tuple of (float, float)
+            Width and height of the figure in inches, passed to
+            :func:`matplotlib.pyplot.subplots`. Defaults to ``(7, 8)``.
+        show : bool
+            Whether to automatically display the plot. Defaults to ``True``.
+            Set to ``False`` if you want to modify the figure before
+            displaying it.
+        legend_kwargs : dict, optional
+            Keyword arguments to adjust legend placement and styling.
+            Supported keys: ``loc``, ``bbox_to_anchor``, ``fontsize``,
+            ``frameon``, ``title`` (``bbox_transform`` is accepted alongside
+            ``bbox_to_anchor``). The existing legend is modified **in
+            place** so that custom handles are preserved.
 
         Returns
         -------
-        tuple[plt.Figure, list[plt.Axes]]
-            The matplotlib figure and axes.
+        fig : matplotlib.figure.Figure
+            The figure that was created.
+        ax : list[matplotlib.axes.Axes] or numpy.ndarray
+            Posterior axes are the ndarray from ``plt.subplots`` (top:
+            predictions, middle: causal impact, bottom: cumulative impact).
+            Prior axes are a one-element list.
         """
-        # Log HDI type info once per session
-        _log_response_type_info_once()
-
-        counterfactual_label = "Counterfactual"
-
-        # Select the variable name based on response_type
-        var_name = "mu" if response_type == "expectation" else "y_hat"
-
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
-        # TOP PLOT --------------------------------------------------
-        # pre-intervention period
-
-        # Get treated unit name - default to first unit if None
-        treated_unit = (
-            treated_unit if treated_unit is not None else self.treated_units[0]
+        return self._render_plot(
+            show=show,
+            legend_kwargs=legend_kwargs,
+            group=group,
+            round_to=round_to,
+            treated_unit=treated_unit,
+            ci_prob=ci_prob,
+            kind=kind,
+            ci_kind=ci_kind,
+            num_samples=num_samples,
+            plot_predictors=plot_predictors,
+            figsize=figsize,
         )
 
-        if treated_unit not in self.treated_units:
-            raise ValueError(
-                f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
-            )
-
-        pre_pred = self.pre_pred["posterior_predictive"][var_name].sel(
-            treated_units=treated_unit
-        )
-        post_pred = self.post_pred["posterior_predictive"][var_name].sel(
-            treated_units=treated_unit
-        )
-
-        h_line, h_patch = plot_xY(
-            self.datapre.index,
-            pre_pred,
-            ax=ax[0],
-            plot_hdi_kwargs={"color": "C0"},
-        )
-        handles = [(h_line, h_patch)]
-        labels = ["Pre-intervention period"]
-
-        # Plot observations for primary treated unit
-        (h,) = ax[0].plot(
-            self.datapre.index,
-            self.datapre_treated.sel(treated_units=treated_unit),
-            "k.",
-            label="Observations",
-        )
-        handles.append(h)
-        labels.append("Observations")
-
-        # post intervention period
-        h_line, h_patch = plot_xY(
-            self.datapost.index,
-            post_pred,
-            ax=ax[0],
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        handles.append((h_line, h_patch))
-        labels.append(counterfactual_label)
-
-        ax[0].plot(
-            self.datapost.index,
-            self.datapost_treated.sel(treated_units=treated_unit),
-            "k.",
-        )
-        # Shaded causal effect for primary treated unit
-        h = ax[0].fill_between(
-            self.datapost.index,
-            y1=post_pred.mean(dim=["chain", "draw"]).values,
-            y2=self.datapost_treated.sel(treated_units=treated_unit).values,
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-        handles.append(h)
-        labels.append("Causal impact")
-
-        ax[0].set(title=f"{self._get_score_title(treated_unit, round_to)}")
-
-        # MIDDLE PLOT -----------------------------------------------
-        # Calculate impact for plotting based on response_type
-        if response_type == "expectation":
-            # Use stored mu-based impact
-            pre_impact_for_plot = self.pre_impact
-            post_impact_for_plot = self.post_impact
-        else:
-            # Calculate y_hat-based impact on demand
-            pre_impact_for_plot = self.model.calculate_impact(
-                self.datapre_treated, self.pre_pred, response_type="prediction"
-            )
-            post_impact_for_plot = self.model.calculate_impact(
-                self.datapost_treated, self.post_pred, response_type="prediction"
-            )
-
-        plot_xY(
-            self.datapre.index,
-            pre_impact_for_plot.sel(treated_units=treated_unit),
-            ax=ax[1],
-            plot_hdi_kwargs={"color": "C0"},
-        )
-        plot_xY(
-            self.datapost.index,
-            post_impact_for_plot.sel(treated_units=treated_unit),
-            ax=ax[1],
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        ax[1].axhline(y=0, c="k")
-        ax[1].fill_between(
-            self.datapost.index,
-            y1=post_impact_for_plot.mean(["chain", "draw"]).sel(
-                treated_units=treated_unit
-            ),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-        ax[1].set(title="Causal Impact")
-
-        # BOTTOM PLOT -----------------------------------------------
-        ax[2].set(title="Cumulative Causal Impact")
-        # Calculate cumulative impact based on response_type
-        if response_type == "expectation":
-            post_impact_cumulative_for_plot = self.post_impact_cumulative
-        else:
-            post_impact_cumulative_for_plot = self.model.calculate_cumulative_impact(
-                post_impact_for_plot
-            )
-
-        plot_xY(
-            self.datapost.index,
-            post_impact_cumulative_for_plot.sel(treated_units=treated_unit),
-            ax=ax[2],
-            plot_hdi_kwargs={"color": "C1"},
-        )
-        ax[2].axhline(y=0, c="k")
-
-        # Intervention line
-        for i in [0, 1, 2]:
-            treatment_time = self._convert_treatment_time_for_axis(
-                ax[i], self.treatment_time
-            )
-            ax[i].axvline(
-                x=treatment_time,
-                ls="-",
-                lw=3,
-                color="r",
-            )
-
-        ax[0].legend(
-            handles=(h_tuple for h_tuple in handles),
-            labels=labels,
-            fontsize=LEGEND_FONT_SIZE,
-        )
-
-        plot_predictors = kwargs.get("plot_predictors", False)
-        if plot_predictors:
-            # plot control units as well
-            ax[0].plot(
-                self.datapre.index,
-                self.datapre_control,
-                "-",
-                c=[0.8, 0.8, 0.8],
-                zorder=1,
-            )
-            ax[0].plot(
-                self.datapost.index,
-                self.datapost_control,
-                "-",
-                c=[0.8, 0.8, 0.8],
-                zorder=1,
-            )
-
-        # Apply intelligent date formatting if data has datetime index
-        if isinstance(self.datapre.index, pd.DatetimeIndex):
-            # Combine pre and post indices for full date range
-            full_index = _combine_datetime_indices(
-                pd.DatetimeIndex(self.datapre.index),
-                pd.DatetimeIndex(self.datapost.index),
-            )
-            format_date_axes(ax, full_index)
-
-        # Add HDI type annotation to the top subplot's title
-        if show_hdi_annotation:
-            add_hdi_annotation(ax[0], response_type)
-
-        return fig, ax
-
-    def _ols_plot(
+    def _plot(
         self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
         round_to: int | None = None,
         treated_unit: str | None = None,
-        **kwargs: dict,
-    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
+        plot_predictors: bool = False,
+        figsize: tuple[float, float] = (7, 8),
+        **kwargs: Any,
+    ) -> tuple[plt.Figure, list[plt.Axes]] | tuple[plt.Figure, np.ndarray]:
         """
-        Plot the results for OLS model for a specific treated unit
+        Plot the posterior or prior-check figure for a specific treated unit.
 
-        :param round_to:
-            Number of decimals used to round results. Defaults to 2. Use "None" to return raw numbers.
-        :param treated_unit:
-            Which treated unit to plot. Must be a string name of the treated unit.
-            If None, plots the first treated unit.
-        """
-        counterfactual_label = "Counterfactual"
-
-        # Get treated unit name - default to first unit if None
-        treated_unit = (
-            treated_unit if treated_unit is not None else self.treated_units[0]
-        )
-
-        if treated_unit not in self.treated_units:
-            raise ValueError(
-                f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
-            )
-
-        fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
-
-        ax[0].plot(
-            self.datapre_treated["obs_ind"],
-            self.datapre_treated.sel(treated_units=treated_unit),
-            "k.",
-        )
-        ax[0].plot(
-            self.datapost_treated["obs_ind"],
-            self.datapost_treated.sel(treated_units=treated_unit),
-            "k.",
-        )
-
-        ax[0].plot(self.datapre.index, self.pre_pred, c="k", label="model fit")
-        ax[0].plot(
-            self.datapost.index,
-            self.post_pred,
-            label=counterfactual_label,
-            ls=":",
-            c="k",
-        )
-        ax[0].set(title=f"{self._get_score_title(treated_unit, round_to)}")
-        # Shaded causal effect
-        post_pred_values = np.squeeze(self.post_pred)
-
-        ax[0].fill_between(
-            self.datapost.index,
-            y1=post_pred_values,
-            y2=np.squeeze(self.datapost_treated.sel(treated_units=treated_unit).data),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-
-        ax[1].plot(self.datapre.index, self.pre_impact, "k.")
-        ax[1].plot(
-            self.datapost.index,
-            self.post_impact,
-            "k.",
-            label=counterfactual_label,
-        )
-        ax[1].axhline(y=0, c="k")
-        ax[1].set(title="Causal Impact")
-
-        ax[2].plot(self.datapost.index, self.post_impact_cumulative, c="k")
-        ax[2].axhline(y=0, c="k")
-        ax[2].set(title="Cumulative Causal Impact")
-
-        # Shaded causal effect
-        ax[1].fill_between(
-            self.datapost.index,
-            y1=np.squeeze(self.post_impact),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-
-        # Intervention line
-        for i in [0, 1, 2]:
-            treatment_time = self._convert_treatment_time_for_axis(
-                ax[i], self.treatment_time
-            )
-            ax[i].axvline(
-                x=treatment_time,
-                ls="-",
-                lw=3,
-                color="r",
-                label="Treatment time",
-            )
-
-        ax[0].legend(fontsize=LEGEND_FONT_SIZE)
-
-        # Apply intelligent date formatting if data has datetime index
-        if isinstance(self.datapre.index, pd.DatetimeIndex):
-            # Combine pre and post indices for full date range
-            full_index = _combine_datetime_indices(
-                pd.DatetimeIndex(self.datapre.index),
-                pd.DatetimeIndex(self.datapost.index),
-            )
-            format_date_axes(ax, full_index)
-
-        return (fig, ax)
-
-    def get_plot_data_ols(self) -> pd.DataFrame:
-        """
-        Recover the data of the experiment along with the prediction and causal impact information.
-        """
-        pre_data = self.datapre.copy()
-        post_data = self.datapost.copy()
-        pre_data["prediction"] = self.pre_pred
-        post_data["prediction"] = self.post_pred
-        pre_data["impact"] = self.pre_impact
-        post_data["impact"] = self.post_impact
-        self.plot_data = pd.concat([pre_data, post_data])
-
-        return self.plot_data
-
-    def get_plot_data_bayesian(
-        self,
-        hdi_prob: float = 0.94,
-        treated_unit: str | None = None,
-        response_type: ResponseType = "expectation",
-    ) -> pd.DataFrame:
-        """
-        Recover the data of the PrePostFit experiment along with the prediction and causal impact information.
+        Consumes the resolved group bundle injected by
+        :meth:`~causalpy.experiments.base.BaseExperiment._render_plot`.
+        Uncertainty bands are drawn only when the container carries draws;
+        point-estimate backends (singleton ``chain``/``draw``) get bare lines.
 
         Parameters
         ----------
-        hdi_prob : float, default=0.94
-            Probability for which the highest density interval will be computed.
-            The default value is defined as the default from the :func:`arviz.hdi` function.
+        group : {"prior", "posterior"}
+            ``"prior"`` renders the reduced single-panel prior-check figure;
+            ``"posterior"`` renders the full three-panel layout.
+        round_to : int, optional
+            Number of decimals used to round results. Defaults to ``None``,
+            in which case 2 significant figures are used.
         treated_unit : str, optional
-            Which treated unit to extract data for. Must be a string name of the treated unit.
-            If None, uses the first treated unit.
-        response_type : {"expectation", "prediction"}, default="expectation"
-            The response type to use for predictions and impact:
-
-            - ``"expectation"``: Uses the model expectation (μ). Excludes observation
-              noise, focusing on the systematic causal effect.
-            - ``"prediction"``: Uses the full posterior predictive (ŷ). Includes
-              observation noise, showing the full predictive uncertainty.
+            Which treated unit to plot. Must be a string name of the treated unit.
+            If ``None``, plots the first treated unit.
+        ci_prob : float, optional
+            Probability mass of the credible interval drawn around the
+            posterior predictive, causal impact, and cumulative impact bands.
+            Must be in ``(0, 1]``. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        plot_predictors : bool, optional
+            Whether to overlay control-unit trajectories. Defaults to ``False``.
+        figsize : tuple of (float, float), optional
+            Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
-        if not isinstance(self.model, PyMCModel):
-            raise ValueError("Unsupported model type")
-
-        # Map semantic response_type to internal variable name
-        var_name = "mu" if response_type == "expectation" else "y_hat"
-
-        hdi_pct = int(round(hdi_prob * 100))
-
-        pred_lower_col = f"pred_hdi_lower_{hdi_pct}"
-        pred_upper_col = f"pred_hdi_upper_{hdi_pct}"
-        impact_lower_col = f"impact_hdi_lower_{hdi_pct}"
-        impact_upper_col = f"impact_hdi_upper_{hdi_pct}"
-
-        pre_data = self.datapre.copy()
-        post_data = self.datapost.copy()
-
-        # Get treated unit name - default to first unit if None
-        treated_unit = (
-            treated_unit if treated_unit is not None else self.treated_units[0]
+        bundle = self._require_bundle(group)
+        style: _PosteriorPlotStyle = {
+            "ci_prob": ci_prob,
+            "kind": kind,
+            "ci_kind": ci_kind,
+            "num_samples": num_samples,
+        }
+        treated_unit = resolve_treated_unit(self.treated_units, treated_unit)
+        title = (
+            self._get_score_title(bundle.score, treated_unit, round_to)
+            if group == "posterior"
+            else ""
+        )
+        return self._panel.plot(
+            bundle,
+            group=group,
+            treated_unit=treated_unit,
+            title=title,
+            style=style,
+            figsize=figsize,
+            plot_predictors=plot_predictors,
         )
 
-        if treated_unit not in self.treated_units:
-            raise ValueError(
-                f"treated_unit '{treated_unit}' not found. Available units: {self.treated_units}"
-            )
+    def get_plot_data(
+        self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+        hdi_prob: float = HDI_PROB,
+        treated_unit: str | None = None,
+    ) -> pd.DataFrame:
+        """
+        Recover the data of the experiment along with the prediction and causal impact information.
 
-        # Extract predictions - handle multi-unit case
-        pre_pred_vals = az.extract(
-            self.pre_pred, group="posterior_predictive", var_names=var_name
-        ).mean("sample")
-        post_pred_vals = az.extract(
-            self.post_pred, group="posterior_predictive", var_names=var_name
-        ).mean("sample")
+        HDI columns are included only when the prediction container carries
+        posterior draws (point-estimate backends return just ``prediction``
+        and ``impact``).
 
-        # Extract predictions for the specified treated unit (always has treated_units dimension)
-        pre_data["prediction"] = pre_pred_vals.sel(treated_units=treated_unit).values
-        post_data["prediction"] = post_pred_vals.sel(treated_units=treated_unit).values
+        Parameters
+        ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to summarize. ``"prior"`` requires
+            :meth:`sample_prior_predictive`; ``"posterior"`` requires
+            :meth:`fit`.
+        hdi_prob : float, default :data:`~causalpy.constants.HDI_PROB`
+            Probability mass of the highest density interval. Defaults to
+            the project-wide :data:`~causalpy.constants.HDI_PROB`. Ignored
+            when the prediction container has no posterior draws.
+        treated_unit : str, optional
+            Which treated unit to extract data for. Must be a string name
+            of the treated unit. If ``None``, uses the first treated unit.
 
-        # HDI intervals for predictions (always use treated_units dimension)
-        pre_hdi = get_hdi_to_df(
-            self.pre_pred["posterior_predictive"][var_name].sel(
-                treated_units=treated_unit
-            ),
+        Returns
+        -------
+        pd.DataFrame
+            Observed data with ``prediction`` and ``impact`` columns plus HDI
+            bounds when draws are available. Not cached on the experiment.
+            Observation columns follow a later write to ``self.data``.
+            ``prediction``, ``impact``, and HDI columns stay computed even
+            when the input frame already uses those names.
+        """
+        bundle = self._require_bundle(group)
+        frame = self._panel.plot_data(
+            bundle,
+            treated_unit=treated_unit,
             hdi_prob=hdi_prob,
         )
-        post_hdi = get_hdi_to_df(
-            self.post_pred["posterior_predictive"][var_name].sel(
-                treated_units=treated_unit
-            ),
-            hdi_prob=hdi_prob,
-        )
-
-        # Extract only the lower and upper columns and ensure proper indexing
-        pre_lower_upper = pre_hdi.iloc[:, [0, -1]].values  # Get first and last columns
-        post_lower_upper = post_hdi.iloc[:, [0, -1]].values
-
-        pre_data[[pred_lower_col, pred_upper_col]] = pre_lower_upper
-        post_data[[pred_lower_col, pred_upper_col]] = post_lower_upper
-
-        # Impact data - select based on response_type
-        if response_type == "expectation":
-            pre_impact = self.pre_impact
-            post_impact = self.post_impact
-        else:
-            # Calculate y_hat-based impact on demand
-            pre_impact = self.model.calculate_impact(
-                self.datapre_treated, self.pre_pred, response_type="prediction"
+        observed = pd.concat([self.datapre, self.datapost])
+        computed = {"prediction", "impact"}
+        if has_posterior_draws(bundle.predictions_pre):
+            hdi_pct = int(round(hdi_prob * 100))
+            computed.update(
+                {
+                    f"pred_hdi_lower_{hdi_pct}",
+                    f"pred_hdi_upper_{hdi_pct}",
+                    f"impact_hdi_lower_{hdi_pct}",
+                    f"impact_hdi_upper_{hdi_pct}",
+                }
             )
-            post_impact = self.model.calculate_impact(
-                self.datapost_treated, self.post_pred, response_type="prediction"
-            )
+        overlay = [column for column in observed.columns if column not in computed]
+        if overlay:
+            frame.loc[:, overlay] = observed.loc[:, overlay]
+        return frame
 
-        pre_data["impact"] = (
-            pre_impact.mean(dim=["chain", "draw"])
-            .sel(treated_units=treated_unit)
-            .values
-        )
-        post_data["impact"] = (
-            post_impact.mean(dim=["chain", "draw"])
-            .sel(treated_units=treated_unit)
-            .values
-        )
-        # Impact HDI intervals (always use treated_units dimension)
-        pre_impact_hdi = get_hdi_to_df(
-            pre_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
-        )
-        post_impact_hdi = get_hdi_to_df(
-            post_impact.sel(treated_units=treated_unit), hdi_prob=hdi_prob
-        )
-
-        # Extract only the lower and upper columns for impact HDI
-        pre_impact_lower_upper = pre_impact_hdi.iloc[:, [0, -1]].values
-        post_impact_lower_upper = post_impact_hdi.iloc[:, [0, -1]].values
-
-        pre_data[[impact_lower_col, impact_upper_col]] = pre_impact_lower_upper
-        post_data[[impact_lower_col, impact_upper_col]] = post_impact_lower_upper
-
-        self.plot_data = pd.concat([pre_data, post_data])
-
-        return self.plot_data
-
-    def _get_score_title(self, treated_unit: str, round_to: int | None = 2) -> str:
+    def _get_score_title(
+        self, score: pd.Series | None, treated_unit: str, round_to: int | None = 2
+    ) -> str:
         """Generate appropriate score title for the specified treated unit"""
-        if isinstance(self.model, PyMCModel):
-            # Bayesian model - get unit-specific R² scores using unified format
-            unit_index = self.treated_units.index(treated_unit)
-            r2_val = round_num(
-                self.score[f"unit_{unit_index}_r2"],
-                round_to if round_to is not None else 2,
-            )
-            r2_std_val = round_num(
-                self.score[f"unit_{unit_index}_r2_std"],
-                round_to if round_to is not None else 2,
-            )
-            return f"Pre-intervention Bayesian $R^2$: {r2_val} (std = {r2_std_val})"
-        else:
-            # OLS model - simple float score
-            return f"$R^2$ on pre-intervention data = {round_num(float(self.score), round_to if round_to is not None else 2)}"
+        return format_r2_score(
+            score,
+            unit_index=self.treated_units.index(treated_unit),
+            round_to=round_to,
+            context="on pre-intervention data",
+        )
 
     def effect_summary(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         window: Literal["post"] | tuple | slice = "post",
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
         alpha: float = 0.05,
@@ -898,16 +682,22 @@ class SyntheticControl(BaseExperiment):
         treated_unit: str | None = None,
         period: Literal["intervention", "post", "comparison"] | None = None,
         prefix: str = "Post-period",
-        response_type: ResponseType = "expectation",
-        **kwargs: Any,
     ) -> EffectSummary:
         """
         Generate a decision-ready summary of causal effects for Synthetic Control.
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to summarize. ``"prior"`` requires
+            :meth:`sample_prior_predictive` and produces prior-appropriate
+            prose — under a neutral prior, ``P(effect > 0)`` should sit near
+            0.5, so a tail probability far from 0.5 flags a design-matrix or
+            prior-specification problem rather than a causal finding.
+            ``"posterior"`` requires :meth:`fit`.
         window : str, tuple, or slice, default="post"
             Time window for analysis:
+
             - "post": All post-treatment time points (default)
             - (start, end): Tuple of start and end times (handles both datetime and integer indices)
             - slice: Python slice object for integer indices
@@ -928,13 +718,6 @@ class SyntheticControl(BaseExperiment):
             Ignored for Synthetic Control (two-period design only).
         prefix : str, optional
             Prefix for prose generation. Defaults to "Post-period".
-        response_type : {"expectation", "prediction"}, default="expectation"
-            Response type to compute effect sizes:
-
-            - ``"expectation"``: Effect size HDI based on model expectation (μ).
-              Excludes observation noise, focusing on the systematic causal effect.
-            - ``"prediction"``: Effect size HDI based on posterior predictive (ŷ).
-              Includes observation noise, showing full predictive uncertainty.
 
         Returns
         -------
@@ -942,18 +725,6 @@ class SyntheticControl(BaseExperiment):
             Object with .table (DataFrame) and .text (str) attributes.
             The .text attribute contains a detailed multi-paragraph narrative report.
         """
-        from causalpy.reporting import (
-            _compute_statistics,
-            _compute_statistics_ols,
-            _extract_counterfactual,
-            _extract_window,
-            _generate_prose_detailed,
-            _generate_prose_detailed_ols,
-            _generate_table,
-            _generate_table_ols,
-        )
-
-        # Warn if period parameter is provided (not supported for Synthetic Control)
         if period is not None:
             warnings.warn(
                 f"period='{period}' is ignored for SyntheticControl (two-period design only). "
@@ -963,100 +734,16 @@ class SyntheticControl(BaseExperiment):
                 stacklevel=2,
             )
 
-        is_pymc = isinstance(self.model, PyMCModel)
-
-        # Log HDI type info once per session (for PyMC models only)
-        if is_pymc:
-            _log_response_type_effect_summary_once()
-
-        # Extract windowed impact data
-        windowed_impact, window_coords = _extract_window(
-            self, window, treated_unit=treated_unit, response_type=response_type
-        )
-
-        # Extract counterfactual for relative effects
-        counterfactual = _extract_counterfactual(
-            self,
-            window_coords,
+        return self._panel.effect_summary(
+            self._require_bundle(group),
+            group=group,
+            window=window,
+            direction=direction,
+            alpha=alpha,
+            cumulative=cumulative,
+            relative=relative,
+            min_effect=min_effect,
             treated_unit=treated_unit,
-            response_type=response_type,
+            prefix=prefix,
+            experiment_type="sc",
         )
-
-        if is_pymc:
-            # PyMC model: use posterior draws
-            hdi_prob = 1 - alpha
-            stats = _compute_statistics(
-                windowed_impact,
-                counterfactual,
-                hdi_prob=hdi_prob,
-                direction=direction,
-                cumulative=cumulative,
-                relative=relative,
-                min_effect=min_effect,
-            )
-
-            table = _generate_table(stats, cumulative=cumulative, relative=relative)
-
-            # Compute observed/counterfactual averages for prose
-            time_dim = "obs_ind"
-            cf_avg = float(counterfactual.mean(dim=[time_dim, "chain", "draw"]).values)
-            obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = float(
-                counterfactual.sum(dim=time_dim).mean(dim=["chain", "draw"]).values
-            )
-            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
-
-            text = _generate_prose_detailed(
-                stats,
-                window_coords,
-                alpha=alpha,
-                direction=direction,
-                cumulative=cumulative,
-                relative=relative,
-                prefix=prefix,
-                observed_avg=obs_avg,
-                counterfactual_avg=cf_avg,
-                observed_cum=obs_cum,
-                counterfactual_cum=cf_cum if cumulative else None,
-                experiment_type="sc",
-            )
-        else:
-            if hasattr(windowed_impact, "values"):
-                impact_array = windowed_impact.values
-            else:
-                impact_array = np.asarray(windowed_impact)
-            if hasattr(counterfactual, "values"):
-                counterfactual_array = counterfactual.values
-            else:
-                counterfactual_array = np.asarray(counterfactual)
-
-            stats = _compute_statistics_ols(
-                impact_array,
-                counterfactual_array,
-                alpha=alpha,
-                cumulative=cumulative,
-                relative=relative,
-            )
-
-            table = _generate_table_ols(stats, cumulative=cumulative, relative=relative)
-
-            cf_avg = float(np.mean(counterfactual_array))
-            obs_avg = cf_avg + stats["avg"]["mean"]
-            cf_cum = float(np.sum(counterfactual_array))
-            obs_cum = cf_cum + stats["cum"]["mean"] if cumulative else None
-
-            text = _generate_prose_detailed_ols(
-                stats,
-                window_coords,
-                alpha=alpha,
-                cumulative=cumulative,
-                relative=relative,
-                prefix=prefix,
-                observed_avg=obs_avg,
-                counterfactual_avg=cf_avg,
-                observed_cum=obs_cum,
-                counterfactual_cum=cf_cum if cumulative else None,
-                experiment_type="sc",
-            )
-
-        return EffectSummary(table=table, text=text)

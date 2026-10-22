@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from matplotlib import pyplot as plt
+from patsy import build_design_matrices
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ExpSineSquared, WhiteKernel
 from sklearn.linear_model import LinearRegression
@@ -23,7 +24,7 @@ import causalpy as cp
 
 
 @pytest.mark.integration
-def test_did():
+def test_did(did_data):
     """
     Test Difference in Differences (DID) scikit-learn experiment.
 
@@ -31,24 +32,59 @@ def test_did():
     1. data is a dataframe
     2. skl_experiements.DifferenceInDifferences returns correct type
     """
-    data = cp.load_data("did")
+    data = did_data
     result = cp.DifferenceInDifferences(
         data,
         formula="y ~ 1 + group*post_treatment",
         time_variable_name="t",
         group_variable_name="group",
-        treated=1,
-        untreated=0,
         model=LinearRegression(),
-    )
+    ).fit()
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.DifferenceInDifferences)
     result.summary()
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
+
+
+@pytest.mark.integration
+def test_did_causal_impact_order_independent_ols(did_data):
+    """
+    Regression test: causal_impact must not depend on which variable is
+    written first in the DiD interaction term.
+
+    Previously, DifferenceInDifferences.algorithm() looked up the OLS
+    interaction coefficient using a single concatenated substring
+    ("group:post_treatment"), which only matched patsy's column naming when
+    the formula wrote the group variable first. Writing the formula the
+    other way round (post_treatment*group) fit an identical model but
+    silently produced causal_impact=None instead of the real value.
+    """
+    data = did_data
+
+    result_group_first = cp.DifferenceInDifferences(
+        data.copy(),
+        formula="y ~ 1 + group*post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    ).fit()
+    result_post_first = cp.DifferenceInDifferences(
+        data.copy(),
+        formula="y ~ 1 + post_treatment*group",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    ).fit()
+
+    assert result_group_first.result.causal_impact is not None
+    assert result_post_first.result.causal_impact is not None
+    assert result_group_first.result.causal_impact == pytest.approx(
+        result_post_first.result.causal_impact
+    )
 
 
 @pytest.mark.integration
@@ -73,19 +109,33 @@ def test_rd_drinking():
         model=LinearRegression(),
         treatment_threshold=21,
         epsilon=0.001,
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
+    assert result.result.predictions.dims == (
+        "chain",
+        "draw",
+        "obs_ind",
+        "treated_units",
+    )
+    (discontinuity_design,) = build_design_matrices(
+        [result._x_design_info], result.x_discon
+    )
+    legacy_prediction = result.model.predict(np.asarray(discontinuity_design))
+    expected = np.squeeze(legacy_prediction[1]) - np.squeeze(legacy_prediction[0])
+    assert np.asarray(result.result.discontinuity_at_threshold).item() == pytest.approx(
+        expected
+    )
     result.summary()
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
 
 
 @pytest.mark.integration
-def test_its():
+def test_its(its_data):
     """
     Test Interrupted Time Series scikit-learn experiment.
 
@@ -95,18 +145,14 @@ def test_its():
     3. the method get_plot_data returns a DataFrame with expected columns
     """
 
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.InterruptedTimeSeries)
     result.summary()
@@ -128,7 +174,7 @@ def test_its():
 
 
 @pytest.mark.integration
-def test_sc():
+def test_sc(sc_data):
     """
     Test Synthetic Control scikit-learn experiment.
 
@@ -137,7 +183,7 @@ def test_sc():
     2. skl_experiements.SyntheticControl returns correct type
     3. the method get_plot_data returns a DataFrame with expected columns
     """
-    df = cp.load_data("sc")
+    df = sc_data
     treatment_time = 70
     result = cp.SyntheticControl(
         df,
@@ -145,7 +191,7 @@ def test_sc():
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.skl_models.WeightedProportion(),
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.SyntheticControl)
     result.summary()
@@ -175,13 +221,9 @@ def test_sc():
 
 
 @pytest.mark.integration
-def test_sc_datetime_treatment_time_plot():
+def test_sc_datetime_treatment_time_plot(geolift1_data):
     """Test SyntheticControl plotting with datetime treatment_time and sklearn model."""
-    df = (
-        cp.load_data("geolift1")
-        .assign(time=lambda x: pd.to_datetime(x["time"]))
-        .set_index("time")
-    )
+    df = geolift1_data
     treatment_time = pd.to_datetime("2022-01-01")
 
     result = cp.SyntheticControl(
@@ -190,7 +232,7 @@ def test_sc_datetime_treatment_time_plot():
         control_units=["Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus"],
         treated_units=["Denmark"],
         model=cp.skl_models.WeightedProportion(),
-    )
+    ).fit()
 
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
@@ -201,7 +243,10 @@ def test_sc_datetime_treatment_time_plot():
 
 @pytest.mark.parametrize("error_type", [TypeError, ValueError])
 def test_sc_convert_treatment_time_for_axis_fallback(error_type):
-    """Return original treatment_time when axis conversion raises."""
+    """The figure's axis helper returns the original time when conversion raises."""
+    from causalpy.experiments._panel_counterfactual import (
+        _convert_treatment_time_for_axis,
+    )
 
     class FailingXAxis:
         def convert_units(self, _value):
@@ -211,15 +256,13 @@ def test_sc_convert_treatment_time_for_axis_fallback(error_type):
         xaxis = FailingXAxis()
 
     treatment_time = pd.Timestamp("2022-01-01")
-    converted = cp.SyntheticControl._convert_treatment_time_for_axis(
-        FailingAxis(), treatment_time
-    )
+    converted = _convert_treatment_time_for_axis(FailingAxis(), treatment_time)
 
     assert converted is treatment_time
 
 
 @pytest.mark.integration
-def test_rd_linear_main_effects():
+def test_rd_linear_main_effects(rd_data):
     """
     Test Regression Discontinuity scikit-learn experiment main effects.
 
@@ -227,14 +270,14 @@ def test_rd_linear_main_effects():
     1. data is a dataframe
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
-    data = cp.load_data("rd")
+    data = rd_data
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
         model=LinearRegression(),
         treatment_threshold=0.5,
         epsilon=0.001,
-    )
+    ).fit()
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
     result.summary()
@@ -244,7 +287,7 @@ def test_rd_linear_main_effects():
 
 
 @pytest.mark.integration
-def test_rd_linear_main_effects_bandwidth():
+def test_rd_linear_main_effects_bandwidth(rd_data):
     """
     Test Regression Discontinuity scikit-learn experiment, main effects with
     bandwidth parameter.
@@ -253,7 +296,7 @@ def test_rd_linear_main_effects_bandwidth():
     1. data is a dataframe
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
-    data = cp.load_data("rd")
+    data = rd_data
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
@@ -261,7 +304,7 @@ def test_rd_linear_main_effects_bandwidth():
         treatment_threshold=0.5,
         epsilon=0.001,
         bandwidth=0.3,
-    )
+    ).fit()
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
     result.summary()
@@ -301,7 +344,7 @@ def test_rd_linear_main_effects_bandwidth_custom_running_variable():
         model=LinearRegression(),
         treatment_threshold=0.45,
         bandwidth=0.2,
-    )
+    ).fit()
 
     assert isinstance(result, cp.RegressionDiscontinuity)
     fig, ax = result.plot()
@@ -310,7 +353,7 @@ def test_rd_linear_main_effects_bandwidth_custom_running_variable():
 
 
 @pytest.mark.integration
-def test_rd_linear_with_interaction():
+def test_rd_linear_with_interaction(rd_data):
     """
     Test Regression Discontinuity scikit-learn experiment with interaction.
 
@@ -318,14 +361,14 @@ def test_rd_linear_with_interaction():
     1. data is a dataframe
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
-    data = cp.load_data("rd")
+    data = rd_data
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated + x:treated",
         model=LinearRegression(),
         treatment_threshold=0.5,
         epsilon=0.001,
-    )
+    ).fit()
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
     result.summary()
@@ -335,7 +378,7 @@ def test_rd_linear_with_interaction():
 
 
 @pytest.mark.integration
-def test_rd_linear_with_gaussian_process():
+def test_rd_linear_with_gaussian_process(rd_data):
     """
     Test Regression Discontinuity scikit-learn experiment with Gaussian process model.
 
@@ -343,16 +386,15 @@ def test_rd_linear_with_gaussian_process():
     1. data is a dataframe
     2. skl_experiements.RegressionDiscontinuity returns correct type
     """
-    data = cp.load_data("rd")
+    data = rd_data
     kernel = 1.0 * ExpSineSquared(1.0, 5.0) + WhiteKernel(1e-1)
     result = cp.RegressionDiscontinuity(
         data,
         formula="y ~ 1 + x + treated",
         model=GaussianProcessRegressor(kernel=kernel),
-        model_kwargs={"kernel": kernel},
         treatment_threshold=0.5,
         epsilon=0.001,
-    )
+    ).fit()
     assert isinstance(data, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
     fig, ax = result.plot()

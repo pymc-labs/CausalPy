@@ -9,6 +9,7 @@ CausalPy welcomes contributions from interested individuals or groups. These gui
 - [Use of agents](#use-of-agents)
 - [Contributing code via pull requests](#contributing-code-via-pull-requests)
 - [Local development steps](#local-development-steps)
+- [Alternative setup: conda/micromamba](#alternative-setup-condamicromamba)
 - [Pull request checklist](#pull-request-checklist)
 - [Building the documentation locally](#building-the-documentation-locally)
 - [Overview of code structure](#overview-of-code-structure)
@@ -25,34 +26,27 @@ CausalPy welcomes contributions from interested individuals or groups. These gui
 
 ## Quick Start
 
-After forking this repository on GitHub, get up and running in a few commands.
+**[uv](https://docs.astral.sh/uv/) is the default developer environment** for CausalPy; conda/micromamba remains a supported alternative (see [Alternative setup: conda/micromamba](#alternative-setup-condamicromamba)). After forking this repository on GitHub, get up and running in a few commands.
 
-Throughout this guide, `conda` is used as a placeholder -- you can substitute `mamba` or `micromamba` in any command. If none are installed, install micromamba:
-
-```bash
-"${SHELL}" <(curl -L micro.mamba.pm/install.sh)
-```
-
-Then:
+Prerequisites: [uv](https://docs.astral.sh/uv/getting-started/installation/), system `make`, `graphviz`, and `pandoc`.
 
 ```bash
 git clone git@github.com:<your-github-handle>/CausalPy.git && cd CausalPy
-conda env create -f environment.yml
-conda run -n CausalPy make setup  # Installs package + all dev dependencies + prek hooks
+uv sync --locked --extra dev --extra docs --extra test --extra lint
+uv run prek install -f  # Installs package + all dev dependencies + prek hooks
 ```
 
-For interactive development, either activate the environment or drop into a subshell:
+Prefer `uv run <command>` for everything — there is no environment to activate:
 
 ```bash
-conda activate CausalPy
-# or
-conda run -n CausalPy bash  # no shell init needed
+uv run pytest
+uv run make html
 ```
 
-From there, all commands run inside the `CausalPy` environment without prefixing each one. Verify everything works:
+Verify everything works:
 
 ```bash
-make test
+uv run make test
 ```
 
 For the complete setup instructions, see [Local development steps](#local-development-steps).
@@ -66,7 +60,7 @@ There are 4 main ways of contributing to the CausalPy project (in ascending orde
 3. Fixing outstanding issues (bugs) with the existing codebase. They range from low-level software bugs to higher-level design problems.
 4. Adding new or improved functionality to the existing codebase.
 
-Items 2-4 require setting up a local development environment, see [Local development steps](#Local-development-steps) for more information.
+Items 2-4 require setting up a local development environment, see [Local development steps](#local-development-steps) for more information.
 
 ## Opening issues
 
@@ -77,7 +71,10 @@ We appreciate being notified of problems with the existing CausalPy code. We pre
 Please verify that your issue is not being currently addressed by other issues or pull requests by using the GitHub search tool to look for key words in the project issue tracker.
 
 ## Use of agents
+
 PR's with agent-generated code are fine. But don't spam us with code you don't understand. See [AGENTS.md](./AGENTS.md) for how we use LLMs in this repo.
+
+This file is aimed at human contributors. AI agents working on code should follow [AGENTS.md](./AGENTS.md) and [ARCHITECTURE.md](./ARCHITECTURE.md) instead — not load this guide into context unless the task is about contributor workflow or onboarding.
 
 ## Contributing code via pull requests
 
@@ -109,48 +106,32 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
 
    Always use a feature branch. It's good practice to never routinely work on the `main` branch of any repository.
 
-1. Create the environment from the `environment.yml` file (remember, `conda` can be substituted with `mamba` or `micromamba`):
+1. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) if you have not already, then sync the locked dev environment (this installs CausalPy in editable mode plus the `dev`, `docs`, `test`, and `lint` extras):
 
     ```bash
-    conda env create -f environment.yml
+    uv sync --locked --extra dev --extra docs --extra test --extra lint
+    uv run prek install -f
     ```
 
-    **Note:** `environment.yml` is generated from `pyproject.toml` by a prek hook. To change dependencies, edit `pyproject.toml` and run `prek run --all-files` (or regenerate with `pyproject2conda yaml` using the same args as in `.pre-commit-config.yaml`). During iterative work, prefer scoped runs like `prek run --files <file1> <file2>`. Do not edit `environment.yml` by hand—it will be overwritten when `pyproject.toml` is committed.
+    **Note:** `uv.lock` and `environment.yml` are both generated from `pyproject.toml` — never hand-edit either. To change dependencies: edit `pyproject.toml`, run `uv lock` to refresh `uv.lock`, and run `prek run pyproject2conda-yaml --all-files` (or `prek run --all-files`) to refresh `environment.yml`. Commit all three files together.
 
-    To update an existing environment after changes to `environment.yml` (e.g. after pulling or after regenerating it from `pyproject.toml`):
+    There is no environment to activate — prefix commands with `uv run` instead:
 
     ```bash
-    conda env update --file environment.yml --prune
+    uv run pytest
+    uv run make test
+    uv run make html
     ```
-
-    For interactive development, either activate the environment or drop into a subshell:
-
-    ```bash
-    conda activate CausalPy
-    # or
-    conda run -n CausalPy bash  # no shell init needed
-    ```
-
-    Either way, subsequent commands run inside the environment without prefixing each one. You can also prefix individual commands with `conda run -n CausalPy` if you prefer.
-
-1. Install the package and all development dependencies using the automated setup:
-
-    ```bash
-    conda run -n CausalPy make setup
-    ```
-
-    This single command:
-    - Installs CausalPy in editable mode (with `--no-deps` to avoid conflicts with conda-installed PyMC)
-    - Installs all development extras (`dev`, `docs`, `test`, `lint`)
-    - Sets up prek hooks
 
     It may also be necessary to [install](https://pandoc.org/installing.html) `pandoc`. On a Mac, run `brew install pandoc`.
 
-	If you are editing or writing new examples in the form of Jupyter notebooks, you may have to run the following command to make Jupyter Lab aware of the `CausalPy` environment.
+    If you are editing or writing new examples in the form of Jupyter notebooks, you may have to run the following command to make Jupyter Lab aware of the environment:
 
-	```bash
-	conda run -n CausalPy python -m ipykernel install --user --name CausalPy
-	```
+    ```bash
+    uv run python -m ipykernel install --user --name CausalPy
+    ```
+
+    Prefer conda-forge instead? See [Alternative setup: conda/micromamba](#alternative-setup-condamicromamba) — both paths lead to the same `make test`.
 
 1. You can then work on your changes locally, in your feature branch. Add changed files using `git add` and then `git commit` files:
 
@@ -177,6 +158,58 @@ For more instructions see the [Pull request checklist](#pull-request-checklist)
 
 1. Finally, to submit a pull request, go to the GitHub web page of your fork of the CausalPy repo. Click the 'Pull request' button to send your changes to the project's maintainers for review. This will send an email to the committers.
 
+## Alternative setup: conda/micromamba
+
+uv is the default developer environment (see [Local development steps](#local-development-steps)); conda/micromamba remains a supported alternative for contributors who prefer conda-forge builds — for example if you rely on conda-forge's BLAS-linked PyTensor. GitHub Actions CI runs tests on uv only; the conda path is validated locally and by a lightweight `environment.yml` sync check in CI, not by running the test suite twice.
+
+Throughout this section, `conda` is used as a placeholder — you can substitute `mamba` or `micromamba` in any command. If none are installed, install micromamba:
+
+```bash
+"${SHELL}" <(curl -L micro.mamba.pm/install.sh)
+```
+
+Then:
+
+```bash
+git clone git@github.com:<your-github-handle>/CausalPy.git && cd CausalPy
+conda env create -f environment.yml
+conda run -n CausalPy make setup-conda  # Installs package + all dev dependencies + prek hooks
+```
+
+**Note:** `environment.yml` is generated from `pyproject.toml` by a prek hook (the same source of truth `uv.lock` derives from). To change dependencies, edit `pyproject.toml` and run `prek run --all-files` (or regenerate with `pyproject2conda yaml` using the same args as in `.pre-commit-config.yaml`). During iterative work, prefer scoped runs like `prek run --files <file1> <file2>`. Do not edit `environment.yml` by hand — it will be overwritten, and CI's `check-environment-yml` job fails if it drifts from `pyproject.toml`.
+
+To update an existing environment after changes to `environment.yml` (e.g. after pulling or after regenerating it from `pyproject.toml`):
+
+```bash
+conda env update --file environment.yml --prune
+```
+
+For interactive development, either activate the environment or drop into a subshell:
+
+```bash
+conda activate CausalPy
+# or
+conda run -n CausalPy bash  # no shell init needed
+```
+
+Either way, subsequent commands run inside the environment without prefixing each one. You can also prefix individual commands with `conda run -n CausalPy` if you prefer. `make setup-conda` (unlike the default `make setup`, which is wired to uv) installs the package and dev extras with plain `pip install` inside the already-active conda environment:
+
+```bash
+conda run -n CausalPy make setup-conda
+```
+
+If you are editing or writing new examples in the form of Jupyter notebooks, you may have to run the following command to make Jupyter Lab aware of the `CausalPy` environment:
+
+```bash
+conda run -n CausalPy python -m ipykernel install --user --name CausalPy
+```
+
+From here, the rest of this guide applies identically — `make test`, `make lint`, `make html`, etc. — just run them with `conda run -n CausalPy <command>` (or from inside an activated shell) instead of `uv run <command>`.
+
+## Public API compatibility
+
+The authoritative [four-tier API policy](ARCHITECTURE.md#public-api-policy) defines which paths are stable and their SemVer expectations. Before adding, promoting, or changing an API, identify its tier in the PR and update the applicable Sphinx or manifest surface. Do not infer public support from an import path, a whole-submodule re-export, or an unprefixed name; leave an ambiguous helper in Tier 3 until maintainers explicitly promote it. Tier 1 and Tier 2 changes need documentation and a compatibility or migration plan for breaking changes; add an observable contract test or deterministic checker only when the rule does not require heuristic judgment. Tier 4 protocol changes need integrator-facing migration guidance.
+
 ## Pull request checklist
 
 We recommend that your contribution complies with the following guidelines before you submit a pull request:
@@ -188,15 +221,15 @@ We recommend that your contribution complies with the following guidelines befor
 - Example usage in docstrings is tested via doctest, which can be run via
 
     ```bash
-    make doctest
+    uv run make doctest
     ```
 
 - Doctest can also be run directly via pytest, which can be helpful to run only specific tests during development. The following commands run all doctests, only doctests in the pymc_models module, and only the doctests for the `PyMCModel` class in pymc_models:
 
     ```bash
-    pytest --doctest-modules causalpy/
-    pytest --doctest-modules causalpy/pymc_models.py
-    pytest --doctest-modules causalpy/pmyc_models.py::causalpy.pymc_models.PyMCModel
+    uv run pytest --doctest-modules causalpy/
+    uv run pytest --doctest-modules causalpy/pymc_models.py
+    uv run pytest --doctest-modules causalpy/pmyc_models.py::causalpy.pymc_models.PyMCModel
     ```
 
 - To indicate a work in progress please mark the PR as `draft`. Drafts may be useful to (1) indicate you are working on something to avoid duplicated work, (2) request broad review of functionality or API, or (3) seek collaborators.
@@ -204,62 +237,120 @@ We recommend that your contribution complies with the following guidelines befor
 - All other tests pass when everything is rebuilt from scratch. Tests can be run with:
 
     ```bash
-    make test
+    uv run make test
     ```
 
+- For pull requests that change Python source or tests, run the local patch coverage gate before marking the PR ready for review or pushing for CI (not on every commit — it runs the full suite):
+
+    ```bash
+    uv run make test-patch-cov
+    ```
+
+    This runs the test suite with coverage, writes `coverage.xml`, and uses `diff-cover` to fail when changed lines in production code (excluding `causalpy/tests/*`) fall below the local patch threshold (default 96%, aligned with Codecov’s patch gate). The compare branch defaults to `upstream/main` when that tracking branch exists and falls back to `origin/main` otherwise. If your branch targets a different base, set `DIFF_COVER_COMPARE_BRANCH`, for example `DIFF_COVER_COMPARE_BRANCH=upstream/release make test-patch-cov`.
+
 - When adding additional functionality, either edit an existing example, or create a new example (typically in the form of a Jupyter Notebook). Have a look at other examples for reference. Examples should demonstrate why the new functionality is useful in practice.
+
+### Adding a new example notebook
+
+When adding a new example notebook to the documentation gallery:
+
+1. **Place the notebook** in `docs/source/notebooks/` following the naming convention `{method}_{model}.ipynb` (e.g., `did_pymc.ipynb`, `rd_skl.ipynb`).
+
+2. **Ensure the notebook has at least one plot/figure** in its outputs. The gallery generation script (`scripts/generate_gallery.py`) will automatically extract the first PNG image from the notebook outputs to create a thumbnail. If the notebook has no outputs, the script will attempt to execute it to generate the thumbnail.
+
+3. **Add the notebook to `docs/source/notebooks/gallery.yaml`** under the appropriate category:
+   - `title`: card title for the gallery grid
+   - `notebook`: filename stem without extension
+   - optional `thumbnail: false` when there is no plot (e.g. `sensitivity_checks.md`)
+   - optional category `intro` text when adding a new method section
+
+4. **Regenerate the gallery** (updates `index.md`, sidebar toctrees, and thumbnails):
+
+   ```bash
+   uv run make gallery
+   ```
+
+   Thumbnails are gitignored (`docs/source/_static/thumbnails/`) and are also generated during `make html` / Read the Docs builds.
+
+5. **Build and test the documentation** to verify the notebook appears correctly in the gallery:
+
+   ```bash
+   uv run make html
+   ```
+
+   Then open `docs/_build/notebooks/index.html` in your browser to see the gallery and confirm the left sidebar lists the new notebook.
+
+**Note**: `gallery.yaml` is the source of truth; `index.md` is generated. The `gallery-in-sync` prek hook enforces that they stay in sync.
+
+- If your pull request makes a structural change — adding, removing, or reshaping an experiment class, PyMC or scikit-learn model, check, pipeline step, or a data contract — update [ARCHITECTURE.md](./ARCHITECTURE.md) in the same PR so the design overview stays accurate.
 
 - Documentation and high-coverage tests are necessary for enhancements to be accepted.
 
 - Documentation follows [NumPy style guide](https://numpydoc.readthedocs.io/en/latest/format.html)
 
-- Notebook files are validated by prek using `nbformat` schema checks (`validate-notebooks`). Run `prek run --all-files` before pushing to catch malformed `.ipynb` files early.
+- Notebook files are validated by prek using `nbformat` schema checks plus docs notebook conventions (`validate-notebooks`). Run `prek run --all-files` before pushing to catch malformed `.ipynb` files and docs navigation issues early.
 
-- If you have changed the documentation, you should [build the docs locally](#Building-the-documentation-locally) and check that the changes look correct.
+- If you have changed the documentation, you should [build the docs locally](#building-the-documentation-locally) and check that the changes look correct.
 
-- If notebook schema validation fails (`validate-notebooks`), use this recovery loop: (1) reopen and save or re-run the notebook in a notebook-aware editor, (2) if it still fails, restore the notebook from `main` and reapply only the intended edits with notebook-aware tooling, (3) rerun `prek run --all-files`, and (4) for docs notebook changes run `conda run -n CausalPy make html` before pushing.
+- If notebook validation fails (`validate-notebooks`), use this recovery loop: (1) reopen and save or re-run the notebook in a notebook-aware editor for schema errors; for docs convention errors, follow the validator message, (2) if it still fails, restore the notebook from `main` and reapply only the intended edits with notebook-aware tooling, (3) rerun `prek run --all-files`, and (4) for docs notebook changes run `uv run make html` (or `conda run -n CausalPy make html` on the conda alternative) before pushing.
 
 - Run any of the pre-existing examples in `CausalPy/docs/source/*` that contain analyses that would be affected by your changes to ensure that nothing breaks. This is a useful opportunity to not only check your work for bugs that might not be revealed by unit test, but also to show how your contribution improves CausalPy for end users.
 
 - Your code passes linting tests. Run the line below to check linting errors:
 
   ```bash
-  make check_lint
+  uv run make check_lint
   ```
+
   If you want to fix linting errors automatically, run
 
   ```bash
-  make lint
+  uv run make lint
   ```
+
+- Your code passes type checking. This is deliberately not a pre-commit hook: mypy only says anything useful when the project dependencies are importable, so run it from the project environment.
+
+  ```bash
+  uv run make typecheck
+  ```
+
+  Modules that already fail are listed as `[[tool.mypy.overrides]]` entries in `pyproject.toml`, each disabling only the error codes that module currently produces. New code should not need a new entry. Removing an existing one is a welcome contribution.
 
 ## Building the documentation locally
 
 To build the documentation, run from the **project root**:
 
 ```bash
-make html
+uv run make html
 ```
+
 To clean and rebuild the documentation from scratch:
+
 ```bash
-make cleandocs
-make html
+uv run make cleandocs
+uv run make html
 ```
+
  Docs are built in docs/_build/html, but these docs are not committed to the GitHub repository due to .gitignore.
 
  📌 Note: The previous docs/Makefile has been removed. Please use only the root-level Makefile for documentation commands
 
 ## Overview of code structure
 
+For a prose overview of CausalPy's design — the layered architecture, the `BaseExperiment` contract, the two-backend (PyMC / scikit-learn) model system, the pipeline and checks systems, the formula interface, and the reporting layer — see [ARCHITECTURE.md](./ARCHITECTURE.md). It is the fastest way to understand where things live and how the pieces fit together.
+
+The auto-generated UML diagrams below complement that overview:
+
 Classes
-![](docs/source/_static/classes.png)
+![](docs/source/_static/classes.svg)
 
 Packages
-![](docs/source/_static/packages.png)
+![](docs/source/_static/packages.svg)
 
 UML diagrams can be created with the command below.
 
 ```bash
-make uml
+uv run make uml
 ```
 
 ---
@@ -271,6 +362,7 @@ Contributions are welcome from the community. This section describes how contrib
 ### Current maintainers
 
 <!-- Update this list as the team evolves -->
+
 - [@drbenvincent](https://github.com/drbenvincent)
 - [@juanitorduz](https://github.com/juanitorduz)
 - [@NathanielF](https://github.com/NathanielF)
@@ -287,7 +379,7 @@ Contributions are welcome from the community. This section describes how contrib
 ### Pathway overview
 
 | Level | GitHub permission | Typical scope | Primary focus |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Community participant | N/A | Participate via issues, discussions, and PRs from forks | Reporting, ideas, fixes, docs, examples, tests |
 | Triager | Triage | Manage issues/PRs (no write) | Labels, reproductions, routing, housekeeping |
 | Collaborator | Write | Contribute directly to branches | Regular PRs, reviews, maintenance |
@@ -300,21 +392,25 @@ Contributions are welcome from the community. This section describes how contrib
 #### 1) Community participant (public access)
 
 **Who this is for**
+
 - Anyone engaging with the project: users, researchers, educators, and prospective contributors.
 
 **What you can do**
+
 - Open issues (bug reports, feature requests, questions).
 - Participate in discussions.
 - Submit PRs from forks (code, docs, tests, examples).
 - Review PRs by leaving comments and suggestions.
 
 **Expectations**
+
 - Follow the [Code of Conduct](https://www.contributor-covenant.org/version/2/1/code_of_conduct/).
 - Prefer small, focused PRs.
 - Include tests and docs updates when appropriate.
 - Be responsive to reviewer feedback.
 
 **Signals you may be ready for elevated access**
+
 - Consistently helpful participation and good judgment.
 - High-quality issue reports (clear repro, version info).
 - A track record of merged contributions and constructive reviews.
@@ -324,28 +420,34 @@ Contributions are welcome from the community. This section describes how contrib
 #### 2) Triager (Triage)
 
 **Who this is for**
+
 - Contributors who help maintain project hygiene by managing issues and PR flow without changing code directly.
 
 **What you can do (typical)**
+
 - Apply and manage labels.
 - Ask for reproductions, logs, environment details.
 - Close duplicates, redirect questions to Discussions.
 - Keep PRs moving by requesting changes, tagging reviewers, and nudging for updates.
 
 **What you cannot do**
+
 - Merge PRs.
 - Change repository settings.
 
 **Expectations**
+
 - Use a consistent labeling taxonomy.
 - Be neutral and kind; focus on clarity.
 - Escalate ambiguous/controversial decisions to maintainers.
 
 **Suggested criteria**
+
 - Demonstrated helpfulness over time (e.g., 4–8 weeks of consistent triage activity).
 - Sound judgment on duplicates, scope, and priority.
 
 **Nomination and granting**
+
 - Maintainers can invite directly, or a contributor can request the role by [opening a GitHub issue](https://github.com/pymc-labs/CausalPy/issues/new).
 - Access is reviewed periodically; inactivity may result in stepping down.
 
@@ -354,24 +456,29 @@ Contributions are welcome from the community. This section describes how contrib
 #### 3) Collaborator (Write)
 
 **Who this is for**
+
 - Contributors who actively push changes and can be trusted with direct write access.
 
 **What you can do (typical)**
+
 - Push branches to the main repository.
 - Help maintain CI, docs, examples.
 - Perform routine maintenance tasks (refactors, dependency updates) within agreed scope.
 
 **Expectations**
+
 - Demonstrate good engineering hygiene: tests, docs, changelog discipline (as applicable).
 - Respect backwards compatibility and public API stability.
 - Participate in code review (both giving and receiving).
 
 **Suggested criteria**
+
 - Sustained contributions (e.g., multiple merged PRs across at least a few weeks/months).
 - High-quality reviews that improve code quality and catch issues.
 - Familiarity with project standards and tooling.
 
 **Safety mechanisms**
+
 - Branch protection remains enabled (required checks, review requirements).
 - Prefer PR-based changes even for collaborators.
 
@@ -380,25 +487,30 @@ Contributions are welcome from the community. This section describes how contrib
 #### 4) Maintainer (Maintain)
 
 **Who this is for**
+
 - People who help run the project: merging, release coordination, and repository management.
 
 **What you can do (typical)**
+
 - Merge PRs.
 - Manage labels and milestones.
 - Coordinate releases and ensure release notes are accurate.
 - Manage project boards (if used).
 
 **Expectations**
+
 - Consistent review and merge quality.
 - Ability to mediate disagreements and drive decisions.
 - Active stewardship of community norms.
 
 **Suggested criteria**
+
 - Track record of high-impact contributions and reliable collaboration.
 - Demonstrated leadership: mentoring, reviews, triage, roadmap contributions.
 - Comfortable with responsible disclosure and security processes (if applicable).
 
 **Onboarding**
+
 - Start with a limited scope (e.g., one module or docs/releases) and expand.
 
 ---
@@ -406,6 +518,7 @@ Contributions are welcome from the community. This section describes how contrib
 ### Decision process
 
 #### How people are invited
+
 - A maintainer opens a short nomination discussion (or uses an internal maintainer thread) referencing:
   - contributions (PRs/issues/reviews)
   - areas of ownership
@@ -413,15 +526,18 @@ Contributions are welcome from the community. This section describes how contrib
 - After a short review period, maintainers grant access.
 
 #### Resolving disagreements
+
 - Decisions are made by informal consensus among maintainers.
 - If consensus cannot be reached, a simple majority decides.
 - For project-wide decisions (e.g., major API changes, new maintainers), give at least one week for async discussion before finalizing.
 
 #### How to step down
+
 - Anyone can request to step down at any time.
 - Access can be reduced after long inactivity to minimize risk.
 
 #### A note on Admin access
+
 Admin access is reserved for project leads and is not part of the contributor pathway. Admins handle repository settings, secrets, and GitHub Actions configuration.
 
 ### Role expectations checklist
@@ -434,6 +550,7 @@ Admin access is reserved for project leads and is not part of the contributor pa
 ### Appendix: Quick rubric for promotion
 
 Consider promoting when a contributor reliably demonstrates:
+
 - **Quality:** produces correct changes with appropriate tests/docs.
 - **Judgment:** scopes work well and respects compatibility.
 - **Collaboration:** responds to review, helps others, communicates.

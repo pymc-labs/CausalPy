@@ -15,6 +15,7 @@
 CausalPy Test Configuration
 
 Functions:
+
 * rng: random number generator with session level scope
 """
 
@@ -27,14 +28,24 @@ import pytest
 matplotlib.use("Agg", force=True)
 
 import causalpy as cp
+from causalpy.data.simulate_data import (
+    RANDOM_SEED,
+    generate_ancova_data,
+    generate_did,
+    generate_geolift_data,
+    generate_multicell_geolift_data,
+    generate_regression_discontinuity_data,
+    generate_synthetic_control_data,
+    generate_time_series_data_seasonal,
+    generate_time_series_data_simple,
+)
 
 # Try to use PyMC's testing helpers if available; otherwise, fall back to no-op fixtures
 try:  # pragma: no cover - conditional import for compatibility across PyMC versions
-    from pymc.testing import mock_sample, mock_sample_setup_and_teardown  # type: ignore
+    from pymc.testing import mock_sample_setup_and_teardown  # type: ignore
 
     _HAVE_PYMC_TESTING = True
 except Exception:  # pragma: no cover
-    mock_sample = None  # type: ignore
     mock_sample_setup_and_teardown = None  # type: ignore
     _HAVE_PYMC_TESTING = False
 
@@ -47,25 +58,92 @@ def rng() -> np.random.Generator:
 
 
 if _HAVE_PYMC_TESTING:
-    mock_pymc_sample = pytest.fixture(mock_sample_setup_and_teardown, scope="session")
+    mock_pymc_sample = pytest.fixture(mock_sample_setup_and_teardown, scope="module")
 else:
 
-    @pytest.fixture(scope="session")
+    @pytest.fixture(scope="module")
     def mock_pymc_sample():  # pragma: no cover - compatibility no-op
         # No-op fixture to satisfy tests when PyMC testing helpers are unavailable
         yield
 
 
-@pytest.fixture(autouse=True)
-def mock_sample_for_doctest(request):
-    if not request.config.getoption("--doctest-modules", default=False):
-        return
-
-    if not _HAVE_PYMC_TESTING or mock_sample is None:
-        return
+def _set_genuine_pymc_sampling(monkeypatch):
+    """Restore all globals replaced by PyMC's mock sampler."""
     import pymc as pm
+    from pymc.distributions.continuous import Flat, HalfFlat
+    from pymc.sampling.mcmc import sample
 
-    pm.sample = mock_sample
+    monkeypatch.setattr(pm, "sample", sample)
+    monkeypatch.setattr(pm, "Flat", Flat)
+    monkeypatch.setattr(pm, "HalfFlat", HalfFlat)
+
+
+@pytest.fixture(scope="module")
+def real_pymc_sampling(mock_pymc_sample):
+    """Use genuine sampling and prior classes throughout one module."""
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _set_genuine_pymc_sampling(monkeypatch)
+        yield
+
+
+@pytest.fixture
+def genuine_pymc_sampling(monkeypatch):
+    """Restore genuine PyMC sampling and prior classes for one test."""
+    _set_genuine_pymc_sampling(monkeypatch)
+
+
+@pytest.fixture(scope="session")
+def did_data():
+    """Synthetic difference-in-differences data."""
+    return generate_did(seed=RANDOM_SEED)
+
+
+@pytest.fixture(scope="session")
+def its_data():
+    """Synthetic interrupted time series data (seasonal, date as datetime index)."""
+    return generate_time_series_data_seasonal(
+        treatment_time=pd.to_datetime("2017-01-01"), seed=RANDOM_SEED
+    )
+
+
+@pytest.fixture(scope="session")
+def its_simple_data():
+    """Synthetic simple ITS data (date as datetime index)."""
+    return generate_time_series_data_simple(
+        treatment_time=pd.to_datetime("2015-01-01"), seed=RANDOM_SEED
+    )
+
+
+@pytest.fixture(scope="session")
+def rd_data():
+    """Synthetic regression discontinuity data."""
+    return generate_regression_discontinuity_data(
+        true_treatment_threshold=0.5, seed=RANDOM_SEED
+    )
+
+
+@pytest.fixture(scope="session")
+def sc_data():
+    """Synthetic control data (DataFrame only, no weightings)."""
+    return generate_synthetic_control_data(seed=RANDOM_SEED)[0]
+
+
+@pytest.fixture(scope="session")
+def anova1_data():
+    """Synthetic ANCOVA / pre-post NEGD data."""
+    return generate_ancova_data(seed=RANDOM_SEED)
+
+
+@pytest.fixture(scope="session")
+def geolift1_data():
+    """Synthetic geolift data (time as datetime index)."""
+    return generate_geolift_data(seed=RANDOM_SEED)
+
+
+@pytest.fixture(scope="session")
+def geolift_multi_cell_data():
+    """Synthetic multi-cell geolift data (time as datetime index)."""
+    return generate_multicell_geolift_data(seed=RANDOM_SEED)
 
 
 def reg_kink_function(x, beta, kink):

@@ -15,14 +15,164 @@
 Functions that generate data sets used in examples
 """
 
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
-from scipy.stats import dirichlet, gamma, norm, uniform
+from scipy.stats import gamma
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
 default_lowess_kwargs: dict[str, float | int] = {"frac": 0.2, "it": 0}
 RANDOM_SEED: int = 8927
-rng: np.random.Generator = np.random.default_rng(RANDOM_SEED)
+
+
+@dataclass(frozen=True)
+class UpDownGeoLiftSimulation:
+    """A reproducible three-arm geo experiment with known potential outcomes.
+
+    Spend frames have a common time index and ``(geo, channel)`` columns. Revenue
+    and effect frames have one column per geo. Spend and revenue are simulated
+    USD per week, recorded in each frame's ``attrs['unit']``.
+    """
+
+    revenue: pd.DataFrame
+    no_intervention: pd.DataFrame
+    effects: pd.DataFrame
+    spend_baseline: pd.DataFrame
+    spend_planned: pd.DataFrame
+    spend_realized: pd.DataFrame
+    arms: dict[str, list[str]]
+    treatment_time: pd.Timestamp
+    tested_channel: str
+
+
+def generate_up_down_geolift_data(
+    seed: int = RANDOM_SEED,
+    *,
+    n_pre: int = 40,
+    n_post: int = 12,
+    n_control: int = 6,
+    n_up: int = 2,
+    n_down: int = 2,
+    effect_scale: float = 150.0,
+    delivery_fraction: float = 0.9,
+) -> UpDownGeoLiftSimulation:
+    """Simulate weekly revenue and two-channel spend for an up/down/control test.
+
+    The tested channel is ``search``. Its realized change starts at the common
+    intervention date; ``display`` is unchanged. Treated business-as-usual
+    revenue is a convex combination of control revenue plus idiosyncratic noise.
+    Control geos span smaller and larger sizes than treated geos, producing
+    correspondingly lower and higher baseline spend and revenue. Effects are
+    differences in geo-specific saturating response to realized and baseline
+    search spend, with no carryover. Set ``effect_scale=0`` for a no-effect case.
+    """
+    if min(n_pre, n_post, n_control, n_up, n_down) < 1:
+        raise ValueError("All geo and period counts must be positive.")
+    if n_control < 2:
+        raise ValueError(
+            "At least two control geos are needed to bracket treated geos."
+        )
+    if effect_scale < 0 or not np.isfinite(effect_scale):
+        raise ValueError("effect_scale must be finite and nonnegative.")
+    if not np.isfinite(delivery_fraction) or not 0 <= delivery_fraction <= 1:
+        raise ValueError("delivery_fraction must lie between 0 and 1.")
+
+    rng = np.random.default_rng(seed)
+    time = pd.date_range(
+        "2024-01-07", periods=n_pre + n_post, freq="W-SUN", name="time"
+    )
+    treatment_time = time[n_pre]
+    arms = {
+        "up": [f"up_{i + 1}" for i in range(n_up)],
+        "down": [f"down_{i + 1}" for i in range(n_down)],
+        "control": [f"control_{i + 1}" for i in range(n_control)],
+    }
+    geos = arms["control"] + arms["up"] + arms["down"]
+    post = np.arange(len(time)) >= n_pre
+
+    common = 110 + 0.18 * np.arange(len(time)) + 4 * np.sin(np.arange(len(time)) / 5)
+    # Geo size creates distinct spend and revenue levels. Controls span the
+    # treated sizes so a convex donor combination can interpolate each geo.
+    control_sizes = np.linspace(0.7, 1.3, n_control)
+    treated_sizes = np.linspace(
+        control_sizes[0] + 0.2 * np.ptp(control_sizes),
+        control_sizes[-1] - 0.2 * np.ptp(control_sizes),
+        n_up + n_down,
+    )
+    geo_sizes = dict(zip(arms["control"], control_sizes, strict=True))
+    controls = pd.DataFrame(
+        {
+            geo: size * common + rng.normal(0, 0.8, len(time))
+            for geo, size in geo_sizes.items()
+        },
+        index=time,
+    )
+    no_intervention = controls.copy()
+    for geo, size in zip(arms["up"] + arms["down"], treated_sizes, strict=True):
+        geo_sizes[geo] = size
+        upper = min(np.searchsorted(control_sizes, size, side="right"), n_control - 1)
+        lower = upper - 1
+        upper_weight = (size - control_sizes[lower]) / (
+            control_sizes[upper] - control_sizes[lower]
+        )
+        donor_mean = (1 - upper_weight) * controls.iloc[
+            :, lower
+        ].to_numpy() + upper_weight * controls.iloc[:, upper].to_numpy()
+        no_intervention[geo] = donor_mean + rng.normal(0, 0.4, len(time))
+
+    spend_columns = pd.MultiIndex.from_product(
+        [geos, ["search", "display"]], names=["geo", "channel"]
+    )
+    spend_baseline = pd.DataFrame(index=time, columns=spend_columns, dtype=float)
+    for geo in geos:
+        spend_baseline[(geo, "search")] = 40 * geo_sizes[geo]
+        spend_baseline[(geo, "display")] = 20 * geo_sizes[geo]
+
+    spend_planned = spend_baseline.copy()
+    spend_realized = spend_baseline.copy()
+    # Equal absolute planned shifts per paired geo make the planned net change zero.
+    for arm, sign in (("up", 1), ("down", -1)):
+        for geo in arms[arm]:
+            baseline = spend_baseline[(geo, "search")].to_numpy()
+            planned = baseline + np.where(post, sign * 8.0, 0.0)
+            realized = baseline + np.where(post, sign * 8.0 * delivery_fraction, 0.0)
+            spend_planned[(geo, "search")] = planned
+            spend_realized[(geo, "search")] = realized
+
+    effects = pd.DataFrame(0.0, index=time, columns=no_intervention.columns)
+    for geo in arms["up"] + arms["down"]:
+        half_saturation = rng.uniform(25, 55)
+        geo_scale = effect_scale * rng.uniform(0.85, 1.15)
+        baseline = spend_baseline[(geo, "search")]
+        realized = spend_realized[(geo, "search")]
+        effects[geo] = geo_scale * (
+            realized / (half_saturation + realized)
+            - baseline / (half_saturation + baseline)
+        )
+
+    revenue = no_intervention + effects
+    for frame in (
+        revenue,
+        no_intervention,
+        effects,
+        spend_baseline,
+        spend_planned,
+        spend_realized,
+    ):
+        frame.attrs["unit"] = "USD/week"
+
+    return UpDownGeoLiftSimulation(
+        revenue=revenue,
+        no_intervention=no_intervention,
+        effects=effects,
+        spend_baseline=spend_baseline,
+        spend_planned=spend_planned,
+        spend_realized=spend_realized,
+        arms=arms,
+        treatment_time=treatment_time,
+        tested_channel="search",
+    )
 
 
 def _smoothed_gaussian_random_walk(
@@ -30,6 +180,7 @@ def _smoothed_gaussian_random_walk(
     gaussian_random_walk_sigma: float,
     N: int,
     lowess_kwargs: dict,
+    rng: np.random.Generator,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Generates Gaussian random walk data and applies LOWESS.
@@ -42,9 +193,11 @@ def _smoothed_gaussian_random_walk(
         Length of the random walk
     :param lowess_kwargs:
         Keyword argument dictionary passed to statsmodels lowess
+    :param rng:
+        NumPy random number generator instance
     """
     x = np.arange(N)
-    y = norm(gaussian_random_walk_mu, gaussian_random_walk_sigma).rvs(N).cumsum()
+    y = rng.normal(gaussian_random_walk_mu, gaussian_random_walk_sigma, N).cumsum()
     filtered = lowess(y, x, **lowess_kwargs)
     y = filtered[:, 1]
     return (x, y)
@@ -56,6 +209,7 @@ def generate_synthetic_control_data(
     grw_mu: float = 0.25,
     grw_sigma: float = 1,
     lowess_kwargs: dict = default_lowess_kwargs,
+    seed: int | None = None,
 ) -> tuple[pd.DataFrame, np.ndarray]:
     """
     Generates data for synthetic control example.
@@ -70,28 +224,47 @@ def generate_synthetic_control_data(
         Standard deviation of Gaussian Random Walk
     :lowess_kwargs:
         Keyword argument dictionary passed to statsmodels lowess
+    :param seed:
+        Random seed for reproducibility
 
     Example
     --------
     >>> from causalpy.data.simulate_data import generate_synthetic_control_data
-    >>> df, weightings_true = generate_synthetic_control_data(treatment_time=70)
+    >>> df, weightings_true = generate_synthetic_control_data(
+    ...     treatment_time=70, seed=42
+    ... )
     """
+    rng = np.random.default_rng(seed)
     # 1. Generate non-treated variables
     df = pd.DataFrame(
         {
-            "a": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
-            "b": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
-            "c": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
-            "d": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
-            "e": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
-            "f": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
-            "g": _smoothed_gaussian_random_walk(grw_mu, grw_sigma, N, lowess_kwargs)[1],
+            "a": _smoothed_gaussian_random_walk(
+                grw_mu, grw_sigma, N, lowess_kwargs, rng
+            )[1],
+            "b": _smoothed_gaussian_random_walk(
+                grw_mu, grw_sigma, N, lowess_kwargs, rng
+            )[1],
+            "c": _smoothed_gaussian_random_walk(
+                grw_mu, grw_sigma, N, lowess_kwargs, rng
+            )[1],
+            "d": _smoothed_gaussian_random_walk(
+                grw_mu, grw_sigma, N, lowess_kwargs, rng
+            )[1],
+            "e": _smoothed_gaussian_random_walk(
+                grw_mu, grw_sigma, N, lowess_kwargs, rng
+            )[1],
+            "f": _smoothed_gaussian_random_walk(
+                grw_mu, grw_sigma, N, lowess_kwargs, rng
+            )[1],
+            "g": _smoothed_gaussian_random_walk(
+                grw_mu, grw_sigma, N, lowess_kwargs, rng
+            )[1],
         }
     )
 
     # 2. Generate counterfactual, based on weighted sum of non-treated variables. This
     # is the counterfactual with NO treatment.
-    weightings_true = dirichlet(np.ones(7)).rvs(1)
+    weightings_true = rng.dirichlet(np.ones(7), size=1)
     df["counterfactual"] = np.dot(df.to_numpy(), weightings_true.T)
 
     # 3. Generate the causal effect
@@ -104,71 +277,26 @@ def generate_synthetic_control_data(
 
     # 5. apply observation noise to all relevant variables
     for var in ["actual", "a", "b", "c", "d", "e", "f", "g"]:
-        df[var] += norm(0, 0.25).rvs(N)
+        df[var] += rng.normal(0, 0.25, N)
 
     return df, weightings_true
 
 
-def generate_time_series_data(
-    N: int = 100,
-    treatment_time: int = 70,
-    beta_temp: float = -1,
-    beta_linear: float = 0.5,
-    beta_intercept: float = 3,
-) -> pd.DataFrame:
-    """
-    Generates interrupted time series example data
-
-    :param N:
-        Length of the time series
-    :param treatment_time:
-        Index of when treatment begins
-    :param beta_temp:
-        The temperature coefficient
-    :param beta_linear:
-        The linear coefficient
-    :param beta_intercept:
-        The intercept
-
-    """
-    x = np.arange(0, N, 1)
-    df = pd.DataFrame(
-        {
-            "temperature": np.sin(x * 0.5) + 1,
-            "linear": np.linspace(0, 1, N),
-            "causal effect": 10 * gamma(10).pdf(np.arange(0, N, 1) - treatment_time),
-        }
-    )
-
-    df["deaths_counterfactual"] = (
-        beta_intercept + beta_temp * df["temperature"] + beta_linear * df["linear"]
-    )
-
-    # generate the actually observed data
-    # ie the treated with the causal effect applied
-    df["deaths_actual"] = df["deaths_counterfactual"] + df["causal effect"]
-
-    # apply observation noise to all relevant variables
-    # NOTE: no observation noise on the linear trend component
-    for var in ["deaths_actual", "temperature"]:
-        df[var] += norm(0, 0.1).rvs(N)
-
-    # add intercept column of ones (for modeling purposes)
-    # This is correctly a column of ones, not beta_intercept, as beta_intercept
-    # is already incorporated in the data generation above
-    df["intercept"] = np.ones(df.shape[0])
-
-    return df
-
-
 def generate_time_series_data_seasonal(
     treatment_time: pd.Timestamp,
+    seed: int | None = None,
 ) -> pd.DataFrame:
     """
     Generates 10 years of monthly data with seasonality
+
+    :param treatment_time:
+        Timestamp of when treatment begins
+    :param seed:
+        Random seed for reproducibility
     """
+    rng = np.random.default_rng(seed)
     dates = pd.date_range(
-        start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="M"
+        start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="ME"
     )
     df = pd.DataFrame(data={"date": dates})
     df = df.assign(
@@ -186,7 +314,7 @@ def generate_time_series_data_seasonal(
     )
 
     df["y"] += df["causal effect"]
-    df["y"] += norm(0, 2).rvs(N)
+    df["y"] += rng.normal(0, 2, N)
 
     # add intercept
     df["intercept"] = np.ones(df.shape[0])
@@ -194,13 +322,23 @@ def generate_time_series_data_seasonal(
 
 
 def generate_time_series_data_simple(
-    treatment_time: pd.Timestamp, slope: float = 0.0
+    treatment_time: pd.Timestamp,
+    slope: float = 0.0,
+    seed: int | None = None,
 ) -> pd.DataFrame:
     """Generate simple interrupted time series data, with no seasonality or temporal
     structure.
+
+    :param treatment_time:
+        Timestamp of when treatment begins
+    :param slope:
+        Slope of the linear trend
+    :param seed:
+        Random seed for reproducibility
     """
+    rng = np.random.default_rng(seed)
     dates = pd.date_range(
-        start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="M"
+        start=pd.to_datetime("2010-01-01"), end=pd.to_datetime("2020-01-01"), freq="ME"
     )
     df = pd.DataFrame(data={"date": dates})
     df = df.assign(
@@ -213,19 +351,23 @@ def generate_time_series_data_simple(
     # add intercept
     df["intercept"] = np.ones(df.shape[0])
     # add observation noise
-    df["timeseries"] += norm(0, 0.25).rvs(N)
+    df["timeseries"] += rng.normal(0, 0.25, N)
     return df
 
 
-def generate_did() -> pd.DataFrame:
+def generate_did(seed: int | None = None) -> pd.DataFrame:
     """
     Generate Difference in Differences data
+
+    :param seed:
+        Random seed for reproducibility
 
     Example
     --------
     >>> from causalpy.data.simulate_data import generate_did
-    >>> df = generate_did()
+    >>> df = generate_did(seed=42)
     """
+    rng = np.random.default_rng(seed)
     # true parameters
     control_intercept = 1
     treat_intercept_delta = 0.25
@@ -275,20 +417,26 @@ def generate_did() -> pd.DataFrame:
 
 
 def generate_regression_discontinuity_data(
-    N: int = 100, true_causal_impact: float = 0.5, true_treatment_threshold: float = 0.0
+    N: int = 100,
+    true_causal_impact: float = 0.5,
+    true_treatment_threshold: float = 0.0,
+    seed: int | None = None,
 ) -> pd.DataFrame:
     """
     Generate regression discontinuity example data
+
+    :param seed:
+        Random seed for reproducibility
 
     Example
     --------
     >>> import pathlib
     >>> from causalpy.data.simulate_data import generate_regression_discontinuity_data
-    >>> df = generate_regression_discontinuity_data(true_treatment_threshold=0.5)
-    >>> df.to_csv(
-    ...     pathlib.Path.cwd() / "regression_discontinuity.csv", index=False
-    ... )  # doctest: +SKIP
+    >>> df = generate_regression_discontinuity_data(
+    ...     true_treatment_threshold=0.5, seed=42
+    ... )
     """
+    rng = np.random.default_rng(seed)
 
     def is_treated(x: np.ndarray) -> np.ndarray:
         """Check if x was treated"""
@@ -300,8 +448,8 @@ def generate_regression_discontinuity_data(
         y[is_treated(x)] = true_causal_impact
         return y
 
-    x = np.sort((uniform.rvs(size=N) - 0.5) * 2)
-    y = np.sin(x * 3) + impact(x) + norm.rvs(scale=0.1, size=N)
+    x = np.sort(rng.uniform(-1, 1, size=N))
+    y = np.sin(x * 3) + impact(x) + rng.normal(0, 0.1, size=N)
 
     return pd.DataFrame({"x": x, "y": y, "treated": is_treated(x)})
 
@@ -311,24 +459,32 @@ def generate_ancova_data(
     pre_treatment_means: np.ndarray | None = None,
     treatment_effect: int = 2,
     sigma: int = 1,
+    seed: int | None = None,
 ) -> pd.DataFrame:
     """
     Generate ANCOVA example data
+
+    :param seed:
+        Random seed for reproducibility
 
     Example
     --------
     >>> import pathlib
     >>> from causalpy.data.simulate_data import generate_ancova_data
     >>> df = generate_ancova_data(
-    ...     N=200, pre_treatment_means=np.array([10, 12]), treatment_effect=2, sigma=1
+    ...     N=200,
+    ...     pre_treatment_means=np.array([10, 12]),
+    ...     treatment_effect=2,
+    ...     sigma=1,
+    ...     seed=42,
     ... )
-    >>> df.to_csv(pathlib.Path.cwd() / "ancova_data.csv", index=False)  # doctest: +SKIP
     """
+    rng = np.random.default_rng(seed)
     if pre_treatment_means is None:
         pre_treatment_means = np.array([10, 12])
-    group = np.random.choice(2, size=N)
-    pre = np.random.normal(loc=pre_treatment_means[group])
-    post = pre + treatment_effect * group + np.random.normal(size=N) * sigma
+    group = rng.choice(2, size=N)
+    pre = rng.normal(loc=pre_treatment_means[group])
+    post = pre + treatment_effect * group + rng.normal(size=N) * sigma
     df = pd.DataFrame({"group": group, "pre": pre, "post": post})
     return df
 
@@ -357,7 +513,17 @@ def generate_geolift_data(seed: int | None = None) -> pd.DataFrame:
 
     K = 3
     factors = np.column_stack(
-        [create_series(n_years=n_years, intercept=0) for _ in range(K)]
+        [
+            _create_series(
+                n=52,
+                amplitude=1,
+                length_scale=2,
+                n_years=n_years,
+                intercept=0,
+                rng=rng,
+            )
+            for _ in range(K)
+        ]
     )  # (n_obs, K)
 
     similar = [
@@ -396,13 +562,20 @@ def generate_geolift_data(seed: int | None = None) -> pd.DataFrame:
     return df
 
 
-def generate_multicell_geolift_data() -> pd.DataFrame:
+def generate_multicell_geolift_data(
+    seed: int | None = None,
+) -> pd.DataFrame:
     """Generate synthetic data for a geolift example. This will consists of 6 untreated
     countries. The treated unit `Denmark` is a weighted combination of the untreated
     units. We additionally specify a treatment effect which takes effect after the
     `treatment_time`. The timeseries data is observed at weekly resolution and has
     annual seasonality, with this seasonality being a drawn from a Gaussian Process with
-    a periodic kernel."""
+    a periodic kernel.
+
+    :param seed:
+        Random seed for reproducibility
+    """
+    rng = np.random.default_rng(seed)
     n_years = 4
     treatment_time = pd.to_datetime("2022-01-01")
     causal_impact = 0.2
@@ -426,7 +599,14 @@ def generate_multicell_geolift_data() -> pd.DataFrame:
     df = (
         pd.DataFrame(
             {
-                country: create_series(n_years=n_years, intercept=3)
+                country: _create_series(
+                    n=52,
+                    amplitude=1,
+                    length_scale=2,
+                    n_years=n_years,
+                    intercept=3,
+                    rng=rng,
+                )
                 for country in untreated
             }
         )
@@ -438,14 +618,14 @@ def generate_multicell_geolift_data() -> pd.DataFrame:
 
     for treated_geo in treated:
         # create treated unit as a weighted sum of the untreated units
-        weights = np.random.dirichlet(np.ones(len(untreated)), size=1)[0]
+        weights = rng.dirichlet(np.ones(len(untreated)))
         df[treated_geo] = np.dot(df[untreated].values, weights)
         # add treatment effect
         df[treated_geo] += np.where(df.index < treatment_time, 0, causal_impact)
 
     # add observation noise to all geos
     for col in untreated + treated:
-        df[col] += np.random.normal(size=len(df), scale=0.1)
+        df[col] += rng.normal(size=len(df), scale=0.1)
 
     # ensure we never see any negative sales
     df = df.clip(lower=0)
@@ -458,23 +638,29 @@ def generate_multicell_geolift_data() -> pd.DataFrame:
 # -----------------
 
 
-def generate_seasonality(
-    n: int = 12, amplitude: int = 1, length_scale: float = 0.5
+def _generate_seasonality(
+    n: int,
+    amplitude: int,
+    length_scale: float,
+    rng: np.random.Generator,
 ) -> np.ndarray:
     """Generate monthly seasonality by sampling from a Gaussian process with a
-    Gaussian kernel, using numpy code"""
+    Gaussian kernel, using numpy code
+
+    :param rng:
+        NumPy random number generator instance
+    """
     # Generate the covariance matrix
     x = np.linspace(0, 1, n)
     x1, x2 = np.meshgrid(x, x)
-    cov = periodic_kernel(
+    cov = _periodic_kernel(
         x1, x2, period=1, length_scale=length_scale, amplitude=amplitude
     )
     # Generate the seasonality
-    seasonality = np.random.multivariate_normal(np.zeros(n), cov)
-    return seasonality
+    return rng.multivariate_normal(np.zeros(n), cov)
 
 
-def periodic_kernel(
+def _periodic_kernel(
     x1: np.ndarray,
     x2: np.ndarray,
     period: int = 1,
@@ -487,19 +673,26 @@ def periodic_kernel(
     )
 
 
-def create_series(
-    n: int = 52,
-    amplitude: int = 1,
-    length_scale: int = 2,
-    n_years: int = 4,
-    intercept: int = 3,
+def _create_series(
+    n: int,
+    amplitude: int,
+    length_scale: int,
+    n_years: int,
+    intercept: int,
+    rng: np.random.Generator,
 ) -> np.ndarray:
     """
     Returns numpy tile with generated seasonality data repeated over
     multiple years
+
+    :param rng:
+        NumPy random number generator instance
     """
     return np.tile(
-        generate_seasonality(n=n, amplitude=amplitude, length_scale=2) + intercept,
+        _generate_seasonality(
+            n=n, amplitude=amplitude, length_scale=length_scale, rng=rng
+        )
+        + intercept,
         n_years,
     )
 
@@ -550,6 +743,7 @@ def generate_staggered_did_data(
     -------
     pd.DataFrame
         Panel data with columns:
+
         - unit: Unit identifier
         - time: Time period
         - treated: Binary indicator (1 if treated at time t, 0 otherwise)
@@ -578,10 +772,7 @@ def generate_staggered_did_data(
     :math:`\\tau_{it}` is the dynamic treatment effect that depends on
     event-time :math:`e = t - G_i`.
     """
-    if seed is not None:
-        local_rng = np.random.default_rng(seed)
-    else:
-        local_rng = np.random.default_rng()
+    rng = np.random.default_rng(seed)
 
     # Default treatment cohorts: 3 cohorts at times 5, 10, 15
     if treatment_cohorts is None:
@@ -600,10 +791,10 @@ def generate_staggered_did_data(
         )
 
     # Generate unit fixed effects
-    unit_fe = local_rng.normal(0, unit_fe_scale, n_units)
+    unit_fe = rng.normal(0, unit_fe_scale, n_units)
 
     # Generate time fixed effects
-    time_fe = local_rng.normal(0, time_fe_scale, n_time_periods)
+    time_fe = rng.normal(0, time_fe_scale, n_time_periods)
 
     # Assign treatment times to units
     treatment_times = np.full(n_units, np.inf)  # Default: never treated
@@ -613,7 +804,7 @@ def generate_staggered_did_data(
         unit_idx += n_cohort
 
     # Shuffle treatment assignments
-    local_rng.shuffle(treatment_times)
+    rng.shuffle(treatment_times)
 
     # Build panel data
     rows = []
@@ -639,7 +830,7 @@ def generate_staggered_did_data(
                 tau = 0.0
 
             # Add noise
-            epsilon = local_rng.normal(0, sigma)
+            epsilon = rng.normal(0, sigma)
 
             # Observed outcome
             y = y0 + tau + epsilon
@@ -679,6 +870,7 @@ def generate_piecewise_its_data(
     y_t = β₀ + β₁t + Σₖ(level_k · I_k(t) + slope_k · R_k(t)) + ε_t
 
     Where:
+
     - I_k(t) = 1 if t >= T_k else 0 (step function for level change)
     - R_k(t) = max(0, t - T_k) (ramp function for slope change)
 
@@ -707,6 +899,7 @@ def generate_piecewise_its_data(
     -------
     df : pd.DataFrame
         DataFrame with columns:
+
         - 't': time index (0 to N-1)
         - 'y': observed outcome with noise
         - 'y_true': outcome without noise (ground truth)
@@ -714,6 +907,7 @@ def generate_piecewise_its_data(
         - 'effect': true causal effect at each time point
     params : dict
         Dictionary containing the true parameters:
+
         - 'baseline_intercept': β₀
         - 'baseline_slope': β₁
         - 'level_changes': list of level changes
@@ -786,9 +980,7 @@ def generate_piecewise_its_data(
                 f"Interruption time {t_k} is outside valid range [0, {N - 1}]"
             )
 
-    # Set random seed
-    if seed is not None:
-        np.random.seed(seed)
+    rng = np.random.default_rng(seed)
 
     # Generate time index
     t = np.arange(N)
@@ -810,7 +1002,7 @@ def generate_piecewise_its_data(
     y_true = counterfactual + effect
 
     # Add noise
-    noise = np.random.normal(0, noise_sigma, N)
+    noise = rng.normal(0, noise_sigma, N)
     y = y_true + noise
 
     # Create DataFrame

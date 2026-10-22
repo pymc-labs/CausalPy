@@ -20,13 +20,16 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+from matplotlib.collections import PolyCollection
+from matplotlib.colors import to_rgba
 
+from causalpy._arviz_compat import hdi_bound_arrays, hdi_bounds
 from causalpy.plot_utils import (
-    _log_response_type_effect_summary_once,
-    _log_response_type_info_once,
-    add_hdi_annotation,
     get_hdi_to_df,
+    plot_posterior_over_x,
+    plot_scalar_posterior,
 )
+from causalpy.utils import round_num
 
 
 @pytest.mark.integration
@@ -103,71 +106,804 @@ def test_get_hdi_to_df_with_coordinate_dimensions():
     assert result["higher"].max() < 7.0, "HDI upper bounds should be reasonable"
 
 
-class TestAddHdiAnnotation:
-    """Tests for the add_hdi_annotation function."""
+def test_get_hdi_to_df_drops_scalar_treated_units_coord():
+    """Scalar treated_units coords must not appear as columns or index levels."""
+    rng = np.random.default_rng(7)
+    da = xr.DataArray(
+        rng.normal(loc=1.0, scale=0.25, size=(2, 50, 3)),
+        dims=["chain", "draw", "obs_ind"],
+        coords={
+            "obs_ind": np.arange(3),
+            "treated_units": "treated_agg",
+        },
+    )
 
-    def test_add_hdi_annotation_expectation(self):
-        """Test adding HDI annotation for expectation type."""
+    result = get_hdi_to_df(da, hdi_prob=0.94)
+
+    assert list(result.columns) == ["lower", "higher"]
+    assert "treated_units" not in result.columns
+    assert "treated_units" not in list(result.index.names)
+    assert result.index.names == ["obs_ind"]
+    assert result["lower"].dtype.kind == "f"
+    assert result["higher"].dtype.kind == "f"
+
+
+def test_get_hdi_to_df_chain_draw_only_uses_default_probability():
+    """A scalar posterior returns a one-row numeric frame at CausalPy's 0.94 HDI."""
+    draws = xr.DataArray(
+        np.random.default_rng(42).normal(size=(2, 200)),
+        dims=["chain", "draw"],
+        coords={"treated_units": "treated_agg"},
+    )
+
+    result = get_hdi_to_df(draws)
+
+    assert list(result.columns) == ["lower", "higher"]
+    assert result.shape == (1, 2)
+    assert tuple(result.iloc[0]) == pytest.approx(
+        (-1.7577283913566313, 1.732311605409944),
+        rel=1e-12,
+        abs=1e-12,
+    )
+
+
+def test_get_hdi_to_df_preserves_empty_non_sample_index():
+    draws = xr.DataArray(
+        np.empty((2, 40, 0)),
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": []},
+    )
+
+    result = get_hdi_to_df(draws)
+
+    assert result.empty
+    assert list(result.columns) == ["lower", "higher"]
+    assert result.columns.name is None
+    assert result.index.name == "obs_ind"
+
+
+def test_get_hdi_to_df_retains_dimensional_treated_units_index():
+    """Dimensional treated_units must remain as an index level after conversion."""
+    rng = np.random.default_rng(11)
+    da = xr.DataArray(
+        rng.normal(size=(2, 40, 2, 2)),
+        dims=["chain", "draw", "obs_ind", "treated_units"],
+        coords={
+            "obs_ind": [0, 1],
+            "treated_units": ["unit_a", "unit_b"],
+        },
+    )
+
+    result = get_hdi_to_df(da, hdi_prob=0.94)
+
+    assert list(result.columns) == ["lower", "higher"]
+    assert result.index.names == ["obs_ind", "treated_units"]
+    assert list(result.index.get_level_values("treated_units").unique()) == [
+        "unit_a",
+        "unit_b",
+    ]
+
+
+def test_get_hdi_to_df_preserves_non_sample_row_order():
+    """Row order must follow the non-sample dimension coordinate order."""
+    rng = np.random.default_rng(19)
+    obs_order = np.array([4, 1, 3, 2])
+    da = xr.DataArray(
+        rng.normal(size=(2, 30, len(obs_order))),
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": obs_order},
+    )
+
+    result = get_hdi_to_df(da, hdi_prob=0.94)
+
+    assert list(result.index) == list(obs_order)
+    assert result.index.name == "obs_ind"
+
+
+def test_get_hdi_to_df_positional_bounds_are_lower_higher():
+    """Exact columns ['lower', 'higher'] keep iloc[:, 0] / iloc[:, -1] semantics."""
+    rng = np.random.default_rng(23)
+    da = xr.DataArray(
+        rng.normal(loc=0.0, scale=1.0, size=(2, 80, 5)),
+        dims=["chain", "draw", "obs_ind"],
+        coords={"obs_ind": np.arange(5)},
+    )
+
+    result = get_hdi_to_df(da, hdi_prob=0.94)
+
+    assert list(result.columns) == ["lower", "higher"]
+    np.testing.assert_allclose(result.iloc[:, 0].to_numpy(), result["lower"].to_numpy())
+    np.testing.assert_allclose(
+        result.iloc[:, -1].to_numpy(), result["higher"].to_numpy()
+    )
+    assert (result.iloc[:, 0] <= result.iloc[:, -1]).all()
+
+
+@pytest.fixture
+def synthetic_posterior_data():
+    """Create synthetic posterior data for testing plot_posterior_over_x."""
+    np.random.seed(42)
+    n_chains = 2
+    n_draws = 100
+    n_time_points = 20
+
+    # Generate synthetic posterior: trend + noise
+    true_mean = (
+        10 + 0.1 * np.arange(n_time_points) + 0.02 * np.arange(n_time_points) ** 2
+    )
+
+    # Create posterior samples with uncertainty
+    rng = np.random.default_rng(seed=42)
+    posterior_samples = np.zeros((n_chains, n_draws, n_time_points))
+
+    for chain in range(n_chains):
+        for draw in range(n_draws):
+            # Add some variation to the mean for each draw
+            draw_mean = true_mean + rng.normal(0, 0.5, n_time_points)
+            # Add observation-level noise
+            posterior_samples[chain, draw, :] = draw_mean + rng.normal(
+                0, 1.0, n_time_points
+            )
+
+    # Create xarray DataArray with proper dimensions and coordinates
+    time_index = pd.date_range(start="2020-01-01", periods=n_time_points, freq="D")
+    Y = xr.DataArray(
+        posterior_samples,
+        dims=["chain", "draw", "obs_ind"],
+        coords={
+            "chain": np.arange(n_chains),
+            "draw": np.arange(n_draws),
+            "obs_ind": time_index,
+        },
+    )
+
+    return time_index, Y
+
+
+@pytest.fixture
+def synthetic_posterior_data_numeric():
+    """Create synthetic posterior data with numeric x values."""
+    np.random.seed(42)
+    n_chains = 2
+    n_draws = 100
+    n_time_points = 20
+
+    # Generate synthetic posterior: trend + noise
+    true_mean = (
+        10 + 0.1 * np.arange(n_time_points) + 0.02 * np.arange(n_time_points) ** 2
+    )
+
+    # Create posterior samples with uncertainty
+    rng = np.random.default_rng(seed=42)
+    posterior_samples = np.zeros((n_chains, n_draws, n_time_points))
+
+    for chain in range(n_chains):
+        for draw in range(n_draws):
+            # Add some variation to the mean for each draw
+            draw_mean = true_mean + rng.normal(0, 0.5, n_time_points)
+            # Add observation-level noise
+            posterior_samples[chain, draw, :] = draw_mean + rng.normal(
+                0, 1.0, n_time_points
+            )
+
+    # Create xarray DataArray with proper dimensions and coordinates
+    x = np.arange(n_time_points)
+    Y = xr.DataArray(
+        posterior_samples,
+        dims=["chain", "draw", "obs_ind"],
+        coords={
+            "chain": np.arange(n_chains),
+            "draw": np.arange(n_draws),
+            "obs_ind": x,
+        },
+    )
+
+    return x, Y
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_ribbon_hdi(synthetic_posterior_data):
+    """Test ribbon plot with HDI (default behavior)."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+
+    h_line, h_patch = plot_posterior_over_x(
+        x,
+        Y,
+        ax=ax,
+        kind="ribbon",
+        ci_kind="hdi",
+        ci_prob=0.94,
+        label="Test HDI",
+    )
+
+    # Check return types
+    assert isinstance(h_line, plt.Line2D), "Should return Line2D for mean line"
+    assert h_patch is not None, "Should return PolyCollection for HDI ribbon"
+    assert isinstance(h_patch, PolyCollection), (
+        "Should return PolyCollection for HDI ribbon"
+    )
+
+    # Check that plot was created
+    assert len(ax.lines) > 0, "Should have at least one line (mean)"
+    assert len(ax.collections) > 0, "Should have at least one collection (HDI ribbon)"
+
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_ribbon_eti(synthetic_posterior_data):
+    """Test ribbon plot with ETI."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+
+    h_line, h_patch = plot_posterior_over_x(
+        x,
+        Y,
+        ax=ax,
+        kind="ribbon",
+        ci_kind="eti",
+        ci_prob=0.89,
+        label="Test ETI",
+    )
+
+    # Check return types
+    assert isinstance(h_line, plt.Line2D), "Should return Line2D for mean line"
+    assert h_patch is not None, "Should return PolyCollection for ETI ribbon"
+    assert isinstance(h_patch, PolyCollection), (
+        "Should return PolyCollection for ETI ribbon"
+    )
+
+    # Check that plot was created
+    assert len(ax.lines) > 0, "Should have at least one line (mean)"
+    assert len(ax.collections) > 0, "Should have at least one collection (ETI ribbon)"
+
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_histogram(synthetic_posterior_data):
+    """Test histogram visualization (2D heatmap)."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+
+    handles, patch = plot_posterior_over_x(
+        x,
+        Y,
+        ax=ax,
+        kind="histogram",
+        label="Test Histogram",
+    )
+
+    # Check return types
+    assert isinstance(handles, list), "Should return list of handles"
+    assert len(handles) > 0, "Should have at least one handle"
+    assert patch is None, "Histogram should not return PolyCollection"
+
+    # Check that plot was created
+    # Histogram uses pcolormesh which creates a QuadMesh
+    assert len(ax.collections) > 0 or len(ax.images) > 0, (
+        "Should have collections or images (pcolormesh/heatmap)"
+    )
+    assert len(ax.lines) > 0, "Should have at least one line (mean overlay)"
+
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_histogram_numeric(synthetic_posterior_data_numeric):
+    """Test histogram visualization with numeric x values."""
+    x, Y = synthetic_posterior_data_numeric
+    fig, ax = plt.subplots()
+
+    handles, patch = plot_posterior_over_x(
+        x,
+        Y,
+        ax=ax,
+        kind="histogram",
+        label="Test Histogram Numeric",
+    )
+
+    # Check return types
+    assert isinstance(handles, list), "Should return list of handles"
+    assert len(handles) > 0, "Should have at least one handle"
+    assert patch is None, "Histogram should not return PolyCollection"
+
+    # Check that plot was created
+    assert len(ax.collections) > 0 or len(ax.images) > 0, (
+        "Should have collections or images (pcolormesh/heatmap)"
+    )
+    assert len(ax.lines) > 0, "Should have at least one line (mean overlay)"
+
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_spaghetti(synthetic_posterior_data):
+    """Test spaghetti plot visualization."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+
+    handles, patch = plot_posterior_over_x(
+        x,
+        Y,
+        ax=ax,
+        kind="spaghetti",
+        num_samples=30,
+        label="Test Spaghetti",
+    )
+
+    # Check return types
+    assert isinstance(handles, list), "Should return list of handles"
+    assert len(handles) > 0, "Should have at least one handle"
+    assert patch is None, "Spaghetti should not return PolyCollection"
+
+    # Check that plot was created
+    # Spaghetti plot should have multiple lines (samples + mean)
+    assert len(ax.lines) >= 30, "Should have at least 30 lines (samples + mean)"
+
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_default_behavior(synthetic_posterior_data):
+    """Test that default behavior matches original (ribbon with HDI)."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+
+    # Test with no parameters (should default to ribbon, hdi, 0.94)
+    h_line, h_patch = plot_posterior_over_x(x, Y, ax=ax)
+
+    # Check return types
+    assert isinstance(h_line, plt.Line2D), "Should return Line2D for mean line"
+    assert h_patch is not None, "Should return PolyCollection for HDI ribbon"
+    np.testing.assert_allclose(
+        h_patch.get_facecolor()[0],
+        to_rgba(h_line.get_color(), alpha=0.3),
+    )
+
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_default_ribbon_matches_line_color_after_prior_artist(
+    synthetic_posterior_data,
+):
+    """Default bands use the same colour as their line after the axes cycle advances."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+    ax.plot(x, np.zeros(len(x)))
+
+    h_line, h_patch = plot_posterior_over_x(x, Y, ax=ax)
+
+    np.testing.assert_allclose(
+        h_patch.get_facecolor()[0],
+        to_rgba(h_line.get_color(), alpha=0.3),
+    )
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_backward_compatibility_hdi_prob(
+    synthetic_posterior_data,
+):
+    """Test backward compatibility with hdi_prob parameter."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+
+    # Test that hdi_prob still works (should override ci_prob)
+    h_line, h_patch = plot_posterior_over_x(x, Y, ax=ax, hdi_prob=0.95)
+
+    # Check return types
+    assert isinstance(h_line, plt.Line2D), "Should return Line2D for mean line"
+    assert h_patch is not None, "Should return PolyCollection for HDI ribbon"
+
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_different_ci_prob(synthetic_posterior_data):
+    """Test different ci_prob values."""
+    x, Y = synthetic_posterior_data
+
+    for ci_prob in [0.80, 0.89, 0.94, 0.95, 0.99]:
         fig, ax = plt.subplots()
-        ax.set_title("Original Title")
 
-        add_hdi_annotation(ax, "expectation")
+        h_line, h_patch = plot_posterior_over_x(
+            x,
+            Y,
+            ax=ax,
+            kind="ribbon",
+            ci_kind="hdi",
+            ci_prob=ci_prob,
+        )
 
-        title = ax.get_title()
-        assert "Original Title" in title
-        assert "94% HDI of model expectation (μ)" in title
-        assert "excl. observation noise" in title
+        # Check return types
+        assert isinstance(h_line, plt.Line2D), (
+            f"Should return Line2D for ci_prob={ci_prob}"
+        )
+        assert h_patch is not None, (
+            f"Should return PolyCollection for ci_prob={ci_prob}"
+        )
+
         plt.close(fig)
 
-    def test_add_hdi_annotation_prediction(self):
-        """Test adding HDI annotation for prediction type."""
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_invalid_kind(synthetic_posterior_data):
+    """Test that invalid kind parameter raises ValueError."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+
+    with pytest.raises(ValueError, match="Unknown kind"):
+        plot_posterior_over_x(x, Y, ax=ax, kind="invalid_kind")
+
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_spaghetti_num_samples(synthetic_posterior_data):
+    """Test spaghetti plot with different num_samples values."""
+    x, Y = synthetic_posterior_data
+
+    for num_samples in [10, 50, 100]:
         fig, ax = plt.subplots()
-        ax.set_title("Original Title")
 
-        add_hdi_annotation(ax, "prediction")
+        handles, patch = plot_posterior_over_x(
+            x,
+            Y,
+            ax=ax,
+            kind="spaghetti",
+            num_samples=num_samples,
+        )
 
-        title = ax.get_title()
-        assert "Original Title" in title
-        assert "94% HDI of posterior predictive (ŷ)" in title
-        assert "incl. observation noise" in title
+        # Check return types
+        assert isinstance(handles, list), (
+            f"Should return list for num_samples={num_samples}"
+        )
+        assert patch is None, (
+            f"Should not return PolyCollection for num_samples={num_samples}"
+        )
+
+        # Check that we have approximately the right number of lines
+        # (samples + mean line, but may be less if num_samples > total samples)
+        assert len(ax.lines) > 0, f"Should have lines for num_samples={num_samples}"
+
         plt.close(fig)
 
-    def test_add_hdi_annotation_custom_prob(self):
-        """Test adding HDI annotation with custom probability."""
-        fig, ax = plt.subplots()
-        ax.set_title("My Plot")
 
-        add_hdi_annotation(ax, "expectation", hdi_prob=0.89)
+@pytest.mark.integration
+def test_plot_posterior_over_x_histogram_custom_colormap(synthetic_posterior_data):
+    """Test histogram with custom colormap."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
 
-        title = ax.get_title()
-        assert "89% HDI" in title
-        plt.close(fig)
+    handles, patch = plot_posterior_over_x(
+        x,
+        Y,
+        ax=ax,
+        kind="histogram",
+        plot_hdi_kwargs={"cmap": "plasma", "alpha": 0.6},
+    )
 
-    def test_add_hdi_annotation_empty_title(self):
-        """Test adding HDI annotation when there's no existing title."""
-        fig, ax = plt.subplots()
-        # No title set
+    # Check return types
+    assert isinstance(handles, list), "Should return list of handles"
+    assert patch is None, "Histogram should not return PolyCollection"
 
-        add_hdi_annotation(ax, "expectation")
-
-        title = ax.get_title()
-        assert "94% HDI of model expectation (μ)" in title
-        plt.close(fig)
+    plt.close(fig)
 
 
-class TestResponseTypeLogging:
-    """Tests for the response type logging functions."""
+@pytest.mark.integration
+def test_plot_posterior_over_x_histogram_requires_single_time_dim():
+    """Histogram rejects Y with more than one non-chain/draw dimension."""
+    rng = np.random.default_rng(0)
+    Y = xr.DataArray(
+        rng.standard_normal((2, 30, 4, 5)),
+        dims=["chain", "draw", "a", "b"],
+        coords={
+            "chain": [0, 1],
+            "draw": np.arange(30),
+            "a": np.arange(4),
+            "b": np.arange(5),
+        },
+    )
+    fig, ax = plt.subplots()
+    with pytest.raises(ValueError, match="exactly one non-chain/draw"):
+        plot_posterior_over_x(np.arange(4), Y, ax=ax, kind="histogram")
+    plt.close(fig)
 
-    def test_log_response_type_info_once_callable(self):
-        """Test that _log_response_type_info_once is callable without error."""
-        # Clear the cache to ensure fresh state
-        _log_response_type_info_once.cache_clear()
-        # Should not raise
-        _log_response_type_info_once()
 
-    def test_log_response_type_effect_summary_once_callable(self):
-        """Test that _log_response_type_effect_summary_once is callable without error."""
-        # Clear the cache to ensure fresh state
-        _log_response_type_effect_summary_once.cache_clear()
-        # Should not raise
-        _log_response_type_effect_summary_once()
+@pytest.mark.integration
+def test_plot_posterior_over_x_histogram_x_length_mismatch_raises(
+    synthetic_posterior_data,
+):
+    """Histogram rejects x length differing from the posterior time dimension."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+    with pytest.raises(ValueError, match="Length of x"):
+        plot_posterior_over_x(x[:3], Y, ax=ax, kind="histogram")
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_histogram_single_time_point():
+    """Histogram with one time point exercises single-edge x bin construction."""
+    rng = np.random.default_rng(2)
+    x = pd.date_range("2020-01-01", periods=1, freq="D")
+    Y = xr.DataArray(
+        rng.standard_normal((2, 40, 1)),
+        dims=["chain", "draw", "obs_ind"],
+        coords={
+            "chain": [0, 1],
+            "draw": np.arange(40),
+            "obs_ind": x,
+        },
+    )
+    fig, ax = plt.subplots()
+    handles, patch = plot_posterior_over_x(x, Y, ax=ax, kind="histogram")
+    assert isinstance(handles, list)
+    assert patch is None
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_histogram_object_dtype_datetime_strings(
+    synthetic_posterior_data,
+):
+    """Object-dtype x of ISO strings hits datetime parsing in _x_as_numeric_mesh."""
+    x, Y = synthetic_posterior_data
+    x_obj = np.array([str(t) for t in x], dtype=object)
+    fig, ax = plt.subplots()
+    handles, patch = plot_posterior_over_x(x_obj, Y, ax=ax, kind="histogram")
+    assert isinstance(handles, list)
+    assert patch is None
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_ribbon_fill_kwargs_eti(synthetic_posterior_data):
+    """Ribbon ETI path uses fill_kwargs and default label when label is None."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+    h_line, h_patch = plot_posterior_over_x(
+        x,
+        Y,
+        ax=ax,
+        kind="ribbon",
+        ci_kind="eti",
+        plot_hdi_kwargs={
+            "color": "C2",
+            "fill_kwargs": {"color": "C2", "alpha": 0.4},
+        },
+        label=None,
+    )
+    assert isinstance(h_line, plt.Line2D)
+    assert h_patch is not None
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_warns_ci_kind_ignored_for_non_ribbon(
+    synthetic_posterior_data,
+):
+    """ci_kind is ignored for histogram/spaghetti; a UserWarning must be raised."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+    with pytest.warns(UserWarning, match="ci_kind.*ignored"):
+        plot_posterior_over_x(x, Y, ax=ax, kind="histogram", ci_kind="eti")
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_warns_num_samples_ignored_for_non_spaghetti(
+    synthetic_posterior_data,
+):
+    """num_samples is ignored for ribbon/histogram; a UserWarning must be raised."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+    with pytest.warns(UserWarning, match="num_samples.*ignored"):
+        plot_posterior_over_x(x, Y, ax=ax, kind="ribbon", num_samples=100)
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_hdi_band_matches_explicit_bounds(
+    synthetic_posterior_data,
+):
+    """The HDI ribbon contains the explicit compatibility bounds at every x value."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+
+    _, patch = plot_posterior_over_x(x, Y, ax=ax, ci_prob=0.89)
+
+    lower, upper = hdi_bound_arrays(Y, prob=0.89, dim=["chain", "draw"])
+    vertices = patch.get_paths()[0].vertices[:, 1]
+    for bound in np.concatenate([lower, upper]):
+        assert np.isclose(vertices, bound).any()
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_hdi_band_honors_fill_kwargs(synthetic_posterior_data):
+    """The local HDI ribbon preserves color and alpha styling."""
+    x, Y = synthetic_posterior_data
+    fig, ax = plt.subplots()
+
+    _, patch = plot_posterior_over_x(
+        x,
+        Y,
+        ax=ax,
+        plot_hdi_kwargs={
+            "color": "C2",
+            "fill_kwargs": {"color": "C2", "alpha": 0.4},
+        },
+    )
+
+    assert patch.get_alpha() == pytest.approx(0.4)
+    np.testing.assert_allclose(patch.get_facecolor()[0], to_rgba("C2", alpha=0.4))
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_hdi_band_handles_singleton_and_empty_x():
+    """Local HDI bands retain valid artists for singleton and empty x dimensions."""
+    singleton_x = pd.DatetimeIndex(["2020-01-01"])
+    singleton = xr.DataArray(
+        np.arange(6, dtype=float).reshape(2, 3, 1),
+        dims=["chain", "draw", "obs_ind"],
+    )
+    empty_x = pd.DatetimeIndex([])
+    empty = xr.DataArray(
+        np.empty((2, 3, 0)),
+        dims=["chain", "draw", "obs_ind"],
+    )
+
+    fig, axes = plt.subplots(1, 2)
+    singleton_line, singleton_patch = plot_posterior_over_x(
+        singleton_x,
+        singleton,
+        ax=axes[0],
+    )
+    _, empty_patch = plot_posterior_over_x(empty_x, empty, ax=axes[1])
+
+    lower, upper = hdi_bound_arrays(
+        singleton,
+        prob=0.94,
+        dim=["chain", "draw"],
+    )
+    singleton_vertices = singleton_patch.get_paths()[0].vertices[:, 1]
+    for bound in np.concatenate([lower, upper]):
+        assert np.isclose(singleton_vertices, bound).any()
+    assert isinstance(empty_patch, PolyCollection)
+    assert sum(len(path.vertices) for path in empty_patch.get_paths()) == 0
+    plt.close(fig)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("ci_prob", [0.5, 0.94])
+def test_plot_scalar_posterior_uses_finite_draws_for_hdi_and_annotation(ci_prob):
+    """Scalar posterior density ignores partial NaN/Inf draws for every statistic."""
+    values = np.array(
+        [
+            [1.0, np.nan, 2.0, np.inf],
+            [3.0, -np.inf, 4.0, 5.0],
+        ]
+    )
+    draws = xr.DataArray(
+        values[:, :, None],
+        dims=["chain", "draw", "treated_units"],
+    )
+    finite_draws = values[np.isfinite(values)]
+    expected_lower, expected_upper = hdi_bounds(finite_draws, prob=ci_prob)
+    expected_mean = float(finite_draws.mean())
+    fig, ax = plt.subplots()
+
+    returned_ax = plot_scalar_posterior(
+        draws,
+        ax=ax,
+        ci_prob=ci_prob,
+        round_to=4,
+    )
+
+    hdi_line = next(
+        line for line in ax.lines if line.get_label() == f"{ci_prob:.0%} HDI"
+    )
+    np.testing.assert_allclose(
+        hdi_line.get_xdata(),
+        [expected_lower, expected_upper],
+    )
+    assert returned_ax is ax
+    assert any(
+        line.get_label() == "Reference value" and np.allclose(line.get_xdata(), [0, 0])
+        for line in ax.lines
+    )
+    annotation = ax.texts[0].get_text()
+    assert round_num(expected_mean, 4) in annotation
+    assert f"{ci_prob:.0%} HDI" in annotation
+    assert "nan" not in annotation.lower()
+    assert "inf" not in annotation.lower()
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_scalar_posterior_rejects_nonscalar_and_nonfinite_draws():
+    """Scalar density fails clearly before it can render invalid posterior inputs."""
+    nonscalar = xr.DataArray(
+        np.ones((2, 3, 2)),
+        dims=["chain", "draw", "coeffs"],
+    )
+    nonfinite = xr.DataArray(
+        np.full((2, 3), np.nan),
+        dims=["chain", "draw"],
+    )
+    fig, axes = plt.subplots(1, 2)
+
+    with pytest.raises(ValueError, match="only chain and draw"):
+        plot_scalar_posterior(nonscalar, ax=axes[0])
+    with pytest.raises(ValueError, match="at least one finite"):
+        plot_scalar_posterior(nonfinite, ax=axes[1])
+    assert not axes[0].patches
+    assert not axes[1].patches
+    plt.close(fig)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("ci_kind", ["hdi", "eti"])
+def test_plot_posterior_over_x_ribbon_rejects_x_length_mismatch(ci_kind):
+    """Both interval kinds reject bounds that cannot align one-to-one with x."""
+    x = np.arange(3)
+    draws = xr.DataArray(
+        np.arange(12, dtype=float).reshape(2, 3, 2),
+        dims=["chain", "draw", "obs_ind"],
+    )
+    fig, ax = plt.subplots()
+
+    with pytest.raises(ValueError, match="length mismatch"):
+        plot_posterior_over_x(x, draws, ax=ax, ci_kind=ci_kind)
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_posterior_over_x_eti_rejects_multiple_preserved_dimensions():
+    """ETI ribbons reject extra dimensions instead of flattening them into x."""
+    x = np.arange(4)
+    draws = xr.DataArray(
+        np.arange(24, dtype=float).reshape(2, 3, 2, 2),
+        dims=["chain", "draw", "obs_ind", "extra"],
+    )
+    fig, ax = plt.subplots()
+
+    with pytest.raises(ValueError, match="exactly one preserved dimension"):
+        plot_posterior_over_x(x, draws, ax=ax, ci_kind="eti")
+    plt.close(fig)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("shape", [(1, 4), (4, 1)])
+def test_plot_scalar_posterior_preserves_singleton_sample_dimensions(shape):
+    """A single chain or draw remains a valid scalar posterior."""
+    values = np.arange(np.prod(shape), dtype=float).reshape(shape)
+    draws = xr.DataArray(values, dims=["chain", "draw"])
+    expected_lower, expected_upper = hdi_bounds(values.ravel(), prob=0.94)
+    fig, ax = plt.subplots()
+
+    plot_scalar_posterior(draws, ax=ax)
+
+    hdi_line = next(line for line in ax.lines if line.get_label() == "94% HDI")
+    np.testing.assert_allclose(hdi_line.get_xdata(), [expected_lower, expected_upper])
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_plot_scalar_posterior_omits_reference_line_when_requested():
+    """An explicit None reference value suppresses the vertical reference artist."""
+    draws = xr.DataArray(
+        np.arange(6, dtype=float).reshape(2, 3),
+        dims=["chain", "draw"],
+    )
+    fig, ax = plt.subplots()
+
+    plot_scalar_posterior(draws, ax=ax, ref_val=None)
+
+    assert all(line.get_label() != "Reference value" for line in ax.lines)
+    plt.close(fig)

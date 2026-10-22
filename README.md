@@ -11,7 +11,6 @@
 ![Build Status](https://github.com/pymc-labs/CausalPy/actions/workflows/ci.yml/badge.svg?branch=main)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://github.com/pre-commit/pre-commit)
-![Interrogate](https://raw.githubusercontent.com/pymc-labs/CausalPy/interrogate-badges/interrogate_badge.svg)
 [![codecov](https://codecov.io/gh/pymc-labs/CausalPy/branch/main/graph/badge.svg?token=FDKNAY5CZ9)](https://codecov.io/gh/pymc-labs/CausalPy)
 
 ![GitHub Repo stars](https://img.shields.io/github/stars/pymc-labs/causalpy?style=flat)
@@ -21,7 +20,7 @@
 
 <!-- docs-start -->
 
-# Causal Inference for Quasi-Experiments
+# Causal Inference for Quasi-Experiments in Python
 
 **Research-grade causal inference workflows** for quasi-experimental designs in Python.
 
@@ -31,7 +30,15 @@ CausalPy helps you estimate causal effects with transparent assumptions, uncerta
 - **Bayesian-first estimation** via [PyMC](https://www.pymc.io/) with full uncertainty quantification, plus traditional OLS via [scikit-learn](https://scikit-learn.org)
 - **Decision-ready outputs:** Effect summaries with credible intervals (HDI), practical significance (ROPE), and publication-quality plots
 
-**Non-goals:** CausalPy focuses on research-grade causal analysis. It does not include production workflow tooling such as scheduled runs, pipeline orchestration, access controls, or experiment/model registries.
+## 📞 [**Book a consulting call**](https://calendly.com/benjamin-vincent/causalpy)
+
+CausalPy is built and maintained by [PyMC Labs](https://www.pymc-labs.com). If your team is exploring a consulting engagement for lift testing, complex or high-stakes causal work, you can book an introductory call. _These calls are for consulting inquiries only. For technical usage questions and free community support, please use GitHub Discussions and the documentation below._
+
+## Help and documentation
+
+- Ask usage questions in [GitHub Discussions Q&A](https://github.com/pymc-labs/CausalPy/discussions/categories/q-a) so the issue tracker stays focused on bugs and enhancements.
+- Report bugs and feature requests in [Issues](https://github.com/pymc-labs/CausalPy/issues)
+- Browse detailed guides in the [documentation](https://causalpy.readthedocs.io)
 
 ## Installation
 
@@ -52,6 +59,20 @@ Alternatively, if you want the very latest version of the package you can instal
 ```bash
 pip install git+https://github.com/pymc-labs/CausalPy.git
 ```
+
+## Runtime notes
+
+As of the PyMC 6 release, CausalPy runs on PyMC 6 / PyTensor 3 / ArviZ 1.x and requires Python 3.12+. A few runtime behaviours are worth knowing about:
+
+- **numba is now a (transitive) hard dependency and the default backend.** PyTensor 3 compiles models with numba by default, so the _first_ sample from a freshly defined model incurs a noticeable one-off compilation delay before sampling starts. Subsequent samples reuse the compiled function.
+- **Native crashes can replace Python tracebacks.** When a numba-compiled sampler worker dies, the failure may surface as a native crash or a stalled worker rather than a Python traceback — so a wedged worker can present as a silent hang rather than an exception.
+- **Installing `nutpie` changes sampling defaults.** If a recent enough `nutpie` is installed, PyMC uses it as the default NUTS sampler unless you pass an explicit `nuts_sampler=`, and nutpie applies its own number of tuning steps rather than PyMC's built-in default of 1000. Merely installing nutpie is therefore enough to change how `pm.sample()` behaves; pass `nuts_sampler="pymc"` if you need the built-in sampler.
+
+For the full list of breaking changes in this release, see the [GitHub release notes](https://github.com/pymc-labs/CausalPy/releases).
+
+## AI Agent Skills
+
+CausalPy includes agent skills that teach AI coding assistants how to use the library for causal inference. Skills are available via [Decision AI Hub](https://hub.decision.ai) and live in `causalpy/skills/` in the source tree.
 
 ## Quickstart
 
@@ -107,7 +128,7 @@ Click on the thumbnail below to watch a video about CausalPy on YouTube.
 CausalPy provides methods for common causal inference decision contexts:
 
 | Decision context | Methods |
-|------------------|---------|
+| --- | --- |
 | Focussed testing on certain units (geos, products) | Synthetic control, Geographical lift |
 | Evaluate before/after changes, launches, policy changes | Differences in Differences, Staggered DiD, Interrupted time series |
 | Exploit cutoff rules, score-based eligibility (credit, age) | Regression discontinuity, Regression kink |
@@ -117,7 +138,7 @@ CausalPy provides methods for common causal inference decision contexts:
 ### Available methods
 
 | Method | Description |
-|-|-|
+| --- | --- |
 | Synthetic control | Constructs a synthetic version of the treatment group from a weighted combination of control units. Used for causal inference in comparative case studies when a single unit is treated, and there are multiple control units. |
 | Geographical lift | Measures the impact of an intervention in a specific geographic area by comparing it to similar areas without the intervention. Commonly used in marketing to assess regional campaigns. |
 | ANCOVA | Analysis of Covariance combines ANOVA and regression to control for the effects of one or more quantitative covariates. Used when comparing group means while controlling for other variables. |
@@ -142,7 +163,7 @@ CausalPy emphasizes transparent, uncertainty-aware outputs for rigorous causal a
 
 If you use CausalPy in your research, please cite it. A Zenodo DOI for stable releases is planned. In the meantime, you can cite the repository:
 
-```
+```bibtex
 @software{causalpy,
   author = {{PyMC Labs}},
   title = {CausalPy: Causal inference for quasi-experiments in Python},
@@ -157,24 +178,12 @@ Plans for the repository can be seen in the [Issues](https://github.com/pymc-lab
 
 ## License
 
-[Apache License 2.0](LICENSE)
+[Apache License 2.0](https://github.com/pymc-labs/CausalPy/blob/main/LICENSE)
 
----
+## Thanks to our contributors
 
-## Get Help
+<a href="https://github.com/pymc-labs/CausalPy/graphs/contributors">
+  <img src="https://raw.githubusercontent.com/pymc-labs/CausalPy/main/docs/source/_static/contributors.svg" alt="CausalPy contributors" />
+</a>
 
-### Community and Documentation
-
-- Ask usage questions in [GitHub Discussions Q&A](https://github.com/pymc-labs/CausalPy/discussions/categories/q-a)
-- Report bugs and feature requests in [Issues](https://github.com/pymc-labs/CausalPy/issues)
-- Browse detailed guides in the [documentation](https://causalpy.readthedocs.io)
-
-Please use GitHub Discussions for general questions so the issue tracker stays focused on bugs and enhancements.
-
-### Expert Consulting
-
-CausalPy is built and maintained by [PyMC Labs](https://www.pymc-labs.com). If your team is exploring a consulting engagement for lift testing, complex or high-stakes causal work, you can book an introductory call.
-
-### 📅 [**Book a consulting call**](https://calendly.com/benjamin-vincent/causalpy)
-
-_These calls are for consulting inquiries only. For technical usage questions and free community support, please use GitHub Discussions and the documentation listed above._
+The contributor image is regenerated weekly by a GitHub Actions workflow (`.github/workflows/contributors.yml`) that opens a PR when the contributor list changes.

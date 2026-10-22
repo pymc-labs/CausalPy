@@ -10,6 +10,10 @@
    {% for item in attributes %}
       {{ item }}
    {%- endfor %}
+
+   {% for item in attributes %}
+   .. autodata:: {{ item }}
+   {% endfor %}
    {% endif %}
    {% endblock %}
 

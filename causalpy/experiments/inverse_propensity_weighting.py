@@ -11,48 +11,64 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Inverse propensity weighting
-"""
+"""Inverse propensity weighting."""
 
 import warnings
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import xarray as xr
 from matplotlib.lines import Line2D
-from patsy import dmatrices
+from patsy import PatsyError
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
+from causalpy.formula_utils import build_formula_matrices
+from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.pymc_models import PropensityScore
-from causalpy.reporting import EffectSummary
 
+from ._results import ResultBundle
 from .base import BaseExperiment
 
 
-class InversePropensityWeighting(BaseExperiment):
+class InversePropensityWeighting(BaseExperiment[ResultBundle]):
     """A class to analyse inverse propensity weighting experiments.
 
     Parameters
     ----------
-    data : pd.DataFrame
-        A pandas dataframe.
+    data : dataframe-like
+        Any eager dataframe Narwhals supports, such as pandas, Polars, or
+        PyArrow. Converted to pandas internally.
     formula : str
         A statistical model formula for the propensity model.
     outcome_variable : str
         A string denoting the outcome variable in data to be reweighted.
     weighting_scheme : str
         A string denoting which weighting scheme to use among: 'raw',
-        'robust', 'doubly robust' or 'overlap'. See Aronow and Miller
+        'robust', 'doubly_robust' or 'overlap'. See Aronow and Miller
         "Foundations of Agnostic Statistics" for discussion and computation
         of these weighting schemes.
     model : PropensityScore, optional
         A PyMC model. Defaults to PropensityScore.
 
-    Example
+    Notes
+    -----
+    **Lazy lifecycle**
+
+    Construction validates the inputs and builds the design matrices — no
+    sampling happens. Call :meth:`fit` to build the propensity graph and
+    draw prior and posterior samples. The IPW diagnostics
+    (:meth:`get_ate`, :meth:`plot_ate`, :meth:`plot_balance_ecdf`) are
+    posterior-only and require :meth:`fit` first.
+
+    **Estimate extraction**
+
+    Fitting produces posterior propensity-score draws. ``get_ate()`` post-processes one draw at a time: ``"raw"`` and ``"robust"`` contrast inverse-probability-weighted mean outcomes for the treated and control potential outcomes, ``"overlap"`` contrasts overlap-weighted means for the overlap population, and ``"doubly_robust"`` augments inverse-probability weighting with separate OLS outcome regressions before averaging over all observations.
+
+    Examples
     --------
     >>> import causalpy as cp
     >>> df = cp.load_data("nhefs")
@@ -70,37 +86,52 @@ class InversePropensityWeighting(BaseExperiment):
     ...             "progressbar": False,
     ...         },
     ...     ),
-    ... )
+    ... ).fit()
     """
 
     supports_ols = False
     supports_bayes = True
     _default_model_class = PropensityScore
+    model: PropensityScore
+
+    #: No grouped result bundles: fitted state keys off the backend's
+    #: posterior draws; read methods inspect ``.idata`` directly.
+    _supports_results = False
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        data: DataFrameLike,
         formula: str,
         outcome_variable: str,
         weighting_scheme: str,
         model: PropensityScore | None = None,
-        **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
         self.expt_type = "Inverse Propensity Score Weighting"
-        self.data = data
+        self.data = to_pandas(data)
+        self.data.index.name = "obs_ind"
         self.formula = formula
         self.outcome_variable = outcome_variable
         self.weighting_scheme = weighting_scheme
-        self.input_validation()
         self._build_design_matrices()
-        self.algorithm()
+        self.input_validation()
 
     def _build_design_matrices(self) -> None:
-        """Build design matrices for propensity score model."""
-        t, X = dmatrices(self.formula, self.data)
+        """Build design matrices for the propensity score model.
+
+        Uses the patsy formula stored in ``self.formula`` to construct treatment
+        and covariate matrices from ``self.data``.  Also creates an augmented
+        design matrix (``self.X_outcome``) that includes the treatment indicator,
+        for use with doubly-robust outcome modelling.
+        """
+        try:
+            t, X = build_formula_matrices(self.formula, self.data)
+        except PatsyError as err:
+            raise DataException(
+                f"Unable to evaluate propensity formula: {err}"
+            ) from err
         self._t_design_info = t.design_info
-        self._t_design_info = X.design_info
+        self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.t, self.X = np.asarray(t), np.asarray(X)
         self.y = self.data[self.outcome_variable]
@@ -111,34 +142,62 @@ class InversePropensityWeighting(BaseExperiment):
         self.X_outcome["trt"] = self.t
         self.coords["outcome_coeffs"] = self.X_outcome.columns
 
-    def algorithm(self) -> None:
-        """Run the experiment algorithm: fit propensity score model."""
-        self.model.fit(X=self.X, t=self.t, coords=self.coords)  # type: ignore[call-arg]
+    def _fit_inputs(self) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+        """Return ``(X, y, coords)`` for the backend build step.
+
+        The propensity model's ``y`` is the observed treatment vector: the
+        propensity score is trained to predict treatment assignment. The
+        base-class lifecycle then drives :meth:`build`,
+        :meth:`sample_prior_predictive`, and :meth:`fit` through
+        :class:`~causalpy.pymc_models.PropensityScore`.
+        """
+        return self.X, self.t, self.coords
 
     def input_validation(self) -> None:
-        """Validate the input data and model formula for correctness"""
-        treatment = self.formula.split("~")[0]
-        test = treatment.strip() in self.data.columns
-        test = test & (self.outcome_variable in self.data.columns)
-        if not test:
+        """Validate the input data and model formula for correctness.
+
+        Checks that the ``outcome_variable`` exists in ``self.data`` and that
+        the treatment values produced by the formula are binary. Note that a
+        constant (single-value) treatment passes this check without error but
+        may cause downstream estimators to fail or produce undefined results.
+
+        Raises
+        ------
+        DataException
+            If the outcome variable is missing from the data or if the
+            formula produces treatment values other than zero and one.
+        """
+        if self.outcome_variable not in self.data.columns:
             raise DataException(
-                f"""
-                The treatment variable:
-                {treatment} must appear in the data to be used
-                as an outcome variable. And {self.outcome_variable}
-                must also be available in the data to be re-weighted
-                """
+                f"Outcome variable '{self.outcome_variable}' must be available "
+                "in the data to be re-weighted."
             )
-        T = self.data[treatment.strip()]
-        check_binary = len(np.unique(T)) > 2
-        if check_binary:
+        if not set(np.unique(self.t)).issubset({0, 1}):
             raise DataException(
-                """Warning. The treatment variable is not 0-1 Binary.
-                """
+                "The treatment values produced by the formula must be 0-1 binary."
             )
 
     def _prepare_ps(self, ps: np.ndarray, eps: float = 1e-6) -> np.ndarray:
-        """Checks for extreme propensity scores and clips them for stability."""
+        """Check for extreme propensity scores and clip them for numerical stability.
+
+        Parameters
+        ----------
+        ps : np.ndarray
+            Raw propensity scores for each observation, expected in [0, 1].
+        eps : float, optional
+            Clipping tolerance.  Scores are capped to the interval
+            ``[eps, 1 - eps]``.  Defaults to 1e-6.
+
+        Returns
+        -------
+        np.ndarray
+            Clipped propensity scores in ``[eps, 1 - eps]``.
+
+        Warns
+        -----
+        UserWarning
+            If any scores fall outside ``[eps, 1 - eps]`` before clipping.
+        """
         if np.any((ps < eps) | (ps > 1 - eps)):
             warnings.warn(
                 f"Extreme propensity scores detected (outside [{eps}, {1 - eps}]). "
@@ -148,12 +207,44 @@ class InversePropensityWeighting(BaseExperiment):
             )
         return np.clip(ps, eps, 1 - eps)
 
+    @staticmethod
+    def _extract_propensity_draws(idata: xr.DataTree) -> xr.DataArray:
+        """Return posterior propensity draws regardless of ArviZ's container type."""
+        try:
+            extracted = az.extract(idata, var_names="p", combined=True)
+        except KeyError as err:
+            raise KeyError(
+                "Posterior propensity score variable 'p' was not found."
+            ) from err
+        if isinstance(extracted, xr.Dataset):
+            if "p" in extracted:
+                return extracted["p"]
+        elif extracted.name == "p":
+            return extracted
+        raise KeyError("Posterior propensity score variable 'p' was not found.")
+
     def make_robust_adjustments(
         self, ps: np.ndarray
     ) -> tuple[pd.Series, pd.Series, int, int]:
-        """This estimator is discussed in Aronow
-        and Miller's book as being related to the
-        Horvitz Thompson method"""
+        """Compute inverse-propensity-weighted outcomes using the robust (Horvitz-Thompson) scheme.
+
+        This estimator is discussed in Aronow and Miller's
+        *Foundations of Agnostic Statistics* as being related to the
+        Horvitz-Thompson method.
+
+        Parameters
+        ----------
+        ps : np.ndarray
+            Propensity scores for each observation.
+
+        Returns
+        -------
+        tuple[pd.Series, pd.Series, int, int]
+            A tuple of ``(weighted_outcome0, weighted_outcome1, n_ntrt, n_trt)``
+            where the weighted outcomes are the IPW-adjusted outcome values for the
+            control and treated groups, and ``n_ntrt`` / ``n_trt`` are the
+            corresponding group sizes used for normalisation.
+        """
         ps = self._prepare_ps(ps)  # <--- Safety Check
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
@@ -174,9 +265,27 @@ class InversePropensityWeighting(BaseExperiment):
     def make_raw_adjustments(
         self, ps: np.ndarray
     ) -> tuple[pd.Series, pd.Series, int, int]:
-        """This estimator is discussed in Aronow and
-        Miller as the simplest of base form of
-        inverse propensity weighting schemes"""
+        """Compute inverse-propensity-weighted outcomes using the raw (basic) scheme.
+
+        This is the simplest form of inverse propensity weighting, as discussed
+        in Aronow and Miller's *Foundations of Agnostic Statistics*.  Each
+        observation is weighted by the reciprocal of its propensity score (or
+        ``1 - ps`` for the control group).
+
+        Parameters
+        ----------
+        ps : np.ndarray
+            Propensity scores for each observation.
+
+        Returns
+        -------
+        tuple[pd.Series, pd.Series, int, int]
+            A tuple of ``(weighted_outcome0, weighted_outcome1, n_ntrt, n_trt)``
+            where the weighted outcomes are the IPW-adjusted outcome values for the
+            control and treated groups.  ``n_ntrt`` and ``n_trt`` are both equal
+            to the total number of observations (the raw scheme normalises by
+            the full sample size).
+        """
         ps = self._prepare_ps(ps)  # <--- Safety Check
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
@@ -196,10 +305,27 @@ class InversePropensityWeighting(BaseExperiment):
     def make_overlap_adjustments(
         self, ps: np.ndarray
     ) -> tuple[pd.Series, pd.Series, pd.Series, pd.Series]:
-        """This weighting scheme was adapted from
-        Lucy D’Agostino McGowan's blog on
-        Propensity Score Weights referenced in
-        the primary CausalPy explainer notebook"""
+        """Compute inverse-propensity-weighted outcomes using the overlap scheme.
+
+        This weighting scheme was adapted from Lucy D’Agostino McGowan’s blog
+        on propensity score weights, referenced in the primary CausalPy
+        explainer notebook.  Overlap weights target the population for which
+        there is clinical equipoise (i.e., where propensity scores are near
+        0.5), reducing sensitivity to extreme scores.
+
+        Parameters
+        ----------
+        ps : np.ndarray
+            Propensity scores for each observation.
+
+        Returns
+        -------
+        tuple[pd.Series, pd.Series, pd.Series, pd.Series]
+            A tuple of ``(weighted_outcome0, weighted_outcome1, n_ntrt, n_trt)``
+            where the weighted outcomes and normalisation terms are all
+            ``pd.Series`` (unlike the raw/robust schemes which return integer
+            counts).
+        """
         ps = self._prepare_ps(ps)  # <--- Safety Check
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
@@ -219,18 +345,40 @@ class InversePropensityWeighting(BaseExperiment):
     def make_doubly_robust_adjustment(
         self, ps: np.ndarray
     ) -> tuple[pd.Series, pd.Series, None, None]:
-        """The doubly robust weighting scheme is also
-        discussed in Aronow and Miller, but a bit more generally
-        than our implementation here. Here we have specified
-        the outcome model to be a simple OLS model.
-        In this way the compromise between the outcome model and
-        the propensity model is always done with OLS."""
+        """Compute doubly-robust adjusted outcomes.
+
+        The doubly-robust weighting scheme is discussed in Aronow and Miller's
+        *Foundations of Agnostic Statistics*.  This implementation fixes the
+        outcome model to ordinary least squares (OLS), so the compromise
+        between the outcome model and the propensity model is always performed
+        with a linear regression. Outcome regressions use
+        ``fit_intercept=False``: Patsy supplies the intercept when the
+        propensity formula includes one, and a second scikit-learn intercept
+        would change the contrast when it does not.
+
+        Parameters
+        ----------
+        ps : np.ndarray
+            Propensity scores for each observation.
+
+        Returns
+        -------
+        tuple[pd.Series, pd.Series, None, None]
+            A tuple of ``(weighted_outcome0, weighted_outcome1, None, None)``.
+            The two ``None`` values are returned for interface consistency with
+            the other adjustment methods; no explicit group sizes are needed
+            because the doubly-robust estimator averages over all observations.
+        """
         ps = self._prepare_ps(ps)  # <--- Safety Check
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         t = self.t.flatten()
-        m0 = sk_lin_reg().fit(X[t == 0].astype(float), self.y[t == 0])
-        m1 = sk_lin_reg().fit(X[t == 1].astype(float), self.y[t == 1])
+        m0 = sk_lin_reg(fit_intercept=False).fit(
+            X[t == 0].astype(float), self.y[t == 0]
+        )
+        m1 = sk_lin_reg(fit_intercept=False).fit(
+            X[t == 1].astype(float), self.y[t == 1]
+        )
         m0_pred = m0.predict(X)
         m1_pred = m1.predict(X)
         ## Compromise between outcome and treatment assignment model
@@ -252,6 +400,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -281,6 +430,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -310,6 +460,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -319,9 +470,9 @@ class InversePropensityWeighting(BaseExperiment):
             weighted_outcome_trt,
             n_ntrt,
             n_trt,
-        ) = self.make_overlap_adjustments(ps)  # type: ignore[assignment]
-        ntrt = np.sum(weighted_outcome_ntrt) / np.sum(n_ntrt)  # type: ignore[arg-type]
-        trt = np.sum(weighted_outcome_trt) / np.sum(n_trt)  # type: ignore[arg-type]
+        ) = self.make_overlap_adjustments(ps)
+        ntrt = np.sum(weighted_outcome_ntrt) / np.sum(n_ntrt)
+        trt = np.sum(weighted_outcome_trt) / np.sum(n_trt)
         ate = trt - ntrt
         return ate, trt, ntrt
 
@@ -339,6 +490,7 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         tuple
             A tuple of (ate, trt, ntrt) where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
@@ -348,14 +500,14 @@ class InversePropensityWeighting(BaseExperiment):
             weighted_outcome_trt,
             _n_ntrt,
             _n_trt,
-        ) = self.make_doubly_robust_adjustment(ps)  # type: ignore[assignment]
+        ) = self.make_doubly_robust_adjustment(ps)
         trt = np.mean(weighted_outcome_trt)
         ntrt = np.mean(weighted_outcome_ntrt)
         ate = trt - ntrt
         return ate, trt, ntrt
 
     def get_ate(
-        self, i: int, idata: az.InferenceData, method: str = "doubly_robust"
+        self, i: int, idata: xr.DataTree, method: str = "doubly_robust"
     ) -> list[float | np.floating]:
         """Compute the Average Treatment Effect for a single posterior sample.
 
@@ -366,8 +518,8 @@ class InversePropensityWeighting(BaseExperiment):
         ----------
         i : int
             Index of the posterior sample to process.
-        idata : az.InferenceData
-            ArviZ InferenceData object containing the posterior samples.
+        idata : xr.DataTree
+            DataTree containing the posterior samples.
         method : str, optional
             Weighting scheme to use. One of 'robust', 'raw', 'overlap',
             or 'doubly_robust'. Defaults to 'doubly_robust'.
@@ -376,10 +528,14 @@ class InversePropensityWeighting(BaseExperiment):
         -------
         list[float]
             A list of [ate, trt, ntrt] where:
+
             - ate: Average Treatment Effect
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
         """
+        # IPW estimand is computed per-draw from propensity draws;
+        # posterior-only helpers.
+        self._resolve_group("posterior")
         ps = idata["posterior"]["p"].stack(z=("chain", "draw"))[:, i].values
 
         ate_methods = {
@@ -394,36 +550,121 @@ class InversePropensityWeighting(BaseExperiment):
 
         return [ate, trt, ntrt]
 
+    def plot(
+        self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        """Plot the results.
+
+        Parameters
+        ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Reserved for the common read contract; this plot is not implemented.
+        show : bool
+            Reserved; ignored. Defaults to ``True``.
+        legend_kwargs : dict, optional
+            Reserved; ignored.
+
+        Raises
+        ------
+        NotImplementedError
+            Always; call :meth:`plot_ate` or :meth:`plot_balance_ecdf`
+            instead.
+
+        Notes
+        -----
+        Inverse propensity weighting does not expose a unified ``plot()``
+        view; instead, use the dedicated diagnostics
+        :meth:`plot_ate` (treatment-effect distribution) and
+        :meth:`plot_balance_ecdf` (covariate-balance ECDF). This stub
+        exists so every experiment subclass offers an explicit,
+        kwarg-only ``plot()`` signature
+        (issue `#886 <https://github.com/pymc-labs/CausalPy/issues/886>`_).
+
+        Both diagnostics are posterior-only: they render posterior
+        propensity draws and require :meth:`fit` first.
+        """
+        raise NotImplementedError(
+            "InversePropensityWeighting does not implement a unified plot(). "
+            "Use plot_ate() for the treatment-effect distribution or "
+            "plot_balance_ecdf() for the covariate-balance ECDF."
+        )
+
     def plot_ate(
         self,
-        idata: az.InferenceData | None = None,
+        idata: xr.DataTree | None = None,
         method: str | None = None,
         prop_draws: int = 100,
         ate_draws: int = 300,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot the Average Treatment Effect and propensity score distributions.
+
+        Produces a three-panel figure:
+
+        * **Top panel** -- Weighted and unweighted histograms of posterior
+          propensity scores for treated and control groups, drawn from
+          ``prop_draws`` posterior samples.  The ``"raw"`` method shows
+          unweighted counts; ``"overlap"`` uses overlap weights; all other
+          methods (``"robust"``, ``"doubly_robust"``) share a common
+          IPW-weighted histogram branch.
+        * **Bottom-left panel** -- Histograms of the reweighted potential
+          outcomes E[Y(1)] and E[Y(0)].
+        * **Bottom-right panel** -- Histogram of the ATE distribution with a
+          vertical line at its posterior mean.
+
+        Parameters
+        ----------
+        idata : xr.DataTree | None, optional
+            DataTree with posterior propensity-score samples. If ``None``,
+            uses the fitted model backend's DataTree.
+        method : str | None, optional
+            Weighting scheme to apply.  One of ``'robust'``, ``'raw'``,
+            ``'overlap'``, or ``'doubly_robust'``.  If ``None``, falls back
+            to ``self.weighting_scheme``.
+        prop_draws : int, optional
+            Number of posterior draws used for the propensity score histogram.
+            Defaults to 100.
+        ate_draws : int, optional
+            Number of posterior draws used to compute ATE samples.
+            Defaults to 300.
+
+        Returns
+        -------
+        tuple[plt.Figure, list[plt.Axes]]
+            The matplotlib Figure and a list of three Axes objects.
+        """
+        # IPW estimand is computed per-draw from propensity draws;
+        # posterior-only helpers.
+        self._resolve_group("posterior")
         if idata is None:
-            idata = self.model.idata
+            idata = self._model_backend.require_idata()
         if method is None:
             method = self.weighting_scheme
+        propensity_draws = self._extract_propensity_draws(idata)
 
-        def plot_weights(bins, top0, top1, ax, color="population"):
+        def _plot_weights(bins, top0, top1, ax, color="population"):
             colors_dict = {
                 "population": ["orange", "skyblue", 0.6],
                 "pseudo_population": ["grey", "grey", 0.1],
             }
 
             ax.axhline(0, c="gray", linewidth=1)
+            bin_widths = np.diff(bins)
+            bin_centers = bins[:-1] + bin_widths / 2
             bars0 = ax.bar(
-                bins[:-1] + 0.025,
+                bin_centers,
                 top0,
-                width=0.04,
+                width=bin_widths,
                 facecolor=colors_dict[color][0],
                 alpha=colors_dict[color][2],
             )
             bars1 = ax.bar(
-                bins[:-1] + 0.025,
+                bin_centers,
                 -top1,
-                width=0.04,
+                width=bin_widths,
                 facecolor=colors_dict[color][1],
                 alpha=colors_dict[color][2],
             )
@@ -432,8 +673,8 @@ class InversePropensityWeighting(BaseExperiment):
                 for bar in bars:
                     bar.set_edgecolor("black")
 
-        def make_hists(idata, i, axs, method=method):
-            p_i = az.extract(idata)["p"][:, i].values
+        def _make_hists(i, axs, method=method):
+            p_i = self._prepare_ps(propensity_draws.isel(sample=i).values)
             if method == "raw":
                 weight0 = 1 / (1 - p_i[self.t.flatten() == 0])
                 weight1 = 1 / (p_i[self.t.flatten() == 1])
@@ -446,23 +687,26 @@ class InversePropensityWeighting(BaseExperiment):
                 p_of_t = np.mean(t)
                 weight1 = p_of_t / p_i[t == 1]
                 weight0 = (1 - p_of_t) / (1 - p_i[t == 0])
-            bins = np.arange(0.025, 0.99, 0.005)
+            bins = np.arange(0, 1.005, 0.005)
             top0, _ = np.histogram(p_i[self.t.flatten() == 0], bins=bins)
             top1, _ = np.histogram(p_i[self.t.flatten() == 1], bins=bins)
-            plot_weights(bins, top0, top1, axs[0])
+            _plot_weights(bins, top0, top1, axs[0])
+            observation_peak = max(top0.max(), top1.max())
             top0, _ = np.histogram(
                 p_i[self.t.flatten() == 0], bins=bins, weights=weight0
             )
             top1, _ = np.histogram(
                 p_i[self.t.flatten() == 1], bins=bins, weights=weight1
             )
-            plot_weights(bins, top0, top1, axs[0], color="pseudo_population")
+            _plot_weights(bins, top0, top1, axs[0], color="pseudo_population")
+            return observation_peak
 
         mosaic = """AAAAAA
                     BBBBCC"""
 
-        fig, axs = plt.subplot_mosaic(mosaic, figsize=(20, 13))
-        axs = [axs[k] for k in axs]
+        fig, mosaic_axes = plt.subplot_mosaic(mosaic, figsize=(20, 13))
+        # Keyed by mosaic label; the panels are used positionally from here on.
+        axs = [mosaic_axes[k] for k in mosaic_axes]
         axs[0].axvline(
             0.1, linestyle="--", label="Low Extreme Propensity Scores", color="black"
         )
@@ -487,7 +731,15 @@ class InversePropensityWeighting(BaseExperiment):
             ["Treatment PS", "Control PS", "Weighted Pseudo Population", "Extreme PS"],
         )
 
-        [make_hists(idata, i, axs) for i in range(prop_draws)]
+        peaks = [_make_hists(i, axs) for i in range(prop_draws)]
+        # Clipped extreme propensity scores give finite but enormous IPW weights,
+        # so the pseudo population mass can exceed the observation counts by
+        # orders of magnitude. On a linear axis that flattens the propensity
+        # score distribution to invisibility (issue #645). Anchoring a symmetric
+        # log scale at the observation-count peak keeps the counts linear and
+        # compresses only the mass above them, so well-behaved weights render
+        # essentially as before while inflated weights stay on the same panel.
+        axs[0].set_yscale("symlog", linthresh=max(max(peaks, default=0), 1))
         ate_df = pd.DataFrame(
             [self.get_ate(i, idata, method=method) for i in range(ate_draws)],
             columns=["ATE", "Y(1)", "Y(0)"],
@@ -531,8 +783,31 @@ class InversePropensityWeighting(BaseExperiment):
     def weighted_percentile(
         self, data: np.ndarray, weights: np.ndarray, perc: float
     ) -> float:
-        """
-        perc : percentile in [0-1]!
+        """Compute a weighted percentile of the data.
+
+        Sorts ``data`` and ``weights`` together, builds a weighted empirical
+        CDF, and linearly interpolates to find the value at the requested
+        percentile.
+
+        Parameters
+        ----------
+        data : np.ndarray
+            One-dimensional array of data values.
+        weights : np.ndarray
+            Non-negative weights corresponding to each element of ``data``.
+        perc : float
+            Desired percentile expressed as a fraction in ``[0, 1]``
+            (e.g., 0.5 for the median).
+
+        Returns
+        -------
+        float
+            The interpolated data value at the given weighted percentile.
+
+        Raises
+        ------
+        ValueError
+            If ``perc`` is not between 0 and 1.
         """
         if not (0 <= perc <= 1):
             raise ValueError("Percentile must be between 0 and 1.")
@@ -547,22 +822,45 @@ class InversePropensityWeighting(BaseExperiment):
     def plot_balance_ecdf(
         self,
         covariate: str,
-        idata: az.InferenceData | None = None,
+        idata: xr.DataTree | None = None,
         weighting_scheme: str | None = None,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Plot the empirical CDF of a covariate before and after IPW adjustment.
+
+        Produces a two-panel figure comparing the raw (unweighted) ECDFs of
+        the treated and control groups with the reweighted ECDFs.  This serves
+        as a visual balance diagnostic: well-balanced covariates should show
+        overlapping ECDFs in the right-hand panel.
+
+        Parameters
+        ----------
+        covariate : str
+            Name of the covariate column (must be one of the model's design
+            matrix labels) to check for balance.
+        idata : xr.DataTree | None, optional
+            DataTree with posterior propensity-score samples. If ``None``,
+            uses the fitted model backend's DataTree.
+        weighting_scheme : str | None, optional
+            Weighting scheme to apply.  One of ``'raw'``, ``'robust'``, or
+            ``'overlap'``.  If ``None``, falls back to
+            ``self.weighting_scheme``.
+
+        Returns
+        -------
+        tuple[plt.Figure, list[plt.Axes]]
+            The matplotlib Figure and a list of two Axes objects (raw ECDF on
+            the left, weighted ECDF on the right).
         """
-        Plotting function takes a single covariate and shows the
-        differences in the ECDF between the treatment and control
-        groups before and after weighting. It provides a visual
-        check on the balance achieved by using the different weighting
-        schemes
-        """
+        # IPW estimand is computed per-draw from propensity draws;
+        # posterior-only helpers.
+        self._resolve_group("posterior")
         if idata is None:
-            idata = self.model.idata
+            idata = self._model_backend.require_idata()
         if weighting_scheme is None:
             weighting_scheme = self.weighting_scheme
 
-        ps = az.extract(idata)["p"].mean(dim="sample").values
+        propensity_draws = self._extract_propensity_draws(idata)
+        ps = self._prepare_ps(propensity_draws.mean(dim="sample").values)
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         t = self.t.flatten()
@@ -625,22 +923,23 @@ class InversePropensityWeighting(BaseExperiment):
     def effect_summary(
         self,
         *,
-        window: Literal["post"] | tuple | slice = "post",
-        direction: Literal["increase", "decrease", "two-sided"] = "increase",
-        alpha: float = 0.05,
-        cumulative: bool = True,
-        relative: bool = True,
-        min_effect: float | None = None,
-        treated_unit: str | None = None,
-        period: Literal["intervention", "post", "comparison"] | None = None,
-        prefix: str = "Post-period",
-        **kwargs: Any,
-    ) -> EffectSummary:
-        """
-        Generate a decision-ready summary of causal effects.
+        group: Literal["prior", "posterior"] = "posterior",
+    ) -> NoReturn:
+        """Raise because unified effect summaries are unavailable.
 
-        Note: effect_summary is not yet implemented for InversePropensityWeighting experiments.
+        Parameters
+        ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Accepted first among the keyword-only parameters for base-contract
+            parity; these experiments implement no effect summary.
+
+        Raises
+        ------
+        NotImplementedError
+            Inverse-propensity-weighting experiments do not implement a unified
+            decision-ready effect summary.
         """
         raise NotImplementedError(
-            "effect_summary is not yet implemented for InversePropensityWeighting experiments."
+            "effect_summary is not yet implemented for "
+            "InversePropensityWeighting experiments."
         )

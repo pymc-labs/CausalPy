@@ -87,7 +87,19 @@ class PipelineResult:
 
     @classmethod
     def from_context(cls, context: PipelineContext) -> PipelineResult:
-        """Build a ``PipelineResult`` from a completed ``PipelineContext``."""
+        """Build a ``PipelineResult`` from a completed ``PipelineContext``.
+
+        Parameters
+        ----------
+        context : PipelineContext
+            Completed pipeline context to extract user-facing results from.
+
+        Returns
+        -------
+        PipelineResult
+            Snapshot containing the experiment, effect summary, sensitivity
+            results, and report.
+        """
         return cls(
             experiment=context.experiment,
             effect_summary=context.effect_summary,
@@ -109,11 +121,28 @@ class Step(Protocol):
     """
 
     def validate(self, context: PipelineContext) -> None:
-        """Check configuration before execution."""
+        """Check configuration before execution.
+
+        Parameters
+        ----------
+        context : PipelineContext
+            Shared pipeline context.
+        """
         ...
 
     def run(self, context: PipelineContext) -> PipelineContext:
-        """Execute the step, mutating and returning the context."""
+        """Execute the step, mutating and returning the context.
+
+        Parameters
+        ----------
+        context : PipelineContext
+            Shared pipeline context, which the step is allowed to mutate.
+
+        Returns
+        -------
+        PipelineContext
+            The same context, returned for chaining convenience.
+        """
         ...
 
 

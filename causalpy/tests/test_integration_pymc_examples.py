@@ -14,13 +14,13 @@
 
 import contextlib
 
-import arviz as az
 import numpy as np
 import pandas as pd
 import pymc as pm
 import pytest
 import xarray as xr
 from matplotlib import pyplot as plt
+from patsy import build_design_matrices
 
 import causalpy as cp
 from causalpy.tests.conftest import setup_regression_kink_data
@@ -29,7 +29,7 @@ sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 
 @pytest.mark.integration
-def test_did(mock_pymc_sample):
+def test_did(mock_pymc_sample, did_data):
     """
     Test Difference in Differences (DID) PyMC experiment.
 
@@ -39,14 +39,14 @@ def test_did(mock_pymc_sample):
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    df = cp.load_data("did")
+    df = did_data
     result = cp.DifferenceInDifferences(
         df,
         formula="y ~ 1 + group*post_treatment",
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
@@ -55,7 +55,7 @@ def test_did(mock_pymc_sample):
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
 
 
@@ -80,7 +80,7 @@ def test_did_banks_simple(mock_pymc_sample, banks_data):
         time_variable_name="year",
         group_variable_name="district",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
     assert isinstance(df_long, pd.DataFrame)
     assert isinstance(result, cp.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
@@ -113,7 +113,7 @@ def test_did_banks_multi(mock_pymc_sample, banks_data):
         time_variable_name="year",
         group_variable_name="district",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
     assert isinstance(df_long, pd.DataFrame)
     assert isinstance(result, cp.DifferenceInDifferences)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
@@ -125,7 +125,7 @@ def test_did_banks_multi(mock_pymc_sample, banks_data):
 
 
 @pytest.mark.integration
-def test_rd(mock_pymc_sample):
+def test_rd(mock_pymc_sample, rd_data):
     """
     Test Regression Discontinuity experiment.
 
@@ -135,28 +135,42 @@ def test_rd(mock_pymc_sample):
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    df = cp.load_data("rd")
+    df = rd_data
     result = cp.RegressionDiscontinuity(
         df,
         formula="y ~ 1 + bs(x, df=6) + treated",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         treatment_threshold=0.5,
         epsilon=0.001,
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
+    assert result.result.predictions.dims == (
+        "chain",
+        "draw",
+        "obs_ind",
+        "treated_units",
+    )
+    (new_x,) = build_design_matrices([result._x_design_info], result.x_discon)
+    pred_discon = result.model.predict(X=np.asarray(new_x))["posterior_predictive"][
+        "mu"
+    ]
+    expected = pred_discon.isel(obs_ind=1, treated_units=0) - pred_discon.isel(
+        obs_ind=0, treated_units=0
+    )
+    xr.testing.assert_allclose(result.result.discontinuity_at_threshold, expected)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
 
 
 @pytest.mark.integration
-def test_rd_bandwidth(mock_pymc_sample):
+def test_rd_bandwidth(mock_pymc_sample, rd_data):
     """
     Test Regression Discontinuity experiment with bandwidth parameter.
 
@@ -166,7 +180,7 @@ def test_rd_bandwidth(mock_pymc_sample):
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    df = cp.load_data("rd")
+    df = rd_data
     result = cp.RegressionDiscontinuity(
         df,
         formula="y ~ 1 + x + treated + x:treated",
@@ -174,7 +188,7 @@ def test_rd_bandwidth(mock_pymc_sample):
         treatment_threshold=0.5,
         epsilon=0.001,
         bandwidth=0.3,
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
@@ -215,7 +229,7 @@ def test_rd_bandwidth_custom_running_variable(mock_pymc_sample):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         treatment_threshold=0.45,
         bandwidth=0.2,
-    )
+    ).fit()
 
     assert isinstance(result, cp.RegressionDiscontinuity)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
@@ -247,7 +261,7 @@ def test_rd_drinking(mock_pymc_sample):
         running_variable_name="age",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         treatment_threshold=21,
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
@@ -276,7 +290,7 @@ def test_rkink(mock_pymc_sample):
         formula=f"y ~ 1 + x + I((x-{kink})*treated)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         kink_point=kink,
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.RegressionKink)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
@@ -285,7 +299,7 @@ def test_rkink(mock_pymc_sample):
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     assert isinstance(ax, plt.Axes)
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
 
 
@@ -308,7 +322,7 @@ def test_rkink_bandwidth(mock_pymc_sample):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         kink_point=kink,
         bandwidth=0.3,
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.RegressionKink)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
@@ -320,7 +334,7 @@ def test_rkink_bandwidth(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_its(mock_pymc_sample):
+def test_its(mock_pymc_sample, its_data):
     """
     Test Interrupted Time-Series experiment.
 
@@ -331,18 +345,14 @@ def test_its(mock_pymc_sample):
     4. the correct number of MCMC draws exists in the posterior inference data
     5. the method get_plot_data returns a DataFrame with expected columns
     """
-    df = (
-        cp.load_data("its")
-        .assign(date=lambda x: pd.to_datetime(x["date"]))
-        .set_index("date")
-    )
+    df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
         df,
         treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
     # Test 1. plot method runs
     result.plot()
     # 2. causalpy.InterruptedTimeSeries returns correct type
@@ -398,7 +408,7 @@ def test_its_covid(mock_pymc_sample):
         treatment_time,
         formula="standardize(deaths) ~ 0 + standardize(t) + C(month) + standardize(temp)",  # noqa E501
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
     # Test 1. plot method runs
     result.plot()
     # 2. causalpy.InterruptedTimeSeries returns correct type
@@ -431,7 +441,96 @@ def test_its_covid(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_sc(mock_pymc_sample):
+def test_its_single_post_observation_plot(mock_pymc_sample, its_data):
+    """Regression test: ITS plot must remain readable when the post-period
+    contains a single observation.
+
+    With one post-period datum the ``arviz.plot_hdi`` ribbon collapses to a
+    zero-area polygon, the median line has no neighbours to connect to, and
+    the (then top-of-zorder) treatment ``axvline`` covers the only datum -
+    leaving the bottom two panels visually empty. The fix
+        1. lowers the treatment-line zorder and switches it to a thin dashed
+           style so it reads as an annotation, never as data;
+        2. overlays an explicit median-plus-HDI errorbar on every panel;
+        3. swaps the legend handle to that errorbar so the legend matches
+           what is drawn (and drops the "Causal impact" entry whose
+           ``fill_between`` collapses to nothing).
+    """
+    from matplotlib.collections import LineCollection
+    from matplotlib.container import ErrorbarContainer
+
+    df = its_data
+    # Choose treatment_time so exactly one datum sits in the post-period.
+    treatment_time = df.index[-1]
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time,
+        formula="y ~ 1 + t + C(month)",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    ).fit()
+    assert len(result.datapost) == 1
+    fig, ax = result.plot()
+
+    treatment_axvlines = [
+        ln for a in ax for ln in a.get_lines() if ln.get_label() == "Treatment start"
+    ]
+    assert treatment_axvlines, "expected a treatment-start axvline"
+    assert all(ln.get_zorder() < 2 for ln in treatment_axvlines), (
+        "treatment axvline must sit below data (zorder<2) so it never "
+        "occludes the only post-period observation"
+    )
+    assert all(ln.get_linestyle() == "--" for ln in treatment_axvlines), (
+        "treatment axvline must be dashed to read as an annotation"
+    )
+    assert all(ln.get_linewidth() <= 2 for ln in treatment_axvlines), (
+        "treatment axvline must be thin to avoid dominating the plot"
+    )
+
+    # Each panel must contain at least one errorbar overlay
+    # (rendered as a LineCollection from the errorbar caps/whiskers).
+    for i, a in enumerate(ax):
+        line_collections = [c for c in a.collections if isinstance(c, LineCollection)]
+        assert line_collections, (
+            f"panel {i} should have a LineCollection from the singleton "
+            "errorbar overlay; otherwise the post-period is invisible"
+        )
+
+    # Top-panel legend must reflect what is actually drawn: a Counterfactual
+    # entry backed by the ErrorbarContainer (not a Line2D + ribbon tuple),
+    # and no "Causal impact" entry (since its fill_between is degenerate).
+    legend = ax[0].get_legend()
+    assert legend is not None, "top panel should have a legend"
+    legend_labels = [t.get_text() for t in legend.get_texts()]
+    assert "Counterfactual" in legend_labels
+    assert "Causal impact" not in legend_labels, (
+        "Causal impact entry must be dropped when its fill_between collapses"
+    )
+    cf_idx = legend_labels.index("Counterfactual")
+    cf_handle = legend.legend_handles[cf_idx]
+    # Matplotlib renders an ErrorbarContainer in the legend via a
+    # LineCollection proxy. What we want to assert is that the handle is
+    # *not* the old (Line2D, PolyCollection) tuple, since that would imply
+    # the legend swatch shows a ribbon that does not exist on the plot.
+    from matplotlib.collections import PolyCollection
+    from matplotlib.lines import Line2D
+
+    assert not (isinstance(cf_handle, tuple) and len(cf_handle) == 2), (
+        "Counterfactual legend handle should not be a (line, ribbon) tuple "
+        "in the singleton case - the ribbon does not render."
+    )
+    assert not isinstance(cf_handle, PolyCollection), (
+        "Counterfactual legend handle should not be a PolyCollection ribbon "
+        "in the singleton case - the ribbon does not render."
+    )
+    assert isinstance(cf_handle, ErrorbarContainer | LineCollection | Line2D), (
+        "Counterfactual legend handle should reflect the errorbar overlay, "
+        f"got {type(cf_handle).__name__}"
+    )
+    plt.close(fig)
+
+
+@pytest.mark.integration
+def test_sc(mock_pymc_sample, sc_data):
     """
     Test Synthetic Control experiment.
 
@@ -443,7 +542,7 @@ def test_sc(mock_pymc_sample):
     5. the method get_plot_data returns a DataFrame with expected columns
     """
 
-    df = cp.load_data("sc")
+    df = sc_data
     treatment_time = 70
     result = cp.SyntheticControl(
         df,
@@ -451,7 +550,7 @@ def test_sc(mock_pymc_sample):
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.SyntheticControl)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
@@ -490,6 +589,147 @@ def test_sc(mock_pymc_sample):
 
 
 @pytest.mark.integration
+def test_sc_softmax(mock_pymc_sample):
+    """
+    Test Synthetic Control experiment with SoftmaxWeightedSumFitter.
+
+    Verifies that SoftmaxWeightedSumFitter is a drop-in replacement for
+    WeightedSumFitter in the SyntheticControl experiment:
+    1. data is a dataframe
+    2. causalpy.SyntheticControl returns correct type
+    3. the correct number of MCMC chains exists in the posterior inference data
+    4. the correct number of MCMC draws exists in the posterior inference data
+    5. the method get_plot_data returns a DataFrame with expected columns
+    """
+
+    df = cp.load_data("sc")
+    treatment_time = 70
+    result = cp.SyntheticControl(
+        df,
+        treatment_time,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SoftmaxWeightedSumFitter(sample_kwargs=sample_kwargs),
+    ).fit()
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(result, cp.SyntheticControl)
+    assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
+    assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
+    result.summary()
+
+    fig, ax = result.plot()
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
+
+    plot_data = result.get_plot_data()
+    assert isinstance(plot_data, pd.DataFrame), (
+        "The returned object is not a pandas DataFrame"
+    )
+    expected_columns = [
+        "prediction",
+        "pred_hdi_lower_94",
+        "pred_hdi_upper_94",
+        "impact",
+        "impact_hdi_lower_94",
+        "impact_hdi_upper_94",
+    ]
+    assert set(expected_columns).issubset(set(plot_data.columns)), (
+        f"DataFrame is missing expected columns {expected_columns}"
+    )
+
+
+@pytest.mark.integration
+def test_sdid(mock_pymc_sample):
+    """
+    Test Synthetic Difference-in-Differences experiment.
+
+    Loads data and checks:
+    1. data is a dataframe
+    2. SyntheticDifferenceInDifferences returns correct type
+    3. tau_posterior exists with chain/draw dims
+    4. post_impact and post_impact_cumulative exist
+    5. summary runs without error
+    6. plot returns Figure and Axes
+    """
+    df = cp.load_data("sc")
+    treatment_time = 70
+    result = cp.SyntheticDifferenceInDifferences(
+        df,
+        treatment_time,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs,
+        ),
+    ).fit()
+    assert isinstance(df, pd.DataFrame)
+    assert isinstance(result, cp.SyntheticDifferenceInDifferences)
+
+    # tau posterior should exist with chain/draw dims
+    assert hasattr(result.result, "tau_posterior")
+    assert "chain" in result.result.tau_posterior.dims
+    assert "draw" in result.result.tau_posterior.dims
+
+    # post_impact should exist
+    assert result.result.impact_post is not None
+    assert result.result.impact_post_cumulative is not None
+
+    # summary should run without error
+    result.summary()
+
+    # plot should return fig and axes
+    fig, ax = result.plot(show=False)
+    assert isinstance(fig, plt.Figure)
+    assert isinstance(ax, np.ndarray) and all(
+        isinstance(item, plt.Axes) for item in ax
+    ), "ax must be a numpy.ndarray of plt.Axes"
+
+
+@pytest.mark.integration
+def test_sdid_datetime_index_and_effect_summary(mock_pymc_sample):
+    """SDiD with a DatetimeIndex panel exercises the datetime branch in
+    ``_plot`` and the full ``effect_summary`` body, including the
+    ``period``-warning path and the ``cumulative=False`` branch.
+    """
+    df = cp.load_data("sc").copy()
+    df.index = pd.date_range("2020-01-01", periods=len(df), freq="D")
+    treatment_time = df.index[70]
+
+    result = cp.SyntheticDifferenceInDifferences(
+        df,
+        treatment_time,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs,
+        ),
+    ).fit()
+
+    # DatetimeIndex branch in _plot calls format_date_axes.
+    fig, _ = result.plot(show=False)
+    assert isinstance(fig, plt.Figure)
+
+    # Default effect_summary call covers the main body and prose generation.
+    summary = result.effect_summary()
+    assert hasattr(summary, "table")
+    assert hasattr(summary, "text")
+    assert isinstance(summary.text, str) and len(summary.text) > 0
+
+    # Passing period= triggers the ignored-warning branch.
+    with pytest.warns(
+        UserWarning, match="ignored for SyntheticDifferenceInDifferences"
+    ):
+        result.effect_summary(period="post")
+
+    # cumulative=False covers the conditional ``obs_cum``/``counterfactual_cum``
+    # branches that are skipped by the default call above.
+    summary_no_cum = result.effect_summary(cumulative=False)
+    assert "cumulative" not in summary_no_cum.table.index
+
+
+@pytest.mark.integration
 def test_sc_brexit(mock_pymc_sample):
     """
     Test Synthetic Control experiment on Brexit data.
@@ -521,7 +761,7 @@ def test_sc_brexit(mock_pymc_sample):
         control_units=other_countries,
         treated_units=[target_country],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.SyntheticControl)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
@@ -553,7 +793,7 @@ def test_sc_brexit(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_ancova(mock_pymc_sample):
+def test_ancova(mock_pymc_sample, anova1_data, capsys):
     """
     Test Pre-PostNEGD experiment on anova1 data.
 
@@ -563,19 +803,29 @@ def test_ancova(mock_pymc_sample):
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    df = cp.load_data("anova1")
+    df = anova1_data
     result = cp.PrePostNEGD(
         df,
         formula="post ~ 1 + C(group) + pre",
         group_variable_name="group",
         pretreatment_variable_name="pre",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.PrePostNEGD)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
+    output = capsys.readouterr().out
+    assert "Group-level descriptive stats:" in output
+    assert "pre_mean" in output
+    assert "post_mean" in output
+    rounded_stats = result._group_level_summary_stats(round_to=1)
+    assert isinstance(rounded_stats, pd.DataFrame)
+    for col in ["pre_mean", "post_mean"]:
+        assert pd.api.types.is_string_dtype(rounded_stats[col])
+        for val in rounded_stats[col]:
+            float(val)
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
     # For multi-panel plots, ax should be an array of axes
@@ -585,7 +835,7 @@ def test_ancova(mock_pymc_sample):
 
 
 @pytest.mark.integration
-def test_geolift1(mock_pymc_sample):
+def test_geolift1(mock_pymc_sample, geolift1_data):
     """
     Test Synthetic Control experiment on geo lift data.
 
@@ -595,11 +845,7 @@ def test_geolift1(mock_pymc_sample):
     3. the correct number of MCMC chains exists in the posterior inference data
     4. the correct number of MCMC draws exists in the posterior inference data
     """
-    df = (
-        cp.load_data("geolift1")
-        .assign(time=lambda x: pd.to_datetime(x["time"]))
-        .set_index("time")
-    )
+    df = geolift1_data
     treatment_time = pd.to_datetime("2022-01-01")
     result = cp.SyntheticControl(
         df,
@@ -607,7 +853,7 @@ def test_geolift1(mock_pymc_sample):
         control_units=["Austria", "Belgium", "Bulgaria", "Croatia", "Cyprus"],
         treated_units=["Denmark"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.SyntheticControl)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
@@ -637,7 +883,7 @@ def test_iv_reg(mock_pymc_sample):
         model=cp.pymc_models.InstrumentalVariableRegression(
             sample_kwargs=sample_kwargs
         ),
-    )
+    ).fit()
     result.model.sample_predictive_distribution(ppc_sampler="pymc")
     assert isinstance(df, pd.DataFrame)
     assert isinstance(data, pd.DataFrame)
@@ -645,7 +891,8 @@ def test_iv_reg(mock_pymc_sample):
     assert isinstance(result, cp.InstrumentalVariable)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
-    with pytest.raises(NotImplementedError):
+    result.summary()
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
 
 
@@ -667,7 +914,7 @@ def test_iv_binary_treatment(mock_pymc_sample):
             sample_kwargs=sample_kwargs
         ),
         binary_treatment=True,
-    )
+    ).fit()
     result.model.sample_predictive_distribution(ppc_sampler="pymc")
     assert isinstance(df, pd.DataFrame)
     assert isinstance(data, pd.DataFrame)
@@ -675,7 +922,7 @@ def test_iv_binary_treatment(mock_pymc_sample):
     assert isinstance(result, cp.InstrumentalVariable)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
     assert "rho" in result.model.named_vars
 
@@ -698,7 +945,7 @@ def test_iv_reg_vs_prior(mock_pymc_sample):
         ),
         vs_prior_type="spike_and_slab",
         vs_hyperparams={"pi_alpha": 5, "outcome": True},
-    )
+    ).fit()
     result.model.sample_predictive_distribution(ppc_sampler="pymc")
     assert isinstance(df, pd.DataFrame)
     assert isinstance(data, pd.DataFrame)
@@ -706,7 +953,7 @@ def test_iv_reg_vs_prior(mock_pymc_sample):
     assert isinstance(result, cp.InstrumentalVariable)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
     assert "gamma_beta_t" in result.model.named_vars
     assert "pi_beta_t" in result.model.named_vars
@@ -738,7 +985,7 @@ def test_iv_reg_vs_prior_hs(mock_pymc_sample):
         ),
         vs_prior_type="horseshoe",
         vs_hyperparams={"outcome": True},
-    )
+    ).fit()
     result.model.sample_predictive_distribution(ppc_sampler="pymc")
     assert isinstance(df, pd.DataFrame)
     assert isinstance(data, pd.DataFrame)
@@ -746,7 +993,7 @@ def test_iv_reg_vs_prior_hs(mock_pymc_sample):
     assert isinstance(result, cp.InstrumentalVariable)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
     assert "tau_beta_t" in result.model.named_vars
     assert "tau_beta_z" in result.model.named_vars
@@ -777,8 +1024,8 @@ def test_inverse_prop(mock_pymc_sample):
         outcome_variable="outcome",
         weighting_scheme="robust",
         model=cp.pymc_models.PropensityScore(sample_kwargs=sample_kwargs),
-    )
-    assert isinstance(result.idata, az.InferenceData)
+    ).fit(**sample_kwargs)
+    assert isinstance(result.idata, xr.DataTree)
     ps = result.idata.posterior["p"].mean(dim=("chain", "draw"))
     w1, w2, _, _ = result.make_doubly_robust_adjustment(ps)
     assert isinstance(w1, pd.Series)
@@ -809,7 +1056,7 @@ def test_inverse_prop(mock_pymc_sample):
     assert isinstance(axs, list)
     assert all(isinstance(ax, plt.Axes) for ax in axs)
     plt.close()
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(AttributeError, match="get_plot_data"):
         result.get_plot_data()
 
     ### testing outcome model
@@ -820,7 +1067,9 @@ def test_inverse_prop(mock_pymc_sample):
         normal_outcome=True,
         spline_component=False,
     )
-    assert isinstance(idata_normal, az.InferenceData)
+    assert isinstance(idata_normal, xr.DataTree)
+    assert "prior_predictive" in idata_normal
+    assert "posterior" in idata_normal
     assert isinstance(model_normal, pm.Model)
     assert "beta_" in idata_normal.posterior
     assert "beta_ps" in idata_normal.posterior
@@ -915,7 +1164,7 @@ def test_bayesian_structural_time_series():
         y=y_da,
         coords=coords_with_x.copy(),  # Pass a copy
     )
-    assert isinstance(model_with_x.idata, az.InferenceData)
+    assert isinstance(model_with_x.idata, xr.DataTree)
     assert "posterior" in model_with_x.idata
     assert "beta" in model_with_x.idata.posterior
     # PyMC Marketing components might use different internal names, e.g. fourier_beta, delta
@@ -934,7 +1183,7 @@ def test_bayesian_structural_time_series():
         X=X_da,
         coords=coords_with_x,  # Original coords_with_x is fine here
     )
-    assert isinstance(predictions_with_x, az.InferenceData)
+    assert isinstance(predictions_with_x, xr.DataTree)
     score_with_x = model_with_x.score(
         X=X_da,
         y=y_da,
@@ -972,7 +1221,7 @@ def test_bayesian_structural_time_series():
         y=y_da_no_x,
         coords=coords_no_x.copy(),  # Pass a copy
     )
-    assert isinstance(model_no_x.idata, az.InferenceData)
+    assert isinstance(model_no_x.idata, xr.DataTree)
     assert "posterior" in model_no_x.idata
     assert "beta" not in model_no_x.idata.posterior
     assert "fourier_beta" in model_no_x.idata.posterior
@@ -983,7 +1232,7 @@ def test_bayesian_structural_time_series():
         X=X_da_no_x,
         coords=coords_no_x,  # Original coords_no_x is fine
     )
-    assert isinstance(predictions_no_x, az.InferenceData)
+    assert isinstance(predictions_no_x, xr.DataTree)
     score_no_x = model_no_x.score(
         X=X_da_no_x,
         y=y_da_no_x,
@@ -1011,13 +1260,13 @@ def test_bayesian_structural_time_series():
         y=y_da_no_x,
         coords=coords_empty_x.copy(),  # Pass a copy
     )
-    assert isinstance(model_empty_x.idata, az.InferenceData)
+    assert isinstance(model_empty_x.idata, xr.DataTree)
 
     predictions_empty_x = model_empty_x.predict(
         X=X_da_no_x,
         coords=coords_empty_x,  # Original coords_empty_x is fine
     )
-    assert isinstance(predictions_empty_x, az.InferenceData)
+    assert isinstance(predictions_empty_x, xr.DataTree)
     score_empty_x = model_empty_x.score(
         X=X_da_no_x,
         y=y_da_no_x,
@@ -1193,7 +1442,7 @@ def test_state_space_time_series():
     )
 
     # Verify inference data structure
-    assert isinstance(idata, az.InferenceData)
+    assert isinstance(idata, xr.DataTree)
     assert "posterior" in idata
     assert "posterior_predictive" in idata
 
@@ -1211,6 +1460,8 @@ def test_state_space_time_series():
     # Check for expected posterior predictive variables
     assert "y_hat" in idata.posterior_predictive
     assert "mu" in idata.posterior_predictive
+    assert "obs_ind" in idata["posterior_predictive"]["y_hat"].dims
+    assert "time" not in idata["posterior_predictive"]["y_hat"].dims
 
     # --- Test Case 2: In-sample prediction --- #
     # Create dummy X for in-sample prediction (state-space doesn't use it but API requires it for consistency)
@@ -1223,7 +1474,7 @@ def test_state_space_time_series():
         X=dummy_X_insample,
         out_of_sample=False,
     )
-    assert isinstance(predictions_in_sample, az.InferenceData)
+    assert isinstance(predictions_in_sample, xr.DataTree)
     assert "posterior_predictive" in predictions_in_sample
     assert "y_hat" in predictions_in_sample.posterior_predictive
     assert "mu" in predictions_in_sample.posterior_predictive
@@ -1241,22 +1492,17 @@ def test_state_space_time_series():
         X=future_X,
         out_of_sample=True,
     )
-    # Note: predict now returns InferenceData, not Dataset!
-    # But let's check what the test expects.
-    # The previous code expected xr.Dataset:
-    # assert isinstance(predictions_out_sample, xr.Dataset)
-    # I updated predict() to return az.InferenceData.
-    # So I should update this assertion too.
+    # Predictions are returned as a DataTree with a posterior_predictive group.
 
-    assert isinstance(predictions_out_sample, az.InferenceData)
-    assert "y_hat" in predictions_out_sample.posterior_predictive
-    assert "mu" in predictions_out_sample.posterior_predictive
-
-    # Verify forecast has correct dimensions
-    # y_hat is in posterior_predictive group
-    assert predictions_out_sample.posterior_predictive["y_hat"].shape[-1] == len(
-        future_dates
+    assert isinstance(predictions_out_sample, xr.DataTree)
+    posterior_predictive = predictions_out_sample["posterior_predictive"]
+    assert "y_hat" in posterior_predictive
+    assert "mu" in posterior_predictive
+    np.testing.assert_array_equal(
+        posterior_predictive["obs_ind"].values, future_X["obs_ind"].values
     )
+
+    assert posterior_predictive["y_hat"].sizes["obs_ind"] == len(future_dates)
 
     # --- Test Case 4: Model scoring --- #
     # Create dummy X for score (state-space doesn't use it but API requires it)
@@ -1470,10 +1716,10 @@ class TestSyntheticControlMultiUnit:
         assert sc.treatment_time == treatment_time
 
         # Check data shapes
-        assert sc.datapre_treated.shape == (40, len(treated_units))
-        assert sc.datapost_treated.shape == (20, len(treated_units))
-        assert sc.datapre_control.shape == (40, len(control_units))
-        assert sc.datapost_control.shape == (20, len(control_units))
+        assert sc.pre_design["treated"].shape == (40, len(treated_units))
+        assert sc.post_design["treated"].shape == (20, len(treated_units))
+        assert sc.pre_design["control"].shape == (40, len(control_units))
+        assert sc.post_design["control"].shape == (20, len(control_units))
 
     @pytest.mark.integration
     def test_multi_unit_scoring(self, multi_unit_sc_data):
@@ -1488,15 +1734,15 @@ class TestSyntheticControlMultiUnit:
             control_units=control_units,
             treated_units=treated_units,
             model=model,
-        )
+        ).fit()
 
         # Score should be a pandas Series with separate entries for each unit
-        assert isinstance(sc.score, pd.Series)
+        assert isinstance(sc.result.score, pd.Series)
 
         # Check that we have r2 and r2_std for each treated unit using unified format
         for i, _unit in enumerate(treated_units):
-            assert f"unit_{i}_r2" in sc.score.index
-            assert f"unit_{i}_r2_std" in sc.score.index
+            assert f"unit_{i}_r2" in sc.result.score.index
+            assert f"unit_{i}_r2_std" in sc.result.score.index
 
     @pytest.mark.integration
     def test_multi_unit_summary(self, multi_unit_sc_data, capsys):
@@ -1511,7 +1757,7 @@ class TestSyntheticControlMultiUnit:
             control_units=control_units,
             treated_units=treated_units,
             model=model,
-        )
+        ).fit()
 
         # Test summary
         sc.summary(round_to=3)
@@ -1557,7 +1803,7 @@ class TestSyntheticControlMultiUnit:
             control_units=control_units,
             treated_units=treated_units,
             model=model,
-        )
+        ).fit()
 
         # Test plotting - should work for each treated unit individually
         for unit in treated_units:
@@ -1587,7 +1833,7 @@ class TestSyntheticControlMultiUnit:
             control_units=control_units,
             treated_units=treated_units,
             model=model,
-        )
+        ).fit()
 
         # Test plot data generation for each treated unit
         for unit in treated_units:
@@ -1622,7 +1868,7 @@ class TestSyntheticControlMultiUnit:
             control_units=control_units,
             treated_units=treated_units,
             model=model,
-        )
+        ).fit()
 
         # Test that invalid treated unit name is handled gracefully
         # Note: Current implementation may not raise ValueError, so we test default behavior
