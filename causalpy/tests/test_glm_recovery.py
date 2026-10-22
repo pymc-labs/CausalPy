@@ -15,15 +15,15 @@
 
 from __future__ import annotations
 
-import arviz as az
 import numpy as np
 import pandas as pd
+import pytest
 from pymc_extras.prior import Prior
 
 import causalpy as cp
+from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB
 from causalpy.pymc_models import GeneralizedLinearRegression
-from causalpy.reporting import _extract_hdi_bounds
 
 sample_kwargs = {
     "tune": 800,
@@ -56,7 +56,9 @@ def _poisson_glr(**kwargs) -> GeneralizedLinearRegression:
     )
 
 
-def test_poisson_its_posterior_recovers_level_shift(real_pymc_sample):
+@pytest.mark.slow
+@pytest.mark.correctness
+def test_poisson_its_posterior_recovers_level_shift(real_pymc_sampling):
     """Poisson ITS HDI covers the known log-scale level shift and cumulative impact."""
     n = 80
     treatment_time = 50
@@ -72,23 +74,22 @@ def test_poisson_its_posterior_recovers_level_shift(real_pymc_sample):
     n_post = int((t >= treatment_time).sum())
     cumulative_effect = daily_effect * n_post
 
-    result = cp.InterruptedTimeSeries(
+    experiment = cp.InterruptedTimeSeries(
         df,
         treatment_time,
         formula="y ~ 1",
         model=_poisson_glr(),
     )
-    post_mean = result.post_impact.mean(dim="obs_ind")
+    experiment.fit()
+    post_mean = experiment.result.impact_post.mean(dim="obs_ind")
     if "treated_units" in post_mean.dims:
         post_mean = post_mean.isel(treated_units=0)
-    post_hdi = az.hdi(post_mean, hdi_prob=HDI_PROB)
-    post_lower, post_upper = _extract_hdi_bounds(post_hdi)
+    post_lower, post_upper = hdi_bounds(post_mean, prob=HDI_PROB)
     assert post_lower <= daily_effect <= post_upper
 
-    cumulative = result.post_impact_cumulative
+    cumulative = experiment.result.impact_post_cumulative
     if "treated_units" in cumulative.dims:
         cumulative = cumulative.isel(treated_units=0)
     final_cumulative = cumulative.isel(obs_ind=-1)
-    cumulative_hdi = az.hdi(final_cumulative, hdi_prob=HDI_PROB)
-    cumulative_lower, cumulative_upper = _extract_hdi_bounds(cumulative_hdi)
+    cumulative_lower, cumulative_upper = hdi_bounds(final_cumulative, prob=HDI_PROB)
     assert cumulative_lower <= cumulative_effect <= cumulative_upper
