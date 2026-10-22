@@ -21,8 +21,9 @@ from matplotlib import pyplot as plt
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
-from causalpy.data.simulate_data import generate_event_study_data
+from causalpy.data.simulate_data import generate_ar1_series, generate_event_study_data
 from causalpy.experiments._results import EventStudyResult
+from causalpy.reporting import _detect_experiment_type, _effect_summary_event_study
 
 SAMPLE_KWARGS = {
     "tune": 20,
@@ -344,3 +345,108 @@ def test_summary_prints_the_reference_period(capsys):
     captured = capsys.readouterr().out
     assert "Reference event time: -1" in captured
     assert "event_time" in captured
+
+
+def test_simulator_builds_predictors_and_explicit_effects():
+    """Optional predictors and an explicit effect map are real columns."""
+    series = generate_ar1_series(n=4, phi=0.5, scale=0.0, initial=2.0)
+    np.testing.assert_allclose(series, [2.0, 1.0, 0.5, 0.25])
+
+    df = generate_event_study_data(
+        n_units=4,
+        n_time=6,
+        treatment_time=3,
+        treated_fraction=0.5,
+        event_window=(-1, 1),
+        treatment_effects={-1: 0.0, 0: 1.5, 1: 2.0},
+        predictor_effects={"spend": 0.25},
+        ar_phi=0.5,
+        ar_scale=0.0,
+    )
+    assert "spend" in df.columns
+    assert df.groupby("time")["spend"].nunique().eq(1).all()
+    assert df.shape == (24, 6)
+
+
+def test_detect_experiment_type_recognizes_event_study():
+    """The new event-study branch is taken, and an unknown bundle is not."""
+    effects = xr.DataArray([0.0], dims=["event_time"], coords={"event_time": [0]})
+
+    class Known:
+        result = EventStudyResult(event_time_effects=effects)
+
+    class Unknown:
+        result = object()
+
+    assert _detect_experiment_type(Known()) == "event_study"
+    with pytest.raises(ValueError, match="Unknown experiment type"):
+        _detect_experiment_type(Unknown())
+
+
+def test_coefficient_draws_reject_a_missing_or_wide_dimension():
+    """Coefficient draws must be reducible to chain, draw, and coeffs."""
+    result = _fit(_ols())
+
+    def missing(group="posterior"):
+        return xr.DataArray([1.0], dims=["chain"])
+
+    result._model_backend.coefficients = missing
+    with pytest.raises(ValueError, match="coeffs"):
+        result._coefficient_draws("posterior")
+
+    def wide(group="posterior"):
+        return xr.DataArray(
+            np.ones((1, 1, 2, 3)),
+            dims=["chain", "draw", "unit", "coeffs"],
+        )
+
+    result._model_backend.coefficients = wide
+    with pytest.raises(ValueError, match="Cannot reduce"):
+        result._coefficient_draws("posterior")
+
+
+def test_effect_summary_covers_each_direction_and_optional_prose(capsys):
+    """Decrease, two-sided, ROPE, and optional prose each have a reader path."""
+    result = _fit(cp.pymc_models.LinearRegression(sample_kwargs=dict(SAMPLE_KWARGS)))
+    decrease = result.effect_summary(direction="decrease", min_effect=0.1)
+    assert {"p_lt_0", "p_rope"} <= set(decrease.table.columns)
+    assert "p_gt_0" not in decrease.table.columns
+    reference = decrease.table.loc[decrease.table["is_reference"]].iloc[0]
+    assert np.isnan(reference["p_lt_0"])
+    assert np.isnan(reference["p_rope"])
+
+    two_sided = result.effect_summary(direction="two-sided")
+    assert {"p_two_sided", "prob_of_effect"} <= set(two_sided.table.columns)
+    reference = two_sided.table.loc[two_sided.table["is_reference"]].iloc[0]
+    assert np.isnan(reference["p_two_sided"])
+    assert np.isnan(reference["prob_of_effect"])
+
+    quiet = result.effect_summary(include_pretrend_check=False)
+    assert "parallel" not in quiet.text
+
+    effects = result.result.event_time_effects
+    pre_only = _effect_summary_event_study(
+        EventStudyResult(event_time_effects=effects.sel(event_time=[-2, -1])),
+        event_window=(-2, -1),
+        reference_event_time=-1,
+    )
+    assert "event-time " not in pre_only.text
+
+    scored = result.result
+    result._result = EventStudyResult(
+        event_time_effects=scored.event_time_effects, score=None
+    )
+    result.summary()
+    assert "Score:" not in capsys.readouterr().out
+
+    kept = [
+        k
+        for k in scored.event_time_effects.coords["event_time"].values
+        if int(k) != result.reference_event_time
+    ]
+    result._result = EventStudyResult(
+        event_time_effects=scored.event_time_effects.sel(event_time=kept),
+        score=scored.score,
+    )
+    fig, _ax = result.plot(show=False)
+    plt.close(fig)
