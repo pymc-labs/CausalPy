@@ -64,7 +64,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
     -----
     **Estimate extraction**
 
-    The reported ``causal_impact`` is the posterior coefficient on the treatment-group term, conditional on the pretreatment outcome and any other formula covariates. Treated and untreated prediction curves are also computed for visualization, but they do not determine the reported scalar effect. With the current additive identity-link model, the treatment coefficient equals the corresponding conditional prediction contrast.
+    The reported ``causal_impact`` is the treated-row factual-minus-counterfactual response-scale ``mu`` contrast, including covariate interactions. Under an additive identity link with no group-covariate interaction, that contrast matches the treatment-group coefficient; the coefficient is not the reported effect. Prediction curves are computed for visualization and do not replace the contrast.
 
     Lazy lifecycle: construction only validates inputs and builds design
     matrices — nothing is sampled. Call :meth:`fit` to draw posterior

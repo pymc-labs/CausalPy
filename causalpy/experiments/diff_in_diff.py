@@ -84,7 +84,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
     -----
     **Estimate extraction**
 
-    Both Bayesian and OLS backends store the fitted group-by-post interaction coefficient as ``causal_impact``. The class also constructs treated-post counterfactual predictions for visualization by setting that interaction term to zero, but those predictions do not determine the reported scalar effect. In an additive identity-link model, the coefficient and the corresponding predicted contrast are algebraically identical.
+    Bayesian backends store the treated-row factual-minus-counterfactual response-scale ``mu`` contrast as ``causal_impact``. OLS stores the fitted group-by-post interaction coefficient. Under the validated additive identity-link design those two quantities match; with a non-identity link only the ``mu`` contrast is the reported effect. Counterfactual predictions are still built for visualization by setting the interaction term to zero, and they do not replace the reported effect.
 
     Lazy lifecycle: construction only validates inputs and builds design
     matrices — nothing is sampled. Call :meth:`fit` to draw posterior

@@ -229,12 +229,18 @@ def _create_family_likelihood(
         return
 
     if family == "negative_binomial":
+        # ``create_likelihood_variable`` deep-copies parameters. A live ``alpha``
+        # tensor copied that way is lifted to ``alpha_lifted`` and the logp
+        # graph will not compile. Set ``mu`` and the live tensor, then create
+        # the likelihood directly.
         dist = y_hat_prior.deepcopy()
         if "alpha" in priors:
             dist.parameters["alpha"] = priors["alpha"].create_variable("alpha")
         elif "alpha" not in dist.parameters:
             dist.parameters["alpha"] = 1.0
-        dist.create_likelihood_variable("y_hat", mu=mu, observed=y_obs)
+        dist.parameters["mu"] = mu
+        dist.parameters["observed"] = y_obs
+        dist.create_variable("y_hat")
         return
 
     y_hat_prior.create_likelihood_variable("y_hat", mu=mu, observed=y_obs)
@@ -979,7 +985,6 @@ class GeneralizedLinearRegression(PyMCModel):
         prior_sample_kwargs: dict[str, Any] | None = None,
     ) -> None:
         self.family = _validate_family(family)
-        self.link = _canonical_link_for_family(self.family)
         _validate_glr_user_priors(self.family, priors)
         super().__init__(
             sample_kwargs=sample_kwargs,
@@ -988,6 +993,11 @@ class GeneralizedLinearRegression(PyMCModel):
         )
         # Visible before build so subclass partial defaults cannot hide the family floor.
         self.priors = {**self._effective_default_priors(), **(self._user_priors or {})}
+
+    @property
+    def link(self) -> LinkName:
+        """Canonical inverse link for ``family``. Assignment is rejected."""
+        return _canonical_link_for_family(self.family)
 
     def _effective_default_priors(self) -> dict[str, Any]:
         """Merge family defaults under any subclass ``default_priors`` dict."""

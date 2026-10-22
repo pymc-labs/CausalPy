@@ -354,9 +354,32 @@ def test_glr_predict_mu_only(rng, mock_pymc_sample):
 
 
 def test_glr_default_link_is_canonical():
-    """Omitting ``link`` resolves to the canonical pairing."""
+    """The canonical link is read-only and follows the family."""
     model = GeneralizedLinearRegression(family="poisson")
     assert model.link == "log"
+    with pytest.raises(AttributeError):
+        model.link = "identity"  # type: ignore[misc]
+    assert model.link == "log"
+
+
+def test_default_negative_binomial_logp_compiles(rng):
+    """The default Negative Binomial graph compiles without lifting ``alpha``."""
+    n_obs = 8
+    X = _design_matrix(n_obs, rng)
+    rate = np.exp(X.data @ np.array([[0.0, 0.3]]).T)
+    y_vals = rng.negative_binomial(n=1.0, p=1 / (1 + rate)).astype(float)
+    y = xr.DataArray(
+        y_vals,
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": np.arange(n_obs), "treated_units": ["unit_0"]},
+    )
+    model = GeneralizedLinearRegression(family="negative_binomial")
+    model.build(X, y, _single_unit_coords(n_obs))
+    assert "alpha" in model.named_vars
+    assert not any("lifted" in name for name in model.named_vars)
+    logp = model.compile_logp()
+    value = np.asarray(logp(model.initial_point()), dtype=float)
+    assert np.isfinite(value).all()
 
 
 def test_glr_score_skipped_for_non_gaussian(rng, mock_pymc_sample):
