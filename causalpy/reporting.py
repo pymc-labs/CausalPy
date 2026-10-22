@@ -504,14 +504,11 @@ def _effect_summary_event_study(
         rows: list[dict[str, Any]] = []
         decisions: list[tuple[int, _ScalarBayesianStats]] = []
         hdi_prob = 1 - alpha
-        probability_keys = (
-            "p_gt_0",
-            "p_lt_0",
-            "p_two_sided",
-            "prob_of_effect",
-            "p_rope",
-        )
-        present_keys: list[str] = []
+        saw_p_gt_0 = False
+        saw_p_lt_0 = False
+        saw_p_two_sided = False
+        saw_prob_of_effect = False
+        saw_p_rope = False
         for event_time in event_times:
             if event_time == reference_event_time:
                 continue
@@ -521,7 +518,7 @@ def _effect_summary_event_study(
                 direction=direction,
                 min_effect=min_effect,
             )
-            row = {
+            row: dict[str, Any] = {
                 "event_time": event_time,
                 "mean": stats["mean"],
                 "median": stats["median"],
@@ -529,14 +526,24 @@ def _effect_summary_event_study(
                 "hdi_upper": stats["hdi_upper"],
                 "is_reference": False,
             }
-            for key in probability_keys:
-                if key in stats:
-                    row[key] = stats[key]
-                    if key not in present_keys:
-                        present_keys.append(key)
+            if "p_gt_0" in stats:
+                row["p_gt_0"] = stats["p_gt_0"]
+                saw_p_gt_0 = True
+            if "p_lt_0" in stats:
+                row["p_lt_0"] = stats["p_lt_0"]
+                saw_p_lt_0 = True
+            if "p_two_sided" in stats:
+                row["p_two_sided"] = stats["p_two_sided"]
+                saw_p_two_sided = True
+            if "prob_of_effect" in stats:
+                row["prob_of_effect"] = stats["prob_of_effect"]
+                saw_prob_of_effect = True
+            if "p_rope" in stats:
+                row["p_rope"] = stats["p_rope"]
+                saw_p_rope = True
             rows.append(row)
             decisions.append((event_time, stats))
-        reference_row = {
+        reference_row: dict[str, Any] = {
             "event_time": reference_event_time,
             "mean": 0.0,
             "median": 0.0,
@@ -544,8 +551,16 @@ def _effect_summary_event_study(
             "hdi_upper": np.nan,
             "is_reference": True,
         }
-        for key in present_keys:
-            reference_row[key] = np.nan
+        if saw_p_gt_0:
+            reference_row["p_gt_0"] = np.nan
+        if saw_p_lt_0:
+            reference_row["p_lt_0"] = np.nan
+        if saw_p_two_sided:
+            reference_row["p_two_sided"] = np.nan
+        if saw_prob_of_effect:
+            reference_row["prob_of_effect"] = np.nan
+        if saw_p_rope:
+            reference_row["p_rope"] = np.nan
         rows.append(reference_row)
         rows.sort(key=lambda row: row["event_time"])
         text = _event_study_draw_prose(
