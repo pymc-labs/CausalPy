@@ -26,10 +26,12 @@ import xarray as xr
 
 from causalpy.experiments._results import CausalResult
 from causalpy.experiments.interactive_fixed_effects import (
+    _RESIDUAL_FLOOR_FRACTION,
     InteractiveFixedEffectsResult,
     InteractiveFixedEffectsSyntheticControl,
     _as_dataset,
     _control_initvals,
+    _control_outcome_spread,
     _scale_log_posterior,
     _updated_residual_scale,
     untreated_counterfactual,
@@ -235,7 +237,7 @@ def test_treated_pre_updates_scale_not_factors_or_time_intercepts(monkeypatch) -
     def assert_split(control_model, conditional_model, frame) -> None:
         assert {rv.name for rv in control_model.free_RVs} == {
             "mgp_delta",
-            "sigma",
+            "sigma_raw",
             "control_unit_intercept",
             "time_intercept",
             "shared_factors",
@@ -557,6 +559,7 @@ def test_scale_posterior_rejects_a_non_positive_covariance() -> None:
         centered=centered,
         control_rss=1.0,
         n_control=1,
+        spread=1.0,
     )
     with np.errstate(invalid="ignore"):
         missing = _scale_log_posterior(
@@ -565,9 +568,53 @@ def test_scale_posterior_rejects_a_non_positive_covariance() -> None:
             centered=centered,
             control_rss=1.0,
             n_control=1,
+            spread=1.0,
         )
     assert singular == -1e300
     assert missing == -1e300
+
+
+def test_scale_posterior_rejects_a_sub_floor_draw() -> None:
+    """A residual scale below the control-panel floor is not in the posterior."""
+    above = _scale_log_posterior(
+        float(np.log(0.2)),
+        gram=np.eye(2),
+        centered=np.zeros((2, 1)),
+        control_rss=1.0,
+        n_control=1,
+        spread=1.0,
+    )
+    below = _scale_log_posterior(
+        float(np.log(0.01)),
+        gram=np.eye(2),
+        centered=np.zeros((2, 1)),
+        control_rss=1.0,
+        n_control=1,
+        spread=1.0,
+    )
+    assert np.isfinite(above)
+    assert below == -1e300
+
+
+def test_control_residual_scale_cannot_reach_an_exact_fit() -> None:
+    """A noise-free control panel cannot put the residual scale on an exact-fit ridge."""
+    panel = latent_factor
+    experiment = InteractiveFixedEffectsSyntheticControl(
+        panel.data,
+        panel.treatment_time,
+        panel.control_units,
+        panel.treated_units,
+        max_factors=2,
+    )
+    experiment.build()
+    model = experiment._control_model
+    assert model is not None
+    floor = _RESIDUAL_FLOOR_FRACTION * _control_outcome_spread(
+        experiment._control_outcomes()
+    )
+    sigma = float(np.asarray(model["sigma"].eval({model["sigma_raw"]: np.array(0.0)})))
+    assert sigma == pytest.approx(floor)
+    assert sigma > 0.0
 
 
 def test_non_finite_treated_pre_period_does_not_move_the_scale() -> None:
@@ -580,23 +627,25 @@ def test_non_finite_treated_pre_period_does_not_move_the_scale() -> None:
         factors_pre=np.zeros((2, 3, 1)),
         shrinkage=np.ones((2, 1)),
         treated_centered=np.full((2, 3, 1), np.nan),
+        spread=1.0,
     )
     np.testing.assert_allclose(updated, sigma)
 
 
 def test_flat_scale_posterior_uses_the_gradient_sign() -> None:
-    """A nearly flat posterior still takes a finite step instead of a Newton step."""
+    """A nearly flat posterior still takes a finite step, and stops at the floor."""
     updated = _updated_residual_scale(
-        sigma=np.array([1e-8]),
-        control_rss=np.array([0.0]),
+        sigma=np.array([1.0, 1e-8]),
+        control_rss=np.array([0.0, 0.0]),
         n_control=1,
-        factors_pre=np.zeros((1, 2, 1)),
-        shrinkage=np.ones((1, 1)),
-        treated_centered=np.zeros((1, 2, 1)),
+        factors_pre=np.zeros((2, 2, 1)),
+        shrinkage=np.ones((2, 1)),
+        treated_centered=np.zeros((2, 2, 1)),
+        spread=1.0,
     )
-    assert np.isfinite(updated[0])
-    assert updated[0] > 0.0
-    assert updated[0] < 1e-8
+    assert np.all(np.isfinite(updated))
+    assert updated[0] < 1.0
+    assert np.all(updated >= _RESIDUAL_FLOOR_FRACTION)
 
 
 def test_failed_line_search_keeps_the_current_scale(monkeypatch) -> None:
@@ -619,6 +668,7 @@ def test_failed_line_search_keeps_the_current_scale(monkeypatch) -> None:
         factors_pre=np.zeros((1, 2, 1)),
         shrinkage=np.ones((1, 1)),
         treated_centered=np.zeros((1, 2, 1)),
+        spread=1.0,
     )
     assert updated[0] == pytest.approx(1.0)
 
@@ -643,6 +693,7 @@ def test_non_finite_curvature_keeps_the_scale(monkeypatch) -> None:
         factors_pre=np.zeros((1, 2, 1)),
         shrinkage=np.ones((1, 1)),
         treated_centered=np.zeros((1, 2, 1)),
+        spread=1.0,
     )
     assert updated[0] == pytest.approx(1.0)
 
