@@ -13,6 +13,8 @@
 #   limitations under the License.
 """Tests for SyntheticControl design-phase methods."""
 
+import logging
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -308,14 +310,18 @@ def test_power_curve_plot_and_summary_report_each_effect():
         raw_results=[],
     )
 
-    fig, _ax = curve.plot()
-    empty_fig, _empty_ax = empty.plot()
+    fig, ax = curve.plot()
+    empty_fig, empty_ax = empty.plot()
     summary = curve.summary()
     plt.close(fig)
     plt.close(empty_fig)
 
+    assert "n=1" in ax.get_title()
+    assert "n=0" in empty_ax.get_title()
     assert list(summary["effect_size"]) == [0.1, 0.2]
     assert list(summary["detection_rate"]) == [0.0, 1.0]
+    assert summary["mean_recovery"].tolist() == pytest.approx([-0.25, 1.5])
+    assert summary["median_recovery"].tolist() == pytest.approx([-0.25, 1.5])
     assert summary["n_simulations"].tolist() == [1, 1]
     assert empty.summary().empty
 
@@ -400,17 +406,25 @@ def test_donor_pool_quality_handles_zero_and_flat_weights(design_sc):
     flat_beta = beta.isel(treated_units=0) if "treated_units" in beta.dims else beta
     flat = _quality_with_beta(design_sc, flat_beta)
 
-    assert zeroed.weight_concentration == pytest.approx(len(design_sc.control_units))
-    assert flat.per_donor_details["normalized_weight"].sum() == pytest.approx(1.0)
+    n_donors = len(design_sc.control_units)
+    assert zeroed.per_donor_details["normalized_weight"].tolist() == pytest.approx(
+        [1 / n_donors] * n_donors
+    )
+    reduced = flat_beta.mean(dim=["chain", "draw"])
+    expected = np.abs(np.asarray(reduced.values, dtype=float).ravel())
+    expected = expected / expected.sum()
+    assert flat.per_donor_details["normalized_weight"].to_numpy() == pytest.approx(
+        expected
+    )
 
 
 def test_validate_design_scores_impact_without_a_treated_unit_dimension(
     design_sc, monkeypatch
 ):
-    impact = xr.DataArray(
-        np.full((1, 8, 4), 2.0),
-        dims=("chain", "draw", "obs_ind"),
-    )
+    values = np.zeros((1, 8, 4))
+    values[..., 0] = -1.0
+    values[..., -1] = 3.0
+    impact = xr.DataArray(values, dims=("chain", "draw", "obs_ind"))
 
     def fake_fit(self, *args, **kwargs):
         self._result = type("Result", (), {"impact_post_cumulative": impact})()
@@ -421,7 +435,7 @@ def test_validate_design_scores_impact_without_a_treated_unit_dimension(
         0.1, holdout_periods=10, sample_kwargs=SAMPLE_KWARGS
     )
 
-    assert result.recovered_effect_mean == pytest.approx(2.0)
+    assert result.recovered_effect_mean == pytest.approx(3.0)
     assert result.effect_type == "relative"
 
 
@@ -453,3 +467,75 @@ def test_power_analysis_counts_a_miss_without_a_residual_unit_dimension(
         design_sc._result = original
 
     assert result.detection_rates == [0.0]
+
+
+def test_dress_rehearsal_check_text_names_a_hit_and_a_miss():
+    hit = _rehearsal([1.0, 2.0], recovered=1.5, truth=1.5)
+    miss = _rehearsal([1.0, 2.0], recovered=1.5, truth=9.0)
+    hit_check = hit.to_check_result()
+    miss_check = miss.to_check_result()
+    plt.close(hit_check.figures[0])
+    plt.close(miss_check.figures[0])
+
+    assert hit_check.passed is True
+    assert "HDI covers" in hit_check.text
+    assert miss_check.passed is False
+    assert "HDI misses" in miss_check.text
+
+
+def test_power_analysis_logs_every_fifth_simulation(design_sc, monkeypatch, caplog):
+    rehearsal = _rehearsal([1.0, 2.0], recovered=1.5, truth=1.0)
+    monkeypatch.setattr(
+        cp.SyntheticControl,
+        "_build_noisy_experiment",
+        lambda self, *args, **kwargs: design_sc,
+    )
+    monkeypatch.setattr(
+        cp.SyntheticControl,
+        "validate_design",
+        lambda self, *args, **kwargs: rehearsal,
+    )
+
+    with caplog.at_level(logging.INFO, logger="causalpy.experiments.synthetic_control"):
+        result = design_sc.power_analysis(
+            [0.1, 0.2], n_simulations=5, sample_kwargs=SAMPLE_KWARGS
+        )
+
+    assert "5/10 simulations complete" in caplog.text
+    assert "10/10 simulations complete" in caplog.text
+    assert "1/10 simulations complete" not in caplog.text
+    assert result.detection_rates == [1.0, 1.0]
+
+
+def test_donor_pool_quality_rejects_idata_without_a_posterior():
+    model = cp.pymc_models.WeightedSumFitter(sample_kwargs=SAMPLE_KWARGS)
+    model.idata = xr.DataTree()
+    shell = type("Shell", (), {"model": model})()
+
+    with pytest.raises(RuntimeError, match="Call fit"):
+        cp.SyntheticControl.donor_pool_quality(shell)
+
+
+def test_donor_pool_quality_omits_undefined_correlations_from_the_score(design_sc):
+    frame = design_sc.datapre.copy()
+    for unit in design_sc.control_units:
+        frame[unit] = 1.0
+    beta = design_sc.model.idata.posterior["beta"]
+    idata = design_sc.model.idata.copy()
+    posterior = idata.posterior.copy()
+    posterior["beta"] = beta
+    idata.posterior = posterior
+    model = cp.pymc_models.WeightedSumFitter(sample_kwargs=SAMPLE_KWARGS)
+    model.idata = idata
+    shell = type("Shell", (), {})()
+    shell.model = model
+    shell.datapre = frame
+    shell.control_units = list(design_sc.control_units)
+    shell.treated_units = list(design_sc.treated_units)
+    shell.pre_design = design_sc.pre_design
+
+    result = cp.SyntheticControl.donor_pool_quality(shell)
+
+    assert np.isnan(result.correlation_score)
+    assert result.per_donor_details["mean_correlation"].isna().all()
+    assert list(result.per_donor_details["donor"]) == list(design_sc.control_units)
