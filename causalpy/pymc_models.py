@@ -17,7 +17,7 @@ import inspect
 import warnings
 from collections.abc import Iterable
 from copy import deepcopy
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import arviz as az
 import numpy as np
@@ -110,7 +110,7 @@ def _validate_family(family: str) -> FamilyName:
     if family not in _CANONICAL_FAMILY_LINKS:
         valid = ", ".join(sorted(_CANONICAL_FAMILY_LINKS))
         raise ValueError(f"Unsupported family {family!r}. Expected one of: {valid}.")
-    return family  # type: ignore[return-value]
+    return cast(FamilyName, family)
 
 
 def _validate_glr_user_priors(
@@ -1162,11 +1162,18 @@ class GeneralizedLinearRegression(PyMCModel):
                 round_to or 2,
             )
 
-    def _clone(self) -> "GeneralizedLinearRegression":
-        """Create a fresh, unfitted copy with the same family and priors."""
+    def _clone(
+        self, priors: dict[str, Any] | None = None
+    ) -> "GeneralizedLinearRegression":
+        """Create a fresh, unfitted copy with the same family and priors.
+
+        ``priors`` overrides the stored user priors on the copy. Omitting it
+        preserves them. The override is how ``auto_scale_sigma=False`` pins a
+        legacy noise prior without reconstructing the subclass by hand.
+        """
         return type(self)(
             sample_kwargs=self.sample_kwargs,
-            priors=self._user_priors,
+            priors=self._user_priors if priors is None else priors,
             family=self.family,
             prior_sample_kwargs=self.prior_sample_kwargs,
         )
@@ -1242,11 +1249,14 @@ class LinearRegression(GeneralizedLinearRegression):
             prior_sample_kwargs=prior_sample_kwargs,
         )
 
-    def _clone(self) -> "LinearRegression":
-        """Clone without exposing ``family`` to the Gaussian constructor."""
+    def _clone(self, priors: dict[str, Any] | None = None) -> "LinearRegression":
+        """Clone without exposing ``family`` to the Gaussian constructor.
+
+        ``priors`` overrides the stored user priors; omitting it preserves them.
+        """
         return type(self)(
             sample_kwargs=self.sample_kwargs,
-            priors=self._user_priors,
+            priors=self._user_priors if priors is None else priors,
             prior_sample_kwargs=self.prior_sample_kwargs,
         )
 
@@ -4021,6 +4031,32 @@ class StateSpaceTimeSeries(PyMCModel):
         )
         return forecast.to_dataset() if isinstance(forecast, xr.DataTree) else forecast
 
+    def _subset_kalman_predictive(
+        self,
+        result: xr.DataTree,
+        var_names: list[str] | tuple[str, ...] | None,
+    ) -> xr.DataTree:
+        """Return only the requested posterior-predictive variables.
+
+        The Kalman path always materializes ``y_hat`` and ``mu``. ``None``
+        keeps both. A subset is applied to a copy so stored ``idata`` still
+        holds the full predictive group.
+        """
+        if var_names is None:
+            return result
+        requested = list(var_names)
+        dataset = result["posterior_predictive"].to_dataset()
+        missing = [name for name in requested if name not in dataset.data_vars]
+        if missing:
+            available = ", ".join(sorted(map(str, dataset.data_vars)))
+            raise ValueError(
+                "Posterior-predictive variables not available on the Kalman path: "
+                f"{missing}. Available: {available}."
+            )
+        restricted = result.copy()
+        restricted["posterior_predictive"] = dataset[requested]
+        return restricted
+
     def predict(
         self,
         X: xr.DataArray | None = None,
@@ -4028,6 +4064,7 @@ class StateSpaceTimeSeries(PyMCModel):
         out_of_sample: bool | None = False,
         *,
         group: Literal["prior", "posterior"] = "posterior",
+        var_names: list[str] | tuple[str, ...] | None = None,
     ) -> xr.DataTree:
         """
         Predict data given input X.
@@ -4048,6 +4085,10 @@ class StateSpaceTimeSeries(PyMCModel):
             Only the posterior is supported; requesting ``"prior"`` raises
             the group-not-sampled error (the Kalman path has no prior
             equivalent).
+        var_names : list or tuple of str, optional
+            Posterior-predictive variables to return. ``None`` returns both
+            ``y_hat`` and ``mu``. G-computation passes ``("mu",)`` so the
+            estimand path does not keep unused outcome noise.
 
         Returns
         -------
@@ -4061,7 +4102,7 @@ class StateSpaceTimeSeries(PyMCModel):
                 group="prior",
             )
         if not out_of_sample:
-            return self._prepare_idata()
+            return self._subset_kalman_predictive(self._prepare_idata(), var_names)
         else:
             # Extract datetime from X coordinates
             if X is None:
@@ -4121,7 +4162,7 @@ class StateSpaceTimeSeries(PyMCModel):
             if isinstance(X, xr.DataArray) and "obs_ind" in X.coords:
                 _assign_group_coords(result, "posterior_predictive", obs_ind=X.obs_ind)
 
-            return result
+            return self._subset_kalman_predictive(result, var_names)
 
     def score(
         self,

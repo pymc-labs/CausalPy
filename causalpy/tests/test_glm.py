@@ -452,6 +452,42 @@ def test_linear_regression_clone_stays_gaussian_identity():
     assert cloned.link == "identity"
 
 
+def test_glr_clone_priors_override_keeps_family():
+    """``_clone(priors=...)`` replaces stored priors and keeps the family.
+
+    ``auto_scale_sigma=False`` pins a legacy noise prior through this argument.
+    An override that dropped it would raise ``TypeError`` and lose the pin.
+    """
+    override = {
+        "beta": Prior("Normal", mu=0, sigma=3, dims=["treated_units", "coeffs"])
+    }
+    original = GeneralizedLinearRegression(
+        family="poisson",
+        sample_kwargs={"draws": 4},
+        prior_sample_kwargs={"draws": 9, "random_seed": 2},
+        priors={
+            "beta": Prior("Normal", mu=0, sigma=8, dims=["treated_units", "coeffs"])
+        },
+    )
+    cloned = original._clone(priors=override)
+    assert cloned is not original
+    assert cloned.family == "poisson"
+    assert cloned.link == "log"
+    assert cloned._user_priors == override
+    assert cloned.prior_sample_kwargs == {"draws": 9, "random_seed": 2}
+    assert original._user_priors != override
+
+    gaussian = LinearRegression(
+        sample_kwargs={"draws": 4},
+        prior_sample_kwargs={"draws": 9, "random_seed": 2},
+    )
+    pinned = gaussian._clone(priors=override)
+    assert isinstance(pinned, LinearRegression)
+    assert pinned.family == "gaussian"
+    assert pinned._user_priors == override
+    assert pinned.prior_sample_kwargs == {"draws": 9, "random_seed": 2}
+
+
 def test_glr_negative_binomial_alpha_prior(rng, mock_pymc_sample):
     """User ``alpha`` priors are wired into the Negative Binomial graph."""
     n_obs = 12
