@@ -194,18 +194,27 @@ def test_aliased_y_hat_with_nan_is_rejected():
         adapter.predict_response(np.ones((2, 1)), quantity="y_hat", group="posterior")
 
 
-def test_independent_predict_seed_clears_replayed_seeds_only():
-    """Any replayed seed, including bool, is cleared; a generator is not."""
+def test_independent_predict_seed_replaces_replayed_seeds_with_a_stable_generator():
+    """A replayed seed becomes the same generator twice; a generator is left."""
 
     class _Model:
         def __init__(self, seed):
             self.sample_kwargs = {"random_seed": seed}
 
-    for seed in (1, True, 7.0, np.int64(7), [11], np.array([[11]])):
+    draws = {}
+    for seed in (1, True, 7.0, np.int64(7), [11], np.array([[11]]), "1", np.True_):
         model = _Model(seed)
-        with independent_predict_seed(model):
-            assert model.sample_kwargs["random_seed"] is None
-        assert model.sample_kwargs["random_seed"] is seed
+        seen = []
+        for _ in range(2):
+            with independent_predict_seed(model):
+                used = model.sample_kwargs["random_seed"]
+                assert isinstance(used, np.random.Generator)
+                seen.append(int(used.integers(1_000_000)))
+            assert model.sample_kwargs["random_seed"] is seed
+        assert seen[0] == seen[1]
+        draws[repr(seed)] = seen[0]
+    assert draws[repr(1)] != draws[repr(True)]
+    assert draws[repr(True)] == draws[repr(np.True_)]
     generator = np.random.default_rng(0)
     model = _Model(generator)
     with independent_predict_seed(model):
@@ -280,8 +289,8 @@ def test_piecewise_prediction_contrast_keeps_independent_observation_noise(seed)
 
         def predict_response(self, X, *, quantity, group, out_of_sample=False):
             used = self._model.sample_kwargs["random_seed"]
-            if used is None:
-                noise_seed = 100.0
+            if isinstance(used, np.random.Generator):
+                noise_seed = 1000.0 + float(used.integers(0, 1000))
             elif isinstance(used, (list, tuple, np.ndarray)):
                 noise_seed = float(np.asarray(used).reshape(-1)[0])
             else:
@@ -319,17 +328,77 @@ def test_piecewise_prediction_contrast_keeps_independent_observation_noise(seed)
         impact_post_cumulative=None,
         score=None,
     )
-    copied = experiment._bundle_for_response(
+    first = experiment._bundle_for_response(
+        stored, response_type="prediction", group="posterior"
+    )
+    second = experiment._bundle_for_response(
         stored, response_type="prediction", group="posterior"
     )
     # Same seed would cancel and leave a zero contrast, because the mean
-    # depends only on the unshifted column. Clearing the seed uses 100.
-    if isinstance(seed, (list, tuple, np.ndarray)):
-        fitted_noise = float(np.asarray(seed).reshape(-1)[0])
-    else:
-        fitted_noise = float(seed)
-    np.testing.assert_allclose(copied.impact_pre.values, fitted_noise - 100.0)
+    # depends only on the unshifted column. The replacement generator uses
+    # a value that cannot equal the fitted seed.
+    xr.testing.assert_equal(first.impact_pre, second.impact_pre)
+    assert np.max(np.abs(first.impact_pre.values)) >= 1000
     assert backend._model.sample_kwargs["random_seed"] is seed
+
+
+def test_piecewise_prediction_contrasts_are_reproducible_and_keep_noise():
+    """Two seeded prediction contrasts match, and neither is the mu contrast."""
+    n = 8
+    obs = np.arange(n)
+    design = np.column_stack([np.ones(n), obs.astype(float), (obs >= 4).astype(float)])
+    X = xr.DataArray(
+        design,
+        dims=("obs_ind", "coeffs"),
+        coords={"obs_ind": obs, "coeffs": ["intercept", "t", "interrupt"]},
+    )
+    y = xr.DataArray(
+        (0.4 * obs + 0.2)[:, None],
+        dims=("obs_ind", "treated_units"),
+        coords={"obs_ind": obs, "treated_units": ["unit_0"]},
+    )
+    model = cp.pymc_models.LinearRegression(
+        sample_kwargs={
+            "draws": 20,
+            "tune": 10,
+            "chains": 1,
+            "cores": 1,
+            "progressbar": False,
+            "compute_convergence_checks": False,
+            "random_seed": 1,
+        }
+    )
+    model.fit(X, y)
+    experiment = PiecewiseITS.__new__(PiecewiseITS)
+    experiment.design = {"X": design}
+    experiment._interruption_cols = [2]
+    experiment.time_col = "t"
+    experiment.interruption_times = [4]
+    experiment.data = pd.DataFrame({"t": obs})
+    experiment.datapost = experiment.data.iloc[4:]
+    experiment._model_backend = PyMCModelAdapter(model)
+    stored = CausalResult(
+        predictions_pre=None,
+        predictions_post=None,
+        impact_pre=None,
+        impact_post=None,
+        impact_post_cumulative=None,
+        score=None,
+    )
+    first = experiment._bundle_for_response(
+        stored, response_type="prediction", group="posterior"
+    )
+    second = experiment._bundle_for_response(
+        stored, response_type="prediction", group="posterior"
+    )
+    xr.testing.assert_allclose(first.impact_pre, second.impact_pre)
+    mu = experiment._model_backend.predict_response(design, quantity="mu")
+    design_cf = design.copy()
+    design_cf[:, 2] = 0
+    mu_cf = experiment._model_backend.predict_response(design_cf, quantity="mu")
+    mu_effect = mu.isel(treated_units=0) - mu_cf.isel(treated_units=0)
+    assert not np.allclose(first.impact_pre.values, mu_effect.values)
+    assert model.sample_kwargs["random_seed"] == 1
 
 
 def _sklearn_its():

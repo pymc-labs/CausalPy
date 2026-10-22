@@ -18,6 +18,7 @@ and summary callers opt into observation-noise draws (``y_hat``) without
 mutating that stored bundle.
 """
 
+import hashlib
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -122,17 +123,61 @@ def _replays_predictive_draws(seed: Any) -> bool:
     return not isinstance(seed, (np.random.Generator, np.random.RandomState))
 
 
+def _seed_token(seed: Any) -> bytes:
+    """Return a stable digest input for one replayed predictive seed."""
+    if isinstance(seed, (bool, np.bool_)):
+        return b"b" + bytes([int(bool(seed))])
+    if isinstance(seed, (int, np.integer)):
+        value = int(seed)
+        nbytes = max(1, (value.bit_length() + 8) // 8)
+        return b"i" + value.to_bytes(nbytes, "little", signed=True)
+    if isinstance(seed, (float, np.floating)):
+        return b"f" + np.float64(seed).tobytes()
+    if isinstance(seed, str):
+        encoded = seed.encode()
+        return b"s" + len(encoded).to_bytes(4, "little") + encoded
+    if isinstance(seed, bytes):
+        return b"y" + len(seed).to_bytes(4, "little") + seed
+    if isinstance(seed, np.ndarray):
+        array = np.ascontiguousarray(seed)
+        if array.dtype == object:
+            return b"o" + _seed_token(array.tolist())
+        header = f"{array.dtype.str}:{array.shape}".encode()
+        return b"a" + len(header).to_bytes(4, "little") + header + array.tobytes()
+    if isinstance(seed, (list, tuple)):
+        parts = [_seed_token(item) for item in seed]
+        body = b"".join(len(part).to_bytes(4, "little") + part for part in parts)
+        kind = b"l" if isinstance(seed, list) else b"t"
+        return kind + body
+    encoded = repr(seed).encode()
+    return b"r" + type(seed).__name__.encode() + b":" + encoded
+
+
+def _counterfactual_generator(seed: Any) -> np.random.Generator:
+    """Build a generator PyMC will not restart from the caller's seed.
+
+    The digest is salted, so the counterfactual sequence is not the fitted
+    predict's sequence. The same seed always yields the same generator state.
+    """
+    digest = hashlib.sha256(b"causalpy-response-counterfactual\0" + _seed_token(seed))
+    entropy = np.frombuffer(digest.digest(), dtype=np.uint32).copy()
+    return np.random.default_rng(entropy)
+
+
 @contextmanager
 def independent_predict_seed(model: Any) -> Iterator[None]:
-    """Drop a replayed predictive seed for one call, then restore it.
+    """Replace a replayed predictive seed for one call, then restore it.
 
     ``PyMCModel.predict`` reseeds posterior-predictive sampling from
     ``sample_kwargs["random_seed"]`` on every call. Two equal-length
     designs therefore share one observation-noise sequence, and a
     fitted-minus-counterfactual contrast cancels that noise. A replayed
-    seed is replaced with ``None`` for the duration of the context, so
-    the next draw is not a restart of the first. The caller's seed is
+    seed is replaced with a generator built from a salted digest of that
+    seed. A generator is not replayed, and rebuilding it from the same
+    digest makes the counterfactual draw repeatable. The caller's seed is
     restored on exit. Missing seeds and generators are left alone.
+    Passing ``None`` is not used: ``sample_posterior_predictive`` treats
+    that as fresh entropy, so two seeded summaries would disagree.
 
     Parameters
     ----------
@@ -142,7 +187,7 @@ def independent_predict_seed(model: Any) -> Iterator[None]:
     Yields
     ------
     None
-        Control returns with a replayed seed cleared. The original seed is
+        Control returns with a replayed seed replaced. The original seed is
         restored on exit, including when the body raises.
     """
     kwargs = getattr(model, "sample_kwargs", None)
@@ -153,7 +198,7 @@ def independent_predict_seed(model: Any) -> Iterator[None]:
     if not _replays_predictive_draws(seed):
         yield
         return
-    kwargs["random_seed"] = None
+    kwargs["random_seed"] = _counterfactual_generator(seed)
     try:
         yield
     finally:
