@@ -10,9 +10,19 @@ Gaussian models with an identity link make the linear predictor, conditional exp
 | --- | --- | --- | --- | --- |
 | Linear predictor / latent state | model-specific (e.g. ``eta``) | Link scale | No | No |
 | Conditional expected outcome | ``mu`` | Outcome / response scale | No | **Yes** |
-| Posterior predictive draw | ``y_hat`` | Outcome scale | Yes | No (by default) |
+| Posterior predictive draw | ``y_hat`` | Outcome scale | Yes | No. Stored impact stays ``y - mu``. Plot and summary callers can opt into ``y_hat`` with ``response_type="prediction"``. |
 
-**Impact** uses the middle row: draw-level contrasts ``y - mu`` are computed in outcome units, then summarized. **Plots and effect summaries** inherit this convention unless a method documents a different estimand (for example link-scale regression coefficients).
+**Impact** uses the middle row: draw-level contrasts ``y - mu`` are computed in outcome units, then summarized. **Plots and effect summaries** use the same contrast unless the caller passes ``response_type="prediction"`` or the method documents a different estimand (for example link-scale regression coefficients).
+
+## Optional observation-noise bands
+
+Stored results stay on ``mu``. The default of ``plot``, ``get_plot_data``, ``effect_summary``, and ``analyze_persistence`` does too. Pass ``response_type="prediction"`` to rebuild the drawn or summarized contrast from posterior predictive ``y_hat``. That contrast includes observation noise, so the intervals are wider and are not the default causal impact. The stored result is left unchanged.
+
+Coefficient experiments (difference-in-differences, pretest/posttest, regression discontinuity, and regression kink) switch only the outcome bands. The reported coefficient or threshold contrast stays the stored conditional-expectation estimate.
+
+Point-estimate backends have no observation-noise draws and raise ``ValueError``. Bayesian ribbon plots name the quantity and the interval by default, including the credible-interval kind (HDI or ETI) and its probability. Histogram and spaghetti plots name the quantity without an interval percentage, because those panels are not ribbons. Pass ``show_response_annotation=False`` to omit the note.
+
+The first Bayesian plot or summary call in a process logs the same distinction once.
 
 Posterior transformations for nonlinear models must be applied **draw by draw** before contrasts or averages. In general, ``inverse_link(mean(eta))`` differs from ``mean(inverse_link(eta))``; g-computation averages unit-level potential outcomes on the response scale. See {doc}`estimands` for how this relates to empirical estimands. A worked tutorial notebook is tracked in `CausalPy#1017 <https://github.com/pymc-labs/CausalPy/issues/1017>`_.
 

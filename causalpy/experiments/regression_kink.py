@@ -27,10 +27,16 @@ import xarray as xr
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.experiments._results import KinkResult
+from causalpy.experiments._response_type import (
+    check_response_type,
+    finish_response_plot,
+    quantity_for,
+)
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
     format_r2_score,
+    has_posterior_draws,
     plot_posterior_over_x,
 )
 
@@ -40,6 +46,7 @@ from causalpy.reporting import EffectSummary, _effect_summary_rkink
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 
 from .base import BaseExperiment
+from dataclasses import replace
 from typing import Any, Literal
 from causalpy.utils import _is_variable_dummy_coded, round_num
 from causalpy.custom_exceptions import (
@@ -320,6 +327,27 @@ class RegressionKink(BaseExperiment[KinkResult]):
         )
         self.print_coefficients(round_to)
 
+    def _bundle_for_response(
+        self,
+        bundle: KinkResult,
+        *,
+        response_type: str,
+        group: Literal["prior", "posterior"],
+    ) -> KinkResult:
+        """Return ``bundle`` or a copy whose curve uses ``y_hat``.
+
+        ``gradient_change`` stays the stored kink contrast. The stored result
+        is not mutated.
+        """
+        if check_response_type(response_type) == "expectation":
+            return bundle
+        quantity = quantity_for(response_type)
+        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
+        predictions = self._model_backend.predict_response(
+            X=np.asarray(new_x), quantity=quantity, group=group
+        )
+        return replace(bundle, predictions=predictions)
+
     def plot(
         self,
         *,
@@ -329,6 +357,8 @@ class RegressionKink(BaseExperiment[KinkResult]):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        response_type: Literal["expectation", "prediction"] = "expectation",
+        show_response_annotation: bool | None = None,
         figsize: tuple[float, float] | None = None,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -366,6 +396,17 @@ class RegressionKink(BaseExperiment[KinkResult]):
         num_samples : int, optional
             Number of posterior draws when ``kind="spaghetti"``. Defaults
             to 50. Ignored for other kinds.
+        response_type : {"expectation", "prediction"}, default "expectation"
+            Which quantity the fitted curve represents. ``"expectation"``
+            uses the conditional mean ``mu``. ``"prediction"`` uses posterior
+            predictive ``y_hat``. The reported gradient change stays the
+            stored kink contrast. Point-estimate backends reject
+            ``"prediction"``.
+        show_response_annotation : bool, optional
+            Whether to add a small figure note naming the quantity and, for
+            ribbon plots, the interval. ``None`` (default) annotates Bayesian
+            ribbon plots and leaves histogram, spaghetti, and point-estimate
+            figures unlabeled. ``True`` always annotates; ``False`` never does.
 
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches, passed to
@@ -396,6 +437,8 @@ class RegressionKink(BaseExperiment[KinkResult]):
             kind=kind,
             ci_kind=ci_kind,
             num_samples=num_samples,
+            response_type=response_type,
+            show_response_annotation=show_response_annotation,
             figsize=figsize,
         )
 
@@ -408,6 +451,8 @@ class RegressionKink(BaseExperiment[KinkResult]):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        response_type: Literal["expectation", "prediction"] = "expectation",
+        show_response_annotation: bool | None = None,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
@@ -432,7 +477,11 @@ class RegressionKink(BaseExperiment[KinkResult]):
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
-        bundle = self._require_bundle(group)
+        bundle = self._bundle_for_response(
+            self._require_bundle(group),
+            response_type=response_type,
+            group=group,
+        )
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
@@ -440,7 +489,19 @@ class RegressionKink(BaseExperiment[KinkResult]):
             "num_samples": num_samples,
         }
         if group == "prior":
-            return self._plot_prior_checks(bundle=bundle, style=style, figsize=figsize)
+            fig, ax = self._plot_prior_checks(
+                bundle=bundle, style=style, figsize=figsize
+            )
+            return finish_response_plot(
+                fig,
+                ax,
+                response_type=response_type,
+                ci_prob=ci_prob,
+                ci_kind=ci_kind,
+                kind=kind,
+                show_response_annotation=show_response_annotation,
+                has_draws=has_posterior_draws(bundle.predictions),
+            )
 
         fig, ax = plt.subplots(figsize=figsize)
         # Plot raw data
@@ -488,7 +549,16 @@ class RegressionKink(BaseExperiment[KinkResult]):
             labels=labels,
             fontsize=LEGEND_FONT_SIZE,
         )
-        return fig, ax
+        return finish_response_plot(
+            fig,
+            ax,
+            response_type=response_type,
+            ci_prob=ci_prob,
+            ci_kind=ci_kind,
+            kind=kind,
+            show_response_annotation=show_response_annotation,
+            has_draws=has_posterior_draws(bundle.predictions),
+        )
 
     def _plot_prior_checks(
         self,

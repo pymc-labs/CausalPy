@@ -160,15 +160,32 @@ def build_coords(
     }
 
 
+def _extract_response(
+    prediction: xr.DataTree, quantity: Literal["mu", "y_hat"]
+) -> xr.DataArray:
+    """Extract response-scale ``mu`` or ``y_hat`` from a prediction container.
+
+    ``mu`` is the conditional expected outcome. ``y_hat`` is the posterior
+    predictive of the observed variable and includes observation noise.
+    Both are returned with the canonical prediction dimensions. Stray
+    non-dimension coordinates are dropped so they cannot leak into impact
+    containers.
+    """
+    if quantity not in ("mu", "y_hat"):
+        raise ValueError(f"quantity must be 'mu' or 'y_hat', got {quantity!r}")
+    group = prediction["posterior_predictive"]
+    if quantity not in group:
+        raise ValueError(
+            f"posterior_predictive has no {quantity!r} draws. "
+            "response_type='prediction' requires y_hat."
+        )
+    draws = group[quantity].transpose("chain", "draw", "obs_ind", "treated_units")
+    return draws.drop_vars([name for name in draws.coords if name not in draws.dims])
+
+
 def _extract_mu(prediction: xr.DataTree) -> xr.DataArray:
     """Extract response-scale ``mu`` from a DataTree prediction container."""
-    mu = prediction["posterior_predictive"]["mu"].transpose(
-        "chain", "draw", "obs_ind", "treated_units"
-    )
-    # Enforce the canonical container: stray non-dim coords (e.g. the
-    # state-space backend's `observed_state`) would otherwise leak into
-    # downstream impact containers and break coordinate equality checks.
-    return mu.drop_vars([name for name in mu.coords if name not in mu.dims])
+    return _extract_response(prediction, "mu")
 
 
 def _sklearn_array(value: Any) -> np.ndarray:
@@ -384,6 +401,59 @@ class ModelAdapter(ABC):
             Expected outcomes with dimensions ``("chain", "draw", "obs_ind",
             "treated_units")``.
         """
+
+    def predict_response(
+        self,
+        X: Any,
+        *,
+        quantity: Literal["mu", "y_hat"] = "mu",
+        coords: dict[str, Any] | None = None,
+        out_of_sample: bool = False,
+        group: Literal["prior", "posterior"] = "posterior",
+    ) -> xr.DataArray:
+        """Return ``mu`` or ``y_hat`` draws with canonical prediction dimensions.
+
+        :meth:`predict` remains the conditional-expectation contract and is
+        unchanged. ``quantity="y_hat"`` is the posterior predictive of the
+        observed variable, including observation noise. Point-estimate
+        backends have no such draws and raise ``ValueError``.
+
+        Parameters
+        ----------
+        X : array-like or xarray.DataArray
+            Predictor matrix for which to generate predictions.
+        quantity : {"mu", "y_hat"}, default "mu"
+            ``"mu"`` is the conditional expected outcome. ``"y_hat"``
+            includes observation noise.
+        coords : dict, optional
+            Coordinate metadata for Bayesian backends.
+        out_of_sample : bool, default False
+            Whether predictions are out-of-sample. Used by PyMC backends only.
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group to condition forward sampling on.
+
+        Returns
+        -------
+        xr.DataArray
+            Draws with dimensions ``("chain", "draw", "obs_ind",
+            "treated_units")``.
+
+        Raises
+        ------
+        ValueError
+            If ``quantity`` is not ``"mu"`` or ``"y_hat"``, or if ``"y_hat"``
+            is requested from a backend that does not sample observation noise.
+        """
+        if quantity == "mu":
+            return self.predict(
+                X, coords=coords, out_of_sample=out_of_sample, group=group
+            )
+        if quantity != "y_hat":
+            raise ValueError(f"quantity must be 'mu' or 'y_hat', got {quantity!r}")
+        raise ValueError(
+            "quantity='y_hat' requires posterior predictive draws. "
+            f"{type(self).__name__} has no observation-noise draws."
+        )
 
     @property
     def is_built(self) -> bool:
@@ -686,6 +756,46 @@ class PyMCModelAdapter(ModelAdapter):
             self._model.predict(
                 X=X, coords=coords, out_of_sample=out_of_sample, group=group
             )
+        )
+
+    def predict_response(
+        self,
+        X: Any,
+        *,
+        quantity: Literal["mu", "y_hat"] = "mu",
+        coords: dict[str, Any] | None = None,
+        out_of_sample: bool = False,
+        group: Literal["prior", "posterior"] = "posterior",
+    ) -> xr.DataArray:
+        """Return ``mu`` or ``y_hat`` draws from the PyMC model.
+
+        Parameters
+        ----------
+        X : array-like or xarray.DataArray
+            Predictor matrix for which to generate predictions.
+        quantity : {"mu", "y_hat"}, default "mu"
+            ``"mu"`` is the conditional expected outcome. ``"y_hat"``
+            includes observation noise.
+        coords : dict, optional
+            Coordinate metadata for the PyMC model.
+        out_of_sample : bool, default False
+            Whether predictions are out-of-sample.
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group to condition forward sampling on.
+
+        Returns
+        -------
+        xr.DataArray
+            Forward draws of the requested variable with canonical prediction
+            dimensions.
+        """
+        if quantity not in ("mu", "y_hat"):
+            raise ValueError(f"quantity must be 'mu' or 'y_hat', got {quantity!r}")
+        return _extract_response(
+            self._model.predict(
+                X=X, coords=coords, out_of_sample=out_of_sample, group=group
+            ),
+            quantity,
         )
 
     def score(
@@ -1257,6 +1367,54 @@ class PyMCForecastAdapter(ModelAdapter):
             )
         return _extract_mu(
             self._model.predict(X=X, coords=coords, out_of_sample=out_of_sample)
+        )
+
+    def predict_response(
+        self,
+        X: Any,
+        *,
+        quantity: Literal["mu", "y_hat"] = "mu",
+        coords: dict[str, Any] | None = None,
+        out_of_sample: bool = False,
+        group: Literal["prior", "posterior"] = "posterior",
+    ) -> xr.DataArray:
+        """Return ``mu`` or ``y_hat`` draws from the forecasting model.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Design matrix for which to generate predictions.
+        quantity : {"mu", "y_hat"}, default "mu"
+            ``"mu"`` is the conditional expected outcome. ``"y_hat"``
+            includes observation noise. On state-space models the two
+            series coincide because the observation model is deterministic.
+        coords : dict, optional
+            Coordinate metadata accepted by the forecasting backend but not
+            used by its forecasting implementation.
+        out_of_sample : bool, default False
+            ``True`` draws the post-period counterfactual via the model's
+            forecasting path.
+        group : {"prior", "posterior"}, default "posterior"
+            Only posterior draws exist on this backend.
+
+        Returns
+        -------
+        xr.DataArray
+            Draws of the requested variable with canonical prediction
+            dimensions.
+        """
+        if quantity not in ("mu", "y_hat"):
+            raise ValueError(f"quantity must be 'mu' or 'y_hat', got {quantity!r}")
+        if group != "posterior":
+            raise GroupNotSampledException(
+                "No 'prior' draws are available on a pymc-forecast backend. "
+                "Call sample_prior_predictive() first — which itself raises "
+                "PriorPredictiveNotSupportedException for this backend.",
+                group=group,
+            )
+        return _extract_response(
+            self._model.predict(X=X, coords=coords, out_of_sample=out_of_sample),
+            quantity,
         )
 
     def score(

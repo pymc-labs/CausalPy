@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Interrupted Time Series Analysis."""
 
+from dataclasses import replace
 from typing import Any, Literal
 
 import numpy as np
@@ -28,6 +29,13 @@ from causalpy.date_utils import (
     _combine_datetime_indices,
     format_date_axes,
     validate_treatment_time_against_index,
+)
+from causalpy.experiments._response_type import (
+    check_response_type,
+    finish_response_plot,
+    log_response_type_once,
+    note_prediction_summary,
+    quantity_for,
 )
 from causalpy.experiments._results import CausalResult
 from causalpy.experiments.model_adapter import build_coords
@@ -543,6 +551,43 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         print(f"Formula: {self.formula}")
         self.print_coefficients(round_to)
 
+    def _bundle_for_response(
+        self,
+        bundle: CausalResult,
+        *,
+        response_type: str,
+        group: Literal["prior", "posterior"],
+    ) -> CausalResult:
+        """Return ``bundle`` or a draw-only copy using posterior predictive draws.
+
+        The stored result is not mutated. ``"expectation"`` is the stored
+        conditional mean. ``"prediction"`` re-predicts ``y_hat`` on the same
+        design matrices and rebuilds impact as observed minus that draw.
+        """
+        if check_response_type(response_type) == "expectation":
+            return bundle
+        pre_pred = self._model_backend.predict_response(
+            X=self.pre_design["X"],
+            quantity=quantity_for(response_type),
+            group=group,
+        )
+        post_pred = self._model_backend.predict_response(
+            X=self.post_design["X"],
+            quantity=quantity_for(response_type),
+            group=group,
+            out_of_sample=True,
+        )
+        impact_pre = (self.pre_design["y"] - pre_pred).squeeze("treated_units")
+        impact_post = (self.post_design["y"] - post_pred).squeeze("treated_units")
+        return replace(
+            bundle,
+            predictions_pre=pre_pred,
+            predictions_post=post_pred,
+            impact_pre=impact_pre,
+            impact_post=impact_post,
+            impact_post_cumulative=impact_post.cumsum(dim="obs_ind"),
+        )
+
     def plot(
         self,
         *,
@@ -552,6 +597,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        response_type: Literal["expectation", "prediction"] = "expectation",
+        show_response_annotation: bool | None = None,
         figsize: tuple[float, float] = (7, 8),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -589,6 +636,17 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         num_samples : int, optional
             Number of posterior draws when ``kind="spaghetti"``. Defaults
             to 50. Ignored for other kinds.
+        response_type : {"expectation", "prediction"}, default "expectation"
+            Which quantity the uncertainty bands represent.
+            ``"expectation"`` uses the conditional mean ``mu`` and excludes
+            observation noise. ``"prediction"`` uses posterior predictive
+            ``y_hat`` and includes observation noise. Stored results stay on
+            ``mu``. Point-estimate backends reject ``"prediction"``.
+        show_response_annotation : bool, optional
+            Whether to add a small figure note naming the quantity and, for
+            ribbon plots, the interval. ``None`` (default) annotates Bayesian
+            ribbon plots and leaves histogram, spaghetti, and point-estimate
+            figures unlabeled. ``True`` always annotates; ``False`` never does.
 
         figsize : tuple of (float, float)
             Width and height of the figure in inches, passed to
@@ -621,6 +679,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             kind=kind,
             ci_kind=ci_kind,
             num_samples=num_samples,
+            response_type=response_type,
+            show_response_annotation=show_response_annotation,
             figsize=figsize,
         )
 
@@ -675,6 +735,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        response_type: Literal["expectation", "prediction"] = "expectation",
+        show_response_annotation: bool | None = None,
         figsize: tuple[float, float] = (7, 8),
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
@@ -702,15 +764,32 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
-        bundle = self._require_bundle(group)
+        bundle = self._bundle_for_response(
+            self._require_bundle(group),
+            response_type=response_type,
+            group=group,
+        )
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
             "num_samples": num_samples,
         }
+        has_draws = has_posterior_draws(bundle.predictions_pre)
         if group == "prior":
-            return self._plot_prior_checks(bundle=bundle, style=style, figsize=figsize)
+            fig, ax = self._plot_prior_checks(
+                bundle=bundle, style=style, figsize=figsize
+            )
+            return finish_response_plot(
+                fig,
+                ax,
+                response_type=response_type,
+                ci_prob=ci_prob,
+                ci_kind=ci_kind,
+                kind=kind,
+                show_response_annotation=show_response_annotation,
+                has_draws=has_draws,
+            )
 
         counterfactual_label = "Counterfactual"
         pre_pred_all = bundle.predictions_pre
@@ -925,7 +1004,16 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             )
             format_date_axes(ax, full_index)
 
-        return fig, ax
+        return finish_response_plot(
+            fig,
+            ax,
+            response_type=response_type,
+            ci_prob=ci_prob,
+            ci_kind=ci_kind,
+            kind=kind,
+            show_response_annotation=show_response_annotation,
+            has_draws=has_posterior_draws(bundle.predictions_pre),
+        )
 
     def _plot_prior_checks(
         self,
@@ -987,6 +1075,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         *,
         group: Literal["prior", "posterior"] = "posterior",
         hdi_prob: float = HDI_PROB,
+        response_type: Literal["expectation", "prediction"] = "expectation",
     ) -> pd.DataFrame:
         """
         Recover the data of the experiment along with the prediction and causal impact information.
@@ -1005,6 +1094,10 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             Probability mass of the highest density interval. Defaults to the
             project-wide :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
             Ignored when the prediction container has no draws.
+        response_type : {"expectation", "prediction"}, default "expectation"
+            Which quantity the returned prediction and impact columns use.
+            ``"prediction"`` rebuilds them from posterior predictive draws.
+            Stored results stay on ``mu``.
 
         Returns
         -------
@@ -1012,7 +1105,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             Observed data with ``prediction`` and ``impact`` columns plus HDI
             bounds when draws are available. Not cached on the experiment.
         """
-        bundle = self._require_bundle(group)
+        bundle = self._bundle_for_response(
+            self._require_bundle(group),
+            response_type=response_type,
+            group=group,
+        )
         with_uncertainty = has_posterior_draws(bundle.predictions_pre)
         hdi_pct = int(round(hdi_prob * 100))
 
@@ -1057,6 +1154,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         self,
         hdi_prob: float = HDI_PROB,
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
+        *,
+        response_type: Literal["expectation", "prediction"] = "expectation",
     ) -> dict[str, Any]:
         """Analyze effect persistence between intervention and post-intervention periods.
 
@@ -1075,6 +1174,10 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         direction : {"increase", "decrease", "two-sided"}, default="increase"
             Direction for tail probability calculation (Bayesian models only)
+        response_type : {"expectation", "prediction"}, default "expectation"
+            ``"prediction"`` recomputes the persistence contrast from
+            posterior predictive draws. Stored results stay on ``mu``.
+            Point-estimate backends reject ``"prediction"``.
 
         Returns
         -------
@@ -1121,7 +1224,12 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 "This method is only available for three-period designs."
             )
 
-        slices = self._period_slices(self.result)
+        bundle = self._bundle_for_response(
+            self.result, response_type=response_type, group="posterior"
+        )
+        if has_posterior_draws(bundle.predictions_post):
+            log_response_type_once("summary")
+        slices = self._period_slices(bundle)
         intervention_impact = slices["intervention_impact"]
         intervention_pred = slices["intervention_pred"]
         post_intervention_impact = slices["post_intervention_impact"]
@@ -1250,6 +1358,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         treated_unit: str | None = None,
         period: Literal["intervention", "post", "comparison"] | None = None,
         prefix: str = "Post-period",
+        response_type: Literal["expectation", "prediction"] = "expectation",
     ) -> EffectSummary:
         """
         Generate a decision-ready summary of causal effects for Interrupted Time Series.
@@ -1263,6 +1372,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             0.5, so a tail probability far from 0.5 flags a design-matrix or
             prior-specification problem rather than a causal finding.
             ``"posterior"`` requires :meth:`fit`.
+        response_type : {"expectation", "prediction"}, default "expectation"
+            ``"prediction"`` summarizes a posterior predictive contrast
+            (includes observation noise) instead of the stored conditional
+            expectation. The returned text says so. Stored results stay on
+            ``mu``. Point-estimate backends reject ``"prediction"``.
         window : str, tuple, or slice, default="post"
             Time window for analysis:
 
@@ -1321,8 +1435,12 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
             if period == "comparison":
                 # Comparison period: delegate to subclass method
-                return self._comparison_period_summary(
-                    bundle=self._require_bundle(group),
+                summary = self._comparison_period_summary(
+                    bundle=self._bundle_for_response(
+                        self._require_bundle(group),
+                        response_type=response_type,
+                        group=group,
+                    ),
                     direction=direction,
                     alpha=alpha,
                     cumulative=cumulative,
@@ -1330,6 +1448,10 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                     min_effect=min_effect,
                     group=group,
                 )
+                if has_posterior_draws(self._require_bundle(group).predictions_post):
+                    log_response_type_once("summary")
+                summary.text = note_prediction_summary(summary.text, response_type)
+                return summary
 
             # For "intervention" or "post" periods, use _extract_window with tuple windows
             if period == "intervention":
@@ -1346,7 +1468,13 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 prefix = "Post-intervention"
 
         # Resolve the group's bundle once; helpers consume containers.
-        bundle = self._require_bundle(group)
+        bundle = self._bundle_for_response(
+            self._require_bundle(group),
+            response_type=response_type,
+            group=group,
+        )
+        if has_posterior_draws(bundle.predictions_post):
+            log_response_type_once("summary")
 
         # Extract windowed impact data
         windowed_impact, window_coords = _extract_window(
@@ -1360,7 +1488,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         counterfactual = _extract_counterfactual(
             bundle.predictions_post, window_coords, treated_unit=treated_unit
         )
-        return _effect_summary_timeseries(
+        summary = _effect_summary_timeseries(
             windowed_impact,
             counterfactual,
             window_coords,
@@ -1373,3 +1501,5 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             experiment_type="its",
             group=group,
         )
+        summary.text = note_prediction_summary(summary.text, response_type)
+        return summary
