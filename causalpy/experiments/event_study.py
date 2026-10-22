@@ -83,6 +83,7 @@ class EventStudy(BaseExperiment[EventStudyResult]):
     Examples
     --------
     >>> import causalpy as cp
+    >>> from sklearn.linear_model import LinearRegression
     >>> from causalpy.data.simulate_data import generate_event_study_data
     >>> df = generate_event_study_data(n_units=8, n_time=8, treatment_time=4, seed=1)
     >>> experiment = cp.EventStudy(
@@ -92,7 +93,7 @@ class EventStudy(BaseExperiment[EventStudyResult]):
     ...     time_col="time",
     ...     treat_time_col="treat_time",
     ...     event_window=(-2, 2),
-    ...     model=cp.skl_models.LinearRegression(),
+    ...     model=cp.create_causalpy_compatible_class(LinearRegression()),
     ... )
     >>> experiment.is_fitted
     False
