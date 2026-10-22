@@ -31,7 +31,7 @@ import xarray as xr
 
 from causalpy.constants import HDI_PROB
 
-if TYPE_CHECKING:
+if TYPE_CHECKING:  # pragma: no cover
     from causalpy.checks.base import CheckResult
 
 

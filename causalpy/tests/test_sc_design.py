@@ -13,9 +13,11 @@
 #   limitations under the License.
 """Tests for SyntheticControl design-phase methods."""
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
@@ -254,3 +256,200 @@ def test_dress_rehearsal_check_returns_a_check_result(design_sc):
 def test_plot_raises_on_a_design_only_pymc_fit(design_sc):
     with pytest.raises(ValueError, match="design-only"):
         design_sc.plot()
+
+
+def _rehearsal(
+    samples: list[float],
+    *,
+    recovered: float,
+    truth: float,
+) -> DressRehearsalResult:
+    return DressRehearsalResult(
+        injected_effect=0.1,
+        effect_type="relative",
+        recovered_effect_mean=recovered,
+        recovered_effect_hdi=(min(samples), max(samples)),
+        hdi_covers_truth=min(samples) <= truth <= max(samples),
+        posterior_samples=xr.DataArray(samples, dims="sample"),
+        injected_truth=truth,
+    )
+
+
+def _quality(
+    correlation: float, coverage: float, weight: float
+) -> DonorPoolQualityResult:
+    return DonorPoolQualityResult(
+        correlation_score=correlation,
+        convex_hull_coverage=coverage,
+        weight_concentration=weight,
+        per_donor_details=pd.DataFrame({"donor": ["a"]}),
+    )
+
+
+def _overall(result: DonorPoolQualityResult) -> str:
+    table = result.summary()
+    return table.loc[table["metric"] == "Overall quality", "assessment"].item()
+
+
+def test_power_curve_plot_and_summary_report_each_effect():
+    curve = PowerCurveResult(
+        effect_sizes=[0.1, 0.2],
+        detection_rates=[0.0, 1.0],
+        criterion="hdi_excludes_zero",
+        raw_results=[
+            [_rehearsal([-1.0, 0.5], recovered=-0.25, truth=1.0)],
+            [_rehearsal([1.0, 2.0], recovered=1.5, truth=1.0)],
+        ],
+    )
+    empty = PowerCurveResult(
+        effect_sizes=[],
+        detection_rates=[],
+        criterion="hdi_excludes_zero",
+        raw_results=[],
+    )
+
+    fig, _ax = curve.plot()
+    empty_fig, _empty_ax = empty.plot()
+    summary = curve.summary()
+    plt.close(fig)
+    plt.close(empty_fig)
+
+    assert list(summary["effect_size"]) == [0.1, 0.2]
+    assert list(summary["detection_rate"]) == [0.0, 1.0]
+    assert summary["n_simulations"].tolist() == [1, 1]
+    assert empty.summary().empty
+
+
+def test_donor_pool_quality_labels_span_the_three_bands():
+    assert _overall(_quality(0.1, 1.0, 5.0)) == "poor"
+    assert _overall(_quality(0.9, 1.0, 4.0)) == "good"
+    assert _overall(_quality(0.7, 0.9, 2.0)) == "acceptable"
+
+
+def test_dress_rehearsal_validate_rejects_the_wrong_experiment_and_model():
+    check = DressRehearsalCheck()
+    with pytest.raises(TypeError, match="SyntheticControl experiment"):
+        check.validate(object())
+
+    design = cp.SyntheticControl.from_pre_period(
+        _tiny_panel(),
+        ["a", "b", "c"],
+        ["y"],
+        model=LinearRegression(),
+    )
+    with pytest.raises(TypeError, match="PyMC model"):
+        check.validate(design)
+
+
+def test_design_methods_reject_bad_controls_before_sampling(design_sc):
+    with pytest.raises(ValueError, match="effect_type"):
+        design_sc.validate_design(0.1, effect_type="nope")
+    with pytest.raises(ValueError, match="n_simulations"):
+        design_sc.power_analysis([0.1], n_simulations=0)
+    with pytest.raises(ValueError, match="effect_type"):
+        design_sc.power_analysis([0.1], effect_type="nope")
+
+
+def test_criterion_met_applies_each_detection_rule():
+    positive = _rehearsal([1.0, 2.0, 3.0], recovered=2.0, truth=2.0)
+    mixed = _rehearsal([-1.0, 1.0], recovered=0.0, truth=2.0)
+    exact_zero = _rehearsal([0.0, 0.0], recovered=0.0, truth=0.0)
+    nonzero_at_zero_truth = _rehearsal([1.0], recovered=1.0, truth=0.0)
+    far = _rehearsal([1.0, 1.0], recovered=1.0, truth=2.0)
+
+    assert cp.SyntheticControl._criterion_met(positive, "prob_gt_zero")
+    assert not cp.SyntheticControl._criterion_met(mixed, "prob_gt_zero")
+    assert cp.SyntheticControl._criterion_met(exact_zero, "recovery_accuracy")
+    assert not cp.SyntheticControl._criterion_met(
+        nonzero_at_zero_truth, "recovery_accuracy"
+    )
+    assert cp.SyntheticControl._criterion_met(positive, "recovery_accuracy")
+    assert not cp.SyntheticControl._criterion_met(far, "recovery_accuracy")
+    with pytest.raises(ValueError, match="Unknown criterion"):
+        cp.SyntheticControl._criterion_met(positive, "not-a-rule")
+
+
+def test_donor_pool_quality_requires_a_fitted_model():
+    model = cp.pymc_models.WeightedSumFitter(sample_kwargs=SAMPLE_KWARGS)
+    experiment = cp.SyntheticControl.__new__(cp.SyntheticControl)
+    experiment.model = model
+
+    with pytest.raises(RuntimeError, match="Call fit"):
+        experiment.donor_pool_quality()
+
+
+def _quality_with_beta(design_sc, beta: xr.DataArray) -> DonorPoolQualityResult:
+    idata = design_sc.model.idata.copy()
+    posterior = idata.posterior.copy()
+    posterior["beta"] = beta
+    idata.posterior = posterior
+    model = cp.pymc_models.WeightedSumFitter(sample_kwargs=SAMPLE_KWARGS)
+    model.idata = idata
+    shell = type("Shell", (), {})()
+    shell.model = model
+    shell.datapre = design_sc.datapre
+    shell.control_units = list(design_sc.control_units)
+    shell.treated_units = list(design_sc.treated_units)
+    shell.pre_design = design_sc.pre_design
+    return cp.SyntheticControl.donor_pool_quality(shell)
+
+
+def test_donor_pool_quality_handles_zero_and_flat_weights(design_sc):
+    beta = design_sc.model.idata.posterior["beta"]
+    zeroed = _quality_with_beta(design_sc, xr.zeros_like(beta))
+    flat_beta = beta.isel(treated_units=0) if "treated_units" in beta.dims else beta
+    flat = _quality_with_beta(design_sc, flat_beta)
+
+    assert zeroed.weight_concentration == pytest.approx(len(design_sc.control_units))
+    assert flat.per_donor_details["normalized_weight"].sum() == pytest.approx(1.0)
+
+
+def test_validate_design_scores_impact_without_a_treated_unit_dimension(
+    design_sc, monkeypatch
+):
+    impact = xr.DataArray(
+        np.full((1, 8, 4), 2.0),
+        dims=("chain", "draw", "obs_ind"),
+    )
+
+    def fake_fit(self, *args, **kwargs):
+        self._result = type("Result", (), {"impact_post_cumulative": impact})()
+        return self
+
+    monkeypatch.setattr(cp.SyntheticControl, "fit", fake_fit)
+    result = design_sc.validate_design(
+        0.1, holdout_periods=10, sample_kwargs=SAMPLE_KWARGS
+    )
+
+    assert result.recovered_effect_mean == pytest.approx(2.0)
+    assert result.effect_type == "relative"
+
+
+def test_power_analysis_counts_a_miss_without_a_residual_unit_dimension(
+    design_sc, monkeypatch
+):
+    residuals = design_sc.result.impact_pre
+    if "treated_units" in residuals.dims:
+        residuals = residuals.isel(treated_units=0)
+    original = design_sc._result
+    design_sc._result = type("Result", (), {"impact_pre": residuals})()
+    rehearsal = _rehearsal([-1.0, 1.0], recovered=0.0, truth=2.0)
+    monkeypatch.setattr(
+        cp.SyntheticControl,
+        "_build_noisy_experiment",
+        lambda self, *args, **kwargs: design_sc,
+    )
+    monkeypatch.setattr(
+        cp.SyntheticControl,
+        "validate_design",
+        lambda self, *args, **kwargs: rehearsal,
+    )
+
+    try:
+        result = design_sc.power_analysis(
+            [0.1], n_simulations=1, sample_kwargs=SAMPLE_KWARGS
+        )
+    finally:
+        design_sc._result = original
+
+    assert result.detection_rates == [0.0]
