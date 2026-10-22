@@ -1,0 +1,24 @@
+ARCHITECTURE.md
+  h_63db634213747e 93
+causalpy/experiments/diff_in_diff.py
+  h_63db634213747e 87
+causalpy/experiments/prepostnegd.py
+  h_63db634213747e 67
+causalpy/pymc_models.py
+  h_63db634213747e 232-235,241-243,997-1001
+causalpy/tests/test_glm.py
+  h_63db634213747e 357,360-382
+docs/source/knowledgebase/custom_pymc_models.ipynb
+  h_63db634213747e 21,100,129,131,146,241-243,275,278
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "cda97eb14dc259c29c4937e93376b81938ef8697",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
