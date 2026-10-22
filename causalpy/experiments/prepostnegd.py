@@ -64,7 +64,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
     -----
     **Estimate extraction**
 
-    The reported ``causal_impact`` is the posterior coefficient on the treatment-group term, conditional on the pretreatment outcome and any other formula covariates. Treated and untreated prediction curves are also computed for visualization, but they do not determine the reported scalar effect. With the current additive identity-link model, the treatment coefficient equals the corresponding conditional prediction contrast.
+    The reported ``causal_impact`` is the treated-row factual-minus-counterfactual response-scale ``mu`` contrast, including covariate interactions. Under an additive identity link with no group-covariate interaction, that contrast matches the treatment-group coefficient; the coefficient is not the reported effect. Prediction curves are computed for visualization and do not replace the contrast.
 
     Lazy lifecycle: construction only validates inputs and builds design
     matrices — nothing is sampled. Call :meth:`fit` to draw posterior
@@ -220,10 +220,9 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
         # coincides with the control scenario above and reuses its prediction
         # instead of paying for an identical second predict pass.
 
-        # Evaluate causal impact as equal to the treatment effect
-        causal_impact = self._model_backend.coefficients(group=group).sel(
-            coeffs=self._get_treatment_effect_coeff()
-        )
+        # Response-scale ATT over treated rows. Under the additive identity
+        # link this equals the treatment coefficient; other links do not.
+        causal_impact = self._att_from_g_computation(group)
 
         bundle = CoefficientResult(
             causal_impact=causal_impact,
@@ -239,6 +238,32 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             score=None,
         )
         self._assign_bundle(group, bundle)
+
+    def _att_from_g_computation(
+        self, group: Literal["prior", "posterior"] = "posterior"
+    ) -> xr.DataArray:
+        """Response-scale ATT averaged over treated observations at covariates."""
+        treated = self.data[self.data[self.group_variable_name] == 1]
+        if treated.empty:
+            raise ValueError("No treated observations for ATT")
+
+        treated_covariates = treated.drop(columns=[self.outcome_variable_name])
+        x_treated_df = treated_covariates.assign(**{self.group_variable_name: 1})
+        x_control_df = treated_covariates.assign(**{self.group_variable_name: 0})
+
+        (x_treated,) = build_design_matrices(
+            [self._x_design_info], x_treated_df, return_type="dataframe"
+        )
+        (x_control,) = build_design_matrices(
+            [self._x_design_info], x_control_df, return_type="dataframe"
+        )
+        mu_treated = self._model_backend.predict(
+            np.asarray(x_treated), group=group, var_names=["mu"]
+        )
+        mu_control = self._model_backend.predict(
+            np.asarray(x_control), group=group, var_names=["mu"]
+        )
+        return (mu_treated - mu_control).mean(dim="obs_ind")
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
