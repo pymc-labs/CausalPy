@@ -1,0 +1,27 @@
+scripts/run_notebooks/runner.py
+  s_2daad4679f7fdc::t_fb73904f701379 133,141-142
+  s_2daad4679f7fdc::t_1b0cb73e232d01 145,158-167
+  s_2daad4679f7fdc::t_cfe283700b9fed 168-169
+causalpy/tests/test_notebook_runner.py
+  s_2daad4679f7fdc::t_bf3d7029a48b92 390-425
+scripts/run_notebooks/README.md
+  s_2daad4679f7fdc::t_3512fc77974548 7,60
+docs/source/notebooks/up-down-control-geolift-pymc.ipynb
+  s_2daad4679f7fdc::t_681f7b14f22108 1071-1073
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "52e503ddf14af5616efa877a0ca24154983d19ca",
+  "prompts": {},
+  "sessions": {
+    "s_2daad4679f7fdc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e694-a136-7eb2-95b1-eab81e421415",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,57 @@
+causalpy/tests/test_check_public_exports.py
+  s_2daad4679f7fdc::t_021d73f1079d2e 62-83
+  s_2daad4679f7fdc::t_7f5346577251e8 84-85
+docs/source/notebooks/gallery.yaml
+  s_2daad4679f7fdc::t_1e2add3330cb72 51-52
+causalpy/__init__.py
+  s_2daad4679f7fdc::t_f4dfffbc86c15b 47,96
+causalpy/data/simulate_data.py
+  s_2daad4679f7fdc::t_db9e65d8efeeef 29-33,36-75,79-98,102-132,144,146-154
+  s_2daad4679f7fdc::t_a1ad37ed0ba35f 18-19,76-78,99-101
+  s_2daad4679f7fdc::t_57ce514f2c1cbb 34-35,133-143,145
+  s_2daad4679f7fdc::t_f3bf82ae1e96ae 155-156
+causalpy/experiments/__init__.py
+  s_2daad4679f7fdc::t_f4dfffbc86c15b 28,43
+causalpy/experiments/up_down_geolift.py
+  s_2daad4679f7fdc::t_b8acfb61621ac3 347-355,365-366
+  s_2daad4679f7fdc::t_87d38b4fc3d9b6 86-88,93,134-141,153,179,219,297-303,306-310,319-324,326-328,343-345
+  s_2daad4679f7fdc::t_86b933f68abd2e 125-133,142-143,173-174,236-255,259-260,285-287,290-294,304-305,311-318,325,329-331,339-342,346,359-364,367-375
+  s_2daad4679f7fdc::t_954eb49451ea54 2-7,14-23,25-40,56,61-85,89-90,92,94-124,144-152,154-155,170-172,175-178,180-195,213,215-218,220-235
+  s_2daad4679f7fdc::t_12d1956007b105 256-258,332-338,356-358
+  s_2daad4679f7fdc::t_3c6124f8b0119e 1,8-13,24,41-55,57-60
+  s_2daad4679f7fdc::t_1c7425e51fb323 91,288-289,295-296
+  s_2daad4679f7fdc::t_6c9a59cfdd008d 214
+  s_2daad4679f7fdc::t_b9898d1e1a8a6b 156-169,196-212,261-284
+scripts/_ast_introspection.py
+  s_2daad4679f7fdc::t_f0ef26d37fabba 29-32,37,123,129-137,139-143
+causalpy/tests/test_up_down_geolift.py
+  s_2daad4679f7fdc::t_74281f36c90db4 151
+  s_2daad4679f7fdc::t_a1ad37ed0ba35f 52-63,73-75,132,139,152-154,157,202-204
+  s_2daad4679f7fdc::t_2237cca2e329d0 78-108,196
+  s_2daad4679f7fdc::t_d0f0269ccd8329 14-51,64-72,76-77,109-131,133-138,140-150,155-156,158-195,197-201,205-242
+  s_2daad4679f7fdc::t_a3602cab98780a 243-254
+  s_2daad4679f7fdc::t_8e188368feeb37 255-276
+  s_2daad4679f7fdc::t_6c3bed850b02dc 1-13
+ARCHITECTURE.md
+  s_2daad4679f7fdc::t_e8da27d301a9f8 88
+docs/source/notebooks/index.md
+  s_2daad4679f7fdc::t_1d82825ba308aa 112-118,435
+docs/source/notebooks/up-down-control-geolift-pymc.ipynb
+  s_2daad4679f7fdc::t_f2c71377f6e47f 1-573
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.4",
+  "base_commit_sha": "24ac444071fe8a047ee49f3a67f3faf8815556db",
+  "prompts": {},
+  "sessions": {
+    "s_2daad4679f7fdc": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a0e694-a136-7eb2-95b1-eab81e421415",
+        "model": "gpt-6-sol"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+causalpy/experiments/interactive_fixed_effects.py
+  s_f67402575a823d::t_2ff963b3d20d44 213-214,241-243,251,256-269
+causalpy/tests/test_interactive_fixed_effects.py
+  s_559513bce24346::t_fcda149f7d7c99 226-242
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9fc81c95493950440b843905bb067b5bac9432f7",
+  "prompts": {},
+  "sessions": {
+    "s_559513bce24346": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14178-3eef-7413-bb1e-4f3ce78300fc",
+        "model": "unknown"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    },
+    "s_f67402575a823d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14015-7c0e-7ff3-b15f-ece3d15d41f9",
+        "model": "unknown"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

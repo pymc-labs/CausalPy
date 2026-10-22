@@ -1,0 +1,22 @@
+causalpy/experiments/_panel_counterfactual.py
+  h_63db634213747e 45,101-105,107-112,118,181,304,332-334,337,413,495,500,503,538-558,630
+causalpy/experiments/synthetic_control.py
+  h_63db634213747e 288-290,296,452,512-515,544
+causalpy/experiments/up_down_geolift.py
+  h_63db634213747e 126,128,140,158
+causalpy/tests/test_integration_skl_examples.py
+  h_63db634213747e 246-249,259
+causalpy/tests/test_panel_counterfactual.py
+  h_63db634213747e 199,210,212-219,287-358,360,368-369,371-375,377-379,385-388,390-393
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ed877d547000f5a9a1d8c40558d32649e2c4df8b",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

@@ -1,0 +1,21 @@
+causalpy/experiments/augmented_synthetic_control.py
+  s_f67402575a823d::t_7441f795b3a24c 1-279
+causalpy/tests/test_augmented_synthetic_control.py
+  s_f67402575a823d::t_425e833229b288 1-367
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "33057c85c5a7e8b8933511d9efd5a7cbcb5a920f",
+  "prompts": {},
+  "sessions": {
+    "s_f67402575a823d": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14015-7c0e-7ff3-b15f-ece3d15d41f9",
+        "model": "unknown"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

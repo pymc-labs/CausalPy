@@ -1,0 +1,19 @@
+docs/source/notebooks/interrupted-time-series-covid.ipynb
+  s_bba9faafcdc630::t_bd7ea14778167e 1293,1309,1311,1316,1324-1333,1335,1338,1340-1342,1344-1365,1375,1377
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "51b4adbb2a3a2433d0c9e2d935b468dc37241c92",
+  "prompts": {},
+  "sessions": {
+    "s_bba9faafcdc630": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15323-8638-7831-b4be-b48f7fa921bc",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

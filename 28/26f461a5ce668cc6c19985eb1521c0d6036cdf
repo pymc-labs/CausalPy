@@ -1,0 +1,19 @@
+environment.yml
+  s_559513bce24346::t_63921403178e08 23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2826f461a5ce668cc6c19985eb1521c0d6036cdf",
+  "prompts": {},
+  "sessions": {
+    "s_559513bce24346": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a14178-3eef-7413-bb1e-4f3ce78300fc",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

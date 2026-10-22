@@ -1,0 +1,20 @@
+causalpy/experiments/interactive_fixed_effects.py
+  h_63db634213747e 1-704
+causalpy/tests/test_interactive_fixed_effects.py
+  h_63db634213747e 1-298
+docs/source/knowledgebase/interactive-fixed-effects-pymc.ipynb
+  h_63db634213747e 1-373
+docs/source/knowledgebase/interactive-fixed-effects.md
+  h_63db634213747e 1-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "91401a8d140e47cb3af4e1198b40581f7d6765b2",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

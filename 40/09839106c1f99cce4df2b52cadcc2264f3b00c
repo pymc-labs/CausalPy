@@ -1,0 +1,19 @@
+codecov.yml
+  s_9ffb5f2d13bfb8::t_f24a21f3271b0b 27-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4009839106c1f99cce4df2b52cadcc2264f3b00c",
+  "prompts": {},
+  "sessions": {
+    "s_9ffb5f2d13bfb8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a15795-ea09-7743-a19e-d5fb828e9abc",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

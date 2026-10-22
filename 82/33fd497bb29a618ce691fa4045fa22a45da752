@@ -1,0 +1,16 @@
+causalpy/experiments/synthetic_control.py
+  h_63db634213747e 39,634-636,638,640,645-658
+causalpy/tests/test_panel_counterfactual.py
+  h_63db634213747e 170-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8233fd497bb29a618ce691fa4045fa22a45da752",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

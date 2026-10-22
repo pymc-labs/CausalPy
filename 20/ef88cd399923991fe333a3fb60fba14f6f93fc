@@ -1,0 +1,25 @@
+docs/source/notebooks/up-down-control-geolift-pymc.ipynb
+  s_cf6b017f7636e2::t_5ad06a9d1e3527 21-29
+docs/source/notebooks/geolift-single-cell.ipynb
+  s_cf6b017f7636e2::t_a055d228f928e6 1230-1250
+docs/source/notebooks/interrupted-time-series-lift-test.ipynb
+  s_cf6b017f7636e2::t_445f02b2eb4bf5 33,35-42,600,2063,2069,2160-2163
+docs/source/notebooks/multi-cell-geolift.ipynb
+  s_cf6b017f7636e2::t_0708dda46c491f 2195,2214-2224,2372
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "20ef88cd399923991fe333a3fb60fba14f6f93fc",
+  "prompts": {},
+  "sessions": {
+    "s_cf6b017f7636e2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a13ff4-945c-7790-a6a4-0906b611fd92",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

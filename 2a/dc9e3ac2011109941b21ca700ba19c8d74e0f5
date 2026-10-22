@@ -1,0 +1,28 @@
+causalpy/tests/test_bayesian_sc_comparison_note.py
+  h_63db634213747e 1-103
+docs/source/knowledgebase/augmented-synthetic-control.md
+  h_63db634213747e 44
+docs/source/knowledgebase/comparing-bayesian-synthetic-control.md
+  h_63db634213747e 1-54
+docs/source/knowledgebase/index.md
+  h_63db634213747e 16
+docs/source/knowledgebase/interactive-fixed-effects.md
+  h_63db634213747e 50
+docs/source/notebooks/comparing-bayesian-synthetic-control-pymc.ipynb
+  h_63db634213747e 1-454
+docs/source/notebooks/gallery.yaml
+  h_63db634213747e 45-46
+docs/source/notebooks/index.md
+  h_63db634213747e 98-104,448
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2adc9e3ac2011109941b21ca700ba19c8d74e0f5",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
