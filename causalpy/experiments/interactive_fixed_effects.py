@@ -20,12 +20,15 @@ zero, and posterior intervals marginalize that prior.
 
 Shared factors and shared time intercepts are updated from the control panel
 only. The control likelihood uses the one shared positive residual scale, not
-a unit observation scale. That is one random variable. Treated pre-period
-outcomes may update that scale's draws after the factor and time-intercept
-sample, and must not resample those draws. Loadings use the updated draws.
-The factor posterior is the control-panel posterior under that scale as
-informed by the control panel. It is not recomputed under the treated-pre
-update. Treated post-intervention outcomes never enter the likelihood.
+a unit observation scale. That is one random variable, bounded below by a
+fraction of the control-panel outcome spread. A noise-free panel would
+otherwise collapse the factor posterior onto a ridge of exact fits. Treated
+pre-period outcomes may update that scale's draws after the factor and
+time-intercept sample, and must not resample those draws. Loadings use the
+updated draws. The factor posterior is the control-panel posterior under that
+scale as informed by the control panel. It is not recomputed under the
+treated-pre update. Treated post-intervention outcomes never enter the
+likelihood.
 """
 
 from __future__ import annotations
@@ -52,7 +55,8 @@ _FACTORS = "factors"
 _DEFAULT_MAX_FACTORS = 4
 _MGP_A1 = 2.0
 _MGP_A2 = 3.0
-_RESIDUAL_CAUCHY_BETA = 2.5
+_RESIDUAL_FLOOR_FRACTION = 0.05
+_MIN_OUTCOME_SPREAD = 1e-6
 _SCALE_UPDATE_STEPS = 12
 _SCALE_FD_STEP = 1e-4
 _INTERCEPT_SD = 5.0
@@ -84,9 +88,10 @@ class InteractiveFixedEffectsSyntheticControl:
     bound, not a selected rank.
 
     ``build`` constructs the control-panel graph. Its likelihood uses the one
-    shared positive residual scale, not a unit observation scale. ``fit``
-    samples the control-panel posterior of the shared factors, shared time
-    intercepts, per-factor shrinkage scales, and that one scale. Treated
+    shared positive residual scale, not a unit observation scale. That scale
+    is bounded below by a fraction of the control-panel outcome spread.
+    ``fit`` samples the control-panel posterior of the shared factors, shared
+    time intercepts, per-factor shrinkage scales, and that one scale. Treated
     pre-period outcomes may update the scale's draws after that sample. They
     must not resample the factor or time-intercept draws. Loadings use the
     updated draws.
@@ -509,12 +514,29 @@ def _factor_names(max_factors: int) -> list[str]:
     return [f"f{i}" for i in range(max_factors)]
 
 
+def _control_outcome_spread(control_y: xr.DataArray) -> float:
+    """Column-centered RMS of the control panel.
+
+    The residual-scale floor is a fraction of this spread. A constant panel
+    still gets a positive floor, so the factor posterior cannot sit on an
+    exact-fit ridge.
+    """
+    values = np.asarray(
+        control_y.transpose("obs_ind", "control_units").values, dtype=float
+    )
+    centered = values - values.mean(axis=0, keepdims=True)
+    return float(max(np.sqrt(np.mean(centered**2)), _MIN_OUTCOME_SPREAD))
+
+
 def _control_model(control_y: xr.DataArray, max_factors: int) -> pm.Model:
     """Gaussian factor graph on control cells only.
 
-    The likelihood uses the one shared positive residual scale. A unit
-    observation scale is not this model. Treated outcomes are not in this
-    graph, so they do not update these factor or time-intercept draws.
+    The likelihood uses the one shared positive residual scale. That scale is
+    bounded below by a fraction of the control-panel outcome spread, so a
+    noise-free panel does not collapse the factor posterior onto a ridge of
+    exact fits. A unit observation scale is not this model. Treated outcomes
+    are not in this graph, so they do not update these factor or time-intercept
+    draws.
     """
     factor_names = _factor_names(max_factors)
     alpha = np.array([_MGP_A1 if i == 0 else _MGP_A2 for i in range(max_factors)])
@@ -528,7 +550,11 @@ def _control_model(control_y: xr.DataArray, max_factors: int) -> pm.Model:
         delta = pm.Gamma("mgp_delta", alpha=alpha, beta=1.0, dims="factors")
         precision = pt.cumprod(delta)
         pm.Deterministic("shrinkage_state", 1.0 / pt.sqrt(precision), dims="factors")
-        sigma = pm.HalfCauchy("sigma", beta=_RESIDUAL_CAUCHY_BETA)
+        spread = _control_outcome_spread(control_y)
+        sigma_raw = pm.HalfNormal("sigma_raw", sigma=1.0)
+        sigma = pm.Deterministic(
+            "sigma", spread * (_RESIDUAL_FLOOR_FRACTION + sigma_raw)
+        )
         unit_intercept = pm.Normal(
             "control_unit_intercept", 0.0, _INTERCEPT_SD, dims="control_units"
         )
@@ -578,7 +604,7 @@ def _control_initvals(
         "shared_factors": factors,
         "control_loadings": loadings,
         "mgp_delta": np.array([1.0 if i == 0 else 1.5 for i in range(n_factors)]),
-        "sigma": np.array(0.5),
+        "sigma_raw": np.array(1.0),
     }
 
 
@@ -589,9 +615,14 @@ def _scale_log_posterior(
     centered: np.ndarray,
     control_rss: float,
     n_control: int,
+    spread: float,
 ) -> float:
     """Profile the one scale given factors, integrating intercepts and loadings."""
-    scale_sq = np.exp(2.0 * log_scale)
+    scale = np.exp(log_scale)
+    raw = scale / spread - _RESIDUAL_FLOOR_FRACTION
+    if not np.isfinite(raw) or raw <= 0.0:
+        return -1e300
+    scale_sq = scale**2
     covariance = scale_sq * np.eye(gram.shape[0]) + gram
     sign, logdet = np.linalg.slogdet(covariance)
     if sign <= 0 or not np.isfinite(logdet):
@@ -599,7 +630,7 @@ def _scale_log_posterior(
     solved = np.linalg.solve(covariance, centered)
     quadratic = float(np.sum(centered * solved))
     n_units = centered.shape[1]
-    prior = -np.log1p(scale_sq / _RESIDUAL_CAUCHY_BETA**2)
+    prior = -0.5 * raw**2
     control = -n_control * log_scale - control_rss / (2.0 * scale_sq)
     return -0.5 * n_units * logdet - 0.5 * quadratic + control + prior
 
@@ -611,23 +642,27 @@ def _updated_residual_scale(
     factors_pre: np.ndarray,
     shrinkage: np.ndarray,
     treated_centered: np.ndarray,
+    *,
+    spread: float,
 ) -> np.ndarray:
     """Move each control-panel scale draw using treated pre-period outcomes.
 
     The target conditions on the sampled factors. It uses the control residuals
     at those draws and the treated pre-period after integrating the unit
-    intercept and loadings under their priors. Factors are not resampled. This
-    is not a second residual-scale random variable.
+    intercept and loadings under their priors. Draws below the control-panel
+    floor are raised to that floor. Factors are not resampled. This is not a
+    second residual-scale random variable.
     """
     updated = np.empty(sigma.shape, dtype=float)
     n_time = treated_centered.shape[1]
+    floor = spread * _RESIDUAL_FLOOR_FRACTION
     for index in range(sigma.shape[0]):
         design = np.column_stack((np.ones(n_time), factors_pre[index]))
         prior_sd = np.concatenate(([_INTERCEPT_SD], shrinkage[index]))
         gram = (design * prior_sd**2) @ design.T
         centered = treated_centered[index]
         rss = float(control_rss[index])
-        log_s = float(np.log(max(float(sigma[index]), 1e-8)))
+        log_s = float(np.log(max(float(sigma[index]), floor)))
         for _ in range(_SCALE_UPDATE_STEPS):
             current = _scale_log_posterior(
                 log_s,
@@ -635,6 +670,7 @@ def _updated_residual_scale(
                 centered=centered,
                 control_rss=rss,
                 n_control=n_control,
+                spread=spread,
             )
             above = _scale_log_posterior(
                 log_s + _SCALE_FD_STEP,
@@ -642,6 +678,7 @@ def _updated_residual_scale(
                 centered=centered,
                 control_rss=rss,
                 n_control=n_control,
+                spread=spread,
             )
             below = _scale_log_posterior(
                 log_s - _SCALE_FD_STEP,
@@ -649,9 +686,14 @@ def _updated_residual_scale(
                 centered=centered,
                 control_rss=rss,
                 n_control=n_control,
+                spread=spread,
             )
-            gradient = (above - below) / (2.0 * _SCALE_FD_STEP)
-            curvature = (above - 2.0 * current + below) / _SCALE_FD_STEP**2
+            if below <= -1e299:
+                gradient = (above - current) / _SCALE_FD_STEP
+                curvature = 0.0
+            else:
+                gradient = (above - below) / (2.0 * _SCALE_FD_STEP)
+                curvature = (above - 2.0 * current + below) / _SCALE_FD_STEP**2
             if not np.isfinite(gradient) or not np.isfinite(curvature):
                 break
             if curvature < -1e-6:
@@ -662,12 +704,15 @@ def _updated_residual_scale(
             accepted = log_s
             for fraction in (1.0, 0.5, 0.25):
                 trial = log_s + fraction * step
+                if np.exp(trial) < floor:
+                    continue
                 trial_value = _scale_log_posterior(
                     trial,
                     gram=gram,
                     centered=centered,
                     control_rss=rss,
                     n_control=n_control,
+                    spread=spread,
                 )
                 if trial_value >= current - 1e-6:
                     accepted = trial
@@ -720,6 +765,7 @@ def _sample_treated_conditional(
         factor_pre,
         np.asarray(shrinkage.values, dtype=float),
         treated_centered,
+        spread=_control_outcome_spread(control_y),
     )
     treated_observed = np.broadcast_to(
         treated_values,
