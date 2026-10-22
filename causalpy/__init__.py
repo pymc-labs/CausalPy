@@ -31,6 +31,7 @@ from .custom_exceptions import (
 )
 from .data import load_data
 from .experiments.diff_in_diff import DifferenceInDifferences
+from .experiments.event_study import EventStudy
 from .experiments.instrumental_variable import InstrumentalVariable
 from .experiments.interrupted_time_series import InterruptedTimeSeries
 from .experiments.inverse_propensity_weighting import InversePropensityWeighting
@@ -62,6 +63,7 @@ __all__ = [
     "DataException",
     "create_causalpy_compatible_class",
     "DifferenceInDifferences",
+    "EventStudy",
     "EstimateEffect",
     "EffectSummary",
     "extract_lift_for_mmm",

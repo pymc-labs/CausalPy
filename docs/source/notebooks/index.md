@@ -173,6 +173,13 @@ Analysis where the treatment effect is estimated as a difference between treatme
 :link: staggered-difference-in-differences-pymc
 :link-type: doc
 :::
+
+:::{grid-item-card} Event Study with `pymc` models
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/event-study-pymc.png
+:link: event-study-pymc
+:link-type: doc
+:::
 ::::
 
 ## Interrupted Time Series
@@ -468,6 +475,7 @@ difference-in-differences-sklearn.ipynb
 difference-in-differences-pymc.ipynb
 difference-in-differences-banks-pymc.ipynb
 staggered-difference-in-differences-pymc.ipynb
+event-study-pymc.ipynb
 :::
 
 :::{toctree}

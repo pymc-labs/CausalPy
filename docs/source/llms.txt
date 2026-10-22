@@ -20,6 +20,7 @@ Typical usage: load a pandas DataFrame, choose an experiment class (e.g. `causal
 - [Multi-cell geolift](https://causalpy.readthedocs.io/en/stable/notebooks/multi-cell-geolift.html): geolift analysis with multiple treated regions
 - [Difference-in-differences](https://causalpy.readthedocs.io/en/stable/notebooks/difference-in-differences-pymc.html): estimate treatment effects from pre/post differences between treatment and control groups
 - [Staggered difference-in-differences](https://causalpy.readthedocs.io/en/stable/notebooks/staggered-difference-in-differences-pymc.html): staggered adoption designs where units receive treatment at different times, avoiding two-way fixed effects pitfalls
+- [Event study](https://causalpy.readthedocs.io/en/stable/notebooks/event-study-pymc.html): dynamic treatment effects when every treated unit adopts at the same time, relative to a reference event time
 - [Synthetic difference-in-differences](https://causalpy.readthedocs.io/en/stable/notebooks/synthetic-difference-in-differences-pymc.html): combines synthetic control weighting with difference-in-differences
 - [Interrupted time series (ITS)](https://causalpy.readthedocs.io/en/stable/notebooks/interrupted-time-series-pymc.html): Bayesian counterfactual forecasting to estimate the causal impact of an intervention on a single time series
 - [Lift testing with ITS](https://causalpy.readthedocs.io/en/stable/notebooks/interrupted-time-series-lift-test.html): marketing lift/incrementality testing without a control group, including MMM calibration
