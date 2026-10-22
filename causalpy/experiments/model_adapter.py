@@ -183,7 +183,9 @@ def _extract_response(
     draws = group[quantity].transpose("chain", "draw", "obs_ind", "treated_units")
     if quantity == "y_hat" and "mu" in group:
         mu = group["mu"].transpose("chain", "draw", "obs_ind", "treated_units")
-        if draws.sizes == mu.sizes and np.array_equal(draws.values, mu.values):
+        if draws.sizes == mu.sizes and np.array_equal(
+            draws.values, mu.values, equal_nan=True
+        ):
             raise ValueError(
                 "y_hat aliases mu on this backend, so response_type='prediction' "
                 "has no observation-noise draws to show. State-space models store "

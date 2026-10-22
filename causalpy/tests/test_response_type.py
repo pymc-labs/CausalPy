@@ -28,6 +28,7 @@ from causalpy.experiments._response_type import (
     annotate_response,
     annotation_text,
     check_response_type,
+    independent_predict_seed,
     log_response_type_once,
     note_prediction_summary,
     reset_response_type_log,
@@ -177,6 +178,44 @@ def test_aliased_y_hat_is_rejected_instead_of_labeled_as_noise():
     )
 
 
+def test_aliased_y_hat_with_nan_is_rejected():
+    """NaN positions still mean the two names are one series."""
+    mu = _draws([[4.0, np.nan], [4.0, 4.0]], "mu")
+    tree = xr.DataTree()
+    tree["posterior_predictive"] = xr.Dataset({"mu": mu, "y_hat": mu.copy()})
+
+    class _Model:
+        def predict(self, X, *, coords=None, out_of_sample=False, group="posterior"):
+            return tree
+
+    adapter = PyMCModelAdapter.__new__(PyMCModelAdapter)
+    adapter._model = _Model()
+    with pytest.raises(ValueError, match="aliases mu"):
+        adapter.predict_response(np.ones((2, 1)), quantity="y_hat", group="posterior")
+
+
+def test_independent_predict_seed_shifts_replayed_seeds_only():
+    """Numpy integers and chain seeds move; a generator is not replayed."""
+
+    class _Model:
+        def __init__(self, seed):
+            self.sample_kwargs = {"random_seed": seed}
+
+    for seed, expected in (
+        (np.int64(7), 8),
+        ([11], [12]),
+        (np.array([3, 5]), [4, 6]),
+    ):
+        model = _Model(seed)
+        with independent_predict_seed(model):
+            assert model.sample_kwargs["random_seed"] == expected
+        assert model.sample_kwargs["random_seed"] is seed
+    generator = np.random.default_rng(0)
+    model = _Model(generator)
+    with independent_predict_seed(model):
+        assert model.sample_kwargs["random_seed"] is generator
+
+
 def test_its_prediction_bundle_uses_y_hat_and_leaves_the_stored_result():
     """Prediction mode rebuilds impact; expectation mode reuses the stored bundle."""
     mu = _draws([[4.0, 4.0], [4.0, 4.0]], "mu")
@@ -224,7 +263,8 @@ def test_its_prediction_bundle_uses_y_hat_and_leaves_the_stored_result():
     ]
 
 
-def test_piecewise_prediction_contrast_keeps_independent_observation_noise():
+@pytest.mark.parametrize("seed", [1, np.int64(7), [11]])
+def test_piecewise_prediction_contrast_keeps_independent_observation_noise(seed):
     """Equal-length fitted and counterfactual draws must not share one noise sequence."""
     n = 4
     design = np.column_stack(
@@ -233,16 +273,20 @@ def test_piecewise_prediction_contrast_keeps_independent_observation_noise():
 
     class _Model:
         def __init__(self):
-            self.sample_kwargs = {"random_seed": 1}
+            self.sample_kwargs = {"random_seed": seed}
 
     class _Backend:
         def __init__(self):
             self._model = _Model()
 
         def predict_response(self, X, *, quantity, group, out_of_sample=False):
-            seed = self._model.sample_kwargs["random_seed"]
+            used = self._model.sample_kwargs["random_seed"]
+            if isinstance(used, (list, tuple, np.ndarray)):
+                noise_seed = float(np.asarray(used).reshape(-1)[0])
+            else:
+                noise_seed = float(used)
             mu = np.asarray(X, dtype=float)[:, 0]
-            noise = 0.0 if quantity == "mu" else float(seed)
+            noise = 0.0 if quantity == "mu" else noise_seed
             values = np.broadcast_to(
                 (mu + noise)[None, None, :, None], (1, 1, n, 1)
             ).copy()
@@ -281,7 +325,7 @@ def test_piecewise_prediction_contrast_keeps_independent_observation_noise():
     # depends only on the unshifted column. Independent noise leaves the
     # seed difference.
     np.testing.assert_allclose(copied.impact_pre.values, -1.0)
-    assert backend._model.sample_kwargs["random_seed"] == 1
+    assert backend._model.sample_kwargs["random_seed"] is seed
 
 
 def _sklearn_its():

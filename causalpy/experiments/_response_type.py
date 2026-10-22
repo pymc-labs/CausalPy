@@ -19,10 +19,11 @@ mutating that stored bundle.
 """
 
 import logging
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any, Literal
 
+import numpy as np
 from matplotlib.figure import Figure
 
 ResponseType = Literal["expectation", "prediction"]
@@ -109,6 +110,31 @@ def log_response_type_once(where: Literal["plot", "summary"]) -> None:
     logger.info(_RESPONSE_LOG)
 
 
+def _shifted_replay_seed(seed: Any, offset: int) -> Any | None:
+    """Return a different seed when PyMC would replay ``seed``, else None.
+
+    ``int``, numpy integers, and one-dimensional integer sequences are
+    replayed by ``sample_posterior_predictive``. ``None`` and a
+    ``Generator`` are not, so they need no offset.
+    """
+    if isinstance(seed, bool):
+        return None
+    if isinstance(seed, (int, np.integer)):
+        return int(seed) + offset
+    values = None
+    if isinstance(seed, np.ndarray):
+        values = seed
+    elif isinstance(seed, Sequence) and not isinstance(seed, (str, bytes)):
+        values = np.asarray(seed)
+    if values is None or values.dtype.kind not in "iu" or values.size == 0:
+        return None
+    if values.ndim == 0:
+        return int(values) + offset
+    if values.ndim != 1:
+        return None
+    return (values.astype(int) + offset).tolist()
+
+
 @contextmanager
 def independent_predict_seed(model: Any, offset: int = 1) -> Iterator[None]:
     """Shift a seeded model's predictive seed for one call, then restore it.
@@ -116,16 +142,16 @@ def independent_predict_seed(model: Any, offset: int = 1) -> Iterator[None]:
     ``PyMCModel.predict`` reseeds posterior-predictive sampling from
     ``sample_kwargs["random_seed"]`` on every call. Two equal-length
     designs therefore share one observation-noise sequence, and a
-    fitted-minus-counterfactual contrast cancels that noise. An integer
-    seed is shifted for the duration of the context. Missing or
-    non-integer seeds are left alone.
+    fitted-minus-counterfactual contrast cancels that noise. Integer
+    seeds and chain-length integer sequences are shifted for the
+    duration of the context. Missing seeds and generators are left alone.
 
     Parameters
     ----------
     model : object
         Object with ``sample_kwargs["random_seed"]``. Other objects are ignored.
     offset : int, default 1
-        Added to an integer seed while the context is active.
+        Added to a replayed seed while the context is active.
 
     Yields
     ------
@@ -135,10 +161,11 @@ def independent_predict_seed(model: Any, offset: int = 1) -> Iterator[None]:
     """
     kwargs = getattr(model, "sample_kwargs", None)
     seed = kwargs.get("random_seed") if isinstance(kwargs, dict) else None
-    if not isinstance(seed, int):
+    shifted = _shifted_replay_seed(seed, offset)
+    if shifted is None:
         yield
         return
-    kwargs["random_seed"] = seed + offset
+    kwargs["random_seed"] = shifted
     try:
         yield
     finally:
