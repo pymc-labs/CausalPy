@@ -25,6 +25,7 @@ from .regression_kink import RegressionKink
 from .staggered_did import StaggeredDifferenceInDifferences
 from .synthetic_control import SyntheticControl
 from .synthetic_difference_in_differences import SyntheticDifferenceInDifferences
+from .up_down_geolift import UpDownGeoLift
 
 __all__ = [
     "DifferenceInDifferences",
@@ -39,4 +40,5 @@ __all__ = [
     "StaggeredDifferenceInDifferences",
     "SyntheticControl",
     "SyntheticDifferenceInDifferences",
+    "UpDownGeoLift",
 ]

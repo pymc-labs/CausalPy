@@ -17,6 +17,7 @@ import numpy as np  # noqa: I001
 import pandas as pd
 import pytest
 from matplotlib import pyplot as plt
+from matplotlib.collections import PolyCollection
 from patsy import build_design_matrices, dmatrix
 
 import causalpy as cp
@@ -105,8 +106,8 @@ def test_did_validation_post_treatment_formula():
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
-    assert result.causal_impact is not None
+    ).fit()
+    assert result.result.causal_impact is not None
 
     # Test 6: Three-way interactions using * (should be invalid)
     with pytest.raises(FormulaException):
@@ -201,8 +202,8 @@ def test_did_validation_interaction_term_order_independent():
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
-    assert result.causal_impact is not None
+    ).fit()
+    assert result.result.causal_impact is not None
 
 
 @pytest.mark.parametrize(
@@ -224,9 +225,9 @@ def test_did_validation_uses_patsy_interaction_terms(did_data, formula):
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
-    assert result.causal_impact is not None
+    assert result.result.causal_impact is not None
 
 
 def test_did_validation_rejects_substring_only_interaction(did_data):
@@ -257,9 +258,9 @@ def test_did_exact_interaction_matching_preserves_categorical_wrapper(did_data):
         group_variable_name="g",
         post_treatment_variable_name="post",
         model=LinearRegression(),
-    )
+    ).fit()
 
-    assert result.causal_impact is not None
+    assert result.result.causal_impact is not None
 
 
 def test_did_ols_matches_only_exact_interaction(did_data):
@@ -277,14 +278,18 @@ def test_did_ols_matches_only_exact_interaction(did_data):
         group_variable_name="g",
         post_treatment_variable_name="post",
         model=LinearRegression(),
-    )
+    ).fit()
 
-    assert result.causal_impact == pytest.approx(4)
+    assert result.result.causal_impact == pytest.approx(4)
     expected_counterfactual = (
-        1 + 2 + 3 + 5 * result.x_pred_counterfactual["g_post"].to_numpy()
+        1
+        + 2
+        + 3
+        + 5 * result.result.scenario_counterfactual.inputs["g_post"].to_numpy()
     )
     np.testing.assert_allclose(
-        np.squeeze(result.y_pred_counterfactual), expected_counterfactual
+        np.squeeze(result.result.scenario_counterfactual.prediction),
+        expected_counterfactual,
     )
 
 
@@ -311,7 +316,7 @@ def test_did_bayesian_matches_only_exact_interaction(did_data):
         group_variable_name="g",
         post_treatment_variable_name="post",
         model=model,
-    )
+    ).fit()
 
     treated_post = df.query("g == 1 and post")
     (x_factual,) = build_design_matrices(
@@ -326,8 +331,8 @@ def test_did_bayesian_matches_only_exact_interaction(did_data):
     expected = _expected_log_link_att(
         np.asarray(x_factual), np.asarray(x_counter), weights
     )
-    assert float(result.causal_impact.mean()) == pytest.approx(expected)
-    assert "coeffs" not in result.causal_impact.dims
+    assert float(result.result.causal_impact.mean()) == pytest.approx(expected)
+    assert "coeffs" not in result.result.causal_impact.dims
 
 
 def test_did_validation_post_treatment_data():
@@ -705,7 +710,7 @@ def test_regression_discontinuity_int_treatment():
     """Test that RegressionDiscontinuity works with integer treatment variables."""
     threshold = 0.5
     df = setup_regression_discontinuity_data(threshold)
-    assert df["treated"].dtype == np.int64  # Ensure treatment is int
+    assert pd.api.types.is_integer_dtype(df["treated"])  # Ensure treatment is int
 
     # This should work now with our fix
     result = cp.RegressionDiscontinuity(
@@ -716,7 +721,7 @@ def test_regression_discontinuity_int_treatment():
     )
 
     # Check that the treatment variable was converted to bool
-    assert result.data["treated"].dtype == bool
+    assert pd.api.types.is_bool_dtype(result.data["treated"])
 
 
 def test_regression_discontinuity_bool_treatment():
@@ -724,7 +729,7 @@ def test_regression_discontinuity_bool_treatment():
     threshold = 0.5
     df = setup_regression_discontinuity_data(threshold)
     df["treated"] = df["treated"].astype(bool)  # Convert to bool
-    assert df["treated"].dtype == bool  # Ensure treatment is bool
+    assert pd.api.types.is_bool_dtype(df["treated"])  # Ensure treatment is bool
 
     # This should work as before
     result = cp.RegressionDiscontinuity(
@@ -735,7 +740,7 @@ def test_regression_discontinuity_bool_treatment():
     )
 
     # Check that the treatment variable is still bool
-    assert result.data["treated"].dtype == bool
+    assert pd.api.types.is_bool_dtype(result.data["treated"])
 
 
 def test_rd_donut_hole_zero_same_as_default():
@@ -915,7 +920,7 @@ def test_rd_unrecognized_model_type():
 
 
 def test_rd_ols_plot_with_donut_hole():
-    """Test that OLS plot shows donut hole boundary lines."""
+    """Test that the OLS hybrid plot preserves its rendering contract."""
     threshold = 0.5
     df = setup_regression_discontinuity_data(threshold)
 
@@ -925,24 +930,90 @@ def test_rd_ols_plot_with_donut_hole():
         model=LinearRegression(),
         treatment_threshold=threshold,
         donut_hole=0.1,
+    ).fit()
+
+    fig, ax = result.plot(show=False)
+    try:
+        assert ax in fig.axes
+        threshold_lines = [
+            line
+            for line in ax.get_lines()
+            if line.get_linestyle() == "-" and line.get_color() == "r"
+        ]
+        assert len(threshold_lines) == 1
+        np.testing.assert_allclose(
+            threshold_lines[0].get_xdata(), [threshold, threshold]
+        )
+
+        donut_lines = [
+            line
+            for line in ax.get_lines()
+            if line.get_linestyle() == "--" and line.get_color() == "orange"
+        ]
+        assert len(donut_lines) == 2
+        np.testing.assert_allclose(
+            sorted(line.get_xdata()[0] for line in donut_lines),
+            [threshold - 0.1, threshold + 0.1],
+        )
+        assert {
+            "fit data",
+            "excluded data",
+            "model fit",
+            "treatment threshold",
+            "donut boundary",
+        } <= {text.get_text() for text in ax.get_legend().get_texts()}
+    finally:
+        plt.close(fig)
+
+
+def test_rd_plot_isolated_from_user_column_names() -> None:
+    """Test Plotnine renderer columns cannot collide with user column names."""
+    prediction = np.linspace(-2, 2, 12)
+    data = pd.DataFrame(
+        {
+            "prediction": prediction,
+            "series": prediction + 2 * (prediction >= 0),
+            "treated": (prediction >= 0).astype(int),
+        }
     )
+    result = cp.RegressionDiscontinuity(
+        data,
+        formula="series ~ 1 + prediction + treated + prediction:treated",
+        model=LinearRegression(),
+        running_variable_name="prediction",
+        treatment_threshold=0,
+    ).fit()
 
-    fig, ax = result.plot()
-    assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    fig, ax = result.plot(show=False)
+    try:
+        point_offsets = np.concatenate(
+            [collection.get_offsets() for collection in ax.collections]
+        )
+        np.testing.assert_allclose(
+            np.sort(point_offsets[:, 0]), np.sort(data["prediction"].to_numpy())
+        )
+        np.testing.assert_allclose(
+            np.sort(point_offsets[:, 1]), np.sort(data["series"].to_numpy())
+        )
 
-    # Check that donut boundary lines were added (2 orange dashed lines)
-    donut_lines = [
-        line
-        for line in ax.get_lines()
-        if line.get_linestyle() == "--" and line.get_color() == "orange"
-    ]
-    assert len(donut_lines) == 2, "Expected 2 donut boundary lines"
-    plt.close(fig)
+        model_fit = next(
+            line
+            for line in ax.get_lines()
+            if len(line.get_xdata()) == len(result.x_pred)
+        )
+        np.testing.assert_allclose(
+            model_fit.get_xdata(), result.x_pred["prediction"].to_numpy()
+        )
+        np.testing.assert_allclose(
+            model_fit.get_ydata(),
+            result.result.predictions.isel(chain=0, draw=0, treated_units=0).to_numpy(),
+        )
+    finally:
+        plt.close(fig)
 
 
 def test_rd_bayesian_plot_with_donut_hole():
-    """Test that Bayesian plot shows donut hole boundary lines."""
+    """Test that the Bayesian hybrid plot preserves its rendering contract."""
     threshold = 0.5
     df = setup_regression_discontinuity_data(threshold)
 
@@ -952,20 +1023,43 @@ def test_rd_bayesian_plot_with_donut_hole():
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         treatment_threshold=threshold,
         donut_hole=0.1,
-    )
+    ).fit()
 
-    fig, ax = result.plot()
-    assert isinstance(fig, plt.Figure)
-    assert isinstance(ax, plt.Axes)
+    fig, ax = result.plot(show=False)
+    try:
+        assert ax in fig.axes
+        assert any(
+            isinstance(collection, PolyCollection) for collection in ax.collections
+        )
+        threshold_lines = [
+            line
+            for line in ax.get_lines()
+            if line.get_linestyle() == "-" and line.get_color() == "r"
+        ]
+        assert len(threshold_lines) == 1
+        np.testing.assert_allclose(
+            threshold_lines[0].get_xdata(), [threshold, threshold]
+        )
 
-    # Check that donut boundary lines were added (2 orange dashed lines)
-    donut_lines = [
-        line
-        for line in ax.get_lines()
-        if line.get_linestyle() == "--" and line.get_color() == "orange"
-    ]
-    assert len(donut_lines) == 2, "Expected 2 donut boundary lines"
-    plt.close(fig)
+        donut_lines = [
+            line
+            for line in ax.get_lines()
+            if line.get_linestyle() == "--" and line.get_color() == "orange"
+        ]
+        assert len(donut_lines) == 2
+        np.testing.assert_allclose(
+            sorted(line.get_xdata()[0] for line in donut_lines),
+            [threshold - 0.1, threshold + 0.1],
+        )
+        assert {
+            "fit data",
+            "excluded data",
+            "treatment threshold",
+            "donut boundary",
+            "Posterior mean",
+        } <= {text.get_text() for text in ax.get_legend().get_texts()}
+    finally:
+        plt.close(fig)
 
 
 # Synthetic Control - Convex Hull Assumption

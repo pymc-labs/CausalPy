@@ -15,7 +15,6 @@ cp.InstrumentalVariable(
     vs_prior_type=None,
     vs_hyperparams=None,
     binary_treatment=False,
-    **kwargs
 )
 ```
 
@@ -61,7 +60,7 @@ result = cp.InstrumentalVariable(
         "eta": 2,
         "lkj_sd": 1,
     },
-)
+).fit()
 ```
 
 ## Interpretation Checks

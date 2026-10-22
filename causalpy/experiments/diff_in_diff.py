@@ -13,15 +13,13 @@
 #   limitations under the License.
 """Difference in differences."""
 
-import warnings
 from typing import Any, Literal
 
 import numpy as np
-import pandas as pd
 import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import ModelDesc, build_design_matrices
+from patsy import ModelDesc
 from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
@@ -29,8 +27,10 @@ from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
+from causalpy.experiments._results import CoefficientResult, GroupComparisonScenario
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.formula_utils import build_formula_matrices
+from causalpy.formula_utils import build_design_matrices, build_formula_matrices
+from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
     has_posterior_draws,
@@ -54,7 +54,7 @@ from causalpy.utils import (
 from .base import BaseExperiment
 
 
-class DifferenceInDifferences(BaseExperiment):
+class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
     """A class to analyse data from Difference in Difference settings.
 
     .. note::
@@ -64,8 +64,9 @@ class DifferenceInDifferences(BaseExperiment):
 
     Parameters
     ----------
-    data : pd.DataFrame
-        A pandas dataframe.
+    data : dataframe-like
+        Any eager dataframe Narwhals supports, such as pandas, Polars, or
+        PyArrow. Converted to pandas internally.
     formula : str
         A statistical model formula.
     time_variable_name : str
@@ -76,9 +77,20 @@ class DifferenceInDifferences(BaseExperiment):
         Name of the data column indicating post-treatment period.
         Defaults to "post_treatment".
     model : PyMCModel or RegressorMixin, optional
-        A PyMC model for difference in differences. Defaults to LinearRegression.
-    **kwargs
-        Additional keyword arguments forwarded to :class:`BaseExperiment`.
+        A PyMC model for difference in differences. Defaults to
+        LinearRegression.
+
+    Notes
+    -----
+    **Estimate extraction**
+
+    Both Bayesian and OLS backends store the fitted group-by-post interaction coefficient as ``causal_impact``. The class also constructs treated-post counterfactual predictions for visualization by setting that interaction term to zero, but those predictions do not determine the reported scalar effect. In an additive identity-link model, the coefficient and the corresponding predicted contrast are algebraically identical.
+
+    Lazy lifecycle: construction only validates inputs and builds design
+    matrices — nothing is sampled. Call :meth:`fit` to draw posterior
+    samples (and :meth:`sample_prior_predictive` for prior predictive
+    checks); read methods such as :meth:`plot`, :meth:`summary`, and
+    :meth:`effect_summary` require the corresponding draw group.
 
     Examples
     --------
@@ -97,29 +109,27 @@ class DifferenceInDifferences(BaseExperiment):
     ...             "progressbar": False,
     ...         }
     ...     ),
-    ... )
+    ... ).fit()
     """
 
     supports_ols = True
     supports_bayes = True
     _default_model_class = LinearRegression
-    _deprecated_design_aliases = {"X": ("design", "X"), "y": ("design", "y")}
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        data: DataFrameLike,
         formula: str,
         time_variable_name: str,
         group_variable_name: str,
         post_treatment_variable_name: str = "post_treatment",
         model: PyMCModel | RegressorMixin | None = None,
-        **kwargs: Any,
     ) -> None:
         super().__init__(model=model)
-        self.causal_impact: xr.DataArray | float | None
-        # rename the index to "obs_ind"
-        data.index.name = "obs_ind"
-        self.data = data
+        # to_pandas returns a copy, so index metadata is normalized on an owned frame rather than the caller's.
+        pandas_data = to_pandas(data)
+        pandas_data.index.name = "obs_ind"
+        self.data = pandas_data
         self.expt_type = "Difference in Differences"
         self.formula = formula
         self.time_variable_name = time_variable_name
@@ -128,7 +138,6 @@ class DifferenceInDifferences(BaseExperiment):
         self.input_validation()
         self._build_design_matrices()
         self._prepare_data()
-        self.algorithm()
 
     def _build_design_matrices(self) -> None:
         """Build design matrices from formula and data using patsy."""
@@ -150,54 +159,63 @@ class DifferenceInDifferences(BaseExperiment):
         )
         del self._X_raw, self._y_raw
 
-    def algorithm(self) -> None:
-        """Run the experiment algorithm: fit model, predict, and calculate causal impact."""
+    def _fit_inputs(
+        self,
+    ) -> tuple[xr.DataArray, xr.DataArray, dict[str, Any]]:
+        """Return the design matrices and coordinates for build."""
         X = self.design["X"]
-        y = self.design["y"]
-
-        self._model_backend.fit(
-            X=X,
-            y=y,
-            coords=build_coords(self.labels, X.shape[0]),
+        return (
+            X,
+            self.design["y"],
+            build_coords(self.labels, X.shape[0]),
         )
 
+    def _finalize(self, group: Literal["prior", "posterior"]) -> None:
+        """Compute the group's result bundle from its draws and assign it.
+
+        The body is the historical ``algorithm()`` prediction and contrast
+        stage with the draw group threaded through prediction and
+        coefficient reads. The three scenario frames are deterministic
+        functions of the data and formula; only their predictions carry
+        the requested draw group.
+        """
         # predicted outcome for control group
-        self.x_pred_control = (
+        x_pred_control = (
             self.data
             # just the untreated group
             .query(f"{self.group_variable_name} == 0")
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
             # We may have multiple units per time point, we only want one time point
-            .groupby(self.time_variable_name)
+            .groupby(self.time_variable_name, observed=True)
             .first()
             .reset_index()
         )
-        if self.x_pred_control.empty:
+        if x_pred_control.empty:
             raise ValueError("x_pred_control is empty")
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_control)
-        self.y_pred_control = self._model_backend.predict(np.asarray(new_x))
+        (new_x,) = build_design_matrices([self._x_design_info], x_pred_control)
+        y_pred_control = self._model_backend.predict(np.asarray(new_x), group=group)
 
         # predicted outcome for treatment group
-        self.x_pred_treatment = (
+        x_pred_treatment = (
             self.data
             # just the treated group
             .query(f"{self.group_variable_name} == 1")
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
             # We may have multiple units per time point, we only want one time point
-            .groupby(self.time_variable_name)
+            .groupby(self.time_variable_name, observed=True)
             .first()
             .reset_index()
         )
-        if self.x_pred_treatment.empty:
+        if x_pred_treatment.empty:
             raise ValueError("x_pred_treatment is empty")
-        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred_treatment)
-        self.y_pred_treatment = self._model_backend.predict(np.asarray(new_x))
+        (new_x,) = build_design_matrices([self._x_design_info], x_pred_treatment)
+        y_pred_treatment = self._model_backend.predict(np.asarray(new_x), group=group)
 
         # predicted outcome for counterfactual. This is given by removing the influence
         # of the interaction term between the group and the post_treatment variable
-        self.x_pred_counterfactual = (
+        x_pred_counterfactual = (
             self.data
             # just the treated group
             .query(f"{self.group_variable_name} == 1")
@@ -206,49 +224,85 @@ class DifferenceInDifferences(BaseExperiment):
             # drop the outcome variable
             .drop(self.outcome_variable_name, axis=1)
             # We may have multiple units per time point, we only want one time point
-            .groupby(self.time_variable_name)
+            .groupby(self.time_variable_name, observed=True)
             .first()
             .reset_index()
         )
-        if self.x_pred_counterfactual.empty:
+        if x_pred_counterfactual.empty:
             raise ValueError("x_pred_counterfactual is empty")
         (new_x,) = build_design_matrices(
-            [self._x_design_info], self.x_pred_counterfactual, return_type="dataframe"
+            [self._x_design_info], x_pred_counterfactual, return_type="dataframe"
         )
         # INTERVENTION: set the interaction term between the group and the
         # post_treatment variable to zero. This is the counterfactual.
         for i, label in enumerate(self.labels):
             if self._is_treatment_interaction(label):
                 new_x.iloc[:, i] = 0
-        self.y_pred_counterfactual = self._model_backend.predict(np.asarray(new_x))
+        y_pred_counterfactual = self._model_backend.predict(
+            np.asarray(new_x), group=group
+        )
 
-        # Calculate causal impact. The estimand is owned by the experiment: the
-        # ATT is the treated-post factual-minus-counterfactual expected-outcome
-        # contrast, averaged over treated post-treatment rows. The model/backend
-        # owns E[Y | X, params] on the response scale (the ``mu`` prediction
-        # contract; see docs/source/knowledgebase/prediction-contract.md) and
-        # the uncertainty representation; how the contrast is computed below is
-        # an implementation detail, not a different estimand per backend.
+        # The estimand is the treated-post factual-minus-counterfactual
+        # expected outcome, averaged over treated post-treatment rows.
+        # Bayesian backends evaluate that contrast on response-scale ``mu``.
+        # OLS keeps the interaction coefficient: under the validated additive
+        # identity design it equals the same contrast.
         if self._model_backend.is_bayesian:
-            # All Bayesian backends promise response-scale ``mu`` draws, so the
-            # contrast is evaluated directly on ``mu``.
-            self.causal_impact = self._att_from_g_computation()
+            causal_impact = self._att_from_g_computation(group)
         elif self._model_backend.is_ols:
-            # Algebraic shortcut: under the validated additive design (exactly
-            # one group-by-post interaction, identity link), the interaction
-            # coefficient equals the prediction-based ATT. Equivalence is pinned
-            # by test_ols_did_coefficient_equals_prediction_contrast.
-            coef_map = dict(
-                zip(self.labels, self._model_backend.coefficients(), strict=False)
+            treatment_coefficient = next(
+                label for label in self.labels if self._is_treatment_interaction(label)
             )
-            matched_key = next(
-                (key for key in coef_map if self._is_treatment_interaction(key)),
-                None,
+            causal_impact = (
+                self._model_backend.coefficients(group=group)
+                .sel(coeffs=treatment_coefficient)
+                .squeeze(drop=True)
             )
-            att = coef_map.get(matched_key) if matched_key is not None else None
-            self.causal_impact = att
         else:
             raise ValueError("Model type not recognized")
+
+        bundle = CoefficientResult(
+            causal_impact=causal_impact,
+            scenario_control=GroupComparisonScenario(
+                inputs=x_pred_control, prediction=y_pred_control
+            ),
+            scenario_treated=GroupComparisonScenario(
+                inputs=x_pred_treatment, prediction=y_pred_treatment
+            ),
+            scenario_counterfactual=GroupComparisonScenario(
+                inputs=x_pred_counterfactual, prediction=y_pred_counterfactual
+            ),
+            score=None,
+        )
+        self._assign_bundle(group, bundle)
+
+    def _att_from_g_computation(
+        self, group: Literal["prior", "posterior"] = "posterior"
+    ) -> xr.DataArray:
+        """Response-scale ATT from treated-post factual vs counterfactual ``mu``."""
+        treated_post = (
+            self.data.query(f"{self.group_variable_name} == 1")
+            .query(f"{self.post_treatment_variable_name} == True")
+            .drop(columns=[self.outcome_variable_name])
+        )
+        if treated_post.empty:
+            raise ValueError("No treated post-treatment observations for ATT")
+
+        (x_factual,) = build_design_matrices(
+            [self._x_design_info], treated_post, return_type="dataframe"
+        )
+        x_counter = x_factual.copy()
+        for i, label in enumerate(self.labels):
+            if self._is_treatment_interaction(label):
+                x_counter.iloc[:, i] = 0
+
+        mu_factual = self._model_backend.predict(
+            np.asarray(x_factual), group=group, var_names=["mu"]
+        )
+        mu_counter = self._model_backend.predict(
+            np.asarray(x_counter), group=group, var_names=["mu"]
+        )
+        return (mu_factual - mu_counter).mean(dim="obs_ind")
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -321,34 +375,6 @@ class DifferenceInDifferences(BaseExperiment):
                 "This interaction term identifies the difference-in-differences causal effect."
             )
 
-    def _att_from_g_computation(self) -> xr.DataArray:
-        """Response-scale ATT from treated-post factual vs counterfactual ``mu``."""
-        treated_post = (
-            self.data.query(f"{self.group_variable_name} == 1")
-            .query(f"{self.post_treatment_variable_name} == True")
-            .drop(self.outcome_variable_name, axis=1)
-        )
-        if treated_post.empty:
-            raise ValueError("No treated post-treatment observations for ATT")
-
-        (x_factual,) = build_design_matrices(
-            [self._x_design_info], treated_post, return_type="dataframe"
-        )
-        x_counter = x_factual.copy()
-        for i, label in enumerate(self.labels):
-            if self._is_treatment_interaction(label):
-                x_counter.iloc[:, i] = 0
-
-        # The adapter returns response-scale ``mu`` draws in the canonical
-        # prediction container; ``var_names`` skips sampling ``y_hat``.
-        mu_factual = self._model_backend.predict(
-            np.asarray(x_factual), var_names=["mu"]
-        )
-        mu_counter = self._model_backend.predict(
-            np.asarray(x_counter), var_names=["mu"]
-        )
-        return (mu_factual - mu_counter).mean(dim="obs_ind")
-
     def _is_treatment_interaction(self, term: str) -> bool:
         """Whether a term is exactly the group/post-treatment interaction."""
         factors = {
@@ -380,14 +406,14 @@ class DifferenceInDifferences(BaseExperiment):
 
     def _causal_impact_summary_stat(self, round_to: int | None = None) -> str:
         """Computes the mean and credible interval bounds for the causal impact."""
-        return f"Causal impact = {convert_to_string(self.causal_impact, round_to=round_to)}"
+        return f"Causal impact = {convert_to_string(self.result.causal_impact, round_to=round_to)}"
 
     def plot(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         round_to: int | None = None,
         ci_prob: float = HDI_PROB,
-        hdi_prob: float | None = None,
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
@@ -399,6 +425,15 @@ class DifferenceInDifferences(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to plot. ``"prior"`` renders the reduced
+            prior-check panel set — prior-implied control and treatment
+            group predictions against the observed data only — and requires
+            :meth:`sample_prior_predictive`; ``"posterior"`` (default)
+            renders the full layout with the counterfactual and causal
+            impact annotation and requires :meth:`fit`.
+            The two groups intentionally return different axes layouts.
+            Uncertainty styling and ``figsize`` apply to both groups; ``round_to`` only affects posterior annotations.
         round_to : int, optional
             Number of decimals used to round numerical results in the figure
             title. Defaults to ``None``, in which case 2 significant figures
@@ -409,8 +444,6 @@ class DifferenceInDifferences(BaseExperiment):
             counterfactual trajectories. Must be in ``(0, 1]``. Ignored for
             OLS models. Defaults to :data:`~causalpy.constants.HDI_PROB`
             (currently 0.94).
-        hdi_prob : float, optional
-            Deprecated. Use ``ci_prob`` instead.
         kind : {"ribbon", "histogram", "spaghetti"}, optional
             How posterior uncertainty is rendered via
             :func:`~causalpy.plot_utils.plot_posterior_over_x`. Defaults to ``"ribbon"``.
@@ -444,26 +477,11 @@ class DifferenceInDifferences(BaseExperiment):
             The figure that was created.
         ax : matplotlib.axes.Axes
             The axes object containing the plot.
-
-        Notes
-        -----
-        The plotted group trajectories use one representative unit's covariate
-        row per time point, while the causal impact reported in the title
-        averages over **all** treated post-treatment rows. When covariates vary
-        across units within a time point, the plotted trajectories are
-        illustrative rather than the exact population underlying the ATT.
         """
-        if hdi_prob is not None:
-            warnings.warn(
-                "hdi_prob is deprecated and will be removed in a future release. "
-                "Use ci_prob instead.",
-                FutureWarning,
-                stacklevel=2,
-            )
-            ci_prob = hdi_prob
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
+            group=group,
             round_to=round_to,
             ci_prob=ci_prob,
             kind=kind,
@@ -474,6 +492,8 @@ class DifferenceInDifferences(BaseExperiment):
 
     def _plot(
         self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
         round_to: int | None = None,
         ci_prob: float = HDI_PROB,
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
@@ -485,16 +505,21 @@ class DifferenceInDifferences(BaseExperiment):
         """
         Plot the results.
 
-        Consumes the canonical prediction container from any backend. When the
-        container carries posterior draws, group fits render as uncertainty
+        Consumes the resolved group bundle injected by
+        :meth:`~causalpy.experiments.base.BaseExperiment._render_plot`. When the
+        scenario prediction containers carry draws, group fits render as uncertainty
         bands with a counterfactual violin/band; point-estimate backends
         (singleton ``chain``/``draw``) get point markers.
 
         Parameters
         ----------
+        group : {"prior", "posterior"}
+            ``"prior"`` renders the reduced single-panel prior-check figure
+            via :meth:`_plot_prior_checks`; ``"posterior"`` renders the full
+            layout.
         round_to : int, optional
-            Number of decimals used to round results. Defaults to 2. Use ``None``
-            to return raw numbers.
+            Number of decimals used to round results. Defaults to ``None``, in
+            which case 2 significant figures are used.
         ci_prob : float, optional
             Probability mass of the credible interval drawn around the
             posterior predictive bands for the control, treatment, and
@@ -504,13 +529,26 @@ class DifferenceInDifferences(BaseExperiment):
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
-        with_uncertainty = has_posterior_draws(self.y_pred_control)
+        bundle = self._require_bundle(group)
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
             "num_samples": num_samples,
         }
+        if group == "prior":
+            return self._plot_prior_checks(bundle=bundle, style=style, figsize=figsize)
+
+        y_pred_control = bundle.scenario_control.prediction
+        y_pred_treatment = bundle.scenario_treated.prediction
+        x_pred_control = bundle.scenario_control.inputs
+        x_pred_treatment = bundle.scenario_treated.inputs
+
+        cf = bundle.scenario_counterfactual
+        y_pred_counterfactual = cf.prediction
+        x_pred_counterfactual = cf.inputs
+
+        with_uncertainty = has_posterior_draws(y_pred_control)
 
         fig, ax = plt.subplots(figsize=figsize)
 
@@ -528,10 +566,10 @@ class DifferenceInDifferences(BaseExperiment):
             )
 
             # Plot model fit to control group
-            time_points = self.x_pred_control[self.time_variable_name].values
+            time_points = x_pred_control[self.time_variable_name].values
             h_line, h_patch = plot_posterior_over_x(
                 time_points,
-                self.y_pred_control.isel(treated_units=0),
+                y_pred_control.isel(treated_units=0),
                 ax=ax,
                 **style,
                 plot_hdi_kwargs={"color": "C0"},
@@ -541,10 +579,10 @@ class DifferenceInDifferences(BaseExperiment):
             labels = ["Control group"]
 
             # Plot model fit to treatment group
-            time_points = self.x_pred_control[self.time_variable_name].values
+            time_points = x_pred_control[self.time_variable_name].values
             h_line, h_patch = plot_posterior_over_x(
                 time_points,
-                self.y_pred_treatment.isel(treated_units=0),
+                y_pred_treatment.isel(treated_units=0),
                 ax=ax,
                 **style,
                 plot_hdi_kwargs={"color": "C1"},
@@ -555,28 +593,27 @@ class DifferenceInDifferences(BaseExperiment):
 
             # Plot counterfactual - post-test for treatment group IF no treatment
             # had occurred.
-            time_points = self.x_pred_counterfactual[self.time_variable_name].values
+            time_points = x_pred_counterfactual[self.time_variable_name].values
             if len(time_points) == 1:
                 violin_data = np.asarray(
-                    self.y_pred_counterfactual.isel(treated_units=0)
+                    y_pred_counterfactual.isel(treated_units=0)
                 ).reshape(-1)
                 parts = ax.violinplot(
                     [violin_data],
-                    positions=self.x_pred_counterfactual[
-                        self.time_variable_name
-                    ].values,
+                    positions=x_pred_counterfactual[self.time_variable_name].values,
                     showmeans=False,
                     showmedians=False,
                     widths=0.2,
                 )
-                for pc in parts["bodies"]:
+                # violinplot types every entry as a single Collection, but the "bodies" entry is a list of them.
+                for pc in parts["bodies"]:  # type: ignore[attr-defined]
                     pc.set_facecolor("C0")
                     pc.set_edgecolor("None")
                     pc.set_alpha(0.5)
             else:
                 h_line, h_patch = plot_posterior_over_x(
                     time_points,
-                    self.y_pred_counterfactual.isel(treated_units=0),
+                    y_pred_counterfactual.isel(treated_units=0),
                     ax=ax,
                     **style,
                     plot_hdi_kwargs={"color": "C2"},
@@ -598,8 +635,8 @@ class DifferenceInDifferences(BaseExperiment):
             )
             # Plot model fit to control group
             ax.plot(
-                self.x_pred_control[self.time_variable_name],
-                np.squeeze(self.y_pred_control),
+                x_pred_control[self.time_variable_name],
+                np.squeeze(y_pred_control),
                 "o",
                 c="C0",
                 markersize=10,
@@ -607,8 +644,8 @@ class DifferenceInDifferences(BaseExperiment):
             )
             # Plot model fit to treatment group
             ax.plot(
-                self.x_pred_treatment[self.time_variable_name],
-                np.squeeze(self.y_pred_treatment),
+                x_pred_treatment[self.time_variable_name],
+                np.squeeze(y_pred_treatment),
                 "o",
                 c="C1",
                 markersize=10,
@@ -617,8 +654,8 @@ class DifferenceInDifferences(BaseExperiment):
             # Plot counterfactual - post-test for treatment group IF no treatment
             # had occurred.
             ax.plot(
-                self.x_pred_counterfactual[self.time_variable_name],
-                np.squeeze(self.y_pred_counterfactual),
+                x_pred_counterfactual[self.time_variable_name],
+                np.squeeze(y_pred_counterfactual),
                 "go",
                 markersize=10,
                 label="counterfactual",
@@ -628,16 +665,14 @@ class DifferenceInDifferences(BaseExperiment):
         # and the post-period treatment-group prediction (posterior means for
         # containers with draws; the point estimates coincide for singletons)
         y_pred_treatment_scalar = _as_scalar(
-            self.y_pred_treatment.isel(obs_ind=1).mean().data
+            y_pred_treatment.isel(obs_ind=1).mean().data
         )
-        y_pred_counterfactual_scalar = _as_scalar(
-            self.y_pred_counterfactual.mean().data
-        )
+        y_pred_counterfactual_scalar = _as_scalar(y_pred_counterfactual.mean().data)
         if with_uncertainty:
             # Note that we force to be float to avoid a type error using np.ptp
             # with boolean values
             time_values = np.array(
-                self.x_pred_treatment[self.time_variable_name].values
+                x_pred_treatment[self.time_variable_name].values
             ).astype(float)
             arrow_x = np.max(time_values) + 0.1 * np.ptp(time_values)
             arrow_style = "<-"
@@ -656,7 +691,7 @@ class DifferenceInDifferences(BaseExperiment):
             "causal\nimpact",
             xy=(
                 arrow_x,
-                np.mean([y_pred_counterfactual_scalar, y_pred_treatment_scalar]),
+                float(np.mean([y_pred_counterfactual_scalar, y_pred_treatment_scalar])),
             ),
             xycoords="data",
             xytext=(5, 0),
@@ -668,7 +703,7 @@ class DifferenceInDifferences(BaseExperiment):
         # formatting
         if with_uncertainty:
             ax.set(
-                xticks=self.x_pred_treatment[self.time_variable_name].values,
+                xticks=x_pred_treatment[self.time_variable_name].values,
                 title=self._causal_impact_summary_stat(round_to),
             )
             ax.legend(
@@ -677,9 +712,7 @@ class DifferenceInDifferences(BaseExperiment):
                 fontsize=LEGEND_FONT_SIZE,
             )
         else:
-            causal_impact_value = (
-                float(self.causal_impact) if self.causal_impact is not None else 0.0
-            )
+            causal_impact_value = _as_scalar(bundle.causal_impact)
             ax.set(
                 xlim=[-0.05, 1.1],
                 xticks=[0, 1],
@@ -689,42 +722,109 @@ class DifferenceInDifferences(BaseExperiment):
             ax.legend(fontsize=LEGEND_FONT_SIZE)
         return fig, ax
 
+    def _plot_prior_checks(
+        self,
+        *,
+        bundle: CoefficientResult,
+        style: _PosteriorPlotStyle,
+        figsize: tuple[float, float] | None,
+    ) -> tuple[plt.Figure, plt.Axes]:
+        """Render the reduced prior-check panel set.
+
+        Prior-implied bands are typically far wider than the data, so the
+        counterfactual decomposition and causal-impact annotation are dropped
+        rather than autoscaled into uselessness. The question a prior check
+        answers is whether the prior-implied group predictions are plausible
+        against the observed series — one panel suffices.
+        """
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Plot raw data
+        sns.scatterplot(
+            self.data,
+            x=self.time_variable_name,
+            y=self.outcome_variable_name,
+            hue=self.group_variable_name,
+            alpha=1,
+            legend=False,
+            markers=True,
+            ax=ax,
+        )
+
+        # Plot prior-implied model fit to control group
+        h_line, h_patch = plot_posterior_over_x(
+            bundle.scenario_control.inputs[self.time_variable_name].values,
+            bundle.scenario_control.prediction.isel(treated_units=0),
+            ax=ax,
+            **style,
+            plot_hdi_kwargs={"color": "C0"},
+            label="Control group",
+        )
+        handles = [tuple(h_line) if isinstance(h_line, list) else (h_line, h_patch)]
+        labels = ["Control group"]
+
+        # Plot prior-implied model fit to treatment group
+        h_line, h_patch = plot_posterior_over_x(
+            bundle.scenario_treated.inputs[self.time_variable_name].values,
+            bundle.scenario_treated.prediction.isel(treated_units=0),
+            ax=ax,
+            **style,
+            plot_hdi_kwargs={"color": "C1"},
+            label="Treatment group",
+        )
+        handles.append(tuple(h_line) if isinstance(h_line, list) else (h_line, h_patch))
+        labels.append("Treatment group")
+
+        ax.legend(
+            handles=(h_tuple for h_tuple in handles),
+            labels=labels,
+            fontsize=LEGEND_FONT_SIZE,
+        )
+        ax.set(title="Prior predictive check")
+        return fig, ax
+
     def effect_summary(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
         alpha: float = 0.05,
         min_effect: float | None = None,
-        **kwargs: Any,
     ) -> EffectSummary:
         """
         Generate a decision-ready summary of causal effects for Difference-in-Differences.
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to summarize. ``"prior"`` requires
+            :meth:`sample_prior_predictive` and produces prior-appropriate
+            prose — under a neutral prior, ``P(effect > 0)`` should sit near
+            0.5, so a tail probability far from 0.5 flags a design-matrix or
+            prior-specification problem rather than a causal finding.
+            ``"posterior"`` requires :meth:`fit`.
         direction : {"increase", "decrease", "two-sided"}, default="increase"
-            Direction for tail probability calculation (PyMC only, ignored for OLS).
+            Direction for tail probability calculation (ignored for
+            point-estimate predictions).
         alpha : float, default=0.05
             Significance level for HDI/CI intervals (1-alpha confidence level).
         min_effect : float, optional
-            Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
-        **kwargs
-            Reserved for forward-compatibility; not consumed by this
-            implementation.
+            Region of Practical Equivalence (ROPE) threshold (ignored for
+            point-estimate predictions).
 
         Returns
         -------
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
-        is_pymc = self._model_backend.is_bayesian
-
-        if is_pymc:
+        bundle = self._require_bundle(group)
+        if self._model_backend.is_bayesian:
             return _effect_summary_did(
-                self,
+                bundle,
                 direction=direction,
                 alpha=alpha,
                 min_effect=min_effect,
+                group=group,
             )
         else:
             # OLS DiD

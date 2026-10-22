@@ -20,40 +20,11 @@ from scipy.optimize import fmin_slsqp
 from sklearn.base import RegressorMixin
 from sklearn.linear_model._base import LinearModel
 
-from causalpy.utils import round_num
-
 
 class ScikitLearnAdaptor:
     """Base class for scikit-learn models that can be used for causal inference."""
 
     coef_: np.ndarray
-
-    def print_coefficients(
-        self, labels: list[str], round_to: int | None = None
-    ) -> None:
-        """Print the coefficients of the model with the corresponding labels.
-
-        Parameters
-        ----------
-        labels : list of str
-            List of strings representing the coefficient names.
-        round_to : int, optional
-            Number of significant figures to round to. Defaults to None,
-            in which case 2 significant figures are used.
-        """
-        print("Model coefficients:")
-        coef_ = self.get_coeffs()
-        # Determine the width of the longest label
-        max_label_length = max(len(name) for name in labels)
-        # Print each coefficient with formatted alignment
-        for name, val in zip(labels, coef_, strict=False):
-            # Left-align the name
-            formatted_name = f"{name:<{max_label_length}}"
-            # Right-align the value with width 10
-            formatted_val = (
-                f"{round_num(val, round_to if round_to is not None else 2):>10}"
-            )
-            print(f"  {formatted_name}\t{formatted_val}")
 
     def get_coeffs(self) -> np.ndarray:
         """Get the coefficients of the model as a numpy array."""

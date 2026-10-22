@@ -2,6 +2,10 @@
 # Regenerate with: python scripts/generate_gallery.py
 
 title: How-to
+description: >-
+  Example gallery of causal inference methods in Python: synthetic control,
+  difference-in-differences, interrupted time series, regression discontinuity,
+  instrumental variables, and inverse propensity weighting with CausalPy.
 intro: |
   On this page you can find a gallery of example notebooks that demonstrate the use of CausalPy.
 
@@ -34,6 +38,12 @@ groups:
             notebook: synthetic-control-brexit-pymc
           - title: Synthetic Difference-in-Differences with `pymc` models
             notebook: synthetic-difference-in-differences-pymc
+          - title: Bayesian interactive fixed-effects synthetic control
+            notebook: interactive-fixed-effects-pymc
+          - title: Bayesian augmented synthetic control
+            notebook: augmented-synthetic-control-pymc
+          - title: Comparing Bayesian synthetic-control models
+            notebook: comparing-bayesian-synthetic-control-pymc
           - title: "Choosing the right counterfactual: ITS vs. synthetic control"
             notebook: interrupted-time-series-causalpy-vs-causalimpact
       - title: Geographical lift testing
@@ -44,6 +54,8 @@ groups:
             notebook: geolift-single-cell
           - title: Multi-cell geolift analysis
             notebook: multi-cell-geolift
+          - title: "Multi-arm geo lift with PyMC: up, down, and control"
+            notebook: up-down-control-geolift-pymc
       - title: Difference in Differences
         intro: |
           Analysis where the treatment effect is estimated as a difference between treatment conditions in the differences between pre-treatment to post treatment observations.
@@ -54,7 +66,7 @@ groups:
             notebook: difference-in-differences-pymc
           - title: Banking dataset with a `pymc` model
             notebook: difference-in-differences-banks-pymc
-          - title: Staggered Difference-in-Differences
+          - title: Staggered Difference-in-Differences with `pymc` models
             notebook: staggered-difference-in-differences-pymc
       - title: Interrupted Time Series
         intro: |
@@ -62,11 +74,11 @@ groups:
         cards:
           - title: Interrupted Time Series (ITS) with scikit-learn models
             notebook: interrupted-time-series-sklearn
-          - title: Bayesian Interrupted Time Series
+          - title: Interrupted Time Series (ITS) with `pymc` models
             notebook: interrupted-time-series-pymc
           - title: Interrupted Time Series for fixed-period interventions
             notebook: interrupted-time-series-post-intervention-analysis
-          - title: Excess deaths due to COVID-19
+          - title: Estimating excess deaths during COVID-19 in England and Wales
             notebook: interrupted-time-series-covid
           - title: Lift Testing with Interrupted Time Series
             notebook: interrupted-time-series-lift-test

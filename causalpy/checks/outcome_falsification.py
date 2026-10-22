@@ -45,7 +45,6 @@ from causalpy.experiments.diff_in_diff import DifferenceInDifferences
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.experiments.piecewise_its import PiecewiseITS
 from causalpy.pipeline import PipelineContext
-from causalpy.pymc_models import PyMCModel
 
 logger = logging.getLogger(__name__)
 
@@ -159,9 +158,10 @@ class OutcomeFalsification:
                 f"OutcomeFalsification requires formula-based experiments "
                 f"(InterruptedTimeSeries, DifferenceInDifferences, PiecewiseITS)."
             )
-        if not isinstance(experiment.model, PyMCModel):
+        if not experiment._model_backend.supports_idata:
             raise TypeError(
-                f"OutcomeFalsification requires a PyMC model for posterior "
+                f"OutcomeFalsification requires a PyMC model or another backend "
+                f"with InferenceData for posterior "
                 f"extraction, but got {type(experiment.model).__name__}. "
                 f"Use a PyMC model (e.g. cp.pymc_models.LinearRegression)."
             )
@@ -192,7 +192,7 @@ class OutcomeFalsification:
         if "model" in kwargs and kwargs["model"] is not None:
             kwargs["model"] = clone_model(kwargs["model"])
 
-        return method(context.data, **kwargs)
+        return method(context.data, **kwargs).fit()
 
     @staticmethod
     def _extract_effect_stats(
@@ -216,9 +216,20 @@ class OutcomeFalsification:
             effect row) should fail loudly rather than silently
             returning the wrong row.
         """
-        summary = experiment.effect_summary(
-            alpha=alpha, direction="two-sided", cumulative=False, relative=False
-        )
+        if isinstance(experiment, DifferenceInDifferences):
+            summary = experiment.effect_summary(alpha=alpha, direction="two-sided")
+        elif isinstance(experiment, (InterruptedTimeSeries, PiecewiseITS)):
+            summary = experiment.effect_summary(
+                alpha=alpha,
+                direction="two-sided",
+                cumulative=False,
+                relative=False,
+            )
+        else:
+            raise TypeError(
+                "OutcomeFalsification supports InterruptedTimeSeries, "
+                "DifferenceInDifferences, and PiecewiseITS experiments."
+            )
         table = summary.table
 
         required_columns = {"mean", "hdi_lower", "hdi_upper"}

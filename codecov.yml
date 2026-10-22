@@ -24,4 +24,6 @@ coverage:
         base: auto
         paths:
           - "causalpy/"
+          # Match the production-only scope of Makefile's test-patch-cov gate; project coverage above still includes tests.
+          - "!causalpy/tests/"
         only_pulls: true

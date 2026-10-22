@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import arviz as az
 import numpy as np
 import pandas as pd
 import pymc as pm
@@ -46,6 +45,8 @@ sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2, "progressbar"
 class FixedMuRegression(PyMCModel):
     """Deterministic response-scale ``mu`` for g-computation estimand tests."""
 
+    supports_prior_predictive = False
+
     def __init__(
         self,
         column_weights: dict[int, float],
@@ -63,11 +64,19 @@ class FixedMuRegression(PyMCModel):
         with self:
             pass
 
+    def sample_posterior(self, **kwargs: object) -> xr.DataTree:
+        """Record a fitted posterior without sampling an empty graph."""
+        self.idata = xr.DataTree()
+        self.idata["posterior"] = xr.Dataset(
+            {"beta": xr.DataArray([[[1.0]]], dims=["chain", "draw", "coeffs"])}
+        )
+        return self.idata
+
     def fit(
         self, X: xr.DataArray, y: xr.DataArray, coords: dict | None = None
-    ) -> az.InferenceData:
-        self.idata = az.from_dict(posterior={"beta": np.array([[[1.0]]])})
-        return self.idata
+    ) -> xr.DataTree:
+        self.build(X, y, coords)
+        return self.sample_posterior()
 
     def predict(
         self,
@@ -76,7 +85,7 @@ class FixedMuRegression(PyMCModel):
         out_of_sample: bool | None = False,
         var_names: list[str] | tuple[str, ...] | None = None,
         **kwargs,
-    ):
+    ) -> xr.DataTree:
         if self.idata is None:
             raise RuntimeError("Model has not been fit")
         x_arr = np.asarray(X)
@@ -103,7 +112,9 @@ class FixedMuRegression(PyMCModel):
                 "treated_units": ["unit_0"],
             },
         )
-        return az.InferenceData(posterior_predictive=xr.Dataset({"mu": mu_da}))
+        prediction = xr.DataTree()
+        prediction["posterior_predictive"] = xr.Dataset({"mu": mu_da})
+        return prediction
 
 
 def _expected_log_link_att(
@@ -479,7 +490,7 @@ def test_poisson_did_att_exact_g_computation():
         time_variable_name="t",
         group_variable_name="group",
         model=model,
-    )
+    ).fit()
     treated_post = df.query("group == 1 and post_treatment")
     (x_factual,) = build_design_matrices(
         [result._x_design_info],
@@ -493,8 +504,8 @@ def test_poisson_did_att_exact_g_computation():
     expected = _expected_log_link_att(
         np.asarray(x_factual), np.asarray(x_counter), weights
     )
-    assert float(result.causal_impact.mean()) == pytest.approx(expected)
-    assert "coeffs" not in result.causal_impact.dims
+    assert float(result.result.causal_impact.mean()) == pytest.approx(expected)
+    assert "coeffs" not in result.result.causal_impact.dims
 
 
 def test_poisson_prepostnegd_att_exact_g_computation():
@@ -524,7 +535,7 @@ def test_poisson_prepostnegd_att_exact_g_computation():
         group_variable_name="group",
         pretreatment_variable_name="pre",
         model=model,
-    )
+    ).fit()
     treated = df[df["group"] == 1]
     x_treated_df = treated.assign(group=1)
     x_control_df = treated.assign(group=0)
@@ -537,7 +548,7 @@ def test_poisson_prepostnegd_att_exact_g_computation():
     expected = _expected_log_link_att(
         np.asarray(x_treated), np.asarray(x_control), weights
     )
-    assert float(result.causal_impact.mean()) == pytest.approx(expected)
+    assert float(result.result.causal_impact.mean()) == pytest.approx(expected)
     mu_calls = [call for call in model.predict_calls if call["var_names"] == ["mu"]]
     assert len(mu_calls) == 2
     assert mu_calls[0]["n_obs"] == len(treated)
@@ -558,7 +569,7 @@ def test_gaussian_did_att_matches_interaction_coefficient(mock_pymc_sample, rng)
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(sample_kwargs={**sample_kwargs, "random_seed": 31}),
-    )
+    ).fit()
     interaction_label = next(
         label for label in result.labels if result._is_treatment_interaction(label)
     )
@@ -566,7 +577,7 @@ def test_gaussian_did_att_matches_interaction_coefficient(mock_pymc_sample, rng)
         coeffs=interaction_label
     )
     np.testing.assert_allclose(
-        result.causal_impact.transpose("chain", "draw", "treated_units").values,
+        result.result.causal_impact.transpose("chain", "draw", "treated_units").values,
         beta_interaction.transpose("chain", "draw", "treated_units").values,
         rtol=1e-6,
     )
@@ -585,10 +596,10 @@ def test_gaussian_prepostnegd_att_matches_group_coefficient(mock_pymc_sample):
         group_variable_name="group",
         pretreatment_variable_name="pre",
         model=LinearRegression(sample_kwargs={**sample_kwargs, "random_seed": 33}),
-    )
+    ).fit()
     beta_group = result.model.idata.posterior["beta"].sel(coeffs="C(group)[T.1]")
     np.testing.assert_allclose(
-        result.causal_impact.transpose("chain", "draw", "treated_units").values,
+        result.result.causal_impact.transpose("chain", "draw", "treated_units").values,
         beta_group.transpose("chain", "draw", "treated_units").values,
         rtol=1e-6,
     )
@@ -610,7 +621,7 @@ def test_ols_did_coefficient_equals_prediction_contrast(rng):
         time_variable_name="t",
         group_variable_name="group",
         model=SkLinearRegression(fit_intercept=False),
-    )
+    ).fit()
     treated_post = df.query("group == 1 and post_treatment").drop(columns=["y"])
     (x_factual,) = build_design_matrices(
         [result._x_design_info], treated_post, return_type="dataframe"
@@ -623,7 +634,7 @@ def test_ols_did_coefficient_equals_prediction_contrast(rng):
         result._model_backend.predict(np.asarray(x_factual))
         - result._model_backend.predict(np.asarray(x_counter))
     )
-    assert float(result.causal_impact) == pytest.approx(float(contrast))
+    assert float(result.result.causal_impact) == pytest.approx(float(contrast))
 
 
 def test_poisson_glr_did_att_matches_posterior_beta_contrast(mock_pymc_sample, rng):
@@ -640,7 +651,7 @@ def test_poisson_glr_did_att_matches_posterior_beta_contrast(mock_pymc_sample, r
         time_variable_name="t",
         group_variable_name="group",
         model=_poisson_glr(random_seed=41),
-    )
+    ).fit()
     treated_post = df.query("group == 1 and post_treatment").drop(columns=["y"])
     (x_factual,) = build_design_matrices(
         [result._x_design_info], treated_post, return_type="dataframe"
@@ -657,7 +668,7 @@ def test_poisson_glr_did_att_matches_posterior_beta_contrast(mock_pymc_sample, r
     eta_counter = np.einsum("cdut,rt->cdur", beta.values, np.asarray(x_counter))
     expected = (np.exp(eta_factual) - np.exp(eta_counter)).mean(axis=-1)
     np.testing.assert_allclose(
-        result.causal_impact.transpose("chain", "draw", "treated_units").values,
+        result.result.causal_impact.transpose("chain", "draw", "treated_units").values,
         expected,
         rtol=1e-6,
     )
@@ -672,10 +683,10 @@ def test_poisson_did_att_uses_g_computation(mock_pymc_sample, rng):
         time_variable_name="t",
         group_variable_name="group",
         model=_poisson_glr(random_seed=11),
-    )
-    assert isinstance(result.causal_impact, xr.DataArray)
-    assert "coeffs" not in result.causal_impact.dims
-    assert {"chain", "draw"}.issubset(set(result.causal_impact.dims))
+    ).fit()
+    assert isinstance(result.result.causal_impact, xr.DataArray)
+    assert "coeffs" not in result.result.causal_impact.dims
+    assert {"chain", "draw"}.issubset(set(result.result.causal_impact.dims))
 
 
 def test_poisson_prepostnegd_att_uses_g_computation(mock_pymc_sample, rng):
@@ -689,9 +700,9 @@ def test_poisson_prepostnegd_att_uses_g_computation(mock_pymc_sample, rng):
         group_variable_name="group",
         pretreatment_variable_name="pre",
         model=_poisson_glr(random_seed=13),
-    )
-    assert isinstance(result.causal_impact, xr.DataArray)
-    assert "coeffs" not in result.causal_impact.dims
+    ).fit()
+    assert isinstance(result.result.causal_impact, xr.DataArray)
+    assert "coeffs" not in result.result.causal_impact.dims
 
 
 def test_poisson_rd_plot_without_score(mock_pymc_sample, rng, rd_data):
@@ -704,11 +715,11 @@ def test_poisson_rd_plot_without_score(mock_pymc_sample, rng, rd_data):
         treatment_threshold=0.5,
         epsilon=0.001,
         model=_poisson_glr(random_seed=17),
-    )
-    assert result.score is None
+    ).fit()
+    assert result.result.score is None
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
-    assert "Bayesian fit on data" in ax.get_title()
+    assert ax.get_title() == ""
 
 
 def test_poisson_rk_plot_without_score(mock_pymc_sample, rng):
@@ -721,11 +732,11 @@ def test_poisson_rk_plot_without_score(mock_pymc_sample, rng):
         formula=f"y ~ 1 + x + I((x-{kink})*treated)",
         kink_point=kink,
         model=_poisson_glr(random_seed=19),
-    )
-    assert result.score is None
+    ).fit()
+    assert result.result.score is None
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
-    assert "Bayesian fit on all data" in ax.get_title()
+    assert "Change in gradient" in ax.get_title()
 
 
 def test_poisson_its_plot_without_score(mock_pymc_sample, rng):
@@ -738,11 +749,11 @@ def test_poisson_its_plot_without_score(mock_pymc_sample, rng):
         pd.to_datetime("2020-07-01"),
         formula="y ~ 1 + t",
         model=_poisson_glr(random_seed=31),
-    )
-    assert result.score is None
+    ).fit()
+    assert result.result.score is None
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
-    assert "Pre-intervention Bayesian fit" in ax[0].get_title()
+    assert ax[0].get_title() == ""
 
 
 def test_sc_score_title_without_score():
@@ -750,7 +761,7 @@ def test_sc_score_title_without_score():
     experiment = object.__new__(cp.SyntheticControl)
     experiment.score = None
     experiment.treated_units = ["actual"]
-    assert experiment._get_score_title("actual") == "Pre-intervention Bayesian fit"
+    assert experiment._get_score_title(None, "actual") == ""
 
 
 def test_poisson_piecewise_its_smoke(mock_pymc_sample, rng):
@@ -781,8 +792,8 @@ def test_poisson_piecewise_its_smoke(mock_pymc_sample, rng):
                 ),
             },
         ),
-    )
-    assert result.score is None
+    ).fit()
+    assert result.result.score is None
     fig, ax = result.plot()
     assert isinstance(fig, plt.Figure)
 
@@ -804,7 +815,7 @@ def test_poisson_staggered_did_smoke(mock_pymc_sample, rng):
         treated_variable_name="treated",
         treatment_time_variable_name="treatment_time",
         model=_poisson_glr(random_seed=29),
-    )
+    ).fit()
     assert isinstance(result, cp.StaggeredDifferenceInDifferences)
 
 
@@ -953,8 +964,8 @@ def test_glr_print_coefficients_reads_sigma_variable(capsys, rng, mock_pymc_samp
     )
     model.fit(X, y, _single_unit_coords(n_obs))
     idata = model.idata.copy()
-    posterior = idata.posterior.rename({"y_hat_sigma": "sigma"})
-    idata.posterior = posterior
+    posterior = idata["posterior"].to_dataset().rename({"y_hat_sigma": "sigma"})
+    idata["posterior"] = posterior
     model.idata = idata
     model.print_coefficients(["x0", "x1"])
     assert "y_hat_sigma" in capsys.readouterr().out
@@ -975,7 +986,7 @@ def test_glr_print_coefficients_requires_sigma_variable(rng, mock_pymc_sample):
     )
     model.fit(X, y, _single_unit_coords(n_obs))
     idata = model.idata.copy()
-    idata.posterior = idata.posterior.drop_vars(["y_hat_sigma"], errors="ignore")
+    idata["posterior"] = idata["posterior"].to_dataset().drop_vars(["y_hat_sigma"])
     model.idata = idata
     with pytest.raises(ValueError, match="Neither 'sigma' nor 'y_hat_sigma'"):
         model.print_coefficients(["x0", "x1"])

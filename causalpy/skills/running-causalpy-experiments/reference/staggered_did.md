@@ -16,7 +16,6 @@ cp.StaggeredDifferenceInDifferences(
     model=None,
     event_window=None,
     reference_event_time=-1,
-    **kwargs
 )
 ```
 
@@ -66,7 +65,7 @@ result = cp.StaggeredDifferenceInDifferences(
     treated_variable_name="treated",
     treatment_time_variable_name="treatment_time",
     model=cp.pymc_models.LinearRegression(sample_kwargs={"target_accept": 0.95}),
-)
+).fit()
 
 result.summary()
 summary = result.effect_summary(direction="increase")

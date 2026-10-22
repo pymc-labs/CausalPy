@@ -13,9 +13,14 @@
 #   limitations under the License.
 """Compatibility tests for optional pymc-marketing components in pymc_models."""
 
+import numpy as np
 import pytensor.tensor as pt
+import pytest
+import xarray as xr
 
 from causalpy.pymc_models import (
+    BayesianBasisExpansionTimeSeries,
+    StateSpaceTimeSeries,
     _call_seasonality_component_apply,
     _call_time_component_apply,
     _uses_xtensor_api,
@@ -113,3 +118,72 @@ def test_uses_xtensor_api_falls_back_to_code_names(monkeypatch):
     monkeypatch.setattr("causalpy.pymc_models.inspect.getsource", raise_oserror)
 
     assert _uses_xtensor_api(fake_transform)
+
+
+def test_state_space_defaults_use_level_trend(monkeypatch):
+    """State-space defaults dispatch to the supported pymc-extras trend component."""
+    statespace = pytest.importorskip("pymc_extras.statespace")
+    structural = statespace.structural
+    calls: list[int] = []
+
+    class FakeLevelTrend:
+        def __init__(self, *, order: int) -> None:
+            calls.append(order)
+
+    monkeypatch.setattr(structural, "LevelTrend", FakeLevelTrend)
+
+    model = StateSpaceTimeSeries(level_order=1)
+
+    trend = model._get_trend_component()
+
+    assert type(trend) is FakeLevelTrend
+    assert calls == [model.level_order]
+    assert model._get_trend_component() is trend
+
+
+def test_pymc_marketing_v1_defaults_build_and_sample():
+    """Default BSTS components work with the PyMC-6-compatible marketing branch."""
+    pytest.importorskip(
+        "pymc_marketing", reason="pymc-marketing optional for default BSTS components"
+    )
+    from pymc_marketing.mmm import LinearTrend, YearlyFourier
+    from pymc_marketing.mmm.transformers import geometric_adstock, logistic_saturation
+
+    dates = np.arange(
+        np.datetime64("2020-01-01"),
+        np.datetime64("2020-01-15"),
+        dtype="datetime64[D]",
+    )
+    X = xr.DataArray(
+        np.empty((len(dates), 0)),
+        dims=["obs_ind", "coeffs"],
+        coords={"obs_ind": dates, "coeffs": []},
+    )
+    y = xr.DataArray(
+        np.linspace(0.0, 1.0, len(dates))[:, None],
+        dims=["obs_ind", "treated_units"],
+        coords={"obs_ind": dates, "treated_units": ["unit_0"]},
+    )
+    model = BayesianBasisExpansionTimeSeries(
+        n_order=1,
+        n_changepoints_trend=2,
+        sample_kwargs={
+            "chains": 1,
+            "cores": 1,
+            "draws": 10,
+            "tune": 10,
+            "progressbar": False,
+            "random_seed": 42,
+        },
+    )
+
+    assert isinstance(model._get_trend_component(), LinearTrend)
+    assert isinstance(model._get_seasonality_component(), YearlyFourier)
+    assert callable(geometric_adstock)
+    assert callable(logistic_saturation)
+
+    idata = model.fit(X, y)
+
+    assert {"trend_component", "season_component"} <= set(idata.posterior.data_vars)
+    assert idata.posterior.sizes["chain"] == 1
+    assert idata.posterior.sizes["draw"] == 10

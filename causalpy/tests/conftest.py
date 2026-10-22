@@ -42,11 +42,10 @@ from causalpy.data.simulate_data import (
 
 # Try to use PyMC's testing helpers if available; otherwise, fall back to no-op fixtures
 try:  # pragma: no cover - conditional import for compatibility across PyMC versions
-    from pymc.testing import mock_sample, mock_sample_setup_and_teardown  # type: ignore
+    from pymc.testing import mock_sample_setup_and_teardown  # type: ignore
 
     _HAVE_PYMC_TESTING = True
 except Exception:  # pragma: no cover
-    mock_sample = None  # type: ignore
     mock_sample_setup_and_teardown = None  # type: ignore
     _HAVE_PYMC_TESTING = False
 
@@ -59,37 +58,38 @@ def rng() -> np.random.Generator:
 
 
 if _HAVE_PYMC_TESTING:
-    mock_pymc_sample = pytest.fixture(mock_sample_setup_and_teardown, scope="session")
+    mock_pymc_sample = pytest.fixture(mock_sample_setup_and_teardown, scope="module")
 else:
 
-    @pytest.fixture(scope="session")
+    @pytest.fixture(scope="module")
     def mock_pymc_sample():  # pragma: no cover - compatibility no-op
         # No-op fixture to satisfy tests when PyMC testing helpers are unavailable
         yield
 
 
+def _set_genuine_pymc_sampling(monkeypatch):
+    """Restore all globals replaced by PyMC's mock sampler."""
+    import pymc as pm
+    from pymc.distributions.continuous import Flat, HalfFlat
+    from pymc.sampling.mcmc import sample
+
+    monkeypatch.setattr(pm, "sample", sample)
+    monkeypatch.setattr(pm, "Flat", Flat)
+    monkeypatch.setattr(pm, "HalfFlat", HalfFlat)
+
+
+@pytest.fixture(scope="module")
+def real_pymc_sampling(mock_pymc_sample):
+    """Use genuine sampling and prior classes throughout one module."""
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _set_genuine_pymc_sampling(monkeypatch)
+        yield
+
+
 @pytest.fixture
-def real_pymc_sample(mock_pymc_sample):
-    """Restore real ``pm.sample`` for a single test under the session mock."""
-    import pymc as pm
-    import pymc.sampling.mcmc
-
-    patched = pm.sample
-    pm.sample = pymc.sampling.mcmc.sample
-    yield
-    pm.sample = patched
-
-
-@pytest.fixture(autouse=True)
-def mock_sample_for_doctest(request):
-    if not request.config.getoption("--doctest-modules", default=False):
-        return
-
-    if not _HAVE_PYMC_TESTING or mock_sample is None:
-        return
-    import pymc as pm
-
-    pm.sample = mock_sample
+def genuine_pymc_sampling(monkeypatch):
+    """Restore genuine PyMC sampling and prior classes for one test."""
+    _set_genuine_pymc_sampling(monkeypatch)
 
 
 @pytest.fixture(scope="session")

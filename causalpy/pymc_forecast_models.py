@@ -42,17 +42,7 @@ causalpy[forecast]``).
 
 Notes
 -----
-Causal impact is computed from upstream ``mu`` / ``mu_future``, which CausalPy
-interprets as the conditional expected outcome in observed outcome units:
-parameter and latent uncertainty, excluding observation-level noise. Models
-using a link function must therefore apply the inverse link before passing the
-latent to ``pymc_forecast.predict``. Passing a link-scale linear predictor
-would make CausalPy subtract quantities in incompatible units and is not
-supported. The draw-level posterior predictive of the observed variable is
-reported separately as ``y_hat``. One posterior subsample is drawn at fit time
-and shared by every predictive call, so draw *i* of the pre-period fit and draw
-*i* of the counterfactual come from the same parameter draw (upstream
-``posterior=`` passthrough).
+Causal impact uses upstream ``expected_observation`` / ``expected_observation_future`` when provided: the conditional expected outcome in observed units, including parameter and latent uncertainty but excluding observation-level noise. Otherwise CausalPy uses ``mu`` / ``mu_future`` under the model author's responsibility that this latent is already an outcome-scale expectation. Models with a link function should pass ``expected_observation=inverse_link(latent)`` to ``pymc_forecast.predict``. The adapter never infers or inverts links. The draw-level posterior predictive of the observed variable is reported separately as ``y_hat``. One posterior subsample is drawn at fit time and shared by every predictive call, so draw *i* of the pre-period fit and draw *i* of the counterfactual come from the same parameter draw (upstream ``posterior=`` passthrough).
 
 ``StatespaceForecaster`` models are rejected for now: their upstream outputs
 carry no separate noise-free latent, so the impact convention above cannot be
@@ -61,22 +51,22 @@ as `pymc-forecast#50 <https://github.com/pymc-labs/pymc-forecast/issues/50>`_.
 
 Inference diagnostics: :attr:`PyMCForecastModel.idata` holds the thinned,
 draw-coherent posterior subsample used for prediction; the *full* fit result
-(e.g. the complete NUTS ``InferenceData`` with sample stats) is exposed as
+(e.g. the complete NUTS ``DataTree`` with sample stats) is exposed as
 :attr:`PyMCForecastModel.fit_idata`.
 """
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any
 
 import arviz as az
 import numpy as np
 import pandas as pd
 import xarray as xr
-from arviz import r2_score
 
 from causalpy.constants import HDI_PROB
-from causalpy.utils import round_num
+from causalpy.utils import _bayesian_r2_score, round_num
 
 __all__ = ["PyMCForecastModel"]
 
@@ -89,7 +79,7 @@ def _import_pymc_forecast():
         raise ImportError(
             "PyMCForecastModel requires the optional dependency 'pymc-forecast'. "
             "Install it with `pip install causalpy[forecast]` or "
-            "`pip install 'pymc-forecast[extras]>=0.2'`."
+            "`pip install 'pymc-forecast[extras]>=0.3,<0.4'`."
         ) from err
     return pymc_forecast
 
@@ -100,10 +90,7 @@ class PyMCForecastModel:
     Parameters
     ----------
     model_fn : callable or pymc_forecast.ForecastingModel
-        The forecasting model body ``(Horizon, covariates) -> None`` or a
-        :class:`pymc_forecast.ForecastingModel` instance. Priors flow through
-        this object (pymc-extras ``Prior``), preserving the transparent-prior
-        ethos.
+        The upstream 0.3 forecasting model body ``(covariates, data=None) -> None`` or a :class:`pymc_forecast.ForecastingModel` instance. Priors flow through this object (pymc-extras ``Prior``), preserving the transparent-prior ethos.
     forecaster : type, optional
         The ``pymc_forecast`` forecaster class used to fit the model. Defaults
         to :class:`pymc_forecast.HMCForecaster` (NUTS), matching CausalPy's
@@ -133,17 +120,15 @@ class PyMCForecastModel:
     >>> import pymc as pm
     >>> import pytensor.tensor as pt
     >>> import pymc_forecast  # doctest: +SKIP
-    >>> def local_level(h, covariates):  # doctest: +SKIP
-    ...     drift = pymc_forecast.time_series(
-    ...         h, "drift", lambda name, dims: pm.Normal(name, 0, 0.1, dims=dims)
-    ...     )
+    >>> def local_level(covariates, data=None):  # doctest: +SKIP
+    ...     h = pymc_forecast.Horizon.from_data(covariates, data)
+    ...     drift = pymc_forecast.innovations(h, "drift", pm.Normal.dist(0, 0.1))
     ...     sigma = pm.HalfNormal("sigma", 1)
     ...     pymc_forecast.predict(
     ...         h,
-    ...         lambda name, mu, dims, observed: pm.Normal(
-    ...             name, mu, sigma, dims=dims, observed=observed
-    ...         ),
+    ...         pm.Normal.dist(0, sigma),
     ...         pt.cumsum(drift),
+    ...         expected_observation=pt.cumsum(drift),
     ...     )
     >>> result = cp.InterruptedTimeSeries(  # doctest: +SKIP
     ...     df,
@@ -191,7 +176,7 @@ class PyMCForecastModel:
             random_seed=self.random_seed,
             **self.forecaster_kwargs,
         )
-        self.idata: az.InferenceData | None = None
+        self.idata: xr.DataTree | None = None
         self._posterior: xr.Dataset | None = None
         self._treated_units: list[str] = ["unit_0"]
         self._has_covariates = False
@@ -213,11 +198,11 @@ class PyMCForecastModel:
         )
 
     @property
-    def fit_idata(self) -> az.InferenceData:
+    def fit_idata(self) -> xr.DataTree:
         """Full inference result of the underlying forecaster fit.
 
         For the default NUTS backend this is the complete MCMC
-        ``InferenceData`` (posterior, sample stats, diagnostics) — as
+        ``DataTree`` (posterior, sample stats, diagnostics) — as
         distinct from :attr:`idata`, which holds the thinned posterior
         subsample shared by every predictive call for draw coherence.
 
@@ -226,7 +211,7 @@ class PyMCForecastModel:
         RuntimeError
             If the model has not been fit yet.
         AttributeError
-            If the forecaster does not retain an ``InferenceData`` fit
+            If the forecaster does not retain a ``DataTree`` fit
             result (e.g. variational fits, which expose ``.approx`` /
             ``.losses`` on ``.forecaster`` instead).
         """
@@ -236,7 +221,7 @@ class PyMCForecastModel:
         if fit_result is None:
             raise AttributeError(
                 f"{type(self.forecaster).__name__} does not retain a full "
-                "InferenceData fit result; inspect the forecaster directly "
+                "DataTree fit result; inspect the forecaster directly "
                 "via `.forecaster` (e.g. `.approx` / `.losses` for "
                 "variational fits)."
             )
@@ -246,7 +231,7 @@ class PyMCForecastModel:
 
     def fit(
         self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None = None
-    ) -> az.InferenceData:
+    ) -> xr.DataTree:
         """Construct and fit the forecasting model on the pre-period.
 
         Parameters
@@ -276,10 +261,16 @@ class PyMCForecastModel:
         # one posterior subsample, shared by every predictive call: draw i of
         # the pre-period fit and draw i of the counterfactual come from the
         # same parameter draw
-        self._posterior = self.forecaster.draw_posterior(
-            self.num_samples, random_seed=self.random_seed
+        posterior_context = (
+            self.forecaster.model
+            if isinstance(self.forecaster, self._pf.Forecaster)
+            else nullcontext()
         )
-        self.idata = az.InferenceData(posterior=self._posterior)
+        with posterior_context:
+            self._posterior = self.forecaster.draw_posterior(
+                self.num_samples, random_seed=self.random_seed
+            )
+        self.idata = xr.DataTree.from_dict({"posterior": self._posterior})
         return self.idata
 
     @staticmethod
@@ -296,8 +287,7 @@ class PyMCForecastModel:
         X: xr.DataArray,
         coords: dict[str, Any] | None = None,
         out_of_sample: bool | None = False,
-        **kwargs: Any,
-    ) -> az.InferenceData:
+    ) -> xr.DataTree:
         """Predict in-sample (pre-period) or forecast the counterfactual.
 
         Parameters
@@ -312,16 +302,11 @@ class PyMCForecastModel:
             Not used, kept for API compatibility.
         out_of_sample : bool, default False
             ``True`` draws the post-period counterfactual ("as if untreated").
-        **kwargs
-            Reserved for forward-compatibility; not consumed.
 
         Returns
         -------
-        az.InferenceData
-            With a ``posterior_predictive`` group holding draw-level ``mu``
-            (the noise-free latent predictor) and ``y_hat`` (the posterior
-            predictive of the observed variable) with dims
-            ``(chain, draw, obs_ind, treated_units)``.
+        xr.DataTree
+            With a ``posterior_predictive`` group holding draw-level ``mu`` (the outcome-scale expectation, preferring the explicit upstream expected observation) and ``y_hat`` (the posterior predictive of the observed variable) with dims ``(chain, draw, obs_ind, treated_units)``.
         """
         if self._posterior is None:
             raise RuntimeError("Model has not been fit yet.")
@@ -339,25 +324,31 @@ class PyMCForecastModel:
                     random_seed=self.random_seed,
                 )
             samples = self._pf.prediction_samples(result)
-            y_hat = samples[self._pf.FORECAST_VAR]
-            mu = samples[self._pf.MU_FORECAST_VAR]
+            observation_var = self._pf.FORECAST_VAR
+            latent_var = self._pf.MU_FORECAST_VAR
+            expected_var = self._pf.EXPECTED_OBSERVATION_FORECAST_VAR
             time_dim = self._pf.FUTURE_DIM
         else:
             result = self.forecaster.predict_in_sample(
                 posterior=self._posterior, random_seed=self.random_seed
             )
             samples = self._pf.prediction_samples(result)
-            y_hat = samples[self._pf.OBS_VAR]
-            mu = samples[self._pf.MU_VAR]
+            observation_var = self._pf.OBS_VAR
+            latent_var = self._pf.MU_VAR
+            expected_var = self._pf.EXPECTED_OBSERVATION_VAR
             time_dim = self._pf.TIME_DIM
+        y_hat = samples[observation_var]
+        # Normalize upstream prediction semantics once at this adapter seam.
+        # Without an explicit expectation, the author must supply response-scale mu.
+        mu = samples[expected_var if expected_var in samples else latent_var]
         mu = mu.rename({time_dim: "obs_ind"})
         y_hat = y_hat.rename({time_dim: "obs_ind"})
         return self._to_inference_data(mu, y_hat, X.obs_ind.values)
 
     def _to_inference_data(
         self, mu: xr.DataArray, y_hat: xr.DataArray, obs_ind: np.ndarray
-    ) -> az.InferenceData:
-        """Rename schema dims onto CausalPy coords and wrap as InferenceData."""
+    ) -> xr.DataTree:
+        """Rename schema dims onto CausalPy coords and wrap as a DataTree."""
 
         def normalize(samples: xr.DataArray) -> xr.DataArray:
             if "series" in samples.dims:
@@ -369,7 +360,7 @@ class PyMCForecastModel:
             )
 
         ds = xr.Dataset({"mu": normalize(mu), "y_hat": normalize(y_hat)})
-        return az.InferenceData(posterior_predictive=ds)
+        return xr.DataTree.from_dict({"posterior_predictive": ds})
 
     # -- scoring and impact ------------------------------------------------
 
@@ -396,7 +387,7 @@ class PyMCForecastModel:
         for i, unit in enumerate(mu.coords["treated_units"].values):
             unit_mu = mu.sel(treated_units=unit).transpose("sample", "obs_ind")
             unit_y = y.sel(treated_units=unit).data
-            unit_score = r2_score(unit_y, unit_mu.data)
+            unit_score = _bayesian_r2_score(unit_y, unit_mu.data)
             scores[f"unit_{i}_r2"] = unit_score["r2"]
             scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
         return pd.Series(scores)

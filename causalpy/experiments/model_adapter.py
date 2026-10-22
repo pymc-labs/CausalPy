@@ -11,25 +11,124 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Backend adapters for experiment model fitting and prediction."""
+"""Backend adapters for model fitting, prediction, and coefficients."""
 
 from __future__ import annotations
 
 import copy
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 import arviz as az
 import numpy as np
+import pandas as pd
 import xarray as xr
 from sklearn.base import RegressorMixin, clone
+from sklearn.metrics import r2_score
 
+from causalpy._arviz_compat import hdi_bounds
+from causalpy.constants import HDI_PROB
+from causalpy.custom_exceptions import (
+    GroupNotSampledException,
+    PriorPredictiveNotSupportedException,
+)
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import create_causalpy_compatible_class
+from causalpy.utils import _design_fingerprint, round_num
 
 BackendKind = Literal["pymc", "sklearn", "pymc-forecast"]
+
+
+class _SamplingDiagnostics(TypedDict):
+    """Canonical fit-diagnostic values, without a sampling-quality verdict."""
+
+    divergences: int | None
+    max_rhat: float | None
+    min_bulk_ess: float | None
+    diagnostics_status: Literal["available", "partial", "unavailable"]
+    diagnostics_reason: str | None
+
+
+def _sampling_diagnostics(idata: xr.DataTree | None) -> _SamplingDiagnostics:
+    """Summarize every posterior variable in a full inference result."""
+    result: _SamplingDiagnostics = {
+        "divergences": None,
+        "max_rhat": None,
+        "min_bulk_ess": None,
+        "diagnostics_status": "unavailable",
+        "diagnostics_reason": None,
+    }
+    reasons: list[str] = []
+    if idata is None:
+        result["diagnostics_reason"] = "Full fit inference data are unavailable."
+        return result
+
+    if "sample_stats" in idata and "diverging" in idata["sample_stats"]:
+        divergent = np.asarray(idata["sample_stats"]["diverging"].values)
+        if divergent.size and np.isin(divergent, [0, 1]).all():
+            result["divergences"] = int(divergent.sum())
+        else:
+            reasons.append("Divergence indicators are empty or invalid.")
+    else:
+        reasons.append("Divergence indicators are unavailable.")
+
+    if "posterior" not in idata or not idata["posterior"].data_vars:
+        reasons.append("Posterior draws are unavailable.")
+    else:
+        posterior = idata["posterior"].to_dataset()
+        for key, diagnostic, method, minimum_chains, reducer in (
+            ("max_rhat", az.rhat, "rank", 2, np.max),
+            ("min_bulk_ess", az.ess, "bulk", 1, np.min),
+        ):
+            values: list[float] = []
+            incomplete: list[str] = []
+            for name, variable in posterior.data_vars.items():
+                if (
+                    variable.sizes.get("chain", 0) < minimum_chains
+                    or variable.sizes.get("draw", 0) < 4
+                ):
+                    incomplete.append(str(name))
+                    continue
+                try:
+                    estimates = np.asarray(diagnostic(variable, method=method).values)
+                except (
+                    ValueError,
+                    TypeError,
+                    KeyError,
+                    AttributeError,
+                    ZeroDivisionError,
+                ):
+                    incomplete.append(str(name))
+                    continue
+                finite = estimates[np.isfinite(estimates)]
+                if finite.size:
+                    values.append(float(reducer(finite)))
+                if finite.size != estimates.size or not estimates.size:
+                    incomplete.append(str(name))
+            if values:
+                if key == "max_rhat":
+                    result["max_rhat"] = float(reducer(values))
+                else:
+                    result["min_bulk_ess"] = float(reducer(values))
+            if incomplete:
+                reasons.append(
+                    f"{key} is unavailable or non-finite for: {', '.join(incomplete)}."
+                )
+
+    available = sum(
+        result[key] is not None for key in ("divergences", "max_rhat", "min_bulk_ess")
+    )
+    result["diagnostics_status"] = (
+        "available"
+        if available == 3 and not reasons
+        else "partial"
+        if available
+        else "unavailable"
+    )
+    result["diagnostics_reason"] = " ".join(reasons) or None
+    return result
 
 
 def build_coords(
@@ -61,9 +160,9 @@ def build_coords(
     }
 
 
-def _extract_mu(prediction: Any) -> xr.DataArray:
-    """Pull response-scale ``mu`` out of a Bayesian prediction container."""
-    mu = prediction.posterior_predictive["mu"].transpose(
+def _extract_mu(prediction: xr.DataTree) -> xr.DataArray:
+    """Extract response-scale ``mu`` from a DataTree prediction container."""
+    mu = prediction["posterior_predictive"]["mu"].transpose(
         "chain", "draw", "obs_ind", "treated_units"
     )
     # Enforce the canonical container: stray non-dim coords (e.g. the
@@ -93,6 +192,90 @@ def _sklearn_y(y: Any) -> np.ndarray:
     return arr
 
 
+def _canonical_pymc_coefficients(posterior: xr.DataTree) -> xr.DataArray:
+    """Normalize supported PyMC coefficient variables to the canonical contract."""
+    variables = posterior if isinstance(posterior, xr.Dataset) else posterior.dataset
+    coefficient_names = ("beta", "b", "beta_z")
+    coefficient_name = next(
+        (name for name in coefficient_names if name in variables), None
+    )
+    if coefficient_name is None:
+        raise ValueError(
+            "PyMC posterior must expose one of 'beta', 'b', or 'beta_z' "
+            "as design-matrix coefficients."
+        )
+
+    coefficients = variables[coefficient_name]
+    label_dims = ("coeffs", "covariates", "instruments", "outcome_coeffs")
+    label_dim = next((dim for dim in label_dims if dim in coefficients.dims), None)
+    if label_dim is None:
+        raise ValueError(
+            "PyMC coefficient draws must include one of "
+            f"{label_dims!r}, got dims={coefficients.dims!r}."
+        )
+    if label_dim != "coeffs":
+        coefficients = coefficients.rename({label_dim: "coeffs"})
+
+    required_dims = {"chain", "draw", "coeffs"}
+    if not required_dims.issubset(coefficients.dims):
+        raise ValueError(
+            "PyMC coefficient draws must include dimensions "
+            f"{required_dims!r}, got dims={coefficients.dims!r}."
+        )
+    unexpected_dims = set(coefficients.dims) - required_dims - {"treated_units"}
+    if unexpected_dims:
+        raise ValueError(
+            "PyMC coefficient draws include unsupported dimensions "
+            f"{unexpected_dims!r}."
+        )
+
+    dims = ["chain", "draw", "coeffs"]
+    if "treated_units" in coefficients.dims:
+        dims.append("treated_units")
+    coefficients = coefficients.transpose(*dims).rename("coefficients")
+    return coefficients.drop_vars(
+        [name for name in coefficients.coords if name not in coefficients.dims]
+    )
+
+
+def _print_coefficients(
+    coefficients: xr.DataArray,
+    labels: list[str],
+    round_to: int | None,
+) -> None:
+    """Print a coefficient container without dispatching on backend type."""
+    coefficients = coefficients.sel(coeffs=labels)
+    with_uncertainty = coefficients.sizes["chain"] * coefficients.sizes["draw"] > 1
+    treated_units: list[Any] = (
+        list(coefficients.coords["treated_units"].values)
+        if "treated_units" in coefficients.dims
+        else [None]
+    )
+    max_label_length = max(len(name) for name in labels)
+
+    print("Model coefficients:")
+    for unit in treated_units:
+        if len(treated_units) > 1:
+            print(f"\nTreated unit: {unit}")
+        unit_coefficients = (
+            coefficients.sel(treated_units=unit) if unit is not None else coefficients
+        )
+        for name in labels:
+            samples = unit_coefficients.sel(coeffs=name)
+            formatted_name = f"{name:<{max_label_length}}"
+            mean = round_num(float(samples.mean()), round_to)
+            if with_uncertainty:
+                lower, upper = hdi_bounds(samples, prob=HDI_PROB)
+                value = (
+                    f"{mean}, {HDI_PROB * 100:.0f}% HDI "
+                    f"[{round_num(float(lower), round_to)}, "
+                    f"{round_num(float(upper), round_to)}]"
+                )
+            else:
+                value = mean
+            print(f"  {formatted_name}  {value}")
+
+
 class ModelAdapter(ABC):
     """Experiment-agnostic wrapper around a CausalPy statistical backend."""
 
@@ -117,9 +300,32 @@ class ModelAdapter(ABC):
         return self.kind == "sklearn"
 
     @property
+    def supports_idata(self) -> bool:
+        """Whether the backend exposes an inference-result DataTree."""
+        return self.kind in ("pymc", "pymc-forecast")
+
+    @property
     @abstractmethod
-    def idata(self) -> az.InferenceData:
-        """Return InferenceData for Bayesian models."""
+    def idata(self) -> xr.DataTree | None:
+        """Return a fitted inference-result DataTree when supported, otherwise ``None``."""
+
+    def sampling_diagnostics(self) -> _SamplingDiagnostics:
+        """Return full-fit sampling diagnostics in a backend-independent dict.
+
+        Missing diagnostics remain ``None``. Extrema include every posterior variable, including latent states; non-finite or unavailable components are explained in ``diagnostics_reason`` and never imply a well-sampled fit.
+        """
+        return _sampling_diagnostics(self.idata)
+
+    def require_idata(self) -> xr.DataTree:
+        """Return fitted inference-result DataTree or raise an explicit capability error."""
+        if not self.supports_idata:
+            raise TypeError(
+                f"{type(self).__name__} does not support InferenceData/DataTree results."
+            )
+        idata = self.idata
+        if idata is None:
+            raise RuntimeError("Model has not been fit yet.")
+        return idata
 
     @abstractmethod
     def fit(
@@ -146,8 +352,9 @@ class ModelAdapter(ABC):
         self,
         X: Any,
         *,
+        coords: dict[str, Any] | None = None,
         out_of_sample: bool = False,
-        **kwargs: Any,
+        group: Literal["prior", "posterior"] = "posterior",
     ) -> xr.DataArray:
         """Return expected outcomes with canonical prediction dimensions.
 
@@ -161,10 +368,15 @@ class ModelAdapter(ABC):
         ----------
         X : array-like or xarray.DataArray
             Predictor matrix for which to generate predictions.
+        coords : dict, optional
+            Coordinate metadata for Bayesian backends.
         out_of_sample : bool, default False
             Whether predictions are out-of-sample. Used by PyMC backends only.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group to condition forward sampling on. Bayesian backends
+            reproduce the prediction machinery using the requested group's
+            draws; point-estimate backends only ever have the (implicit)
+            posterior atom.
 
         Returns
         -------
@@ -173,9 +385,91 @@ class ModelAdapter(ABC):
             "treated_units")``.
         """
 
+    @property
+    def is_built(self) -> bool:
+        """Whether the backend's model graph / design state is constructed."""
+        return False
+
+    @property
+    def has_posterior(self) -> bool:
+        """Whether posterior draws are available on this backend."""
+        return False
+
+    @property
+    def has_prior(self) -> bool:
+        """Whether prior draws are available on this backend."""
+        return False
+
+    @property
+    def supports_prior_predictive(self) -> bool:
+        """Whether this backend can sample a prior predictive phase."""
+        return False
+
+    def build(
+        self,
+        X: Any,
+        y: Any,
+        *,
+        coords: dict[str, Any] | None = None,
+    ) -> None:
+        """Construct the backend's graph/design state without sampling.
+
+        Idempotent by skipping when already built. Bayesian backends merge
+        data-driven priors and construct the PyMC graph; sklearn backends
+        record the design matrices for :meth:`sample_posterior`.
+
+        Parameters
+        ----------
+        X : array-like or xarray.DataArray or mapping
+            Predictor matrix in the backend's expected form.
+        y : array-like or xarray.DataArray or mapping
+            Outcome vector or matrix in the backend's expected form.
+        coords : dict, optional
+            Coordinate metadata for PyMC models. Ignored by sklearn backends.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support deferred construction."
+        )
+
+    def sample_prior_predictive(self, **kwargs: Any) -> None:
+        """Sample the prior predictive phase.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Forwarded to the backend's prior-predictive sampler, overriding
+            the model's stored ``prior_sample_kwargs`` for this call only.
+
+        Raises
+        ------
+        PriorPredictiveNotSupportedException
+            For backends without a prior predictive phase.
+        """
+        raise PriorPredictiveNotSupportedException(
+            f"The {type(self.model).__name__} backend does not support prior "
+            "predictive sampling."
+        )
+
     @abstractmethod
-    def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
-        """Score predictions against observed outcomes.
+    def sample_posterior(self, **kwargs: Any) -> Any:
+        """Sample the posterior phase with backend-appropriate conventions.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Forwarded to the backend's posterior sampler, overriding the
+            model's stored ``sample_kwargs`` for this call only.
+        """
+
+    @abstractmethod
+    def score(
+        self, X: Any, y: Any, *, coords: dict[str, Any] | None = None
+    ) -> pd.Series | None:
+        """Return per-unit :math:`R^2` scores in the canonical container.
+
+        Every backend returns a :class:`pandas.Series` with one
+        ``unit_{i}_r2`` entry per treated unit. Backends with posterior
+        dispersion also include ``unit_{i}_r2_std`` entries.
 
         Parameters
         ----------
@@ -183,15 +477,34 @@ class ModelAdapter(ABC):
             Predictor matrix.
         y : array-like or xarray.DataArray
             Observed outcomes.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
+        coords : dict, optional
+            Coordinate metadata for Bayesian backends.
+
+        Returns
+        -------
+        pd.Series
+            Per-treated-unit :math:`R^2` values and optional posterior
+            standard deviations.
         """
 
     @abstractmethod
-    def coefficients(self) -> np.ndarray:
-        """Return point estimates of model coefficients."""
+    def coefficients(
+        self, *, group: Literal["prior", "posterior"] = "posterior"
+    ) -> xr.DataArray:
+        """Return model coefficients with canonical coefficient dimensions.
 
-    @abstractmethod
+        Every supported backend returns an :class:`xarray.DataArray` with
+        dimensions ``("chain", "draw", "coeffs")`` and an optional trailing
+        ``"treated_units"`` dimension. Point-estimate backends return singleton
+        ``chain`` and ``draw`` dimensions.
+
+        Parameters
+        ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group to read coefficient variables from. ``"prior"`` is how
+            coefficient-estimand experiments compute prior-phase effects.
+        """
+
     def print_coefficients(
         self, labels: list[str], round_to: int | None = None
     ) -> None:
@@ -204,6 +517,7 @@ class ModelAdapter(ABC):
         round_to : int, optional
             Number of significant figures to round to.
         """
+        _print_coefficients(self.coefficients(), labels, round_to)
 
 
 class PyMCModelAdapter(ModelAdapter):
@@ -229,9 +543,86 @@ class PyMCModelAdapter(ModelAdapter):
         return "pymc"
 
     @property
-    def idata(self) -> az.InferenceData:
-        """Return the model's InferenceData object."""
+    def idata(self) -> xr.DataTree | None:
+        """Return the model's DataTree when fitted."""
         return self._model.idata
+
+    @property
+    def is_built(self) -> bool:
+        """Whether the PyMC graph has been constructed."""
+        return bool(getattr(self._model, "_built", False))
+
+    @property
+    def has_posterior(self) -> bool:
+        """Whether posterior draws are available."""
+        idata = self._model.idata
+        return idata is not None and "posterior" in idata.children
+
+    @property
+    def has_prior(self) -> bool:
+        """Whether prior draws are available."""
+        idata = self._model.idata
+        return idata is not None and "prior" in idata.children
+
+    @property
+    def supports_prior_predictive(self) -> bool:
+        """Whether the wrapped PyMC model exposes a prior predictive phase."""
+        return bool(getattr(self._model, "supports_prior_predictive", True))
+
+    def build(
+        self,
+        X: Any,
+        y: Any,
+        *,
+        coords: dict[str, Any] | None = None,
+    ) -> None:
+        """Merge priors and construct the PyMC graph without sampling.
+
+        Idempotent: skips when the graph already exists. Mapping inputs are
+        routed to the model's mapping-aware build path.
+
+        Parameters
+        ----------
+        X : xarray.DataArray or dict of str to xarray.DataArray
+            Predictor matrix or mapping inputs.
+        y : xarray.DataArray or dict of str to xarray.DataArray
+            Outcome matrix or mapping inputs.
+        coords : dict, optional
+            Coordinate metadata for the PyMC model.
+        """
+        if isinstance(X, dict) and isinstance(y, dict):
+            self._model.build_mapping(X=X, y=y, coords=coords)
+            return
+        if isinstance(X, dict) or isinstance(y, dict):
+            raise TypeError("X and y must either both be mappings or both be arrays")
+        self._model.build(X=X, y=y, coords=coords)
+
+    def sample_prior_predictive(self, **kwargs: Any) -> None:
+        """Sample the prior predictive phase on the built graph.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Forwarded to the wrapped model, overriding its stored
+            ``prior_sample_kwargs`` for this call only.
+        """
+        if not self.supports_prior_predictive:
+            raise PriorPredictiveNotSupportedException(
+                f"The {type(self._model).__name__} backend does not support "
+                "prior predictive sampling."
+            )
+        self._model.sample_prior_predictive(**kwargs)
+
+    def sample_posterior(self, **kwargs: Any) -> xr.DataTree:
+        """Sample the posterior phase on the built graph.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Forwarded to the wrapped model, overriding its stored
+            ``sample_kwargs`` for this call only.
+        """
+        return self._model.sample_posterior(**kwargs)
 
     def fit(
         self,
@@ -239,8 +630,8 @@ class PyMCModelAdapter(ModelAdapter):
         y: Any,
         *,
         coords: dict[str, Any] | None = None,
-    ) -> az.InferenceData:
-        """Fit the PyMC model.
+    ) -> xr.DataTree:
+        """Fit the PyMC model (build + prior phase + posterior phase).
 
         Parameters
         ----------
@@ -251,14 +642,20 @@ class PyMCModelAdapter(ModelAdapter):
         coords : dict, optional
             Coordinate metadata for the PyMC model.
         """
+        if isinstance(X, dict) and isinstance(y, dict):
+            return self._model.fit_mapping(X=X, y=y, coords=coords)
+        if isinstance(X, dict) or isinstance(y, dict):
+            raise TypeError("X and y must either both be mappings or both be arrays")
         return self._model.fit(X=X, y=y, coords=coords)
 
     def predict(
         self,
         X: Any,
         *,
+        coords: dict[str, Any] | None = None,
         out_of_sample: bool = False,
-        **kwargs: Any,
+        group: Literal["prior", "posterior"] = "posterior",
+        var_names: list[str] | tuple[str, ...] | None = None,
     ) -> xr.DataArray:
         """Predict expected outcomes using the PyMC model.
 
@@ -266,21 +663,42 @@ class PyMCModelAdapter(ModelAdapter):
         ----------
         X : array-like or xarray.DataArray
             Predictor matrix for which to generate predictions.
+        coords : dict, optional
+            Coordinate metadata for the PyMC model.
         out_of_sample : bool, default False
             Whether predictions are out-of-sample.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group to condition forward sampling on. The returned draws
+            always land in the ``posterior_predictive`` group (PyMC's output
+            location regardless of conditioning group) but carry the
+            conditioning group's ``chain``/``draw`` sizes.
+        var_names : list of str, optional
+            Posterior variables to draw. ``None`` keeps the model default,
+            which includes response-scale ``mu``.
 
         Returns
         -------
         xr.DataArray
-            Posterior draws of ``mu`` with canonical prediction dimensions.
-        """
-        return _extract_mu(
-            self._model.predict(X=X, out_of_sample=out_of_sample, **kwargs)
-        )
+            Forward draws of ``mu`` with canonical prediction dimensions.
 
-    def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
+        Notes
+        -----
+        Reading ``posterior_predictive`` here is correct for prior-conditioned
+        output too; do not "fix" it to read ``idata[group]``.
+        """
+        predict_kwargs: dict[str, Any] = {
+            "X": X,
+            "coords": coords,
+            "out_of_sample": out_of_sample,
+            "group": group,
+        }
+        if var_names is not None:
+            predict_kwargs["var_names"] = var_names
+        return _extract_mu(self._model.predict(**predict_kwargs))
+
+    def score(
+        self, X: Any, y: Any, *, coords: dict[str, Any] | None = None
+    ) -> pd.Series | None:
         """Score predictions from the PyMC model.
 
         Parameters
@@ -289,31 +707,30 @@ class PyMCModelAdapter(ModelAdapter):
             Predictor matrix.
         y : array-like or xarray.DataArray
             Observed outcomes.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
+        coords : dict, optional
+            Coordinate metadata for the PyMC model.
         """
-        return self._model.score(X=X, y=y, **kwargs)
+        return self._model.score(X=X, y=y, coords=coords)
 
-    def coefficients(self) -> np.ndarray:
-        """Return posterior mean coefficients."""
-        if self._model.idata is None:
-            raise RuntimeError("Model has not been fit yet.")
-        beta = self._model.idata.posterior["beta"]
-        return beta.mean(dim=["chain", "draw"]).values
-
-    def print_coefficients(
-        self, labels: list[str], round_to: int | None = None
-    ) -> None:
-        """Print PyMC model coefficients.
+    def coefficients(
+        self, *, group: Literal["prior", "posterior"] = "posterior"
+    ) -> xr.DataArray:
+        """Return coefficient draws from the requested group, canonically.
 
         Parameters
         ----------
-        labels : list of str
-            Coefficient names aligned with the fitted model.
-        round_to : int, optional
-            Number of significant figures to round to.
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group to read coefficient variables from. The prior group is
+            how coefficient-estimand experiments compute prior-phase effects.
         """
-        self._model.print_coefficients(labels, round_to)
+        idata = self._model.idata
+        if idata is None or group not in idata.children:
+            call = "fit()" if group == "posterior" else "sample_prior_predictive()"
+            raise GroupNotSampledException(
+                f"No {group!r} draws are available on this model. Call {call} first.",
+                group=group,
+            )
+        return _canonical_pymc_coefficients(idata.children[group])
 
 
 class SklearnModelAdapter(ModelAdapter):
@@ -327,7 +744,11 @@ class SklearnModelAdapter(ModelAdapter):
 
     def __init__(self, model: RegressorMixin) -> None:
         self._model = model
+        self._coeffs: np.ndarray | None = None
         self._treated_units: np.ndarray | None = None
+        self._fit_inputs: tuple[Any, Any] | None = None
+        self._fit_fingerprint: tuple | None = None
+        self._is_fitted: bool = False
 
     @property
     def model(self) -> RegressorMixin:
@@ -340,9 +761,89 @@ class SklearnModelAdapter(ModelAdapter):
         return "sklearn"
 
     @property
-    def idata(self) -> az.InferenceData:
-        """OLS models do not expose InferenceData."""
-        raise AttributeError("OLS models do not have idata.")
+    def idata(self) -> None:
+        """Return ``None`` because sklearn models have no inference-result DataTree."""
+        return None
+
+    @property
+    def is_built(self) -> bool:
+        """Whether design matrices have been recorded via :meth:`build`."""
+        return self._fit_inputs is not None
+
+    @property
+    def has_posterior(self) -> bool:
+        """Whether the sklearn model has been fitted."""
+        return self._is_fitted
+
+    def build(
+        self,
+        X: Any,
+        y: Any,
+        *,
+        coords: dict[str, Any] | None = None,
+    ) -> None:
+        """Record the design matrices for :meth:`sample_posterior`.
+
+        sklearn has no graph to construct; building only captures the fit
+        inputs. Idempotent by skipping when already recorded.
+
+        Parameters
+        ----------
+        X : array-like
+            Predictor matrix.
+        y : array-like
+            Outcome vector or matrix.
+        coords : dict, optional
+            Ignored for sklearn backends.
+        """
+        if self._fit_inputs is not None:
+            if _design_fingerprint(X, y) != self._fit_fingerprint:
+                raise RuntimeError(
+                    "This backend is already built with different inputs. "
+                    "Design matrices are recorded exactly once per instance; "
+                    "assign a fresh model instead of rebuilding."
+                )
+            return
+        self._fit_inputs = (X, y)
+        self._fit_fingerprint = _design_fingerprint(X, y)
+
+    def sample_prior_predictive(self, **kwargs: Any) -> None:
+        """Raise: point-estimate backends have no prior predictive phase.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Ignored; the capability error is raised unconditionally.
+        """
+        raise PriorPredictiveNotSupportedException(
+            f"The {type(self._model).__name__} backend does not support "
+            "prior predictive sampling."
+        )
+
+    def sample_posterior(self, **kwargs: Any) -> Any:
+        """Fit the sklearn model on the recorded design matrices.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Not supported by point-estimate backends; any override attempt
+            raises ``TypeError``.
+        """
+        if self._fit_inputs is None:
+            raise RuntimeError(
+                "Design matrices have not been recorded. Call build(X, y) — "
+                "or an experiment's build() / fit(), which auto-call it — "
+                "before sampling."
+            )
+        if kwargs:
+            raise TypeError(
+                "Point-estimate backends accept no sampling overrides; got "
+                f"{sorted(kwargs)!r}"
+            )
+        X, y = self._fit_inputs
+        result = self.fit(X=X, y=y)
+        self._is_fitted = True
+        return result
 
     def fit(
         self,
@@ -362,18 +863,26 @@ class SklearnModelAdapter(ModelAdapter):
         coords : dict, optional
             Ignored for sklearn backends.
         """
+        X_array = _sklearn_array(X)
+        if isinstance(X, xr.DataArray) and "coeffs" in X.coords:
+            self._coeffs = np.asarray(X.coords["coeffs"])
+        else:
+            self._coeffs = np.asarray([f"coeff_{i}" for i in range(X_array.shape[1])])
         if isinstance(y, xr.DataArray) and "treated_units" in y.coords:
             self._treated_units = np.asarray(y.coords["treated_units"])
         else:
             self._treated_units = None
-        return self._model.fit(X=_sklearn_array(X), y=_sklearn_y(y))
+        result = self._model.fit(X=X_array, y=_sklearn_y(y))
+        self._is_fitted = True
+        return result
 
     def predict(
         self,
         X: Any,
         *,
+        coords: dict[str, Any] | None = None,
         out_of_sample: bool = False,
-        **kwargs: Any,
+        group: Literal["prior", "posterior"] = "posterior",
     ) -> xr.DataArray:
         """Return point predictions as singleton posterior draws.
 
@@ -381,10 +890,14 @@ class SklearnModelAdapter(ModelAdapter):
         ----------
         X : array-like or xarray.DataArray
             Predictor matrix for which to generate predictions.
+        coords : dict, optional
+            Ignored for sklearn backends.
         out_of_sample : bool, default False
             Ignored for sklearn backends.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
+        group : {"prior", "posterior"}, default "posterior"
+            Only the implicit posterior atom exists on point-estimate
+            backends; requesting ``"prior"`` raises the group-not-sampled
+            error naming :meth:`sample_prior_predictive`.
 
         Returns
         -------
@@ -392,7 +905,15 @@ class SklearnModelAdapter(ModelAdapter):
             Point predictions with canonical prediction dimensions and
             singleton ``chain``/``draw`` dimensions.
         """
-        values = np.asarray(self._model.predict(X=_sklearn_array(X), **kwargs))
+        if group != "posterior":
+            raise GroupNotSampledException(
+                "No 'prior' draws are available on a point-estimate backend. "
+                "Call sample_prior_predictive() first — which itself raises "
+                "PriorPredictiveNotSupportedException for this backend — or "
+                "use a Bayesian model for prior checks.",
+                group=group,
+            )
+        values = np.asarray(self._model.predict(X=_sklearn_array(X)))
         if values.ndim == 1:
             values = values[:, None]
         if values.ndim != 2:
@@ -402,7 +923,7 @@ class SklearnModelAdapter(ModelAdapter):
             )
 
         obs_ind = (
-            np.asarray(X.coords["obs_ind"])
+            X.get_index("obs_ind")
             if isinstance(X, xr.DataArray) and "obs_ind" in X.coords
             else np.arange(values.shape[0])
         )
@@ -427,8 +948,17 @@ class SklearnModelAdapter(ModelAdapter):
             },
         )
 
-    def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
-        """Score predictions from the sklearn model.
+    def score(
+        self,
+        X: Any,
+        y: Any,
+        *,
+        coords: dict[str, Any] | None = None,
+        sample_weight: Any | None = None,
+        multioutput: Literal["raw_values"] = "raw_values",
+        force_finite: bool = True,
+    ) -> pd.Series:
+        """Return per-output :math:`R^2` scores from the sklearn model.
 
         Parameters
         ----------
@@ -436,28 +966,117 @@ class SklearnModelAdapter(ModelAdapter):
             Predictor matrix.
         y : array-like
             Observed outcomes.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
+        coords : dict, optional
+            Ignored for sklearn backends.
+        sample_weight : array-like, optional
+            Sample weights passed to :func:`sklearn.metrics.r2_score`.
+        multioutput : {"raw_values"}, default "raw_values"
+            The required aggregation mode. Per-unit scores require the raw
+            value for each output.
+        force_finite : bool, default True
+            Whether to replace non-finite scores for constant targets, passed to
+            :func:`sklearn.metrics.r2_score`.
+
+        Returns
+        -------
+        pd.Series
+            One ``unit_{i}_r2`` entry per output. Point estimates carry no
+            dispersion entries.
         """
-        return self._model.score(X=_sklearn_array(X), y=_sklearn_y(y), **kwargs)
+        if multioutput != "raw_values":
+            raise ValueError(
+                "SklearnModelAdapter.score() requires "
+                'multioutput="raw_values" for the canonical per-unit score contract.'
+            )
+        scores = np.atleast_1d(
+            r2_score(
+                _sklearn_y(y),
+                self._model.predict(X=_sklearn_array(X)),
+                sample_weight=sample_weight,
+                multioutput=multioutput,
+                force_finite=force_finite,
+            )
+        )
+        return pd.Series(
+            {f"unit_{i}_r2": float(score) for i, score in enumerate(scores)}
+        )
 
-    def coefficients(self) -> np.ndarray:
-        """Return fitted sklearn coefficients."""
-        return self._model.get_coeffs()
-
-    def print_coefficients(
-        self, labels: list[str], round_to: int | None = None
-    ) -> None:
-        """Print sklearn model coefficients.
+    def coefficients(
+        self, *, group: Literal["prior", "posterior"] = "posterior"
+    ) -> xr.DataArray:
+        """Return fitted sklearn coefficients as singleton posterior draws.
 
         Parameters
         ----------
-        labels : list of str
-            Coefficient names aligned with the fitted model.
-        round_to : int, optional
-            Number of significant figures to round to.
+        group : {"prior", "posterior"}, default "posterior"
+            Only the implicit posterior atom exists on point-estimate
+            backends; requesting ``"prior"`` raises the group-not-sampled
+            error naming :meth:`sample_prior_predictive`.
         """
-        self._model.print_coefficients(labels, round_to)
+        if group != "posterior":
+            raise GroupNotSampledException(
+                "No 'prior' draws are available on a point-estimate backend. "
+                "Call sample_prior_predictive() first — which itself raises "
+                "PriorPredictiveNotSupportedException for this backend.",
+                group=group,
+            )
+        if not self._is_fitted:
+            raise GroupNotSampledException(
+                "No posterior draws are available on this model. Call fit() first.",
+                group="posterior",
+            )
+        values = np.asarray(self._model.coef_)
+        n_coeffs = values.shape[-1]
+        coeffs = (
+            self._coeffs
+            if self._coeffs is not None
+            else np.asarray([f"coeff_{i}" for i in range(n_coeffs)])
+        )
+        if len(coeffs) != n_coeffs:
+            raise ValueError(
+                "Coefficient output does not match the predictors used for fit."
+            )
+
+        if values.ndim == 1:
+            if self._treated_units is None:
+                return xr.DataArray(
+                    values[None, None, :],
+                    dims=("chain", "draw", "coeffs"),
+                    coords={"chain": [0], "draw": [0], "coeffs": coeffs},
+                    name="coefficients",
+                )
+            if len(self._treated_units) != 1:
+                raise ValueError(
+                    "Coefficient output columns do not match the treated units "
+                    "used for fit."
+                )
+            values = values[None, :]
+        elif values.ndim != 2:
+            raise ValueError(
+                "Expected sklearn coefficients with shape (coeffs,) or "
+                f"(treated_units, coeffs), got {values.shape}."
+            )
+
+        treated_units = (
+            self._treated_units
+            if self._treated_units is not None
+            else np.asarray([f"unit_{i}" for i in range(values.shape[0])])
+        )
+        if len(treated_units) != values.shape[0]:
+            raise ValueError(
+                "Coefficient output rows do not match the treated units used for fit."
+            )
+        return xr.DataArray(
+            values.T[None, None, :, :],
+            dims=("chain", "draw", "coeffs", "treated_units"),
+            coords={
+                "chain": [0],
+                "draw": [0],
+                "coeffs": coeffs,
+                "treated_units": treated_units,
+            },
+            name="coefficients",
+        )
 
 
 class PyMCForecastAdapter(ModelAdapter):
@@ -476,6 +1095,8 @@ class PyMCForecastAdapter(ModelAdapter):
 
     def __init__(self, model: PyMCForecastModel) -> None:
         self._model = model
+        self._fit_inputs: tuple[Any, Any, dict[str, Any] | None] | None = None
+        self._fit_fingerprint: tuple | None = None
 
     @property
     def model(self) -> PyMCForecastModel:
@@ -488,11 +1109,101 @@ class PyMCForecastAdapter(ModelAdapter):
         return "pymc-forecast"
 
     @property
-    def idata(self) -> az.InferenceData:
-        """Return the model's InferenceData (posterior draws)."""
-        if self._model.idata is None:
-            raise RuntimeError("Model has not been fit yet.")
+    def idata(self) -> xr.DataTree | None:
+        """Return the model's DataTree when fitted."""
         return self._model.idata
+
+    def sampling_diagnostics(self) -> _SamplingDiagnostics:
+        """Use the complete fit result rather than the predictive subsample."""
+        try:
+            fit_idata = self._model.fit_idata
+        except (RuntimeError, AttributeError) as error:
+            result = _sampling_diagnostics(None)
+            result["diagnostics_reason"] = str(error)
+            return result
+        return _sampling_diagnostics(fit_idata)
+
+    @property
+    def is_built(self) -> bool:
+        """Whether fit inputs have been recorded via :meth:`build`."""
+        return self._fit_inputs is not None
+
+    @property
+    def has_posterior(self) -> bool:
+        """Whether posterior draws are available."""
+        idata = self._model.idata
+        return idata is not None and "posterior" in idata.children
+
+    def build(
+        self,
+        X: Any,
+        y: Any,
+        *,
+        coords: dict[str, Any] | None = None,
+    ) -> None:
+        """Record the fit inputs for :meth:`sample_posterior`.
+
+        The wrapped forecaster exposes no graph-construction step of its own,
+        so building only captures the inputs. Idempotent by skipping when
+        already recorded.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Design matrix with dims ``["obs_ind", "coeffs"]``.
+        y : xarray.DataArray
+            Outcome with dims ``["obs_ind", "treated_units"]``.
+        coords : dict, optional
+            Coordinate metadata; forwarded to :meth:`fit`.
+        """
+        if self._fit_inputs is not None:
+            if _design_fingerprint(X, y) != self._fit_fingerprint:
+                raise RuntimeError(
+                    "This backend is already built with different inputs. "
+                    "Fit inputs are recorded exactly once per instance; "
+                    "assign a fresh model instead of rebuilding."
+                )
+            return
+        self._fit_inputs = (X, y, coords)
+        self._fit_fingerprint = _design_fingerprint(X, y)
+
+    def sample_prior_predictive(self, **kwargs: Any) -> None:
+        """Raise: the forecaster exposes no prior-drawing path upstream.
+
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Ignored; the capability error is raised unconditionally.
+        """
+        raise PriorPredictiveNotSupportedException(
+            "The PyMCForecastModel backend does not support prior predictive "
+            "sampling; the installed pymc-forecast API exposes no prior draw "
+            "path."
+        )
+
+    def sample_posterior(self, **kwargs: Any) -> xr.DataTree:
+        """Fit the forecaster on the recorded inputs.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Not supported by the forecasting backend; any override attempt
+            raises ``TypeError``.
+        """
+        if self._fit_inputs is None:
+            raise RuntimeError(
+                "Fit inputs have not been recorded. Call build(X, y) — or an "
+                "experiment's build() / fit(), which auto-call it — before "
+                "sampling."
+            )
+        if kwargs:
+            raise TypeError(
+                "pymc-forecast backends accept no sampling overrides; got "
+                f"{sorted(kwargs)!r}"
+            )
+        X, y, coords = self._fit_inputs
+        return self._model.fit(X=X, y=y, coords=coords)
 
     def fit(
         self,
@@ -500,7 +1211,7 @@ class PyMCForecastAdapter(ModelAdapter):
         y: Any,
         *,
         coords: dict[str, Any] | None = None,
-    ) -> az.InferenceData:
+    ) -> xr.DataTree:
         """Fit the forecasting model on the pre-period.
 
         Parameters
@@ -519,8 +1230,9 @@ class PyMCForecastAdapter(ModelAdapter):
         self,
         X: Any,
         *,
+        coords: dict[str, Any] | None = None,
         out_of_sample: bool = False,
-        **kwargs: Any,
+        group: Literal["prior", "posterior"] = "posterior",
     ) -> xr.DataArray:
         """Predict in-sample or forecast the counterfactual.
 
@@ -528,22 +1240,36 @@ class PyMCForecastAdapter(ModelAdapter):
         ----------
         X : xarray.DataArray
             Design matrix for which to generate predictions.
+        coords : dict, optional
+            Coordinate metadata accepted by the forecasting backend but not
+            used by its forecasting implementation.
         out_of_sample : bool, default False
             ``True`` draws the post-period counterfactual via the model's
             forecasting path.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
+        group : {"prior", "posterior"}, default "posterior"
+            Only posterior draws exist on this backend; requesting
+            ``"prior"`` raises the group-not-sampled error naming
+            :meth:`sample_prior_predictive`.
 
         Returns
         -------
         xr.DataArray
             Posterior draws of ``mu`` with canonical prediction dimensions.
         """
+        if group != "posterior":
+            raise GroupNotSampledException(
+                "No 'prior' draws are available on a pymc-forecast backend. "
+                "Call sample_prior_predictive() first — which itself raises "
+                "PriorPredictiveNotSupportedException for this backend.",
+                group=group,
+            )
         return _extract_mu(
-            self._model.predict(X=X, out_of_sample=out_of_sample, **kwargs)
+            self._model.predict(X=X, coords=coords, out_of_sample=out_of_sample)
         )
 
-    def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
+    def score(
+        self, X: Any, y: Any, *, coords: dict[str, Any] | None = None
+    ) -> pd.Series:
         """Score in-sample predictions with the Bayesian :math:`R^2`.
 
         Parameters
@@ -552,13 +1278,22 @@ class PyMCForecastAdapter(ModelAdapter):
             Design matrix.
         y : xarray.DataArray
             Observed outcomes.
-        **kwargs
-            Additional keyword arguments forwarded to the underlying model.
+        coords : dict, optional
+            Coordinate metadata accepted by the forecasting backend but not
+            used by its scoring implementation.
         """
-        return self._model.score(X=X, y=y, **kwargs)
+        return self._model.score(X=X, y=y, coords=coords)
 
-    def coefficients(self) -> np.ndarray:
-        """Forecasting models have no design-matrix coefficients."""
+    def coefficients(
+        self, *, group: Literal["prior", "posterior"] = "posterior"
+    ) -> xr.DataArray:
+        """Forecasting models have no design-matrix coefficients.
+
+        Parameters
+        ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Ignored; no coefficient container exists on this backend.
+        """
         raise NotImplementedError(
             "pymc-forecast models do not expose design-matrix coefficients; "
             "inspect the fitted posterior via `.idata` instead."

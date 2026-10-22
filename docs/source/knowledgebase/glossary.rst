@@ -5,7 +5,7 @@ Glossary
    :sorted:
 
    ANCOVA
-      Analysis of covariance is a simple linear model, typically with one continuous predictor (the covariate) and a catgeorical variable (which may correspond to treatment or control group). In the context of this package, ANCOVA could be useful in pre-post treatment designs, either with or without random assignment. This is similar to the approach of difference in differences, but only applicable with a single pre and post treatment measure.
+      Analysis of covariance is a simple linear model, typically with one continuous predictor (the covariate) and a categorical variable (which may correspond to treatment or control group). In the context of this package, ANCOVA could be useful in pre-post treatment designs, either with or without random assignment. This is similar to the approach of difference in differences, but only applicable with a single pre and post treatment measure.
 
    Average treatment effect
    ATE
@@ -63,10 +63,10 @@ Glossary
 
    Instrumental Variable regression
    IV
-      A quasi-experimental design  to estimate a treatment effect where the is a risk of confounding between the treatment and the outcome due to endogeniety.
+      A quasi-experimental design  to estimate a treatment effect where the is a risk of confounding between the treatment and the outcome due to endogeneity.
 
    Endogenous Variable
-      An endogenous variable is a variable in a regression equation such that the variable is correlated with the error term of the equation i.e. correlated with the outcome variable (in the system). This is a problem for OLS regression estimation techniques because endogeniety violates the assumptions of the Gauss Markov theorem.
+      An endogenous variable is a variable in a regression equation such that the variable is correlated with the error term of the equation i.e. correlated with the outcome variable (in the system). This is a problem for OLS regression estimation techniques because endogeneity violates the assumptions of the Gauss Markov theorem.
 
    Effect decay
       In interrupted time series analysis with temporary interventions, effect decay refers to the reduction in treatment effect magnitude over time after the intervention ends. Decay patterns can be exponential (rapid initial decline), linear (steady decline), or step (sudden drop to zero). Analyzing decay helps understand how long intervention effects persist and whether they fade gradually or disappear abruptly.

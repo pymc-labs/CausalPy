@@ -40,7 +40,6 @@ from causalpy.experiments.regression_kink import RegressionKink
 from causalpy.experiments.staggered_did import StaggeredDifferenceInDifferences
 from causalpy.experiments.synthetic_control import SyntheticControl
 from causalpy.pipeline import PipelineContext
-from causalpy.pymc_models import PyMCModel
 
 logger = logging.getLogger(__name__)
 
@@ -100,9 +99,9 @@ class PriorSensitivity:
         experiment : BaseExperiment
             Candidate experiment to validate.
         """
-        if not isinstance(experiment.model, PyMCModel):
+        if not experiment._model_backend.supports_idata:
             raise TypeError(
-                "PriorSensitivity requires a Bayesian (PyMC) model. "
+                "PriorSensitivity requires a Bayesian backend with InferenceData. "
                 f"Got {type(experiment.model).__name__}."
             )
 
@@ -140,7 +139,7 @@ class PriorSensitivity:
             model = clone_model(alt["model"])
             logger.info("PriorSensitivity: fitting with '%s'", name)
 
-            alt_experiment = method(context.data, model=model, **base_kwargs)
+            alt_experiment = method(context.data, model=model, **base_kwargs).fit()
 
             try:
                 summary = alt_experiment.effect_summary()
