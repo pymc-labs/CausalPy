@@ -21,15 +21,22 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
-from patsy import ModelDesc, build_design_matrices, dmatrices
+from patsy import ModelDesc, build_design_matrices
 from sklearn.base import RegressorMixin
+
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
-from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
+from causalpy.plot_utils import (
+    _PosteriorPlotStyle,
+    format_r2_score,
+    has_posterior_draws,
+    plot_posterior_over_x,
+)
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rd
 from causalpy.utils import (
@@ -73,6 +80,12 @@ class RegressionDiscontinuity(BaseExperiment):
         ``bandwidth`` if ``bandwidth`` is finite.
     **kwargs
         Additional keyword arguments forwarded to :class:`BaseExperiment`.
+
+    Notes
+    -----
+    **Estimate extraction**
+
+    After fitting the regression on the selected bandwidth, the class predicts the conditional expectation immediately below the threshold with ``treated=0`` and immediately above it with ``treated=1``. ``discontinuity_at_threshold`` is the upper prediction minus the lower prediction, evaluated at ``threshold ± epsilon``. This is a local prediction contrast, not a population-standardized effect.
 
     Examples
     --------
@@ -155,7 +168,7 @@ class RegressionDiscontinuity(BaseExperiment):
                 msg = f"Only {len(self.fit_data)} datapoints in the dataset."
             warnings.warn(msg, UserWarning, stacklevel=2)
 
-        y, X = dmatrices(self.formula, self.fit_data)
+        y, X = build_formula_matrices(self.formula, self.fit_data)
 
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -220,19 +233,10 @@ class RegressionDiscontinuity(BaseExperiment):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], self.x_discon)
-        self.pred_discon = self.model.predict(X=np.asarray(new_x))
-
-        # ******** THIS IS SUBOPTIMAL AT THE MOMENT ************************************
-        if self._model_backend.is_bayesian:
-            self.discontinuity_at_threshold = (
-                self.pred_discon["posterior_predictive"].sel(obs_ind=1)["mu"]
-                - self.pred_discon["posterior_predictive"].sel(obs_ind=0)["mu"]
-            )
-        else:
-            self.discontinuity_at_threshold = np.squeeze(
-                self.pred_discon[1]
-            ) - np.squeeze(self.pred_discon[0])
-        # ******************************************************************************
+        self.pred_discon = self._model_backend.predict(X=np.asarray(new_x))
+        self.discontinuity_at_threshold = self.pred_discon.isel(
+            obs_ind=1, treated_units=0
+        ) - self.pred_discon.isel(obs_ind=0, treated_units=0)
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -298,9 +302,12 @@ class RegressionDiscontinuity(BaseExperiment):
         print(f"Donut hole: {self.donut_hole}")
         print(f"Observations used for fit: {len(self.fit_data)}")
         print("\nResults:")
-        print(
-            f"Discontinuity at threshold = {convert_to_string(self.discontinuity_at_threshold)}"
+        discontinuity = (
+            self.discontinuity_at_threshold
+            if has_posterior_draws(self.discontinuity_at_threshold)
+            else _as_scalar(self.discontinuity_at_threshold)
         )
+        print(f"Discontinuity at threshold = {convert_to_string(discontinuity)}")
         print("\n")
         self.print_coefficients(round_to)
 
@@ -385,7 +392,7 @@ class RegressionDiscontinuity(BaseExperiment):
             figsize=figsize,
         )
 
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,
@@ -402,22 +409,23 @@ class RegressionDiscontinuity(BaseExperiment):
         round_to : int, optional
             Number of decimals used to round results. Defaults to 2. Use ``None``
             to return raw numbers.
-        hdi_prob : float, optional
+        ci_prob : float, optional
             Probability mass of the highest density interval drawn around the
             posterior predictive band, and the central credible interval
             reported in the figure title for the discontinuity at threshold.
-            Must be in ``(0, 1]``. Defaults to
-            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+            Must be in ``(0, 1]``. Ignored for point-estimate models. Defaults
+            to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        kind : {"ribbon", "histogram", "spaghetti"}, optional
+            How posterior uncertainty is rendered. Defaults to ``"ribbon"``.
+        ci_kind : {"hdi", "eti"}, optional
+            Credible interval type when ``kind="ribbon"``. Defaults to ``"hdi"``.
+        num_samples : int, optional
+            Number of posterior draws when ``kind="spaghetti"``. Defaults to 50.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
-        style: _PosteriorPlotStyle = {
-            "ci_prob": ci_prob,
-            "kind": kind,
-            "ci_kind": ci_kind,
-            "num_samples": num_samples,
-        }
+        with_uncertainty = has_posterior_draws(self.pred)
         fig, ax = plt.subplots(figsize=figsize)
 
         # Plot data: use two layers only when there are excluded observations
@@ -441,109 +449,47 @@ class RegressionDiscontinuity(BaseExperiment):
         )
 
         # Plot model fit to data
-        plot_posterior_over_x(
-            self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].mu.isel(treated_units=0),
-            ax=ax,
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-            label="Posterior mean",
-        )
+        if with_uncertainty:
+            style: _PosteriorPlotStyle = {
+                "ci_prob": ci_prob,
+                "kind": kind,
+                "ci_kind": ci_kind,
+                "num_samples": num_samples,
+            }
+            plot_posterior_over_x(
+                self.x_pred[self.running_variable_name],
+                self.pred.isel(treated_units=0),
+                ax=ax,
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+                label="Posterior mean",
+            )
+        else:
+            ax.plot(
+                self.x_pred[self.running_variable_name],
+                self.pred.isel(chain=0, draw=0, treated_units=0),
+                "k",
+                markersize=10,
+                label="model fit",
+            )
 
         # create strings to compose title
-        title_info = f"{round_num(self.score['unit_0_r2'], round_to)} (std = {round_num(self.score['unit_0_r2_std'], round_to)})"
-        r2 = f"Bayesian $R^2$ on fit data = {title_info}"
-        percentiles = self.discontinuity_at_threshold.quantile(
-            [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
-        ).values
-        ci = (
-            rf"$CI_{{{ci_prob * 100:.0f}\%}}$"
-            + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
-        )
-        discon = f"""
+        r2 = format_r2_score(self.score, round_to=round_to, context="on fit data")
+        if with_uncertainty:
+            percentiles = self.discontinuity_at_threshold.quantile(
+                [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
+            ).values
+            ci = (
+                rf"$CI_{{{ci_prob * 100:.0f}\%}}$"
+                + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
+            )
+            discon = f"""
             Discontinuity at threshold = {round_num(self.discontinuity_at_threshold.mean(), round_to)},
             """
-        ax.set(title=r2 + "\n" + discon + ci)
-
-        # Treatment threshold line
-        ax.axvline(
-            x=self.treatment_threshold,
-            ls="-",
-            lw=3,
-            color="r",
-            label="treatment threshold",
-        )
-
-        # Add donut hole boundary lines if donut_hole > 0
-        if self.donut_hole > 0:
-            ax.axvline(
-                x=self.treatment_threshold - self.donut_hole,
-                ls="--",
-                lw=2,
-                color="orange",
-                label="donut boundary",
-            )
-            ax.axvline(
-                x=self.treatment_threshold + self.donut_hole,
-                ls="--",
-                lw=2,
-                color="orange",
-            )
-
-        ax.legend(fontsize=LEGEND_FONT_SIZE)
-        return (fig, ax)
-
-    def _ols_plot(
-        self,
-        round_to: int | None = None,
-        figsize: tuple[float, float] | None = None,
-        **kwargs: Any,
-    ) -> tuple[plt.Figure, plt.Axes]:
-        """Generate plot for regression discontinuity designs.
-
-        Parameters
-        ----------
-        round_to : int, optional
-            Number of decimals used to round results.
-        figsize : tuple of (float, float), optional
-            Width and height of the figure in inches. Defaults to ``None``
-            (use matplotlib's default).
-        """
-        fig, ax = plt.subplots(figsize=figsize)
-
-        # Plot data: use two layers only when there are excluded observations
-        has_exclusion = len(self.fit_data) < len(self.data)
-        if has_exclusion:
-            sns.scatterplot(
-                self.data,
-                x=self.running_variable_name,
-                y=self.outcome_variable_name,
-                color="lightgray",
-                ax=ax,
-                label="excluded data",
-            )
-        sns.scatterplot(
-            self.fit_data,
-            x=self.running_variable_name,
-            y=self.outcome_variable_name,
-            color="k",
-            ax=ax,
-            label="fit data" if has_exclusion else "data",
-        )
-
-        # Plot model fit to data
-        ax.plot(
-            self.x_pred[self.running_variable_name],
-            self.pred,
-            "k",
-            markersize=10,
-            label="model fit",
-        )
-
-        # create strings to compose title
-        r2 = f"$R^2$ on fit data = {round_num(_as_scalar(self.score), round_to)}"
-        discon = f"Discontinuity at threshold = {round_num(self.discontinuity_at_threshold, round_to)}"
-        ax.set(title=r2 + "\n" + discon)
+            ax.set(title=r2 + "\n" + discon + ci)
+        else:
+            discon = f"Discontinuity at threshold = {round_num(_as_scalar(self.discontinuity_at_threshold), round_to)}"
+            ax.set(title=r2 + "\n" + discon)
 
         # Treatment threshold line
         ax.axvline(

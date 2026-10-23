@@ -21,10 +21,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
-from patsy import PatsyError, dmatrices
+from patsy import PatsyError
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 from causalpy.custom_exceptions import DataException
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.pymc_models import PropensityScore
 from causalpy.reporting import EffectSummary
 
@@ -51,6 +52,12 @@ class InversePropensityWeighting(BaseExperiment):
         A PyMC model. Defaults to PropensityScore.
     **kwargs
         Additional keyword arguments forwarded to :class:`BaseExperiment`.
+
+    Notes
+    -----
+    **Estimate extraction**
+
+    Fitting produces posterior propensity-score draws. ``get_ate()`` post-processes one draw at a time: ``"raw"`` and ``"robust"`` contrast inverse-probability-weighted mean outcomes for the treated and control potential outcomes, ``"overlap"`` contrasts overlap-weighted means for the overlap population, and ``"doubly_robust"`` augments inverse-probability weighting with separate OLS outcome regressions before averaging over all observations.
 
     Examples
     --------
@@ -105,7 +112,7 @@ class InversePropensityWeighting(BaseExperiment):
         for use with doubly-robust outcome modelling.
         """
         try:
-            t, X = dmatrices(self.formula, self.data)
+            t, X = build_formula_matrices(self.formula, self.data)
         except PatsyError as err:
             raise DataException(
                 f"Unable to evaluate propensity formula: {err}"
@@ -564,7 +571,7 @@ class InversePropensityWeighting(BaseExperiment):
         ----------
         idata : az.InferenceData | None, optional
             ArviZ InferenceData with posterior propensity score samples.
-            If ``None``, uses ``self.model.idata``.
+            If ``None``, uses the fitted model backend's InferenceData.
         method : str | None, optional
             Weighting scheme to apply.  One of ``'robust'``, ``'raw'``,
             ``'overlap'``, or ``'doubly_robust'``.  If ``None``, falls back
@@ -582,7 +589,7 @@ class InversePropensityWeighting(BaseExperiment):
             The matplotlib Figure and a list of three Axes objects.
         """
         if idata is None:
-            idata = self.model.idata
+            idata = self._model_backend.require_idata()
         if method is None:
             method = self.weighting_scheme
 
@@ -767,7 +774,7 @@ class InversePropensityWeighting(BaseExperiment):
             matrix labels) to check for balance.
         idata : az.InferenceData | None, optional
             ArviZ InferenceData containing posterior propensity score samples.
-            If ``None``, uses ``self.model.idata``.
+            If ``None``, uses the fitted model backend's InferenceData.
         weighting_scheme : str | None, optional
             Weighting scheme to apply.  One of ``'raw'``, ``'robust'``, or
             ``'overlap'``.  If ``None``, falls back to
@@ -780,7 +787,7 @@ class InversePropensityWeighting(BaseExperiment):
             the left, weighted ECDF on the right).
         """
         if idata is None:
-            idata = self.model.idata
+            idata = self._model_backend.require_idata()
         if weighting_scheme is None:
             weighting_scheme = self.weighting_scheme
 

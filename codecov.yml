@@ -17,3 +17,11 @@ coverage:
         if_ci_failed: error #success, failure, error, ignore
         informational: false
         only_pulls: false
+    patch:
+      default:
+        target: 95%
+        threshold: 0%
+        base: auto
+        paths:
+          - "causalpy/"
+        only_pulls: true

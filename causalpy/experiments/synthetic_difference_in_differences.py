@@ -63,6 +63,10 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
     Notes
     -----
+    **Estimate extraction**
+
+    The Bayesian weight model produces posterior draws of synthetic-control unit weights and pre-period time weights. For each draw, the class constructs treated-minus-synthetic gaps and evaluates the weighted double-difference analytically to obtain the scalar ``tau_posterior`` ATT; the effect is not read from a regression coefficient or obtained by population-standardized g-computation. The time-indexed ``post_impact`` consumed by ``effect_summary()`` is the post-period treated-minus-synthetic trajectory rather than this time-weighted scalar.
+
     This implements Bayesian SDiD method. The model fits two weight modules via
     MCMC:
 
@@ -248,6 +252,8 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         6. :meth:`_build_reporting_objects` constructs the xarray objects
            required by the reporting helpers.
         """
+        # Backend-identity check is justified here: capability validation
+        # (trust boundary), not statistical dispatch.
         if self._model_backend.is_ols:
             raise NotImplementedError(
                 "OLS estimation for SyntheticDifferenceInDifferences is not yet "
@@ -260,8 +266,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
         X, y, coords = self._build_weight_fitter_inputs(Y_co, y_tr, T_pre)
         self._model_backend.fit(X=X, y=y, coords=coords)
-        if self.model.idata is None:
-            raise AttributeError("Model fitting failed to produce idata")
 
         omega, omega0, lam, n_chains, n_draws = self._extract_weight_posteriors()
         sc_all, gaps = self._compute_synthetic_and_gaps(omega, omega0, Y_co, y_tr)
@@ -360,9 +364,7 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         n_draws : int
             Number of draws per chain.
         """
-        if self.model.idata is None:
-            raise RuntimeError("Model has not been fit")
-        posterior = self.model.idata.posterior
+        posterior = self._model_backend.require_idata().posterior
         omega = posterior["omega"].to_numpy()
         lam = posterior["lam"].to_numpy()
         omega0 = posterior["omega0"].to_numpy()
@@ -460,9 +462,9 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
         Sets the following attributes on ``self``:
 
-        - ``pre_pred`` / ``post_pred``: ``az.InferenceData`` objects holding
-          the synthetic-control predictions in a ``posterior_predictive``
-          group.
+        - ``pre_pred`` / ``post_pred``: ``xr.DataArray`` synthetic-control
+          predictions with canonical dims ``(chain, draw, obs_ind,
+          treated_units)``.
         - ``pre_impact`` / ``post_impact``: ``xr.DataArray`` of observed
           minus counterfactual with dims ``(chain, draw, obs_ind,
           treated_units)``.
@@ -484,10 +486,10 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         sc_pre = sc_all[..., :T_pre]
         sc_post = sc_all[..., T_pre:]
 
-        self.pre_pred = self._build_inference_data(
+        self.pre_pred = self._build_prediction(
             sc_pre, self.datapre.index, n_chains, n_draws
         )
-        self.post_pred = self._build_inference_data(
+        self.post_pred = self._build_prediction(
             sc_post, self.datapost.index, n_chains, n_draws
         )
 
@@ -519,18 +521,14 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         )
         self.post_impact_cumulative = self.post_impact.cumsum(dim="obs_ind")
 
-    def _build_inference_data(
+    def _build_prediction(
         self,
         mu_vals: np.ndarray,
         index: pd.Index,
         n_chains: int,
         n_draws: int,
-    ) -> az.InferenceData:
-        """Build an InferenceData-like object with posterior_predictive group.
-
-        Constructs a minimal InferenceData containing a ``mu`` variable in the
-        ``posterior_predictive`` group, shaped to be compatible with the
-        reporting helpers that expect SC-style predictions.
+    ) -> xr.DataArray:
+        """Build a prediction DataArray with canonical dimensions.
 
         Parameters
         ----------
@@ -545,14 +543,11 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
 
         Returns
         -------
-        az.InferenceData
-            InferenceData with posterior_predictive group containing ``mu``.
+        xr.DataArray
+            Predictions with dims ``(chain, draw, obs_ind, treated_units)``.
         """
-        # Add a singleton treated_units dim: (chain, draw, T, 1)
-        mu_4d = mu_vals[..., np.newaxis]
-
-        mu_da = xr.DataArray(
-            mu_4d,
+        return xr.DataArray(
+            mu_vals[..., np.newaxis],
             dims=["chain", "draw", "obs_ind", "treated_units"],
             coords={
                 "chain": np.arange(n_chains),
@@ -561,8 +556,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
                 "treated_units": [self.treated_units[0]],
             },
         )
-        ds = xr.Dataset({"mu": mu_da})
-        return az.InferenceData(posterior_predictive=ds)
 
     def summary(self, round_to: int | None = None) -> None:
         """Print summary of main results.
@@ -677,13 +670,14 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         except (TypeError, ValueError):
             return treatment_time
 
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = None,
         ci_prob: float = HDI_PROB,
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot the results: counterfactual, impact, and cumulative impact.
 
@@ -720,12 +714,8 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
         fig, ax = plt.subplots(3, 1, sharex=True, figsize=(7, 8))
 
         # ---- TOP PLOT: Observed vs counterfactual ----
-        pre_pred = self.pre_pred.posterior_predictive["mu"].sel(
-            treated_units=treated_unit
-        )
-        post_pred = self.post_pred.posterior_predictive["mu"].sel(
-            treated_units=treated_unit
-        )
+        pre_pred = self.pre_pred.sel(treated_units=treated_unit)
+        post_pred = self.post_pred.sel(treated_units=treated_unit)
 
         # Pre-intervention synthetic control fit
         h_line, h_patch = plot_posterior_over_x(
@@ -845,13 +835,6 @@ class SyntheticDifferenceInDifferences(BaseExperiment):
             format_date_axes(ax, full_index)
 
         return fig, ax
-
-    def _ols_plot(self, *args: Any, **kwargs: Any) -> tuple:
-        """OLS not supported for SDiD."""
-        raise NotImplementedError(
-            "OLS models are not supported for "
-            "SyntheticDifferenceInDifferences. Use a Bayesian model."
-        )
 
     def effect_summary(
         self,

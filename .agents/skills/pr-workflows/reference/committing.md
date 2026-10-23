@@ -16,7 +16,7 @@ description: Create clean, focused commits with user confirmation and prek check
 
 ## Commit steps
 
-1. Run prek (see `pre-commit.md` for details). Prefer scoped runs while iterating, then `prek run --all-files` before final commit.
+1. Run prek (see `prek.md` for details). Prefer scoped runs while iterating, then `prek run --all-files` before final commit.
 2. Stage only relevant files (avoid `git add -A` / `git add .`).
 3. Create the commit with a clear message.
 

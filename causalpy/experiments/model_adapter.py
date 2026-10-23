@@ -22,13 +22,16 @@ from typing import Any, Literal
 
 import arviz as az
 import numpy as np
+import pandas as pd
 import xarray as xr
 from sklearn.base import RegressorMixin, clone
+from sklearn.metrics import r2_score
 
+from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import PyMCModel
 from causalpy.skl_models import create_causalpy_compatible_class
 
-BackendKind = Literal["pymc", "sklearn"]
+BackendKind = Literal["pymc", "sklearn", "pymc-forecast"]
 
 
 def build_coords(
@@ -60,6 +63,17 @@ def build_coords(
     }
 
 
+def _extract_mu(prediction: Any) -> xr.DataArray:
+    """Pull response-scale ``mu`` out of a Bayesian prediction container."""
+    mu = prediction.posterior_predictive["mu"].transpose(
+        "chain", "draw", "obs_ind", "treated_units"
+    )
+    # Enforce the canonical container: stray non-dim coords (e.g. the
+    # state-space backend's `observed_state`) would otherwise leak into
+    # downstream impact containers and break coordinate equality checks.
+    return mu.drop_vars([name for name in mu.coords if name not in mu.dims])
+
+
 def _sklearn_array(value: Any) -> np.ndarray:
     """Coerce xarray or array-like inputs to a numpy array for sklearn."""
     if isinstance(value, xr.DataArray):
@@ -86,7 +100,7 @@ class ModelAdapter(ABC):
 
     @property
     @abstractmethod
-    def model(self) -> PyMCModel | RegressorMixin:
+    def model(self) -> PyMCModel | RegressorMixin | PyMCForecastModel:
         """The underlying model instance."""
 
     @property
@@ -96,8 +110,8 @@ class ModelAdapter(ABC):
 
     @property
     def is_bayesian(self) -> bool:
-        """Whether the backend is Bayesian (PyMC)."""
-        return self.kind == "pymc"
+        """Whether the backend is Bayesian (PyMC or pymc-forecast)."""
+        return self.kind in ("pymc", "pymc-forecast")
 
     @property
     def is_ols(self) -> bool:
@@ -105,9 +119,23 @@ class ModelAdapter(ABC):
         return self.kind == "sklearn"
 
     @property
+    def supports_idata(self) -> bool:
+        """Whether the backend can expose ArviZ ``InferenceData``."""
+        return self.kind in ("pymc", "pymc-forecast")
+
+    @property
     @abstractmethod
-    def idata(self) -> az.InferenceData:
-        """Return InferenceData for Bayesian models."""
+    def idata(self) -> az.InferenceData | None:
+        """Return ``InferenceData`` when supported and fitted, otherwise ``None``."""
+
+    def require_idata(self) -> az.InferenceData:
+        """Return fitted ``InferenceData`` or raise an explicit capability error."""
+        if not self.supports_idata:
+            raise TypeError(f"{type(self).__name__} does not support InferenceData.")
+        idata = self.idata
+        if idata is None:
+            raise RuntimeError("Model has not been fit yet.")
+        return idata
 
     @abstractmethod
     def fit(
@@ -136,8 +164,14 @@ class ModelAdapter(ABC):
         *,
         out_of_sample: bool = False,
         **kwargs: Any,
-    ) -> Any:
-        """Predict with backend-appropriate conventions.
+    ) -> xr.DataArray:
+        """Return expected outcomes with canonical prediction dimensions.
+
+        Every backend returns the same container: response-scale expected
+        outcomes as an :class:`xarray.DataArray` with dimensions
+        ``("chain", "draw", "obs_ind", "treated_units")``. Point-estimate
+        backends (sklearn) return singleton ``chain``/``draw`` dimensions —
+        a point estimate is a posterior with one atom.
 
         Parameters
         ----------
@@ -147,11 +181,21 @@ class ModelAdapter(ABC):
             Whether predictions are out-of-sample. Used by PyMC backends only.
         **kwargs
             Additional keyword arguments forwarded to the underlying model.
+
+        Returns
+        -------
+        xr.DataArray
+            Expected outcomes with dimensions ``("chain", "draw", "obs_ind",
+            "treated_units")``.
         """
 
     @abstractmethod
-    def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
-        """Score predictions against observed outcomes.
+    def score(self, X: Any, y: Any, **kwargs: Any) -> pd.Series:
+        """Return per-unit :math:`R^2` scores in the canonical container.
+
+        Every backend returns a :class:`pandas.Series` with one
+        ``unit_{i}_r2`` entry per treated unit. Backends with posterior
+        dispersion also include ``unit_{i}_r2_std`` entries.
 
         Parameters
         ----------
@@ -161,6 +205,12 @@ class ModelAdapter(ABC):
             Observed outcomes.
         **kwargs
             Additional keyword arguments forwarded to the underlying model.
+
+        Returns
+        -------
+        pd.Series
+            Per-treated-unit :math:`R^2` values and optional posterior
+            standard deviations.
         """
 
     @abstractmethod
@@ -205,7 +255,7 @@ class PyMCModelAdapter(ModelAdapter):
         return "pymc"
 
     @property
-    def idata(self) -> az.InferenceData:
+    def idata(self) -> az.InferenceData | None:
         """Return the model's InferenceData object."""
         return self._model.idata
 
@@ -235,8 +285,8 @@ class PyMCModelAdapter(ModelAdapter):
         *,
         out_of_sample: bool = False,
         **kwargs: Any,
-    ) -> Any:
-        """Predict using the PyMC model.
+    ) -> xr.DataArray:
+        """Predict expected outcomes using the PyMC model.
 
         Parameters
         ----------
@@ -246,10 +296,17 @@ class PyMCModelAdapter(ModelAdapter):
             Whether predictions are out-of-sample.
         **kwargs
             Additional keyword arguments forwarded to the underlying model.
-        """
-        return self._model.predict(X=X, out_of_sample=out_of_sample, **kwargs)
 
-    def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
+        Returns
+        -------
+        xr.DataArray
+            Posterior draws of ``mu`` with canonical prediction dimensions.
+        """
+        return _extract_mu(
+            self._model.predict(X=X, out_of_sample=out_of_sample, **kwargs)
+        )
+
+    def score(self, X: Any, y: Any, **kwargs: Any) -> pd.Series:
         """Score predictions from the PyMC model.
 
         Parameters
@@ -265,9 +322,7 @@ class PyMCModelAdapter(ModelAdapter):
 
     def coefficients(self) -> np.ndarray:
         """Return posterior mean coefficients."""
-        if self._model.idata is None:
-            raise RuntimeError("Model has not been fit yet.")
-        beta = self._model.idata.posterior["beta"]
+        beta = self.require_idata().posterior["beta"]
         return beta.mean(dim=["chain", "draw"]).values
 
     def print_coefficients(
@@ -296,6 +351,7 @@ class SklearnModelAdapter(ModelAdapter):
 
     def __init__(self, model: RegressorMixin) -> None:
         self._model = model
+        self._treated_units: np.ndarray | None = None
 
     @property
     def model(self) -> RegressorMixin:
@@ -308,9 +364,9 @@ class SklearnModelAdapter(ModelAdapter):
         return "sklearn"
 
     @property
-    def idata(self) -> az.InferenceData:
-        """OLS models do not expose InferenceData."""
-        raise AttributeError("OLS models do not have idata.")
+    def idata(self) -> None:
+        """Return ``None`` because sklearn models have no ``InferenceData``."""
+        return None
 
     def fit(
         self,
@@ -330,6 +386,10 @@ class SklearnModelAdapter(ModelAdapter):
         coords : dict, optional
             Ignored for sklearn backends.
         """
+        if isinstance(y, xr.DataArray) and "treated_units" in y.coords:
+            self._treated_units = np.asarray(y.coords["treated_units"])
+        else:
+            self._treated_units = None
         return self._model.fit(X=_sklearn_array(X), y=_sklearn_y(y))
 
     def predict(
@@ -338,22 +398,61 @@ class SklearnModelAdapter(ModelAdapter):
         *,
         out_of_sample: bool = False,
         **kwargs: Any,
-    ) -> Any:
-        """Predict using the sklearn model.
+    ) -> xr.DataArray:
+        """Return point predictions as singleton posterior draws.
 
         Parameters
         ----------
-        X : array-like
+        X : array-like or xarray.DataArray
             Predictor matrix for which to generate predictions.
         out_of_sample : bool, default False
             Ignored for sklearn backends.
         **kwargs
             Additional keyword arguments forwarded to the underlying model.
-        """
-        return self._model.predict(X=_sklearn_array(X), **kwargs)
 
-    def score(self, X: Any, y: Any, **kwargs: Any) -> Any:
-        """Score predictions from the sklearn model.
+        Returns
+        -------
+        xr.DataArray
+            Point predictions with canonical prediction dimensions and
+            singleton ``chain``/``draw`` dimensions.
+        """
+        values = np.asarray(self._model.predict(X=_sklearn_array(X), **kwargs))
+        if values.ndim == 1:
+            values = values[:, None]
+        if values.ndim != 2:
+            raise ValueError(
+                "Expected sklearn predictions with shape (obs,) or "
+                f"(obs, treated_units), got {values.shape}."
+            )
+
+        obs_ind = (
+            np.asarray(X.coords["obs_ind"])
+            if isinstance(X, xr.DataArray) and "obs_ind" in X.coords
+            else np.arange(values.shape[0])
+        )
+        treated_units = (
+            self._treated_units
+            if self._treated_units is not None
+            else np.asarray([f"unit_{i}" for i in range(values.shape[1])])
+        )
+        if len(treated_units) != values.shape[1]:
+            raise ValueError(
+                "Prediction output columns do not match the treated units used for fit."
+            )
+
+        return xr.DataArray(
+            values[None, None, :, :],
+            dims=("chain", "draw", "obs_ind", "treated_units"),
+            coords={
+                "chain": [0],
+                "draw": [0],
+                "obs_ind": obs_ind,
+                "treated_units": treated_units,
+            },
+        )
+
+    def score(self, X: Any, y: Any, **kwargs: Any) -> pd.Series:
+        """Return per-output :math:`R^2` scores from the sklearn model.
 
         Parameters
         ----------
@@ -362,9 +461,35 @@ class SklearnModelAdapter(ModelAdapter):
         y : array-like
             Observed outcomes.
         **kwargs
-            Additional keyword arguments forwarded to the underlying model.
+            Additional keyword arguments forwarded to
+            :func:`sklearn.metrics.r2_score`, such as ``sample_weight``.
+            These are not forwarded to the underlying estimator's
+            ``score`` method. ``multioutput`` is fixed to
+            ``"raw_values"`` so each treated unit receives its own
+            ``unit_{i}_r2`` entry.
+
+        Returns
+        -------
+        pd.Series
+            One ``unit_{i}_r2`` entry per output. Point estimates carry no
+            dispersion entries.
         """
-        return self._model.score(X=_sklearn_array(X), y=_sklearn_y(y), **kwargs)
+        if "multioutput" in kwargs:
+            raise ValueError(
+                "Cannot pass multioutput to SklearnModelAdapter.score(); "
+                'the canonical contract requires multioutput="raw_values".'
+            )
+        scores = np.atleast_1d(
+            r2_score(
+                _sklearn_y(y),
+                self._model.predict(X=_sklearn_array(X)),
+                multioutput="raw_values",
+                **kwargs,
+            )
+        )
+        return pd.Series(
+            {f"unit_{i}_r2": float(score) for i, score in enumerate(scores)}
+        )
 
     def coefficients(self) -> np.ndarray:
         """Return fitted sklearn coefficients."""
@@ -379,6 +504,123 @@ class SklearnModelAdapter(ModelAdapter):
         ----------
         labels : list of str
             Coefficient names aligned with the fitted model.
+        round_to : int, optional
+            Number of significant figures to round to.
+        """
+        self._model.print_coefficients(labels, round_to)
+
+
+class PyMCForecastAdapter(ModelAdapter):
+    """Adapter for :class:`~causalpy.pymc_forecast_models.PyMCForecastModel`
+    backends.
+
+    The wrapped model already speaks CausalPy's Bayesian conventions
+    (``mu``/``y_hat`` posterior-predictive output on ``obs_ind`` /
+    ``treated_units`` coords), so this adapter is pure delegation.
+
+    Parameters
+    ----------
+    model : PyMCForecastModel
+        Wrapped ``pymc_forecast`` backend model.
+    """
+
+    def __init__(self, model: PyMCForecastModel) -> None:
+        self._model = model
+
+    @property
+    def model(self) -> PyMCForecastModel:
+        """The underlying pymc-forecast wrapper."""
+        return self._model
+
+    @property
+    def kind(self) -> BackendKind:
+        """Backend identifier."""
+        return "pymc-forecast"
+
+    @property
+    def idata(self) -> az.InferenceData | None:
+        """Return the model's InferenceData when fitted."""
+        return self._model.idata
+
+    def fit(
+        self,
+        X: Any,
+        y: Any,
+        *,
+        coords: dict[str, Any] | None = None,
+    ) -> az.InferenceData:
+        """Fit the forecasting model on the pre-period.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Design matrix with dims ``["obs_ind", "coeffs"]``.
+        y : xarray.DataArray
+            Outcome with dims ``["obs_ind", "treated_units"]``.
+        coords : dict, optional
+            Coordinate metadata; ignored (real coordinates are read from
+            ``X`` and ``y``).
+        """
+        return self._model.fit(X=X, y=y, coords=coords)
+
+    def predict(
+        self,
+        X: Any,
+        *,
+        out_of_sample: bool = False,
+        **kwargs: Any,
+    ) -> xr.DataArray:
+        """Predict in-sample or forecast the counterfactual.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Design matrix for which to generate predictions.
+        out_of_sample : bool, default False
+            ``True`` draws the post-period counterfactual via the model's
+            forecasting path.
+        **kwargs
+            Additional keyword arguments forwarded to the underlying model.
+
+        Returns
+        -------
+        xr.DataArray
+            Posterior draws of ``mu`` with canonical prediction dimensions.
+        """
+        return _extract_mu(
+            self._model.predict(X=X, out_of_sample=out_of_sample, **kwargs)
+        )
+
+    def score(self, X: Any, y: Any, **kwargs: Any) -> pd.Series:
+        """Score in-sample predictions with the Bayesian :math:`R^2`.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Design matrix.
+        y : xarray.DataArray
+            Observed outcomes.
+        **kwargs
+            Additional keyword arguments forwarded to the underlying model.
+        """
+        return self._model.score(X=X, y=y, **kwargs)
+
+    def coefficients(self) -> np.ndarray:
+        """Forecasting models have no design-matrix coefficients."""
+        raise NotImplementedError(
+            "pymc-forecast models do not expose design-matrix coefficients; "
+            "inspect the fitted posterior via `.idata` instead."
+        )
+
+    def print_coefficients(
+        self, labels: list[str], round_to: int | None = None
+    ) -> None:
+        """Print posterior summaries of the model's scalar parameters.
+
+        Parameters
+        ----------
+        labels : list of str
+            Design-matrix labels; ignored by forecasting models.
         round_to : int, optional
             Number of significant figures to round to.
         """
@@ -407,17 +649,18 @@ def _prepare_sklearn_model(model: RegressorMixin) -> RegressorMixin:
 
 
 def make_model_adapter(
-    model: PyMCModel | RegressorMixin | None,
+    model: PyMCModel | RegressorMixin | PyMCForecastModel | None,
     *,
     default_model_class: type[PyMCModel] | None,
     supports_bayes: bool,
     supports_ols: bool,
+    supports_pymc_forecast: bool = False,
 ) -> ModelAdapter:
     """Resolve, validate, and wrap a model in a backend adapter.
 
     Parameters
     ----------
-    model : PyMCModel, RegressorMixin, or None
+    model : PyMCModel, RegressorMixin, PyMCForecastModel, or None
         User-supplied model instance, or ``None`` to use the default.
     default_model_class : type[PyMCModel] or None
         PyMC model class used when ``model`` is ``None``.
@@ -425,6 +668,8 @@ def make_model_adapter(
         Whether the experiment supports Bayesian backends.
     supports_ols : bool
         Whether the experiment supports OLS/sklearn backends.
+    supports_pymc_forecast : bool, default False
+        Whether the experiment supports pymc-forecast backends.
 
     Returns
     -------
@@ -449,5 +694,10 @@ def make_model_adapter(
         if not supports_ols:
             raise ValueError("OLS models not supported.")
         return SklearnModelAdapter(model)
+
+    if isinstance(model, PyMCForecastModel):
+        if not supports_pymc_forecast:
+            raise ValueError("pymc-forecast models not supported.")
+        return PyMCForecastAdapter(model)
 
     raise ValueError("Unsupported model type")

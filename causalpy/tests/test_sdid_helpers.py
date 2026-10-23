@@ -53,6 +53,11 @@ class _StubModelAdapter:
     def fit(self, X: Any, y: Any, *, coords: Any | None = None) -> Any:
         return self.model.fit(X=X, y=y, coords=coords)
 
+    def require_idata(self) -> az.InferenceData:
+        if self.model.idata is None:
+            raise RuntimeError("Model has not been fit yet.")
+        return self.model.idata
+
 
 def _make_experiment_stub(
     *,
@@ -262,12 +267,14 @@ class TestBuildReportingObjects:
 
         stub._build_reporting_objects(sc_all, toy_panel.T_pre, n_chains, n_draws)
 
-        # pre_pred / post_pred are InferenceData with a 'mu' variable in
-        # the posterior_predictive group.
-        assert isinstance(stub.pre_pred, az.InferenceData)
-        assert isinstance(stub.post_pred, az.InferenceData)
-        assert "mu" in stub.pre_pred.posterior_predictive
-        assert "mu" in stub.post_pred.posterior_predictive
+        # pre_pred / post_pred are canonical prediction DataArrays.
+        for pred, expected_len in (
+            (stub.pre_pred, toy_panel.T_pre),
+            (stub.post_pred, toy_panel.T - toy_panel.T_pre),
+        ):
+            assert isinstance(pred, xr.DataArray)
+            assert pred.dims == ("chain", "draw", "obs_ind", "treated_units")
+            assert pred.shape == (n_chains, n_draws, expected_len, 1)
 
         # pre_impact / post_impact are xr.DataArrays with the correct dims.
         for impact, expected_len in (
@@ -361,7 +368,7 @@ class TestErrorBranches:
             treatment_time=toy_panel.treatment_time,
             model=_NoIdataModel(),
         )
-        with pytest.raises(AttributeError, match="failed to produce idata"):
+        with pytest.raises(RuntimeError, match="Model has not been fit"):
             stub.algorithm()
 
 

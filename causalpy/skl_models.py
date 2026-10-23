@@ -28,28 +28,6 @@ class ScikitLearnAdaptor:
 
     coef_: np.ndarray
 
-    def calculate_impact(self, y_true: np.ndarray, y_pred: np.ndarray) -> np.ndarray:
-        """Calculate the causal impact of the intervention.
-
-        Parameters
-        ----------
-        y_true : np.ndarray
-            Observed outcomes.
-        y_pred : np.ndarray
-            Counterfactual predictions from the fitted model.
-        """
-        return y_true - y_pred
-
-    def calculate_cumulative_impact(self, impact: np.ndarray) -> np.ndarray:
-        """Calculate the cumulative impact intervention.
-
-        Parameters
-        ----------
-        impact : np.ndarray
-            Per-period impact estimates.
-        """
-        return np.cumsum(impact)
-
     def print_coefficients(
         self, labels: list[str], round_to: int | None = None
     ) -> None:

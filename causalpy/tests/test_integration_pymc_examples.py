@@ -145,6 +145,16 @@ def test_rd(mock_pymc_sample, rd_data):
     )
     assert isinstance(df, pd.DataFrame)
     assert isinstance(result, cp.RegressionDiscontinuity)
+    assert result.pred_discon.dims == (
+        "chain",
+        "draw",
+        "obs_ind",
+        "treated_units",
+    )
+    expected = result.pred_discon.isel(
+        obs_ind=1, treated_units=0
+    ) - result.pred_discon.isel(obs_ind=0, treated_units=0)
+    xr.testing.assert_allclose(result.discontinuity_at_threshold, expected)
     assert len(result.idata.posterior.coords["chain"]) == sample_kwargs["chains"]
     assert len(result.idata.posterior.coords["draw"]) == sample_kwargs["draws"]
     result.summary()
@@ -676,7 +686,7 @@ def test_sdid(mock_pymc_sample):
 @pytest.mark.integration
 def test_sdid_datetime_index_and_effect_summary(mock_pymc_sample):
     """SDiD with a DatetimeIndex panel exercises the datetime branch in
-    ``_bayesian_plot`` and the full ``effect_summary`` body, including the
+    ``_plot`` and the full ``effect_summary`` body, including the
     ``period``-warning path and the ``cumulative=False`` branch.
     """
     df = cp.load_data("sc").copy()
@@ -693,7 +703,7 @@ def test_sdid_datetime_index_and_effect_summary(mock_pymc_sample):
         ),
     )
 
-    # DatetimeIndex branch in _bayesian_plot calls format_date_axes.
+    # DatetimeIndex branch in _plot calls format_date_axes.
     fig, _ = result.plot(show=False)
     assert isinstance(fig, plt.Figure)
 

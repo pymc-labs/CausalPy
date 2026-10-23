@@ -399,7 +399,7 @@ def test_piecewise_its_ols_single_interruption():
     )
 
     assert isinstance(result, cp.PiecewiseITS)
-    assert result.score > 0.9  # Should fit well with low noise
+    assert result.score["unit_0_r2"] > 0.9  # Should fit well with low noise
     assert len(result.labels) == 4  # Intercept, time, step, ramp
 
 
@@ -517,7 +517,7 @@ def test_piecewise_its_ols_effect_consistency():
 
     # Effect should equal fitted - counterfactual
     expected_effect = np.squeeze(result.y_pred) - np.squeeze(result.y_counterfactual)
-    np.testing.assert_allclose(result.effect, expected_effect)
+    np.testing.assert_allclose(np.squeeze(result.effect), expected_effect)
 
 
 def test_piecewise_its_ols_cumulative_effect():
@@ -538,8 +538,10 @@ def test_piecewise_its_ols_cumulative_effect():
     )
 
     # Cumulative effect should be cumsum of effect
-    expected_cumulative = np.cumsum(result.effect)
-    np.testing.assert_allclose(result.cumulative_effect, expected_cumulative)
+    expected_cumulative = np.cumsum(np.squeeze(result.effect))
+    np.testing.assert_allclose(
+        np.squeeze(result.cumulative_effect), expected_cumulative
+    )
 
 
 def test_piecewise_its_ols_plot():
@@ -976,10 +978,10 @@ def test_piecewise_its_post_impact_attributes():
     assert len(result.datapost) == 50
 
     # post_impact should have same length as datapost
-    assert len(result.post_impact) == len(result.datapost)
+    assert result.post_impact.sizes["obs_ind"] == len(result.datapost)
 
     # post_pred should have same length as datapost
-    assert len(result.post_pred) == len(result.datapost)
+    assert result.post_pred.sizes["obs_ind"] == len(result.datapost)
 
 
 # ==============================================================================
@@ -1181,9 +1183,13 @@ def test_piecewise_its_pymc_post_impact_attributes(mock_pymc_sample):
     # datapost should have 50 rows (t >= 50)
     assert len(result.datapost) == 50
 
-    # post_pred should be dict-like with posterior_predictive
-    assert "posterior_predictive" in result.post_pred
-    assert "mu" in result.post_pred["posterior_predictive"]
+    assert result.post_pred.dims == (
+        "chain",
+        "draw",
+        "obs_ind",
+        "treated_units",
+    )
+    assert result.post_pred.sizes["obs_ind"] == len(result.datapost)
 
 
 def test_piecewise_its_datetime_post_intervention_attributes():
@@ -1243,11 +1249,11 @@ def test_piecewise_its_counterfactual_zeros_interruption_terms():
     )
 
     # Pre-intervention: effect should be approximately 0
-    pre_effect = result.effect[:50]
+    pre_effect = result.effect.isel(obs_ind=slice(0, 50))
     assert np.allclose(pre_effect, 0, atol=1e-10)
 
     # Post-intervention: effect should be non-zero
-    post_effect = result.effect[50:]
+    post_effect = result.effect.isel(obs_ind=slice(50, None))
     assert not np.allclose(post_effect, 0)
 
 
@@ -1298,7 +1304,7 @@ def test_piecewise_its_ols_various_effects(level_change, slope_change):
     result = cp.PiecewiseITS(df, formula=formula, model=LinearRegression())
 
     assert isinstance(result, cp.PiecewiseITS)
-    assert result.score > 0.5  # Should have reasonable fit
+    assert result.score["unit_0_r2"] > 0.5  # Should have reasonable fit
 
 
 @pytest.mark.parametrize(
@@ -1391,9 +1397,8 @@ def test_piecewise_its_score_attribute_ols():
         model=LinearRegression(),
     )
 
-    # Score should be a float for OLS
-    assert isinstance(result.score, float)
-    assert 0 <= result.score <= 1
+    assert list(result.score.index) == ["unit_0_r2"]
+    assert 0 <= result.score["unit_0_r2"] <= 1
 
 
 def test_piecewise_its_ols_model_without_fit_intercept():
@@ -1488,7 +1493,7 @@ def test_piecewise_its_effect_pre_intervention_zero():
     )
 
     # Effect before interruption should be zero
-    pre_effect = result.effect[:50]
+    pre_effect = result.effect.isel(obs_ind=slice(0, 50))
     np.testing.assert_allclose(pre_effect, 0, atol=1e-10)
 
 

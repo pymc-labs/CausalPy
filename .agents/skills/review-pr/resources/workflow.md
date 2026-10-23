@@ -18,6 +18,16 @@ gh pr checks <num>
 
 If the user asks a narrow question, narrow the fetch. Do not pull every comment and full diff when the request is only to evaluate one latest response.
 
+### Form a Review Brief
+
+Before the diff pass, write a short internal brief:
+
+- **Value hypothesis:** the two to four concrete outcomes the PR should deliver for users or maintainers.
+- **Risk thesis:** the changed contract, invariant, or boundary with the highest cost if it is wrong.
+- **Attack plan:** at least three plausible PR-specific failure modes, each with the evidence needed to falsify it.
+
+Use the issue and existing PR comments as inputs to this brief. Add independent hypotheses; do not only repeat concerns already raised. For example, a canonical-container change should prompt probes for every backend producer, every direct consumer, multi-output or multi-unit behavior, and backwards-compatible callers.
+
 ## Step 2: Read the Relevant Subset
 
 Read every changed file needed to evaluate the PR. Also read surrounding context:
@@ -32,6 +42,15 @@ Read every changed file needed to evaluate the PR. Also read surrounding context
 
 This is what catches omissions that are invisible in the diff alone, such as subclass overrides that drop base-class kwargs.
 
+For each behavior-changing hunk, answer all of the following before moving on:
+
+1. What previous behavior or invariant is this replacing?
+2. Who produces the value this code assumes, and who consumes its result?
+3. What is the weakest supported input or backend shape for this path?
+4. Which test would fail if this hunk were removed or made subtly wrong?
+
+When the answer to a consumer or producer is “all backends,” enumerate them. When the answer to the test question is “none,” assess whether missing coverage is a must-fix.
+
 ## Step 3: Walk the Checklist
 
 Review against the universal checklist in `SKILL.md`, the PR-type resource files, and `review-patterns.md`. Group findings by severity:
@@ -40,6 +59,8 @@ Review against the universal checklist in `SKILL.md`, the PR-type resource files
 - Should-fix: design concerns, unclear API shape, hidden runtime or memory costs, weak but not absent evidence.
 - Nits: small clarity, naming, docstring, or cleanup suggestions that should not distract from substantive items.
 - What worked well: specific positives that help the contributor preserve the strongest parts of the PR.
+
+Do not stop at identifying a risk. Trace it to an observable failure, a violated contract, or evidence that the implementation already handles it. Where a concern is not a blocker, name the concrete follow-up or test that would improve confidence.
 
 ## Step 4: Verify Claims
 
@@ -55,6 +76,8 @@ Treat PR descriptions and contributor responses as hypotheses to test.
 | "Docs build" | Confirm the relevant docs/notebook command was run or remote CI proves it. |
 
 Flag incorrect claims respectfully and specifically. Vague disagreement is not useful review feedback.
+
+For each claimed win, retain one piece of direct evidence from the diff, tests, benchmark, documentation, or runtime behavior. Use those verified wins in the executive summary; this prevents the final review from reducing the PR to a changelog or a CI report.
 
 ## Step 5: Draft Feedback
 

@@ -193,7 +193,9 @@ def check_redirects(compare_branch: str | None = None) -> list[str]:
             file=sys.stderr,
         )
     else:
-        for _kind, old_path in changed_notebook_paths(branch):
+        for kind, old_path in changed_notebook_paths(branch):
+            if kind != "rename":
+                continue
             docname = path_to_docname(old_path)
             if docname not in redirects:
                 errors.append(

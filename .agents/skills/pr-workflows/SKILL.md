@@ -17,4 +17,4 @@ This skill covers the end-to-end PR flow, including commits and prek usage.
 
 - [Issue to PR workflow](reference/issue-to-pr.md)
 - [Committing changes](reference/committing.md)
-- [Prek usage](reference/pre-commit.md)
+- [Prek usage](reference/prek.md)

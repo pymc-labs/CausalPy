@@ -22,10 +22,15 @@ from matplotlib import pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from patsy import ModelDesc, build_design_matrices, dmatrices
+from patsy import ModelDesc, build_design_matrices
 import xarray as xr
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.experiments.model_adapter import build_coords
-from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
+from causalpy.plot_utils import (
+    _PosteriorPlotStyle,
+    format_r2_score,
+    plot_posterior_over_x,
+)
 
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_rkink
@@ -63,6 +68,12 @@ class RegressionKink(BaseExperiment):
         fit the model.
     **kwargs
         Additional keyword arguments forwarded to :class:`BaseExperiment`.
+
+    Notes
+    -----
+    **Estimate extraction**
+
+    The class predicts the conditional expectation at ``kink_point - epsilon``, ``kink_point``, and ``kink_point + epsilon``. It forms finite-difference slopes on the left and right and stores their difference as ``gradient_change``. This is a local prediction contrast on derivatives, not a population-standardized effect.
     """
 
     supports_ols = False
@@ -106,9 +117,9 @@ class RegressionKink(BaseExperiment):
                     UserWarning,
                     stacklevel=2,
                 )
-            y, X = dmatrices(self.formula, filtered_data)
+            y, X = build_formula_matrices(self.formula, filtered_data)
         else:
-            y, X = dmatrices(self.formula, self.data)
+            y, X = build_formula_matrices(self.formula, self.data)
 
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -222,11 +233,10 @@ class RegressionKink(BaseExperiment):
             }
         )
         (new_x,) = build_design_matrices([self._x_design_info], x_predict)
-        predicted = self.model.predict(X=np.asarray(new_x))
-        # extract predicted mu values
-        mu_kink_left = predicted["posterior_predictive"].sel(obs_ind=0)["mu"]
-        mu_kink = predicted["posterior_predictive"].sel(obs_ind=1)["mu"]
-        mu_kink_right = predicted["posterior_predictive"].sel(obs_ind=2)["mu"]
+        predicted = self._model_backend.predict(X=np.asarray(new_x))
+        mu_kink_left = predicted.sel(obs_ind=0)
+        mu_kink = predicted.sel(obs_ind=1)
+        mu_kink_right = predicted.sel(obs_ind=2)
         return mu_kink_left, mu_kink, mu_kink_right
 
     def _is_treated(self, x: np.ndarray | pd.Series) -> np.ndarray:
@@ -336,7 +346,7 @@ class RegressionKink(BaseExperiment):
             figsize=figsize,
         )
 
-    def _bayesian_plot(
+    def _plot(
         self,
         round_to: int | None = 2,
         ci_prob: float = HDI_PROB,
@@ -382,7 +392,7 @@ class RegressionKink(BaseExperiment):
         # Plot model fit to data
         h_line, h_patch = plot_posterior_over_x(
             self.x_pred[self.running_variable_name],
-            self.pred["posterior_predictive"].mu.isel(treated_units=0),
+            self.pred.isel(treated_units=0),
             ax=ax,
             **style,
             plot_hdi_kwargs={"color": "C1"},
@@ -391,8 +401,7 @@ class RegressionKink(BaseExperiment):
         labels = ["Posterior mean"]
 
         # create strings to compose title
-        title_info = f"{round_num(self.score['unit_0_r2'], round_to if round_to is not None else 2)} (std = {round_num(self.score['unit_0_r2_std'], round_to if round_to is not None else 2)})"
-        r2 = f"Bayesian $R^2$ on all data = {title_info}"
+        r2 = format_r2_score(self.score, round_to=round_to, context="on all data")
         percentiles = self.gradient_change.quantile(
             [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
         ).values

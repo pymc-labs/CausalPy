@@ -17,13 +17,14 @@ import warnings  # noqa: I001
 
 import numpy as np
 import pandas as pd
-from patsy import PatsyError, dmatrices
+from patsy import PatsyError
 from sklearn.linear_model import LinearRegression as sk_lin_reg
 
 import arviz as az
 
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
+from causalpy.formula_utils import build_formula_matrices
 from causalpy.pymc_models import InstrumentalVariableRegression
 from causalpy.utils import round_num
 
@@ -69,6 +70,12 @@ class InstrumentalVariable(BaseExperiment):
         treatment.
     **kwargs
         Additional keyword arguments forwarded to :class:`BaseExperiment`.
+
+    Notes
+    -----
+    **Estimate extraction**
+
+    The class computes naive OLS and two-stage least-squares reference fits, then fits a joint Bayesian model for the treatment and outcome equations. Under the instrumental-variable assumptions, the causal quantity is read from the outcome-stage coefficient associated with the instrumented treatment; no counterfactual prediction or population standardization is performed. For binary treatments, its LATE interpretation applies to the complier population induced by the instrument; continuous treatments require the corresponding structural IV interpretation.
 
     Examples
     --------
@@ -153,8 +160,10 @@ class InstrumentalVariable(BaseExperiment):
     def _build_design_matrices(self) -> None:
         """Build design matrices for outcome and instrument formulas."""
         try:
-            y, X = dmatrices(self.formula, self.data)
-            t, Z = dmatrices(self.instruments_formula, self.instruments_data)
+            y, X = build_formula_matrices(self.formula, self.data)
+            t, Z = build_formula_matrices(
+                self.instruments_formula, self.instruments_data
+            )
         except PatsyError as err:
             raise DataException(f"Unable to evaluate IV formula: {err}") from err
 
@@ -248,7 +257,7 @@ class InstrumentalVariable(BaseExperiment):
         if self.instrument_variable_name in self.data.columns:
             second_stage_data = self.data.copy(deep=True)
             second_stage_data[self.instrument_variable_name] = fitted_Z_values
-            _, X2 = dmatrices(self.formula, second_stage_data)
+            _, X2 = build_formula_matrices(self.formula, second_stage_data)
             X2 = np.asarray(X2)
         else:
             X2 = self.X.copy()
@@ -336,7 +345,7 @@ class InstrumentalVariable(BaseExperiment):
             print(f"    {name: <20}  {round_num(val, round_to)}")
 
         print("\nBayesian coefficients:")
-        posterior = self.idata.posterior  # type: ignore[union-attr]
+        posterior = self._model_backend.require_idata().posterior
         for var, dim, labels, stage in [
             ("beta_t", "instruments", self.labels_instruments, "Instrument stage"),
             ("beta_z", "covariates", self.labels, "Outcome stage"),
