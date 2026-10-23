@@ -38,7 +38,7 @@ self._model_backend.fit(
 )
 ```
 
-Experiments with non-standard fit signatures bypass this path and call `self.model.fit(...)` directly with custom arguments: `InstrumentalVariable` (two-stage IV), `InversePropensityWeighting` (propensity `fit(X, t, coords)`), and `SyntheticDifferenceInDifferences` (dict-shaped weight-fitter inputs). Those models are not forced through `build_coords` or sklearn y-normalization.
+Experiments with non-standard fit signatures bypass this path and call `self.model.fit(...)` directly with custom arguments: `InstrumentalVariable` (two-stage IV), `InversePropensityWeighting` (propensity `fit(X, t, coords)`), `SyntheticDifferenceInDifferences` (dict-shaped weight-fitter inputs), and `HierarchicalInterruptedTimeSeries` (`fit(X, y, coords, aux)` with an auxiliary unit/event-time design bundle; it still predicts through the adapter, forwarding `aux`). Those models are not forced through `build_coords` or sklearn y-normalization.
 
 `PyMCModel` extends `pymc.Model` with a sklearn-like `fit` / `predict` / `score` interface; the adapter's `predict()` returns response-scale expected outcomes as an `xr.DataArray` with canonical dims `(chain, draw, obs_ind, treated_units)` on every backend (sklearn backends return singleton `chain`/`draw`), and experiments compute impact as plain xarray subtraction `y - predict(X)`. `ScikitLearnAdaptor` is a mixin patched onto any `RegressorMixin` via `create_causalpy_compatible_class()` during adapter construction. Every experiment declares `supports_ols` and `supports_bayes`; validation runs in `make_model_adapter()`. When `model=None`, `_default_model_class` is instantiated (always Bayesian; `PanelRegression` requires an explicit model).
 

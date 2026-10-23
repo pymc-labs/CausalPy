@@ -32,7 +32,7 @@ from patsy import dmatrix
 
 from causalpy.constants import HDI_PROB
 from causalpy.pymc_models import HierarchicalLaunchITS, PyMCModel
-from causalpy.reporting import EffectSummary
+from causalpy.reporting import EffectSummary, _compute_statistics, _generate_table
 
 from .base import BaseExperiment
 
@@ -123,7 +123,10 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         The effect parameterization.
     bin_edges : sequence of float, optional
         Post-launch bin edges (in units of ``time_col``). Required for
-        ``effect_type="event_study"`` and ``"placebo"``.
+        ``effect_type="event_study"`` and ``"placebo"``. Every post-launch
+        observation must fall in a bin, so start at 0 and make the final edge
+        exceed the largest observed event time (a large final edge gives an
+        open-ended last bin); otherwise a ``ValueError`` is raised.
     placebo_edges : sequence of float, optional
         Pre-launch (negative) bin edges for ``effect_type="placebo"``. Rows
         with ``tau`` below the smallest edge are the implicit reference.
@@ -407,6 +410,26 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
                 "treatment_time_col)."
             )
 
+        # Rows outside every bin get a zero effect, i.e. they act as the
+        # untreated reference. That is intended for pre-launch rows but would
+        # silently anchor the counterfactual on treated periods for any
+        # post-launch row not covered by `bin_edges`.
+        if self.effect_type in ("event_study", "placebo"):
+            post_edges_all = [float(e) for e in self.bin_edges]  # type: ignore[union-attr]
+            uncovered = (tau >= 0) & (_assign_bins(tau, post_edges_all) < 0)
+            if uncovered.any():
+                raise ValueError(
+                    f"{int(uncovered.sum())} post-launch observation(s) fall "
+                    "outside every `bin_edges` bin (observed post-launch event "
+                    f"time spans [{tau[tau >= 0].min():g}, "
+                    f"{tau[tau >= 0].max():g}]; bins span "
+                    f"[{post_edges_all[0]:g}, {post_edges_all[-1]:g})). "
+                    "Uncovered post-launch rows would be treated as untreated "
+                    "baseline. Start `bin_edges` at 0 and extend the final "
+                    "edge past the largest event time (e.g. a large final "
+                    "edge for an open-ended last bin)."
+                )
+
         # Assemble xarray DataArrays
         obs_ind = np.arange(len(df))
         self.X = xr.DataArray(
@@ -419,6 +442,9 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
             dims=["obs_ind", "treated_units"],
             coords={"obs_ind": obs_ind, "treated_units": ["unit_0"]},
         )
+        # Row order of every design/prediction array along `obs_ind`; any
+        # per-row lookup into the input data must go through this frame.
+        self._sorted_data = df
         self._n_units = n_units
         self._unit_idx = unit_idx
         self._F = F
@@ -486,19 +512,28 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
     def algorithm(self) -> None:
         """Fit model, compute observed/counterfactual predictions and impact."""
         model: HierarchicalLaunchITS = self.model  # type: ignore[assignment]
+        # `fit` takes the extra `aux` design bundle, so it bypasses the
+        # adapter's standard `fit(X, y, coords)` signature.
         model.fit(
             X=self.X, y=self.y, coords=self._coords, aux=self._aux(effect_on=True)
         )
-        # Posterior predictive for observed design and counterfactual. `score`
-        # is derived from `observed_pred` (rather than calling `model.score()`,
-        # which would internally re-run `predict()`) to avoid sampling the
-        # posterior predictive distribution a third time.
-        self.observed_pred = model.predict(X=self.X, aux=self._aux(effect_on=True))
+        # Canonical (chain, draw, obs_ind, treated_units) expected outcomes for
+        # the observed design and the counterfactual. `score` is derived from
+        # `observed_pred` (rather than calling the adapter's `score()`, which
+        # would internally re-run `predict()`) to avoid sampling the posterior
+        # predictive distribution a third time.
+        self.observed_pred = self._model_backend.predict(
+            X=self.X, aux=self._aux(effect_on=True)
+        )
         self.score = model.score_from_prediction(self.observed_pred, self.y)
-        self.counterfactual_pred = model.predict(
+        self.counterfactual_pred = self._model_backend.predict(
             X=self.X, aux=self._aux(effect_on=False)
         )
-        self.impact = model.calculate_impact(self.y, self.counterfactual_pred)
+        assert self.y.obs_ind.equals(self.counterfactual_pred.obs_ind)
+        self.impact = (
+            self.y.isel(treated_units=0)
+            - self.counterfactual_pred.isel(treated_units=0)
+        ).transpose(..., "obs_ind")
 
     # ---------------------------------------------------------------- output
 
@@ -515,12 +550,12 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         print(f"Effect type: {self.effect_type}")
         print(f"Units: {self._n_units}")
         if self.effect_type == "instant":
-            post = self.model.idata.posterior  # type: ignore[union-attr]
+            post = self._model_backend.require_idata().posterior
             mu = float(post["mu_lift"].mean())
             sd = float(post["sigma_lift"].mean())
             print(f"E[mu_lift] = {mu:.3g}   E[sigma_lift] = {sd:.3g}")
         elif self.effect_type == "saturation":
-            post = self.model.idata.posterior  # type: ignore[union-attr]
+            post = self._model_backend.require_idata().posterior
             L = float(np.exp(post["mu_logL"]).mean())
             k = float(np.exp(post["mu_logk"]).mean())
             s = float(post["s"].mean())
@@ -530,7 +565,7 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
                 f"E[s] (Hill exponent) = {s:.3g}"
             )
         else:
-            post = self.model.idata.posterior  # type: ignore[union-attr]
+            post = self._model_backend.require_idata().posterior
             mu_delta = post["mu_delta"].mean(("chain", "draw")).values
             for label, val in zip(self._event_bin_labels or [], mu_delta, strict=False):
                 print(f"  {label:<18}  mu_delta = {val:+.3g}")
@@ -547,7 +582,7 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
             interval contains zero. Defaults to
             :data:`~causalpy.constants.HDI_PROB`.
         """
-        post = self.model.idata.posterior  # type: ignore[union-attr]
+        post = self._model_backend.require_idata().posterior
         mu_delta = post["mu_delta"]
         n_pre = getattr(self, "_n_pre_bins", 0)
         if n_pre == 0:
@@ -584,9 +619,7 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
             Seed for the random number generator used to draw from the
             population-level distribution.
         """
-        if self.model.idata is None:
-            raise RuntimeError("Model is not fitted")
-        post = self.model.idata.posterior
+        post = self._model_backend.require_idata().posterior
         rng = np.random.default_rng(random_seed)
         if self.effect_type == "instant":
             mu = post["mu_lift"].values.flatten()
@@ -665,8 +698,18 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
             show=show, legend_kwargs=legend_kwargs, ci_prob=ci_prob
         )
 
-    def _bayesian_plot(self, *, ci_prob: float = HDI_PROB):
-        """Dispatch to the appropriate plot method based on effect type."""
+    def _plot(self, ci_prob: float = HDI_PROB, **kwargs: Any) -> tuple:
+        """Dispatch to the appropriate plot method based on effect type.
+
+        Parameters
+        ----------
+        ci_prob : float
+            Probability mass of the HDI band. Defaults to
+            :data:`~causalpy.constants.HDI_PROB`.
+        **kwargs
+            Accepted for compatibility with :meth:`BaseExperiment._plot`;
+            not consumed.
+        """
         if self.effect_type == "instant":
             return self._plot_instant(ci_prob=ci_prob)
         if self.effect_type == "saturation":
@@ -675,7 +718,7 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
 
     def _plot_instant(self, *, ci_prob: float = HDI_PROB):
         """Forest plot of per-unit lifts and population posterior of mu_lift."""
-        post = self.model.idata.posterior  # type: ignore[union-attr]
+        post = self._model_backend.require_idata().posterior
         fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
         # Forest of per-unit lifts
@@ -693,15 +736,13 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         axes[0].set_title("Posterior lift by unit")
 
         # Population posterior of mu_lift
-        az.plot_posterior(
-            self.model.idata, var_names=["mu_lift"], hdi_prob=ci_prob, ax=axes[1]
-        )
+        az.plot_posterior(post, var_names=["mu_lift"], hdi_prob=ci_prob, ax=axes[1])
         axes[1].set_title(r"Population mean $\mu_{lift}$")
         return fig, axes
 
     def _plot_saturation(self, *, ci_prob: float = HDI_PROB):
         """Plot the population-level Hill saturation curve with an HDI band."""
-        post = self.model.idata.posterior  # type: ignore[union-attr]
+        post = self._model_backend.require_idata().posterior
         max_tau = float(np.nanmax(self._tau_since)) if len(self._tau_since) else 1.0
         grid = xr.DataArray(np.linspace(0, max(max_tau, 1.0), 100), dims="tau_since")
 
@@ -734,7 +775,7 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
 
     def _plot_event_study(self, *, ci_prob: float = HDI_PROB):
         """Event-study plot of population bin effects with HDI error bars."""
-        post = self.model.idata.posterior  # type: ignore[union-attr]
+        post = self._model_backend.require_idata().posterior
         mu_delta = post["mu_delta"]
         mean = mu_delta.mean(("chain", "draw")).values
         lo, hi = _hdi_bounds(mu_delta, ci_prob)
@@ -801,8 +842,8 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         """
         if not 0 < ci_prob <= 1:
             raise ValueError(f"ci_prob must be in (0, 1], got {ci_prob!r}")
-        df = self.data
-        mask = df[self.unit_col] == unit_id
+        df = self._sorted_data
+        mask = (df[self.unit_col] == unit_id).to_numpy()
         if not mask.any():
             raise ValueError(
                 f"unit_id={unit_id!r} not found in column {self.unit_col!r}"
@@ -811,16 +852,8 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         y_obs = df.loc[mask, self.outcome_variable_name].values
         launch = df.loc[mask, self.treatment_time_col].iloc[0]
 
-        obs_mu = (
-            self.observed_pred.posterior_predictive["mu"]
-            .mean(("chain", "draw"))
-            .values.flatten()[mask]
-        )
-        cf_mu = (
-            self.counterfactual_pred.posterior_predictive["mu"]
-            .mean(("chain", "draw"))
-            .values.flatten()[mask]
-        )
+        obs_mu = self.observed_pred.mean(("chain", "draw")).values.flatten()[mask]
+        cf_mu = self.counterfactual_pred.mean(("chain", "draw")).values.flatten()[mask]
 
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
 
@@ -872,7 +905,7 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         round_to : int, optional
             Unused; accepted for interface parity with other experiments.
         """
-        post = self.model.idata.posterior  # type: ignore[union-attr]
+        post = self._model_backend.require_idata().posterior
         print("Model coefficients (population level):")
         for name in ("mu_beta", "sigma_beta"):
             if name in post:
@@ -911,35 +944,37 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         prefix: str = "Post-period",
         **kwargs: Any,
     ) -> EffectSummary:
-        """Return a compact summary of the population-level effect.
+        """Summarize the causal effect on the outcome scale.
 
-        Reports posterior mean and HDI for ``mu_lift`` (instant), each
-        ``mu_delta`` bin (event-study / placebo), or ``L``/``k``/``s``
-        (saturation).
+        The effect is ``observed - counterfactual`` (the counterfactual
+        switches the launch effect off), pooled over every unit-period row
+        whose event time ``tau = time_col - treatment_time_col`` falls in
+        ``window``. The ``average`` row is the mean effect per unit-period
+        row; the ``cumulative`` row is the total incremental outcome summed
+        over those rows (across all units). Use :meth:`parameter_summary` for
+        the population-level model parameters instead.
 
         Parameters
         ----------
-        window : str, tuple, or slice, default="post"
-            Not supported; passing a non-default value emits a warning and
-            is ignored.
+        window : "post", tuple, or slice, default="post"
+            Event-time window. ``"post"`` selects all post-launch rows
+            (``tau >= 0``). A ``(start, end)`` tuple or ``slice(start, end)``
+            selects ``start <= tau <= end`` (``None`` leaves a side open).
         direction : {"increase", "decrease", "two-sided"}, default="increase"
-            Direction for the tail-probability column reported per row:
-            ``P(effect > 0)``, ``P(effect < 0)``, or ``P(effect != 0)``.
+            Direction for the tail probability.
         alpha : float, default=0.05
             Significance level for HDI intervals; the effective HDI
             probability is ``hdi_prob = 1 - alpha``.
         cumulative : bool, default=True
-            Not supported; passing a non-default value emits a warning and
-            is ignored.
+            Whether to include the cumulative (total) effect row.
         relative : bool, default=True
-            Not supported; passing a non-default value emits a warning and
-            is ignored.
+            Whether to include effects relative to the counterfactual (%).
         min_effect : float, optional
-            Not supported; passing a non-``None`` value emits a warning and
-            is ignored.
+            Region of practical equivalence threshold; adds a ``p_rope``
+            column when given.
         treated_unit : str, optional
-            Not supported; passing a non-``None`` value emits a warning and
-            is ignored.
+            Restrict the summary to one unit, given as it appears in
+            ``unit_col`` (compared as strings). Defaults to pooling all units.
         period : {"intervention", "post", "comparison"}, optional
             Not supported; passing a non-``None`` value emits a warning and
             is ignored.
@@ -954,24 +989,133 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes.
         """
-        _unsupported = {
-            "window": (window, "post"),
-            "cumulative": (cumulative, True),
-            "relative": (relative, True),
-            "period": (period, None),
-            "min_effect": (min_effect, None),
-            "treated_unit": (treated_unit, None),
-        }
-        for param_name, (val, default) in _unsupported.items():
-            if val != default:
-                warnings.warn(
-                    f"effect_summary() parameter {param_name!r} is not yet supported "
-                    "by HierarchicalInterruptedTimeSeries and will be ignored.",
-                    UserWarning,
-                    stacklevel=2,
-                )
+        if period is not None:
+            warnings.warn(
+                "effect_summary() parameter 'period' is not yet supported "
+                "by HierarchicalInterruptedTimeSeries and will be ignored.",
+                UserWarning,
+                stacklevel=2,
+            )
 
-        post = self.model.idata.posterior  # type: ignore[union-attr]
+        df = self._sorted_data
+        rows_mask = self._event_time_window_mask(window)
+        if treated_unit is not None:
+            unit_mask = (df[self.unit_col].astype(str) == str(treated_unit)).to_numpy()
+            if not unit_mask.any():
+                raise ValueError(
+                    f"treated_unit={treated_unit!r} not found in column "
+                    f"{self.unit_col!r}"
+                )
+            rows_mask &= unit_mask
+        if not rows_mask.any():
+            raise ValueError(
+                f"No observations fall in window={window!r}"
+                + (f" for treated_unit={treated_unit!r}" if treated_unit else "")
+                + "."
+            )
+
+        idx = np.flatnonzero(rows_mask)
+        impact = self.impact.isel(obs_ind=idx)
+        counterfactual = self.counterfactual_pred.isel(treated_units=0, obs_ind=idx)
+        hdi_prob = 1 - alpha
+        stats = _compute_statistics(
+            impact,
+            counterfactual,
+            hdi_prob=hdi_prob,
+            direction=direction,
+            cumulative=cumulative,
+            relative=relative,
+            min_effect=min_effect,
+        )
+        table = _generate_table(stats, cumulative=cumulative, relative=relative)
+
+        n_units = int(df.loc[rows_mask, self.unit_col].nunique())
+        ci_pct = int(hdi_prob * 100)
+
+        def _describe(key: str, label: str) -> str:
+            """Return one prose sentence for the ``avg`` or ``cum`` stats."""
+            s = stats[key]
+            line = (
+                f"{label}: {s['mean']:.2f} ({ci_pct}% HDI "
+                f"[{s['hdi_lower']:.2f}, {s['hdi_upper']:.2f}])"
+            )
+            if "p_gt_0" in s:
+                line += f", P(effect > 0) = {s['p_gt_0']:.2f}"
+            elif "p_lt_0" in s:
+                line += f", P(effect < 0) = {s['p_lt_0']:.2f}"
+            else:
+                line += f", P(effect) = {s['prob_of_effect']:.2f}"
+            if "relative_mean" in s:
+                line += f"; {s['relative_mean']:.1f}% relative to the counterfactual"
+            return line + "."
+
+        text_lines = [
+            f"{prefix}: {self.expt_type}, effect_type={self.effect_type!r}, "
+            f"{n_units} unit(s), {len(idx)} unit-period observations "
+            f"(event-time window {window!r}).",
+            _describe("avg", "Average effect per unit-period"),
+        ]
+        if cumulative:
+            text_lines.append(_describe("cum", "Cumulative effect (all rows)"))
+        if self.effect_type == "placebo":
+            text_lines.append(self._placebo_check_text())
+        return EffectSummary(table=table, text="\n".join(text_lines))
+
+    def _event_time_window_mask(
+        self, window: Literal["post"] | tuple | slice
+    ) -> np.ndarray:
+        """Boolean mask over ``obs_ind`` selecting rows whose event time is in ``window``."""
+        if isinstance(window, str):
+            if window != "post":
+                raise ValueError(
+                    f"window must be 'post', a (start, end) tuple or a slice, "
+                    f"got {window!r}"
+                )
+            return self._tau >= 0
+        if isinstance(window, slice):
+            if window.step is not None:
+                raise ValueError("window slices must not have a step")
+            start, end = window.start, window.stop
+        elif isinstance(window, tuple) and len(window) == 2:
+            start, end = window
+        else:
+            raise ValueError(
+                f"window must be 'post', a (start, end) tuple or a slice, got {window!r}"
+            )
+        mask = np.ones(self._tau.shape, dtype=bool)
+        if start is not None:
+            mask &= self._tau >= start
+        if end is not None:
+            mask &= self._tau <= end
+        return mask
+
+    def parameter_summary(
+        self,
+        *,
+        alpha: float = 0.05,
+        direction: Literal["increase", "decrease", "two-sided"] = "increase",
+    ) -> pd.DataFrame:
+        """Return posterior summaries of the population-level effect parameters.
+
+        Reports posterior mean and HDI for ``mu_lift``/``sigma_lift``
+        (instant), each ``mu_delta`` bin (event-study / placebo), or
+        ``L``/``k``/``s`` (saturation).
+
+        Parameters
+        ----------
+        alpha : float, default=0.05
+            Significance level for HDI intervals; the effective HDI
+            probability is ``hdi_prob = 1 - alpha``.
+        direction : {"increase", "decrease", "two-sided"}, default="increase"
+            Direction for the tail-probability column reported per row:
+            ``P(effect > 0)``, ``P(effect < 0)``, or ``P(effect != 0)``.
+
+        Returns
+        -------
+        pd.DataFrame
+            One row per parameter, indexed by parameter name.
+        """
+        post = self._model_backend.require_idata().posterior
         rows = []
         hdi_prob = 1 - alpha
 
@@ -1010,13 +1154,4 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
                     _row(f"mu_delta[{label}]", post["mu_delta"].isel(event_bin=i))
                 )
 
-        table = pd.DataFrame(rows).set_index("parameter")
-        text_lines = [
-            f"{prefix}: {self.expt_type}",
-            f"Effect type: {self.effect_type}",
-            f"Units: {self._n_units}",
-        ]
-        if self.effect_type == "placebo":
-            text_lines.append(self._placebo_check_text())
-        text = "\n".join(text_lines)
-        return EffectSummary(table=table, text=text)
+        return pd.DataFrame(rows).set_index("parameter")

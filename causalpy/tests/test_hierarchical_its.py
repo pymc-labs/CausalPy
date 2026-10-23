@@ -19,6 +19,7 @@ import pandas as pd
 import pytest
 
 import causalpy as cp
+from causalpy.experiments.model_adapter import PyMCModelAdapter
 from causalpy.pymc_models import HierarchicalLaunchITS
 
 SAMPLE_KWARGS = {"progressbar": False, "random_seed": 42}
@@ -79,7 +80,13 @@ class TestInstant:
         assert result._n_units == 4
         assert "lift" in result.model.idata.posterior
         assert "mu_lift" in result.model.idata.posterior
-        assert result.impact.shape[-1] == len(panel)
+        canonical_dims = ("chain", "draw", "obs_ind", "treated_units")
+        for pred in (result.observed_pred, result.counterfactual_pred):
+            assert pred.dims == canonical_dims
+            assert pred.sizes["obs_ind"] == len(panel)
+        assert result.impact.dims == ("chain", "draw", "obs_ind")
+        assert result.impact.sizes["obs_ind"] == len(panel)
+        assert list(result.score.index) == ["unit_0_r2", "unit_0_r2_std"]
 
     def test_plot(self, panel, mock_pymc_sample):
         """Plot instant model and verify figure is returned."""
@@ -111,10 +118,68 @@ class TestInstant:
         assert np.isfinite(draws).all()
 
     def test_effect_summary(self, panel, mock_pymc_sample):
-        """Effect summary table contains mu_lift for instant model."""
+        """Effect summary reports outcome-scale average and cumulative effects."""
         result = _fit(panel, "instant")
         es = result.effect_summary()
-        assert "mu_lift" in es.table.index
+        assert list(es.table.index) == ["average", "cumulative"]
+        assert {"mean", "hdi_lower", "hdi_upper", "p_gt_0", "relative_mean"} <= set(
+            es.table.columns
+        )
+        post_impact = result.impact.isel(obs_ind=np.flatnonzero(result._tau >= 0))
+        np.testing.assert_allclose(
+            es.table.loc["average", "mean"], float(post_impact.mean())
+        )
+        np.testing.assert_allclose(
+            es.table.loc["cumulative", "mean"],
+            float(post_impact.sum("obs_ind").mean()),
+        )
+        assert "Average effect per unit-period" in es.text
+
+    def test_parameter_summary(self, panel, mock_pymc_sample):
+        """parameter_summary reports population-level lift parameters."""
+        result = _fit(panel, "instant")
+        table = result.parameter_summary()
+        assert list(table.index) == ["mu_lift", "sigma_lift"]
+        assert "prob_positive" in table.columns
+
+    def test_effect_summary_window_and_unit(self, panel, mock_pymc_sample):
+        """window and treated_unit restrict the pooled rows."""
+        result = _fit(panel, "instant")
+        es_window = result.effect_summary(window=(0, 3), cumulative=False)
+        assert list(es_window.table.index) == ["average"]
+        assert "4 unit(s)" in es_window.text
+        rows = np.flatnonzero((result._tau >= 0) & (result._tau <= 3))
+        np.testing.assert_allclose(
+            es_window.table.loc["average", "mean"],
+            float(result.impact.isel(obs_ind=rows).mean()),
+        )
+        assert result.effect_summary(window=slice(0, 3)).table.equals(
+            result.effect_summary(window=(0, 3)).table
+        )
+
+        es_unit = result.effect_summary(treated_unit="1", relative=False)
+        assert "1 unit(s)" in es_unit.text
+        assert "relative_mean" not in es_unit.table.columns
+
+    def test_effect_summary_min_effect_adds_rope(self, panel, mock_pymc_sample):
+        """min_effect adds a ROPE probability column."""
+        result = _fit(panel, "instant")
+        es = result.effect_summary(min_effect=0.5)
+        assert "p_rope" in es.table.columns
+
+    def test_effect_summary_invalid_inputs(self, panel, mock_pymc_sample):
+        """Bad window / unit / empty window raise ValueError."""
+        result = _fit(panel, "instant")
+        with pytest.raises(ValueError, match="window must be"):
+            result.effect_summary(window="pre")
+        with pytest.raises(ValueError, match="window must be"):
+            result.effect_summary(window=(0, 1, 2))
+        with pytest.raises(ValueError, match="step"):
+            result.effect_summary(window=slice(0, 5, 2))
+        with pytest.raises(ValueError, match="not found"):
+            result.effect_summary(treated_unit="9999")
+        with pytest.raises(ValueError, match="No observations"):
+            result.effect_summary(window=(1000, None))
 
     def test_summary(self, panel, mock_pymc_sample, capsys):
         """Summary prints experiment info and mu_lift for instant model."""
@@ -132,22 +197,28 @@ class TestInstant:
         assert "mu_lift" in out
 
     def test_effect_summary_direction_decrease(self, panel, mock_pymc_sample):
-        """effect_summary with direction='decrease' emits prob_negative column."""
+        """direction='decrease' emits lower-tail probability columns."""
         result = _fit(panel, "instant")
         es = result.effect_summary(direction="decrease")
-        assert "prob_negative" in es.table.columns
+        assert "p_lt_0" in es.table.columns
+        assert "P(effect < 0)" in es.text
+        table = result.parameter_summary(direction="decrease")
+        assert "prob_negative" in table.columns
 
     def test_effect_summary_direction_two_sided(self, panel, mock_pymc_sample):
-        """effect_summary with direction='two-sided' emits prob_nonzero column."""
+        """direction='two-sided' emits two-sided probability columns."""
         result = _fit(panel, "instant")
         es = result.effect_summary(direction="two-sided")
-        assert "prob_nonzero" in es.table.columns
+        assert "prob_of_effect" in es.table.columns
+        assert "P(effect) =" in es.text
+        table = result.parameter_summary(direction="two-sided")
+        assert "prob_nonzero" in table.columns
 
     def test_effect_summary_unsupported_param_warns(self, panel, mock_pymc_sample):
-        """effect_summary warns when an unsupported parameter is non-default."""
+        """effect_summary warns when the unsupported `period` is passed."""
         result = _fit(panel, "instant")
         with pytest.warns(UserWarning, match="not yet supported"):
-            result.effect_summary(min_effect=0.5)
+            result.effect_summary(period="post")
 
 
 class TestEventStudy:
@@ -167,8 +238,9 @@ class TestEventStudy:
         result = _fit(panel, "event_study", bin_edges=[0, 4, 8, 12, 30])
         draws = result.predictive_for_new_unit(size=20, random_seed=1)
         assert draws.shape == (20, 4)
-        es = result.effect_summary()
-        assert any("mu_delta" in name for name in es.table.index)
+        table = result.parameter_summary()
+        assert any("mu_delta" in name for name in table.index)
+        assert list(result.effect_summary().table.index) == ["average", "cumulative"]
 
     def test_summary(self, panel, mock_pymc_sample, capsys):
         """Summary prints bin-level mu_delta for event-study model."""
@@ -237,17 +309,18 @@ class TestPlacebo:
             bin_edges=[0, 4, 8, 30],
             placebo_edges=[-8, -4, 0],
         )
-        es = result.effect_summary()
-        assert any("mu_delta" in name for name in es.table.index)
+        table = result.parameter_summary()
+        assert any("mu_delta" in name for name in table.index)
         # Should have rows for pre + post bins
-        assert len(es.table) == result._n_pre_bins + result._n_post_bins
+        assert len(table) == result._n_pre_bins + result._n_post_bins
+        assert "Placebo check" in result.effect_summary().text
 
     def test_placebo_counterfactual_keeps_pre_bins(self, panel, mock_pymc_sample):
         """Counterfactual aux keeps pre-launch D columns active, zeros post columns."""
         result = _fit(
             panel,
             "placebo",
-            bin_edges=[0, 5, 10],
+            bin_edges=[0, 5, 10, 40],
             placebo_edges=[-5, -2, 0],
         )
         aux_cf = result._aux(effect_on=False)
@@ -267,7 +340,7 @@ class TestSaturation:
         post = result.model.idata.posterior
         for name in ("L", "k", "s", "mu_logL", "sigma_logL", "mu_logk", "sigma_logk"):
             assert name in post
-        assert result.impact.shape[-1] == len(panel)
+        assert result.impact.sizes["obs_ind"] == len(panel)
 
     def test_plot(self, panel, mock_pymc_sample):
         """Plot saturation model and verify figure is returned."""
@@ -336,10 +409,11 @@ class TestSaturation:
     def test_effect_summary(self, panel, mock_pymc_sample):
         """Effect summary table contains L/k/s rows for saturation model."""
         result = _fit(panel, "saturation")
-        es = result.effect_summary()
-        assert "L (ceiling lift)" in es.table.index
-        assert "k (half-saturation time)" in es.table.index
-        assert "s (Hill exponent)" in es.table.index
+        table = result.parameter_summary()
+        assert "L (ceiling lift)" in table.index
+        assert "k (half-saturation time)" in table.index
+        assert "s (Hill exponent)" in table.index
+        assert list(result.effect_summary().table.index) == ["average", "cumulative"]
 
     def test_counterfactual_zeroes_effect(self, panel, mock_pymc_sample):
         """Counterfactual aux zeroes `tau_since`, which zeroes the Hill effect entirely."""
@@ -500,11 +574,12 @@ class TestEdgeCases:
         """Raise RuntimeError when calling predictive on an unfitted model."""
         # Build experiment object without fitting by manually constructing
         model = HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS)
-        with pytest.raises(RuntimeError, match="not fitted"):
+        with pytest.raises(RuntimeError, match="not been fit"):
             # Manually create the experiment skeleton and call predictive
             result = cp.HierarchicalInterruptedTimeSeries.__new__(
                 cp.HierarchicalInterruptedTimeSeries
             )
+            result._model_backend = PyMCModelAdapter(model)
             result.model = model
             result.effect_type = "instant"
             result.predictive_for_new_unit()
@@ -705,6 +780,31 @@ class TestValidation:
             result_shuffled._within_unit_tidx,
         )
 
+    def test_plot_unit_unsorted_panel(self, mock_pymc_sample):
+        """plot_unit aligns observed points and fitted mu for shuffled input rows."""
+        panel = _make_panel()
+        shuffled = panel.sample(frac=1, random_state=99).reset_index(drop=True)
+        result = _fit(shuffled, "instant")
+        fig, (ax1, _) = result.plot_unit(unit_id=0)
+
+        unit_rows = panel[panel["product"] == 0].sort_values("week_idx")
+        sorted_unit_mask = (result._sorted_data["product"] == 0).to_numpy()
+        expected_fit = (
+            result.observed_pred.mean(("chain", "draw"))
+            .isel(treated_units=0)
+            .values[sorted_unit_mask]
+        )
+        fitted_line = ax1.get_lines()[0]
+        np.testing.assert_array_equal(
+            fitted_line.get_xdata(), unit_rows["week_idx"].to_numpy()
+        )
+        np.testing.assert_allclose(fitted_line.get_ydata(), expected_fit)
+        np.testing.assert_allclose(
+            ax1.collections[0].get_offsets(),
+            unit_rows[["week_idx", "sales"]].to_numpy(),
+        )
+        plt.close(fig)
+
     def test_unknown_kwargs_raises(self, panel):
         """Raise TypeError when unexpected keyword arguments are passed."""
         with pytest.raises(TypeError, match="unexpected keyword argument"):
@@ -754,3 +854,17 @@ class TestValidation:
         """Raise ValueError when bin_edges don't overlap the observed event-time range."""
         with pytest.raises(ValueError, match="No observations fall within any bin"):
             _fit(panel, "event_study", bin_edges=[1000, 1001])
+
+    @pytest.mark.parametrize(
+        "effect_type, bin_edges",
+        [
+            ("event_study", [0, 4, 8]),  # last edge below max post-launch tau
+            ("event_study", [2, 8, 100]),  # tau in [0, 2) uncovered
+            ("placebo", [0, 4, 8]),
+        ],
+    )
+    def test_post_launch_rows_outside_bins_raise(self, panel, effect_type, bin_edges):
+        """Post-launch rows not covered by bin_edges must not become baseline."""
+        kwargs = {"placebo_edges": [-8, -4, 0]} if effect_type == "placebo" else {}
+        with pytest.raises(ValueError, match="outside every `bin_edges` bin"):
+            _fit(panel, effect_type, bin_edges=bin_edges, **kwargs)

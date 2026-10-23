@@ -444,30 +444,31 @@ class PyMCModel(pm.Model):
             Reserved for subclass extensions.
         """
         pp = self.predict(X)
-        return self.score_from_prediction(pp, y)
+        return self.score_from_prediction(pp.posterior_predictive["mu"], y)
 
-    def score_from_prediction(self, pp: az.InferenceData, y: xr.DataArray) -> pd.Series:
-        """Compute the Bayesian :math:`R^2` from an already-sampled posterior predictive.
+    def score_from_prediction(self, mu: xr.DataArray, y: xr.DataArray) -> pd.Series:
+        """Compute the Bayesian :math:`R^2` from already-sampled ``mu`` draws.
 
-        Reuses a prediction that has already been drawn (e.g. via
-        :meth:`predict`) instead of resampling the posterior predictive
-        distribution, which :meth:`score` would otherwise trigger internally.
+        Reuses a prediction that has already been drawn (e.g. the canonical
+        container returned by the model adapter's ``predict()``) instead of
+        resampling the posterior predictive distribution, which :meth:`score`
+        would otherwise trigger internally.
 
         Parameters
         ----------
-        pp : az.InferenceData
-            Posterior predictive draws containing a ``mu`` variable with a
-            ``treated_units`` dimension, as returned by :meth:`predict`.
+        mu : xr.DataArray
+            Posterior draws of ``mu`` with ``chain``, ``draw``, ``obs_ind`` and
+            ``treated_units`` dimensions.
         y : xr.DataArray
             Observed targets to score against the posterior predictive mean.
         """
-        mu_data = az.extract(pp, group="posterior_predictive", var_names="mu")
+        mu_data = mu.stack(sample=("chain", "draw"))
 
         scores = {}
 
         # Always iterate over treated_units dimension - no branching needed!
         for i, unit in enumerate(mu_data.coords["treated_units"].values):
-            unit_mu = mu_data.sel(treated_units=unit).T  # (sample, obs_ind)
+            unit_mu = mu_data.sel(treated_units=unit).transpose("sample", "obs_ind")
             unit_y = y.sel(treated_units=unit).data
             unit_score = r2_score(unit_y, unit_mu.data)
             scores[f"unit_{i}_r2"] = unit_score["r2"]
