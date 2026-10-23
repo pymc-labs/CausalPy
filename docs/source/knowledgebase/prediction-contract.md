@@ -7,7 +7,7 @@ Gaussian models with an identity link make the linear predictor, conditional exp
 ## Three prediction quantities
 
 | Quantity | Typical name in CausalPy | Scale | Includes observation noise? | Used for impact? |
-|----------|-------------------------|-------|----------------------------|------------------|
+| --- | --- | --- | --- | --- |
 | Linear predictor / latent state | model-specific (e.g. ``eta``) | Link scale | No | No |
 | Conditional expected outcome | ``mu`` | Outcome / response scale | No | **Yes** |
 | Posterior predictive draw | ``y_hat`` | Outcome scale | Yes | No (by default) |
@@ -21,13 +21,15 @@ Posterior transformations for nonlinear models must be applied **draw by draw** 
 Every Bayesian backend that participates in impact calculation must expose outcome-scale conditional expectations through ``mu`` in the object returned by ``predict()``:
 
 | Backend | ``mu`` semantics today | Notes |
-|---------|------------------------|-------|
+| --- | --- | --- |
 | Native :class:`~causalpy.pymc_models.PyMCModel` subclasses (e.g. ``LinearRegression``) | ``Deterministic`` named ``mu`` in the PyMC graph | Identity-link Gaussian models satisfy the contract by construction. Custom subclasses must inverse-link before naming the node ``mu``. See {doc}`custom_pymc_models`. |
 | :class:`~causalpy.pymc_models.StateSpaceTimeSeries` | ``mu`` aliases the smoothed expected observation | Gaussian observation model; ``mu`` and ``y_hat`` coincide up to naming. |
-| :class:`~causalpy.pymc_forecast_models.PyMCForecastModel` | Upstream ``mu`` / ``mu_future`` latent passed to ``pymc_forecast.predict()`` | CausalPy treats these as outcome-scale expectations. For linked GLMs, pass the inverse-linked expectation as the latent until upstream exposes a dedicated expected-observation output (`pymc-forecast#52 <https://github.com/pymc-labs/pymc-forecast/issues/52>`_). ``StatespaceForecaster`` is rejected because upstream does not yet expose a separate noise-free expectation (`pymc-forecast#50 <https://github.com/pymc-labs/pymc-forecast/issues/50>`_). |
+| :class:`~causalpy.pymc_forecast_models.PyMCForecastModel` | Explicit upstream ``expected_observation`` / ``expected_observation_future`` when present; otherwise ``mu`` / ``mu_future`` | With pymc-forecast 0.3, pass the response-scale expectation to ``predict(..., expected_observation=...)``. The fallback latent must already be an outcome-scale expectation; CausalPy does not infer inverse links. ``StatespaceForecaster`` is rejected because upstream does not yet expose a separate noise-free expectation (`pymc-forecast#50 <https://github.com/pymc-labs/pymc-forecast/issues/50>`_). |
 | scikit-learn adapters | Point predictions on the outcome scale | OLS backends return fitted values in ``y`` units; no separate ``mu`` draw dimension. |
 
 sklearn backends compute impact as ``y_true - y_pred`` with the same outcome-scale requirement.
+
+When upgrading from pymc-forecast 0.2 to 0.3, change model-builder callbacks from ``(h, covariates)`` to ``(covariates, data=None)`` and construct the horizon inside the callback with ``Horizon.from_data(covariates, data)``. Replace the 0.2 ``time_series`` pattern with ``innovations`` for independent innovations or ``markov_series`` for recursive states. Both in-sample and future predictions are normalized at the wrapper boundary into the same ``posterior_predictive.mu`` and ``y_hat`` containers; observation noise remains in ``y_hat`` only. The {doc}`../notebooks/interrupted-time-series-covid` example combines these building blocks.
 
 ## Score container
 
@@ -35,9 +37,17 @@ Every model adapter returns scores in one canonical ``pandas.Series``. Each trea
 
 For multi-output sklearn models, CausalPy computes one :math:`R^2` per output instead of exposing sklearn's default uniform average. The shared container does not make the statistics identical: PyMC reports Bayesian :math:`R^2` and its posterior dispersion, while sklearn reports classical point-estimate :math:`R^2`. It only guarantees that consumers can locate each unit's score without knowing which backend produced it.
 
-This is a user-visible change for sklearn experiments: ``experiment.score`` is a keyed ``pandas.Series`` rather than a bare float. Single-output users should read ``experiment.score["unit_0_r2"]``.
+This is a user-visible change for sklearn experiments: ``experiment.result.score`` is a keyed ``pandas.Series`` rather than a bare float. Single-output users should read ``experiment.result.score["unit_0_r2"]``.
 
 For direct adapter callers, ``SklearnModelAdapter.score()`` keyword arguments follow :func:`sklearn.metrics.r2_score` (for example ``sample_weight``), not the underlying estimator's ``score`` method. ``multioutput`` is fixed to ``"raw_values"`` so each treated unit keeps its own ``unit_{i}_r2`` entry.
+
+## Canonical coefficient container
+
+The model adapter's ``coefficients()`` method preserves coefficient uncertainty in a canonical :class:`xarray.DataArray` named ``"coefficients"``. Every supported backend returns dimensions ``("chain", "draw", "coeffs")`` in that order, with an optional trailing ``"treated_units"`` dimension when the model fits a separate coefficient vector per outcome. The ``coeffs`` coordinate contains the fitted design-matrix labels; ``treated_units`` contains the corresponding outcome labels.
+
+PyMC adapters return all posterior draws, normalizing the built-in model families' native coefficient names and label dimensions at the adapter boundary. sklearn adapters embed fitted point estimates with singleton ``chain`` and ``draw`` dimensions. Consumers therefore use the same xarray operations for every backend: point estimates are ``coefficients.mean(("chain", "draw"))``, while intervals are only meaningful when ``coefficients.sizes["chain"] * coefficients.sizes["draw"] > 1``.
+
+Coefficients remain on their model's parameter scale; unlike the prediction contract, CausalPy does not inverse-link them to the response scale. Models without design-matrix coefficients, including the ``pymc-forecast`` adapter, raise ``NotImplementedError``. Instrumental variables also retain a dedicated two-stage summary because its treatment and outcome equations are distinct coefficient surfaces rather than interchangeable backend containers.
 
 ## Public name and compatibility
 

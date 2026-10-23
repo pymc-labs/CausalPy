@@ -22,6 +22,13 @@ from causalpy.skl_models import create_causalpy_compatible_class
 from causalpy.transforms import ramp, step
 from causalpy.version import __version__
 
+from .custom_exceptions import (
+    BadIndexException,
+    DataException,
+    FormulaException,
+    GroupNotSampledException,
+    PriorPredictiveNotSupportedException,
+)
 from .data import load_data
 from .experiments.diff_in_diff import DifferenceInDifferences
 from .experiments.hierarchical_interrupted_time_series import (
@@ -40,7 +47,9 @@ from .experiments.synthetic_control import SyntheticControl
 from .experiments.synthetic_difference_in_differences import (
     SyntheticDifferenceInDifferences,
 )
+from .experiments.up_down_geolift import UpDownGeoLift
 from .pipeline import Pipeline, PipelineContext, PipelineResult, Step
+from .reporting import EffectSummary
 from .steps import (
     EstimateEffect,
     GenerateReport,
@@ -51,12 +60,17 @@ from .utils import extract_lift_for_mmm, plot_correlations
 
 __all__ = [
     "__version__",
+    "BadIndexException",
     "checks",
+    "DataException",
     "create_causalpy_compatible_class",
     "DifferenceInDifferences",
     "EstimateEffect",
+    "EffectSummary",
     "extract_lift_for_mmm",
+    "FormulaException",
     "GenerateReport",
+    "GroupNotSampledException",
     "HierarchicalInterruptedTimeSeries",
     "InstrumentalVariable",
     "InterruptedTimeSeries",
@@ -69,6 +83,7 @@ __all__ = [
     "PanelRegression",
     "plot_correlations",
     "PrePostNEGD",
+    "PriorPredictiveNotSupportedException",
     "pymc_forecast_models",
     "pymc_models",
     "ramp",
@@ -82,5 +97,6 @@ __all__ = [
     "Step",
     "SyntheticControl",
     "SyntheticDifferenceInDifferences",
+    "UpDownGeoLift",
     "variable_selection_priors",
 ]

@@ -7,7 +7,7 @@ The ideal causal comparison is the same unit in two parallel worlds, with only t
 ## Common Proxy Counterfactuals
 
 | Method | Proxy counterfactual | Main identifying burden |
-|---|---|---|
+| --- | --- | --- |
 | Difference-in-differences | Untreated group's trend | Parallel trends |
 | Interrupted time series | Pre-treatment trend projected forward | Trend continuity and no concurrent shock |
 | Synthetic control | Weighted combination of donor units | Donor relevance and convex-hull support |

@@ -254,6 +254,14 @@ class VariableSelectionPrior:
 
             - pi_alpha: float (default=2) - Beta prior alpha for selection probability
             - pi_beta: float (default=2) - Beta prior beta for selection probability
+            - expected_model_size: float, optional - Prior expected number of
+              coefficients whose relaxed inclusion indicator satisfies
+              ``gamma > 0.5``, equal to ``n_params * E[pi]``. The relaxed
+              indicators do not make coefficients exactly zero. Cannot be combined with ``pi_alpha`` or ``pi_beta`` at either
+              the instance or call level; validation uses the merged configuration.
+            - pi_concentration: float, optional - Beta prior concentration used
+              with ``expected_model_size`` (default=4, matching the strength of
+              the existing ``Beta(2, 2)`` prior). Requires ``expected_model_size``.
             - slab_sigma: float (default=2) - SD of slab (non-zero) component
             - temperature: float (default=0.1) - Relaxation parameter for binary approximation
 
@@ -346,6 +354,62 @@ class VariableSelectionPrior:
                 "sigma": 1,
             }
 
+    def _resolve_spike_and_slab_hyperparams(
+        self,
+        n_params: int,
+        call_hyperparams: dict[str, Any],
+        merged_hyperparams: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Resolve the expected-size convenience without hiding user intent."""
+        instance_keys = set(self.hyperparams)
+        call_keys = set(call_hyperparams)
+        user_keys = instance_keys | call_keys
+        convenience_keys = {"expected_model_size", "pi_concentration"}
+        supplied_convenience_keys = user_keys & convenience_keys
+
+        if not supplied_convenience_keys:
+            return merged_hyperparams
+
+        if "expected_model_size" not in supplied_convenience_keys:
+            raise ValueError("pi_concentration requires expected_model_size")
+
+        if user_keys & {"pi_alpha", "pi_beta"}:
+            raise ValueError(
+                "expected_model_size and pi_concentration cannot be combined "
+                "with pi_alpha or pi_beta at either the instance or call level"
+            )
+
+        expected_model_size = call_hyperparams.get(
+            "expected_model_size", self.hyperparams.get("expected_model_size")
+        )
+        pi_concentration = call_hyperparams.get(
+            "pi_concentration", self.hyperparams.get("pi_concentration", 4)
+        )
+
+        numeric_types = (int, float, np.integer, np.floating)
+        if isinstance(expected_model_size, bool) or not isinstance(
+            expected_model_size, numeric_types
+        ):
+            raise ValueError("expected_model_size must be a finite numeric value")
+        if not np.isfinite(expected_model_size):
+            raise ValueError("expected_model_size must be a finite numeric value")
+        if not 0 < expected_model_size < n_params:
+            raise ValueError(
+                "expected_model_size must be greater than 0 and less than n_params"
+            )
+
+        if isinstance(pi_concentration, bool) or not isinstance(
+            pi_concentration, numeric_types
+        ):
+            raise ValueError("pi_concentration must be a positive finite numeric value")
+        if not np.isfinite(pi_concentration) or pi_concentration <= 0:
+            raise ValueError("pi_concentration must be a positive finite numeric value")
+
+        inclusion_probability = expected_model_size / n_params
+        merged_hyperparams["pi_alpha"] = inclusion_probability * pi_concentration
+        merged_hyperparams["pi_beta"] = (1 - inclusion_probability) * pi_concentration
+        return merged_hyperparams
+
     def create_prior(
         self,
         name: str,
@@ -374,6 +438,22 @@ class VariableSelectionPrior:
         hyperparams : dict, optional
             Override default hyperparameters for this specific prior instance
 
+            For spike-and-slab priors, ``expected_model_size`` optionally uses
+            ``pi_concentration`` (default 4, the strength of ``Beta(2, 2)``).
+            Instance and call values are merged before validation: ``pi_alpha``
+            or ``pi_beta`` at either level conflicts with ``expected_model_size``
+            at either level, even when the call is intended as an override.
+            ``expected_model_size``
+            is the prior expected number of coefficients whose relaxed inclusion
+            indicator satisfies ``gamma > 0.5``, equal to
+            ``n_params * E[pi]``. The concentration controls the strength of the
+            Beta prior on ``pi``. Shape parameters at or below one produce a
+            boundary-heavy prior and may be intentional. The relaxed indicator
+            obeys ``P(gamma > 0.5 | pi) = pi`` exactly; its continuous mean still
+            depends on the relaxation temperature, and it does not make
+            coefficients exactly zero. This is not a hard selected-variable
+            count or posterior guarantee.
+
         Returns
         -------
         PyMC variable
@@ -392,8 +472,13 @@ class VariableSelectionPrior:
         # Merge instance and call-specific hyperparameters
         default_hp = self._get_default_hyperparams(n_params, X)
         merged_hp = {**default_hp, **self.hyperparams}
-        if hyperparams:
-            merged_hp.update(hyperparams)
+        call_hyperparams = hyperparams or {}
+        if call_hyperparams:
+            merged_hp.update(call_hyperparams)
+        if self.prior_type == "spike_and_slab":
+            merged_hp = self._resolve_spike_and_slab_hyperparams(
+                n_params, call_hyperparams, merged_hp
+            )
 
         # Normalize dims
         if isinstance(dims, str):
@@ -438,8 +523,8 @@ class VariableSelectionPrior:
 
         Parameters
         ----------
-        idata : arviz.InferenceData
-            Fitted model inference data
+        idata : xarray.DataTree
+            Fitted model data tree
         param_name : str
             Name of the coefficient parameter (must match name in create_prior)
         threshold : float, default=0.5
@@ -476,25 +561,17 @@ class VariableSelectionPrior:
         import arviz as az
 
         # Extract gamma values
-        gamma = az.extract(idata.posterior[gamma_name])
+        gamma = az.extract(idata, group="posterior", var_names=gamma_name)
+        probabilities = (gamma > threshold).mean(dim="sample")
+        gamma_mean = gamma.mean(dim="sample")
 
-        # Compute inclusion probabilities
-        probabilities = (gamma > threshold).mean(dim="sample").to_array()
-        gamma_mean = gamma.mean(dim="sample").to_array()
-        selected = probabilities > threshold
-
-        summary = {
-            "probabilities": probabilities,
-            "selected": selected,
-            "gamma_mean": gamma_mean,
-        }
-        probs = summary["probabilities"].T
-        df = pd.DataFrame(index=list(range(len(probs))))
-
-        df["prob"] = probs
-        df["selected"] = summary["selected"].T
-        df["gamma_mean"] = summary["gamma_mean"].T
-        return df
+        return pd.DataFrame(
+            {
+                "prob": np.asarray(probabilities).reshape(-1),
+                "selected": np.asarray(probabilities > threshold).reshape(-1),
+                "gamma_mean": np.asarray(gamma_mean).reshape(-1),
+            }
+        )
 
     def get_shrinkage_factors(self, idata, param_name: str) -> pd.DataFrame:
         """
@@ -505,8 +582,8 @@ class VariableSelectionPrior:
 
         Parameters
         ----------
-        idata : arviz.InferenceData
-            Fitted model inference data
+        idata : xarray.DataTree
+            Fitted model data tree
         param_name : str
             Name of the coefficient parameter
 
@@ -538,27 +615,18 @@ class VariableSelectionPrior:
         if lambda_tilde_name not in idata.posterior:
             raise ValueError(f"Could not find '{lambda_tilde_name}' in posterior")
 
-        # Extract components
-        tau = az.extract(idata.posterior[tau_name]).to_array()
-        lambda_tilde = az.extract(idata.posterior[lambda_tilde_name]).to_array()
+        tau = az.extract(idata, group="posterior", var_names=tau_name)
+        lambda_tilde = az.extract(idata, group="posterior", var_names=lambda_tilde_name)
+        shrinkage_factor = (tau * lambda_tilde).mean(dim="sample")
+        lambda_tilde_mean = lambda_tilde.mean(dim="sample")
 
-        shrinkage_factor = np.array(
-            [tau[0, i] * lambda_tilde[0, :, :] for i in range(len(tau))]
+        return pd.DataFrame(
+            {
+                "shrinkage_factor": np.asarray(shrinkage_factor).reshape(-1),
+                "lambda_tilde": np.asarray(lambda_tilde_mean).reshape(-1),
+                "tau": float(tau.mean()),
+            }
         )
-        shrinkage_factor = shrinkage_factor.mean(axis=2)
-
-        summary = {
-            "shrinkage_factors": shrinkage_factor,
-            "tau": tau.mean(),
-            "lambda_tilde": lambda_tilde.mean(dim=("sample")),
-        }
-        probs = summary["shrinkage_factors"].T
-        df = pd.DataFrame(index=list(range(len(probs))))
-        df["shrinkage_factor"] = probs
-
-        df["lambda_tilde"] = summary["lambda_tilde"].T
-        df["tau"] = np.mean(tau).item()
-        return df
 
 
 def create_variable_selection_prior(

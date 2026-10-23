@@ -1,3 +1,10 @@
+---
+myst:
+  html_meta:
+    description: "Causal estimands explained: ATE, ATT, LATE, and which estimand each quasi-experimental method in CausalPy identifies."
+"og:description": "Causal estimands explained: ATE, ATT, LATE, and which estimand each quasi-experimental method in CausalPy identifies."
+---
+
 # Estimands in CausalPy
 
 Understanding **what** a method estimates is just as important as knowing **how** to use it. This page introduces a framework for thinking about causal estimands and connects CausalPy's methods to this framework.
@@ -162,10 +169,16 @@ The descriptions above assume standard usage. Always consider what your specific
 ## Quick Reference
 
 | Method | Empirical Estimand |
-|--------|-------------------|
+| --- | --- |
 | Difference-in-Differences | {term}`ATT` |
 | Interrupted Time Series | Time-varying unit-specific impact |
 | Synthetic Control | Time-varying unit-specific impact |
 | Regression Discontinuity | Local treatment effect at cutoff |
 
 For methods not covered in detail here, including IV, IPW, and ANCOVA, see the respective notebook documentation, {doc}`quasi_dags` for identification, and the {doc}`glossary` for estimand definitions.
+
+## References
+
+:::{bibliography}
+:filter: docname in docnames
+:::

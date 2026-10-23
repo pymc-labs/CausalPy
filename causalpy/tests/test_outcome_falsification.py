@@ -280,7 +280,7 @@ def test_run_handles_failed_formula(mock_pymc_sample, its_context):
 
     Note: the more natural failure mode (a formula referencing a
     missing column, e.g. ``"missing_col ~ 1 + t"``) would be preferable
-    here, but under Python 3.13 it exposes a patsy tracebak/pytest
+    here, but under Python 3.13 it exposes a patsy traceback/pytest
     interaction bug (``INTERNALERROR`` from ``KeyError`` in
     ``patsy.eval``).  See also the skipped tests in
     ``test_piecewise_its.py`` (``test_transforms_with_patsy_dmatrix``

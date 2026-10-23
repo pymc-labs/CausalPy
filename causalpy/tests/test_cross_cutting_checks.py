@@ -141,7 +141,7 @@ class TestPersistenceCheck:
             treatment_end_time=70,
             formula="y ~ 1 + t",
             model=model,
-        )
+        ).fit()
         ctx = PipelineContext(data=df)
         ctx.experiment = its
 
@@ -331,15 +331,15 @@ class TestPriorSensitivity:
 class TestPreTreatmentPlaceboCheckRun:
     """Additional tests covering run() and edge cases."""
 
-    def test_validate_missing_att_event_time(self):
+    def test_validate_rejects_unfitted_experiment(self):
         mock_sdid = Mock(spec=StaggeredDifferenceInDifferences)
-        del mock_sdid.att_event_time_
-        with pytest.raises(ValueError, match="att_event_time_"):
+        mock_sdid.is_fitted = False
+        with pytest.raises(ValueError, match="not been fitted"):
             PreTreatmentPlaceboCheck().validate(mock_sdid)
 
     def test_run_passing_pre_treatment(self):
         mock_exp = Mock()
-        mock_exp.att_event_time_ = pd.DataFrame(
+        mock_exp.result.att_event_time = pd.DataFrame(
             {
                 "event_time": [-3, -2, -1, 0, 1, 2],
                 "att": [0.001, -0.002, 0.001, 0.5, 0.6, 0.7],
@@ -356,7 +356,7 @@ class TestPreTreatmentPlaceboCheckRun:
 
     def test_run_failing_pre_treatment(self):
         mock_exp = Mock()
-        mock_exp.att_event_time_ = pd.DataFrame(
+        mock_exp.result.att_event_time = pd.DataFrame(
             {
                 "event_time": [-3, -2, -1, 0, 1],
                 "att": [5.0, 4.0, 6.0, 0.5, 0.6],
@@ -369,7 +369,7 @@ class TestPreTreatmentPlaceboCheckRun:
 
     def test_run_empty_pre_treatment(self):
         mock_exp = Mock()
-        mock_exp.att_event_time_ = pd.DataFrame(
+        mock_exp.result.att_event_time = pd.DataFrame(
             {
                 "event_time": [0, 1, 2],
                 "att": [0.5, 0.6, 0.7],

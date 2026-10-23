@@ -22,7 +22,7 @@ Review prompts:
 
 ## `PyMCModel` Contract
 
-PyMC models inherit from `PyMCModel` and share the public interface `fit()`, `predict()`, `score()`, `calculate_impact()`, and `print_coefficients()`.
+PyMC models inherit from `PyMCModel` and share the public interface `fit()`, `predict()`, `score()`, and `print_coefficients()`. Experiments derive impact from the adapter's canonical `mu` prediction container.
 
 - Use `xarray.DataArray` with coordinates such as `coeffs`, `obs_ind`, and `treated_units`.
 - Store user-supplied priors on `self._user_priors` so they round-trip through `_clone()`.

@@ -331,3 +331,53 @@ class TestPipelineIntegration:
         assert result.effect_summary is not None
         assert len(result.sensitivity_results) == 1
         assert result.sensitivity_results[0].passed is True
+
+
+def test_scheduled_descriptive_placebos_render_as_information():
+    """The real check keeps its table and figure without inventing a verdict."""
+    import matplotlib.pyplot as plt
+
+    frame = pd.DataFrame(
+        {"t": np.arange(70), "y": 10 + 0.1 * np.arange(70)},
+    )
+    template = cp.pymc_models.LinearRegression(
+        sample_kwargs={"chains": 2, "draws": 100, "tune": 100, "random_seed": 42}
+    )
+    experiment = cp.InterruptedTimeSeries(
+        frame, treatment_time=60, formula="y ~ 1 + t", model=template._clone()
+    ).fit()
+    context = PipelineContext(
+        data=frame,
+        experiment=experiment,
+        experiment_config={
+            "method": cp.InterruptedTimeSeries,
+            "formula": "y ~ 1 + t",
+            "model": template,
+        },
+    )
+    check = cp.checks.PlaceboInTime(
+        n_folds=2,
+        treatment_times=[30, 40],
+        intervention_length=15,
+        min_training_rows=30,
+        allow_overlap=True,
+        calibrate=False,
+        random_seed=42,
+    )
+    try:
+        SensitivityAnalysis(checks=[check]).run(context)
+        assert context.report.all_passed is None
+        result = context.sensitivity_results[0]
+        assert result.passed is None
+        assert result.table["status"].tolist() == ["completed", "completed"]
+        assert len(result.figures) == 1
+        cp.GenerateReport().run(context)
+        assert 'badge-info">INFO' in context.report
+        assert 'badge-pass">PASS' not in context.report
+        assert 'badge-fail">FAIL' not in context.report
+        assert "pseudo_treatment_time" in context.report
+        assert "n_comparison" in context.report
+        assert result.text in context.report
+        assert context.report.count("data:image/png;base64,") >= 2
+    finally:
+        plt.close("all")

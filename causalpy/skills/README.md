@@ -9,7 +9,7 @@ When these user-facing skills change, update the distributed Decision AI Hub cop
 ## Layout
 
 | Path | Purpose |
-|------|---------|
+| --- | --- |
 | `choosing-causalpy-methods/` | Route causal or impact questions to the right CausalPy experiment via ordered intake, disambiguation, and explicit no-fit outcomes |
 | `causal-detective/` | Challenging causal claims with threat assessment, counterfactual reasoning, and falsification checks |
 | `example-datasets/` | Loading bundled CausalPy example datasets for demos, tutorials, and tests |

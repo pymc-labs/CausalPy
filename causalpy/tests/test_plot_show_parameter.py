@@ -45,7 +45,7 @@ def test_plot_show_parameter_default_true_pymc(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     with patch("matplotlib.pyplot.show") as mock_show:
         fig, ax = result.plot()
@@ -66,7 +66,7 @@ def test_plot_show_parameter_explicit_true_pymc(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     with patch("matplotlib.pyplot.show") as mock_show:
         fig, ax = result.plot(show=True)
@@ -89,7 +89,7 @@ def test_plot_show_parameter_false_pymc(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     with patch("matplotlib.pyplot.show") as mock_show:
         fig, ax = result.plot(show=False)
@@ -110,7 +110,7 @@ def test_plot_show_parameter_default_true_skl(did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
     with patch("matplotlib.pyplot.show") as mock_show:
         fig, ax = result.plot()
@@ -131,7 +131,7 @@ def test_plot_show_parameter_false_skl(did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
     with patch("matplotlib.pyplot.show") as mock_show:
         fig, ax = result.plot(show=False)
@@ -166,7 +166,7 @@ def test_legend_kwargs_preserves_labels_pymc(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Plot without legend_kwargs to get baseline
     with patch("matplotlib.pyplot.show"):
@@ -201,7 +201,7 @@ def test_legend_kwargs_preserves_labels_skl(did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Plot without legend_kwargs to get baseline
     with patch("matplotlib.pyplot.show"):
@@ -236,7 +236,7 @@ def test_legend_kwargs_changes_location_pymc(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Get baseline labels
     with patch("matplotlib.pyplot.show"):
@@ -265,7 +265,7 @@ def test_legend_kwargs_bbox_to_anchor_triggers_layout(mock_pymc_sample, did_data
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     with (
         patch("matplotlib.pyplot.show"),
@@ -291,7 +291,7 @@ def test_legend_kwargs_frameon_and_title(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     with patch("matplotlib.pyplot.show"):
         _, ax = result.plot(
@@ -315,7 +315,7 @@ def test_legend_kwargs_unsupported_key_raises(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     with (
         pytest.raises(TypeError, match="not supported"),
@@ -336,7 +336,7 @@ def test_legend_kwargs_bbox_transform_without_anchor_raises(mock_pymc_sample, di
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     with (
         pytest.raises(TypeError, match="bbox_transform requires bbox_to_anchor"),
@@ -358,7 +358,7 @@ def test_legend_kwargs_preserves_fontsize(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Get baseline fontsize
     with patch("matplotlib.pyplot.show"):
@@ -390,7 +390,7 @@ def test_legend_kwargs_none_is_noop(mock_pymc_sample, did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     with patch("matplotlib.pyplot.show"):
         fig, ax = result.plot(legend_kwargs=None)
@@ -412,7 +412,7 @@ def test_legend_kwargs_multi_axis_its(mock_pymc_sample, its_data):
         formula="y ~ 1 + t",
         treatment_time=pd.to_datetime("2017-01-01"),
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Get baseline legend from first axes
     with patch("matplotlib.pyplot.show"):

@@ -139,7 +139,7 @@ class PriorSensitivity:
             model = clone_model(alt["model"])
             logger.info("PriorSensitivity: fitting with '%s'", name)
 
-            alt_experiment = method(context.data, model=model, **base_kwargs)
+            alt_experiment = method(context.data, model=model, **base_kwargs).fit()
 
             try:
                 summary = alt_experiment.effect_summary()
