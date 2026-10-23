@@ -195,13 +195,16 @@ def _sklearn_y(y: Any) -> np.ndarray:
 def _canonical_pymc_coefficients(posterior: xr.DataTree) -> xr.DataArray:
     """Normalize supported PyMC coefficient variables to the canonical contract."""
     variables = posterior if isinstance(posterior, xr.Dataset) else posterior.dataset
-    coefficient_names = ("beta", "b", "beta_z")
+    # "mu_beta" is checked first: hierarchical models (e.g. HierarchicalLaunchITS)
+    # expose per-unit "beta" with an extra "unit" dim, whereas "mu_beta" is the
+    # population-level analogue with the canonical ("coeffs",) shape.
+    coefficient_names = ("mu_beta", "beta", "b", "beta_z")
     coefficient_name = next(
         (name for name in coefficient_names if name in variables), None
     )
     if coefficient_name is None:
         raise ValueError(
-            "PyMC posterior must expose one of 'beta', 'b', or 'beta_z' "
+            "PyMC posterior must expose one of 'mu_beta', 'beta', 'b', or 'beta_z' "
             "as design-matrix coefficients."
         )
 

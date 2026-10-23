@@ -308,7 +308,7 @@ def test_maketables_hierarchical_its_pymc_contract(mock_pymc_sample):
         treatment_time_col="launch_week",
         effect_type="instant",
         model=cp.pymc_models.HierarchicalLaunchITS(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     table = result.__maketables_coef_table__
     assert table.index.name == "Coefficient"

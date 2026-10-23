@@ -19,7 +19,6 @@ import pandas as pd
 import pytest
 
 import causalpy as cp
-from causalpy.experiments.model_adapter import PyMCModelAdapter
 from causalpy.pymc_models import HierarchicalLaunchITS
 
 SAMPLE_KWARGS = {"progressbar": False, "random_seed": 42}
@@ -66,7 +65,7 @@ def _fit(df, effect_type, **kwargs):
         effect_type=effect_type,
         model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
         **kwargs,
-    )
+    ).fit()
 
 
 class TestInstant:
@@ -81,12 +80,12 @@ class TestInstant:
         assert "lift" in result.model.idata.posterior
         assert "mu_lift" in result.model.idata.posterior
         canonical_dims = ("chain", "draw", "obs_ind", "treated_units")
-        for pred in (result.observed_pred, result.counterfactual_pred):
+        for pred in (result.result.observed_pred, result.result.counterfactual_pred):
             assert pred.dims == canonical_dims
             assert pred.sizes["obs_ind"] == len(panel)
-        assert result.impact.dims == ("chain", "draw", "obs_ind")
-        assert result.impact.sizes["obs_ind"] == len(panel)
-        assert list(result.score.index) == ["unit_0_r2", "unit_0_r2_std"]
+        assert result.result.impact.dims == ("chain", "draw", "obs_ind")
+        assert result.result.impact.sizes["obs_ind"] == len(panel)
+        assert list(result.result.score.index) == ["unit_0_r2", "unit_0_r2_std"]
 
     def test_plot(self, panel, mock_pymc_sample):
         """Plot instant model and verify figure is returned."""
@@ -125,7 +124,9 @@ class TestInstant:
         assert {"mean", "hdi_lower", "hdi_upper", "p_gt_0", "relative_mean"} <= set(
             es.table.columns
         )
-        post_impact = result.impact.isel(obs_ind=np.flatnonzero(result._tau >= 0))
+        post_impact = result.result.impact.isel(
+            obs_ind=np.flatnonzero(result._tau >= 0)
+        )
         np.testing.assert_allclose(
             es.table.loc["average", "mean"], float(post_impact.mean())
         )
@@ -151,7 +152,7 @@ class TestInstant:
         rows = np.flatnonzero((result._tau >= 0) & (result._tau <= 3))
         np.testing.assert_allclose(
             es_window.table.loc["average", "mean"],
-            float(result.impact.isel(obs_ind=rows).mean()),
+            float(result.result.impact.isel(obs_ind=rows).mean()),
         )
         assert result.effect_summary(window=slice(0, 3)).table.equals(
             result.effect_summary(window=(0, 3)).table
@@ -340,7 +341,7 @@ class TestSaturation:
         post = result.model.idata.posterior
         for name in ("L", "k", "s", "mu_logL", "sigma_logL", "mu_logk", "sigma_logk"):
             assert name in post
-        assert result.impact.sizes["obs_ind"] == len(panel)
+        assert result.result.impact.sizes["obs_ind"] == len(panel)
 
     def test_plot(self, panel, mock_pymc_sample):
         """Plot saturation model and verify figure is returned."""
@@ -453,7 +454,7 @@ class TestSaturationRecovery:
         return pd.DataFrame(rows), {"L": L, "k": k, "s": s}
 
     @pytest.mark.slow
-    def test_recovers_saturation_parameters(self):
+    def test_recovers_saturation_parameters(self, genuine_pymc_sampling):
         """Fit with real (non-mocked) sampling and check L/k are in a plausible range."""
         df, truth = self._make_saturation_panel()
         result = cp.HierarchicalInterruptedTimeSeries(
@@ -472,7 +473,7 @@ class TestSaturationRecovery:
                     "random_seed": 42,
                 }
             ),
-        )
+        ).fit()
         post = result.model.idata.posterior
         L_hat = float(np.exp(post["mu_logL"]).mean())
         k_hat = float(np.exp(post["mu_logk"]).mean())
@@ -501,7 +502,7 @@ class TestEdgeCases:
             treatment_time_col="launch_week",
             effect_type="instant",
             model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
-        )
+        ).fit()
         assert result.X.sizes["coeffs"] == 0
 
     def test_formula_with_intercept_dropped(self, panel, mock_pymc_sample):
@@ -514,7 +515,7 @@ class TestEdgeCases:
             treatment_time_col="launch_week",
             effect_type="instant",
             model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
-        )
+        ).fit()
         assert "Intercept" not in result.labels
 
     def test_print_coefficients_no_covariates(self, panel, mock_pymc_sample, capsys):
@@ -527,7 +528,7 @@ class TestEdgeCases:
             treatment_time_col="launch_week",
             effect_type="instant",
             model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
-        )
+        ).fit()
         result.print_coefficients()
         out = capsys.readouterr().out
         assert "mu_lift" in out
@@ -562,7 +563,7 @@ class TestEdgeCases:
             effect_type="instant",
             ar_residuals=True,
             model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
-        )
+        ).fit()
         post = result.model.idata.posterior
         assert "rho" in post
         assert "z_ar" in post
@@ -571,18 +572,21 @@ class TestEdgeCases:
         assert "time_step" in post["z_ar"].dims
 
     def test_predictive_unfitted_model(self, panel):
-        """Raise RuntimeError when calling predictive on an unfitted model."""
-        # Build experiment object without fitting by manually constructing
-        model = HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS)
-        with pytest.raises(RuntimeError, match="not been fit"):
-            # Manually create the experiment skeleton and call predictive
-            result = cp.HierarchicalInterruptedTimeSeries.__new__(
-                cp.HierarchicalInterruptedTimeSeries
-            )
-            result._model_backend = PyMCModelAdapter(model)
-            result.model = model
-            result.effect_type = "instant"
+        """Reading draws before fit() raises GroupNotSampledException."""
+        result = cp.HierarchicalInterruptedTimeSeries(
+            data=panel,
+            formula="sales ~ 0 + emails + price",
+            unit_col="product",
+            time_col="week_idx",
+            treatment_time_col="launch_week",
+            effect_type="instant",
+            model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+        )
+        assert not result.is_fitted
+        with pytest.raises(cp.GroupNotSampledException, match="fit"):
             result.predictive_for_new_unit()
+        with pytest.raises(cp.GroupNotSampledException, match="fit"):
+            result.effect_summary()
 
 
 class TestValidation:
@@ -745,7 +749,7 @@ class TestValidation:
             treatment_time_col="launch_week",
             effect_type="instant",
             model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
-        )
+        ).fit()
         assert result._time_std == 1.0
 
     def test_rejects_non_hierarchical_model(self, panel):
@@ -790,7 +794,7 @@ class TestValidation:
         unit_rows = panel[panel["product"] == 0].sort_values("week_idx")
         sorted_unit_mask = (result._sorted_data["product"] == 0).to_numpy()
         expected_fit = (
-            result.observed_pred.mean(("chain", "draw"))
+            result.result.observed_pred.mean(("chain", "draw"))
             .isel(treated_units=0)
             .values[sorted_unit_mask]
         )
@@ -902,8 +906,8 @@ def test_calendar_effects_fit_and_projection(panel, mock_pymc_sample, capsys):
     # predictions coincide before launch.
     pre = np.flatnonzero(result._tau < 0)
     np.testing.assert_allclose(
-        result.observed_pred.isel(obs_ind=pre).values,
-        result.counterfactual_pred.isel(obs_ind=pre).values,
+        result.result.observed_pred.isel(obs_ind=pre).values,
+        result.result.counterfactual_pred.isel(obs_ind=pre).values,
     )
 
     result.summary()
@@ -954,3 +958,86 @@ def test_launch_overlap_counts(panel, mock_pymc_sample):
         assert overlap.loc[week, "n_post"] == int((launches <= week).sum())
     assert overlap.loc[0, "identified"]
     assert not overlap.loc[39, "identified"]
+
+
+# ---------------------------------------------------------------- lifecycle
+
+
+def _configure(df, effect_type="instant", **kwargs):
+    """Construct (but do not fit) a HierarchicalInterruptedTimeSeries."""
+    return cp.HierarchicalInterruptedTimeSeries(
+        data=df,
+        formula="sales ~ 0 + emails + price",
+        unit_col="product",
+        time_col="week_idx",
+        treatment_time_col="launch_week",
+        effect_type=effect_type,
+        model=HierarchicalLaunchITS(
+            sample_kwargs=SAMPLE_KWARGS,
+            prior_sample_kwargs={"draws": 50, "random_seed": 42},
+        ),
+        **kwargs,
+    )
+
+
+def test_construction_is_lazy_and_build_exposes_graph(panel):
+    """Construction samples nothing; build() makes the graph inspectable."""
+    result = _configure(panel)
+    assert result.idata is None
+    assert not result.is_built
+    assert result.build() is result
+    assert result.is_built
+    assert not result.is_fitted
+    assert {"mu_lift", "lift", "y_hat"} <= set(result.model.named_vars)
+    # build() is idempotent
+    result.build()
+
+
+def test_prior_phase_supports_group_prior_reads(panel, mock_pymc_sample):
+    """sample_prior_predictive() populates prior_result for group='prior' reads."""
+    result = _configure(panel).sample_prior_predictive()
+    assert result.has_prior_predictive
+    assert not result.is_fitted
+    bundle = result.prior_result
+    assert bundle.score is None
+    assert bundle.impact.dims == ("chain", "draw", "obs_ind")
+
+    es = result.effect_summary(group="prior")
+    assert es.text.startswith("Prior predictive check")
+    assert list(result.parameter_summary(group="prior").index) == [
+        "mu_lift",
+        "sigma_lift",
+    ]
+    assert result.predictive_for_new_unit(size=10, group="prior").shape == (10,)
+    fig, _ = result.plot(group="prior", show=False)
+    plt.close(fig)
+    fig, _ = result.plot_unit(unit_id=0, group="prior")
+    plt.close(fig)
+    with pytest.raises(cp.GroupNotSampledException):
+        result.effect_summary()
+
+
+def test_fit_rearms_full_design_for_prior_phase(panel, mock_pymc_sample):
+    """The counterfactual prediction must not leak into the automatic prior phase.
+
+    ``fit()`` predicts the counterfactual (effect switched off) before it fills
+    the prior phase; every data node, not just ``X``/``y``, must be re-armed.
+    """
+    result = _configure(panel).fit()
+    assert result.is_fitted and result.has_prior_predictive
+    assert result.prior_result.impact.sizes["obs_ind"] == len(panel)
+    # The last prediction left the graph on the counterfactual design...
+    assert not result.model["post"].get_value().any()
+    # ...and re-arming (run before every sampling phase) restores all of it.
+    result.model._rearm_fit_data()
+    np.testing.assert_array_equal(result.model["post"].get_value(), result._post)
+    np.testing.assert_array_equal(
+        result.model["unit_idx"].get_value(), result._unit_idx
+    )
+
+
+def test_model_set_aux_after_build_raises(panel):
+    """The auxiliary design cannot change once the graph exists."""
+    result = _configure(panel).build()
+    with pytest.raises(RuntimeError, match="already built"):
+        result.model.set_aux(result._aux(effect_on=False))

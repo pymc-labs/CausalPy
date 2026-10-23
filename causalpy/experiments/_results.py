@@ -37,6 +37,7 @@ __all__ = [
     "CoefficientResult",
     "DiscontinuityResult",
     "GroupComparisonScenario",
+    "HierarchicalInterruptedTimeSeriesResult",
     "KinkResult",
     "ResultBundle",
     "StaggeredDifferenceInDifferencesResult",
@@ -122,6 +123,23 @@ class KinkResult:
 
 
 @dataclass(frozen=True)
+class HierarchicalInterruptedTimeSeriesResult:
+    """Result bundle for :class:`~causalpy.experiments.hierarchical_interrupted_time_series.HierarchicalInterruptedTimeSeries`.
+
+    ``observed_pred`` and ``counterfactual_pred`` are expected outcomes on the
+    canonical ``("chain", "draw", "obs_ind", "treated_units")`` dimensions
+    under the actual design and with the launch effect switched off;
+    ``impact`` is ``observed - counterfactual`` on ``("chain", "draw",
+    "obs_ind")``. Rows follow the experiment's unit-then-time sorted panel.
+    """
+
+    observed_pred: xr.DataArray
+    counterfactual_pred: xr.DataArray
+    impact: xr.DataArray
+    score: pd.Series | None = None
+
+
+@dataclass(frozen=True)
 class StaggeredDifferenceInDifferencesResult:
     """Result bundle for :class:`~causalpy.experiments.staggered_did.StaggeredDifferenceInDifferences`.
 
@@ -144,6 +162,7 @@ ResultBundle = (
     CausalResult
     | CoefficientResult
     | DiscontinuityResult
+    | HierarchicalInterruptedTimeSeriesResult
     | KinkResult
     | StaggeredDifferenceInDifferencesResult
     | SyntheticDifferenceInDifferencesResult
