@@ -43,7 +43,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         Any eager dataframe Narwhals supports, such as pandas, Polars, or
         PyArrow. Converted to pandas internally.
     formula : str
-        A statistical model formula for the propensity model.
+        A patsy formula for the propensity model, such as ``"trt ~ 1 + age + race"``. The left-hand side must evaluate to binary 0/1 treatment values, and the right-hand side sets the covariates used to estimate propensity scores.
     outcome_variable : str
         A string denoting the outcome variable in data to be reweighted.
     weighting_scheme : str
@@ -52,7 +52,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         "Foundations of Agnostic Statistics" for discussion and computation
         of these weighting schemes.
     model : PropensityScore, optional
-        A PyMC model. Defaults to PropensityScore.
+        A PyMC model that samples the posterior propensity scores. Defaults to PropensityScore. Sampler options are set through its ``sample_kwargs``, as in the example below.
 
     Notes
     -----
@@ -519,10 +519,10 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         i : int
             Index of the posterior sample to process.
         idata : xr.DataTree
-            DataTree containing the posterior samples.
+            DataTree containing the posterior samples, including the propensity score variable ``p``.
         method : str, optional
             Weighting scheme to use. One of 'robust', 'raw', 'overlap',
-            or 'doubly_robust'. Defaults to 'doubly_robust'.
+            or 'doubly_robust'. Defaults to 'doubly_robust'. Any other value silently falls back to 'doubly_robust'.
 
         Returns
         -------
@@ -842,8 +842,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
             uses the fitted model backend's DataTree.
         weighting_scheme : str | None, optional
             Weighting scheme to apply.  One of ``'raw'``, ``'robust'``, or
-            ``'overlap'``.  If ``None``, falls back to
-            ``self.weighting_scheme``.
+            ``'overlap'``.  Any other value, including ``'doubly_robust'``, uses the overlap weights.  If ``None``, falls back to ``self.weighting_scheme``.
 
         Returns
         -------
