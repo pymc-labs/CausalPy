@@ -748,8 +748,8 @@ class HierarchicalInterruptedTimeSeries(
             sd = float(post["sigma_lift"].mean())
             print(f"E[mu_lift] = {mu:.3g}   E[sigma_lift] = {sd:.3g}")
         elif self.effect_type == "saturation":
-            L = float(np.exp(post["mu_logL"]).mean())
-            k = float(np.exp(post["mu_logk"]).mean())
+            L = float(xr.ufuncs.exp(post["mu_logL"]).mean())
+            k = float(xr.ufuncs.exp(post["mu_logk"]).mean())
             s = float(post["s"].mean())
             print(
                 f"E[L] (ceiling lift) = {L:.3g}   "
@@ -974,8 +974,8 @@ class HierarchicalInterruptedTimeSeries(
         max_tau = float(np.nanmax(self._tau_since)) if len(self._tau_since) else 1.0
         grid = xr.DataArray(np.linspace(0, max(max_tau, 1.0), 100), dims="tau_since")
 
-        L = np.exp(draws["mu_logL"])
-        k = np.exp(draws["mu_logk"])
+        L = xr.ufuncs.exp(draws["mu_logL"])
+        k = xr.ufuncs.exp(draws["mu_logk"])
         s = draws["s"]
         hill_curve = grid**s / (k**s + grid**s + 1e-6)
         effect_draws = L * hill_curve
@@ -1160,9 +1160,11 @@ class HierarchicalInterruptedTimeSeries(
             print(f"  mu_lift: {float(post['mu_lift'].mean()):.4g}")
             print(f"  sigma_lift: {float(post['sigma_lift'].mean()):.4g}")
         elif self.effect_type == "saturation":
-            print(f"  L (ceiling lift): {float(np.exp(post['mu_logL']).mean()):.4g}")
             print(
-                f"  k (half-saturation time): {float(np.exp(post['mu_logk']).mean()):.4g}"
+                f"  L (ceiling lift): {float(xr.ufuncs.exp(post['mu_logL']).mean()):.4g}"
+            )
+            print(
+                f"  k (half-saturation time): {float(xr.ufuncs.exp(post['mu_logk']).mean()):.4g}"
             )
             print(f"  s (Hill exponent): {float(post['s'].mean()):.4g}")
         else:  # event_study / placebo
@@ -1391,8 +1393,10 @@ class HierarchicalInterruptedTimeSeries(
             rows.append(_row("mu_lift", post["mu_lift"]))
             rows.append(_row("sigma_lift", post["sigma_lift"]))
         elif self.effect_type == "saturation":
-            rows.append(_row("L (ceiling lift)", np.exp(post["mu_logL"])))
-            rows.append(_row("k (half-saturation time)", np.exp(post["mu_logk"])))
+            rows.append(_row("L (ceiling lift)", xr.ufuncs.exp(post["mu_logL"])))
+            rows.append(
+                _row("k (half-saturation time)", xr.ufuncs.exp(post["mu_logk"]))
+            )
             rows.append(_row("s (Hill exponent)", post["s"]))
         else:
             for i, label in enumerate(self._event_bin_labels or []):

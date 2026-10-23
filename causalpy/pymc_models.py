@@ -4015,7 +4015,10 @@ class HierarchicalLaunchITS(PyMCModel):
         )
 
     def build_model(
-        self, X: xr.DataArray, y: xr.DataArray, coords: dict[str, Any] | None
+        self,
+        X: xr.DataArray | dict[str, xr.DataArray],
+        y: xr.DataArray | dict[str, xr.DataArray],
+        coords: dict[str, Any] | None,
     ) -> None:
         """
         Define the hierarchical PyMC model.
@@ -4036,6 +4039,8 @@ class HierarchicalLaunchITS(PyMCModel):
                 "HierarchicalLaunchITS.build_model called without aux. "
                 "Use .fit(..., aux=...) rather than calling build_model directly."
             )
+        if isinstance(X, dict) or isinstance(y, dict):
+            raise TypeError("HierarchicalLaunchITS does not support mapping inputs")
         aux = self._aux
         effect_type = aux["effect_type"]
         unit_idx_np = np.asarray(aux["unit_idx"], dtype=np.int64)
@@ -4313,7 +4318,7 @@ class HierarchicalLaunchITS(PyMCModel):
         with self:
             pm.set_data(payload, coords={"obs_ind": np.arange(X.shape[0])})
 
-    def predict(  # type: ignore[override]
+    def predict(
         self,
         X: xr.DataArray,
         coords: dict[str, Any] | None = None,
