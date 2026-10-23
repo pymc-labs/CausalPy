@@ -868,3 +868,89 @@ class TestValidation:
         kwargs = {"placebo_edges": [-8, -4, 0]} if effect_type == "placebo" else {}
         with pytest.raises(ValueError, match="outside every `bin_edges` bin"):
             _fit(panel, effect_type, bin_edges=bin_edges, **kwargs)
+
+
+# ---------------------------------------------------------- calendar effects
+
+
+def _calendar_grid_effect(result):
+    """Posterior calendar effect as a (sample, calendar_time) array."""
+    return (
+        result.model.idata.posterior["calendar_effect"]
+        .stack(sample=("chain", "draw"))
+        .transpose("sample", "calendar_time")
+        .values
+    )
+
+
+def test_calendar_effects_fit_and_projection(panel, mock_pymc_sample, capsys):
+    """Calendar effect is shared, orthogonal to intercept/trend, kept in counterfactual."""
+    with pytest.warns(UserWarning, match="no pre-launch units"):
+        result = _fit(panel, "instant", calendar_effects=True)
+
+    post = result.model.idata.posterior
+    assert post["calendar_effect"].dims == ("chain", "draw", "calendar_time")
+    grid = np.sort(panel["week_idx"].unique())
+    np.testing.assert_array_equal(post.coords["calendar_time"].values, grid)
+
+    effect = _calendar_grid_effect(result)
+    scale = np.abs(effect).max()
+    np.testing.assert_allclose(effect.sum(axis=1), 0.0, atol=1e-8 * (1 + scale))
+    np.testing.assert_allclose(effect @ grid, 0.0, atol=1e-6 * (1 + scale))
+
+    # The calendar effect is part of the baseline: observed and counterfactual
+    # predictions coincide before launch.
+    pre = np.flatnonzero(result._tau < 0)
+    np.testing.assert_allclose(
+        result.observed_pred.isel(obs_ind=pre).values,
+        result.counterfactual_pred.isel(obs_ind=pre).values,
+    )
+
+    result.summary()
+    assert "Calendar effects: on" in capsys.readouterr().out
+
+
+def test_calendar_effects_orthogonal_to_seasonality(panel, mock_pymc_sample):
+    """With seasonality, the calendar effect is projected off the Fourier terms."""
+    seasonality = {"period": 13, "K": 1}
+    with pytest.warns(UserWarning, match="no pre-launch units"):
+        result = _fit(panel, "instant", calendar_effects=True, seasonality=seasonality)
+    grid = result.model.idata.posterior.coords["calendar_time"].values
+    fourier = np.column_stack(
+        [np.sin(2 * np.pi * grid / 13), np.cos(2 * np.pi * grid / 13)]
+    )
+    effect = _calendar_grid_effect(result)
+    scale = np.abs(effect).max()
+    np.testing.assert_allclose(effect @ fourier, 0.0, atol=1e-6 * (1 + scale))
+
+
+def test_calendar_effects_off_by_default(panel, mock_pymc_sample):
+    """Without calendar_effects, no calendar term or aux inputs are created."""
+    result = _fit(panel, "instant")
+    assert "calendar_effect" not in result.model.idata.posterior
+    assert "calendar_idx" not in result._aux()
+
+
+def test_calendar_effects_no_warning_when_window_has_pre_launch_units(
+    panel, mock_pymc_sample, recwarn
+):
+    """No overlap warning when every calendar time has a not-yet-launched unit."""
+    truncated = panel[panel["week_idx"] < panel["launch_week"].max()]
+    result = _fit(truncated, "instant", calendar_effects=True)
+    assert result.launch_overlap()["identified"].all()
+    assert not any("calendar_effects" in str(w.message) for w in recwarn)
+
+
+def test_launch_overlap_counts(panel, mock_pymc_sample):
+    """launch_overlap counts pre/post-launch units per calendar time."""
+    result = _fit(panel, "instant")
+    overlap = result.launch_overlap()
+    assert overlap.index.name == "week_idx"
+    assert list(overlap.columns) == ["n_pre", "n_post", "identified"]
+    assert (overlap["n_pre"] + overlap["n_post"] == panel["product"].nunique()).all()
+
+    launches = panel.groupby("product")["launch_week"].first()
+    for week in (0, 15, 39):
+        assert overlap.loc[week, "n_post"] == int((launches <= week).sum())
+    assert overlap.loc[0, "identified"]
+    assert not overlap.loc[39, "identified"]

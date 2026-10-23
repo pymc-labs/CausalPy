@@ -2658,7 +2658,19 @@ class HierarchicalLaunchITS(PyMCModel):
       ``"instant"``), ``D`` (one-hot event-bin design) and ``tau_since``
       (event time clipped at 0, for ``"saturation"`` — the counterfactual
       switch zeroes ``tau_since`` directly rather than using a ``post``
-      indicator).
+      indicator). Optional ``calendar_idx`` (int array mapping each row to a
+      position on the shared calendar grid) plus ``calendar_projection``
+      (square matrix over that grid) enable the shared calendar-time effect.
+
+    The optional calendar-time effect is a single Gaussian random walk over
+    the shared calendar grid, added to every unit's baseline (it is *not*
+    switched off in the counterfactual). Its scale prior ``sigma_calendar``
+    is the marginal standard deviation of the walk over the whole window.
+    The walk is multiplied by ``calendar_projection``, which the experiment
+    builds to remove its mean, linear trend and (when seasonality is used)
+    Fourier components, so it cannot compete with ``mu_alpha``,
+    ``mu_gamma`` or ``beta_season``. With staggered launches it is identified
+    at calendar times where some units are still pre-launch.
 
     See :class:`causalpy.experiments.hierarchical_interrupted_time_series.HierarchicalInterruptedTimeSeries`
     for the user-facing experiment wrapper that assembles ``aux`` from a long
@@ -2723,6 +2735,9 @@ class HierarchicalLaunchITS(PyMCModel):
             "mu_logk": Prior("Normal", mu=float(np.log(5.0)), sigma=1.5),
             "sigma_logk": Prior("HalfNormal", sigma=0.75),
             "s": Prior("Gamma", mu=2.0, sigma=1.5),
+            # Marginal scale of the shared calendar-time random walk over the
+            # whole window (the per-step innovation is this / sqrt(n_steps)).
+            "sigma_calendar": Prior("HalfNormal", sigma=0.5 * y_std),
             "sigma": Prior("HalfNormal", sigma=y_std),
         }
 
@@ -2848,6 +2863,31 @@ class HierarchicalLaunchITS(PyMCModel):
             else:
                 season_contrib = pt.zeros(n_obs)
 
+            # Optional shared calendar-time effect: one random walk over the
+            # calendar grid, projected off the intercept/trend/seasonal span
+            calendar_idx_np = aux.get("calendar_idx")
+            if calendar_idx_np is not None:
+                projection_np = np.asarray(aux["calendar_projection"], dtype=float)
+                n_calendar = projection_np.shape[0]
+                calendar_idx_ = pm.Data(
+                    "calendar_idx",
+                    np.asarray(calendar_idx_np, dtype=np.int64),
+                    dims="obs_ind",
+                )
+                sigma_calendar = self.priors["sigma_calendar"].create_variable(
+                    "sigma_calendar"
+                )
+                z_calendar = pm.Normal("z_calendar", 0.0, 1.0, dims="calendar_time")
+                walk = pt.cumsum(z_calendar) * sigma_calendar / np.sqrt(n_calendar)
+                calendar_effect = pm.Deterministic(
+                    "calendar_effect",
+                    pt.dot(pt.as_tensor_variable(projection_np), walk),
+                    dims="calendar_time",
+                )
+                calendar_contrib = calendar_effect[calendar_idx_]
+            else:
+                calendar_contrib = pt.zeros(n_obs)
+
             # Effect component
             if effect_type == "instant":
                 if post_np is None:
@@ -2968,6 +3008,7 @@ class HierarchicalLaunchITS(PyMCModel):
                 + trend_contrib
                 + cov_contrib
                 + season_contrib
+                + calendar_contrib
                 + effect_contrib
                 + ar_contrib
             )
@@ -3028,6 +3069,11 @@ class HierarchicalLaunchITS(PyMCModel):
             if tidx_val is None:
                 raise ValueError("Model has within_unit_tidx but aux is missing it")
             data_to_set["within_unit_tidx"] = np.asarray(tidx_val, dtype=np.int64)
+        if "calendar_idx" in named:
+            cal_val = aux.get("calendar_idx")
+            if cal_val is None:
+                raise ValueError("Model has calendar_idx but aux is missing it")
+            data_to_set["calendar_idx"] = np.asarray(cal_val, dtype=np.int64)
 
         with self:
             pm.set_data(data_to_set, coords={"obs_ind": obs_coords})

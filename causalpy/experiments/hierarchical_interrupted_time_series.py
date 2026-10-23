@@ -115,8 +115,12 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
     unit_col : str
         Column identifying units (e.g. product id).
     time_col : str
-        Numeric time index column (e.g. ``week_idx``). Datetime columns are not
-        supported directly; convert to an integer index first.
+        Numeric **shared calendar** time index (e.g. weeks since a common
+        origin), so the same value means the same calendar period for every
+        unit. Seasonality, unit trends and calendar effects are all defined on
+        this clock; a per-series counter that restarts at 0 for each unit
+        would silently misalign them. Datetime columns are not supported
+        directly; convert to an integer index first.
     treatment_time_col : str
         Numeric column with each unit's launch time (same units as ``time_col``).
     effect_type : {"instant", "event_study", "placebo", "saturation"}, default="instant"
@@ -138,8 +142,54 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         ``pytensor.scan``. Requires a balanced panel (all units observed at
         the same time steps). The AR coefficient is partially pooled:
         ``rho[unit] ~ tanh(Normal(mu_rho, sigma_rho))``.
+    calendar_effects : bool, default=False
+        If ``True``, add a shared calendar-time effect: one random walk over
+        the distinct values of ``time_col``, added to every unit's baseline
+        and kept in the counterfactual. It absorbs market-wide shocks that hit
+        all units at the same calendar time, identified from units that are
+        still pre-launch at that time. It is projected off the intercept,
+        linear trend and (if used) seasonal terms. A ``UserWarning`` is
+        emitted when some calendar times have post-launch rows but no
+        pre-launch units; see :meth:`launch_overlap`.
     model : HierarchicalLaunchITS, optional
         A custom model instance. If ``None``, a default is constructed.
+
+    Notes
+    -----
+    **Data preparation.** Put every unit on one shared calendar index that
+    spans the whole study window (potentially several years), and include
+    pre-launch history for every unit. Launches then occur at different
+    calendar times, while the effect itself is measured in event time
+    ``tau = time_col - treatment_time_col``, which is what makes launches
+    comparable and lets their effects be pooled.
+
+    **Identification.** Each unit is an interrupted time series: the launch
+    is a known interruption, and the counterfactual is the unit's baseline
+    (intercept, linear trend, covariates, seasonality) carried past it. The
+    jump at launch is identified by the design, provided nothing else
+    changes at the same moment. How far that identification reaches depends
+    on the model:
+
+    - The trend is estimated jointly with the effect on all rows, not on
+      pre-launch rows alone. The effect parameterization (constant lift,
+      piecewise-constant bins, Hill curve) is what separates post-launch
+      dynamics from drift, so an effect whose shape the chosen
+      ``effect_type`` cannot represent can leak into the trend.
+    - Without ``calendar_effects``, nothing absorbs a shock common to all
+      units at one calendar time beyond covariates and seasonality; such a
+      shock is attributed to the launch effect of units already launched.
+      This is pure ITS pooled in event time.
+    - With ``calendar_effects=True``, staggered launches act like a
+      not-yet-treated comparison: at each calendar time, pre-launch units
+      identify the common shock. This only holds where pre-launch units
+      exist; after the last launch the calendar effect and long-run effects
+      are separated only by priors (see :meth:`launch_overlap`).
+    - Partial pooling (shared ``mu_gamma``, ``mu_beta``, seasonality and
+      hyperpriors) is a modelling assumption: each unit's counterfactual is
+      partly informed by the others.
+
+    The ``placebo`` effect type tests the no-anticipation part of these
+    assumptions.
     """
 
     supports_ols = False
@@ -162,6 +212,7 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         placebo_edges: Sequence[float] | None = None,
         seasonality: dict | None = None,
         ar_residuals: bool = False,
+        calendar_effects: bool = False,
         model: PyMCModel | None = None,
     ) -> None:
         super().__init__(model=model)
@@ -181,6 +232,7 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         self.placebo_edges = list(placebo_edges) if placebo_edges is not None else None
         self.seasonality = seasonality
         self.ar_residuals = ar_residuals
+        self.calendar_effects = calendar_effects
 
         self._validate_inputs()
         self._prepare_data()
@@ -358,6 +410,29 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
             F = None
             fourier_labels = None
 
+        # Shared calendar-time grid and the projection that keeps the calendar
+        # random walk orthogonal to the intercept, linear trend and seasonality
+        self._calendar_idx: np.ndarray | None = None
+        self._calendar_projection: np.ndarray | None = None
+        calendar_grid: np.ndarray | None = None
+        if self.calendar_effects:
+            calendar_grid = np.unique(t_raw)
+            self._calendar_idx = np.searchsorted(calendar_grid, t_raw).astype(np.int64)
+            grid_std = (calendar_grid - self._time_mean) / self._time_std
+            basis = [np.ones_like(grid_std), grid_std]
+            if self.seasonality is not None:
+                basis.append(
+                    _fourier_terms(
+                        calendar_grid,
+                        period=float(self.seasonality["period"]),
+                        K=int(self.seasonality["K"]),
+                    )
+                )
+            B = np.column_stack(basis)
+            U, s, _ = np.linalg.svd(B, full_matrices=False)
+            Q = U[:, s > s.max() * 1e-10]
+            self._calendar_projection = np.eye(len(calendar_grid)) - Q @ Q.T
+
         # Effect design
         post = None
         D = None
@@ -466,7 +541,66 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
             coords["event_bin"] = event_bin_labels
         if self._n_time_steps is not None:
             coords["time_step"] = np.arange(self._n_time_steps)
+        if calendar_grid is not None:
+            coords["calendar_time"] = calendar_grid
         self._coords = coords
+
+        if self.calendar_effects:
+            self._warn_calendar_overlap()
+
+    def launch_overlap(self) -> pd.DataFrame:
+        """Count pre- and post-launch units observed at each calendar time.
+
+        Shows where staggered launches provide a not-yet-launched comparison:
+        a calendar effect (``calendar_effects=True``) is identified from
+        data only at calendar times with ``n_pre > 0``. Where ``n_pre == 0``
+        and ``n_post > 0``, common shocks and launch effects are separated
+        by priors and functional form alone.
+
+        Returns
+        -------
+        pd.DataFrame
+            Indexed by the distinct values of ``time_col``, with columns
+            ``n_pre`` and ``n_post`` (number of units observed pre-launch /
+            post-launch at that time) and ``identified`` (``n_pre > 0``).
+        """
+        df = self._sorted_data
+        is_post = pd.Series(self._tau >= 0, index=df.index)
+        counts = (
+            df.assign(_post=is_post)
+            .groupby([self.time_col, "_post"])[self.unit_col]
+            .nunique()
+            .unstack("_post", fill_value=0)
+            .reindex(columns=[False, True], fill_value=0)
+        )
+        out = pd.DataFrame(
+            {
+                "n_pre": counts[False].astype(int),
+                "n_post": counts[True].astype(int),
+            }
+        )
+        out.index.name = self.time_col
+        out["identified"] = out["n_pre"] > 0
+        return out
+
+    def _warn_calendar_overlap(self) -> None:
+        """Warn when calendar effects lack a pre-launch comparison somewhere."""
+        overlap = self.launch_overlap()
+        unsupported = overlap[(overlap["n_pre"] == 0) & (overlap["n_post"] > 0)]
+        if unsupported.empty:
+            return
+        n_rows = int(np.isin(self._sorted_data[self.time_col], unsupported.index).sum())
+        warnings.warn(
+            f"calendar_effects=True: {len(unsupported)} calendar time(s) "
+            f"(from {unsupported.index.min():g} to {unsupported.index.max():g}, "
+            f"{n_rows} rows) have post-launch units but no pre-launch units, "
+            "so the calendar effect there is not identified by a "
+            "not-yet-launched comparison and is separated from launch effects "
+            "only by priors. Consider truncating the window; see "
+            "launch_overlap().",
+            UserWarning,
+            stacklevel=4,
+        )
 
     def _aux(self, *, effect_on: bool = True) -> dict[str, Any]:
         """Build the aux dict passed to the model.
@@ -483,6 +617,9 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         if self._within_unit_tidx is not None:
             aux["within_unit_tidx"] = self._within_unit_tidx
             aux["n_time_steps"] = self._n_time_steps
+        if self._calendar_idx is not None:
+            aux["calendar_idx"] = self._calendar_idx
+            aux["calendar_projection"] = self._calendar_projection
         if self._F is not None:
             aux["F"] = self._F
         if self.effect_type == "instant":
@@ -549,6 +686,11 @@ class HierarchicalInterruptedTimeSeries(BaseExperiment):
         print(f"Formula: {self.formula}")
         print(f"Effect type: {self.effect_type}")
         print(f"Units: {self._n_units}")
+        if self.calendar_effects:
+            cal_scale = float(
+                self._model_backend.require_idata().posterior["sigma_calendar"].mean()
+            )
+            print(f"Calendar effects: on   E[sigma_calendar] = {cal_scale:.3g}")
         if self.effect_type == "instant":
             post = self._model_backend.require_idata().posterior
             mu = float(post["mu_lift"].mean())
