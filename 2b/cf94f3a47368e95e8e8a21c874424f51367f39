@@ -1,0 +1,16 @@
+docs/source/notebooks/gallery.yaml
+  h_63db634213747e 156-173
+docs/source/notebooks/index.md
+  h_63db634213747e 384-428,569-580
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2bcf94f3a47368e95e8e8a21c874424f51367f39",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
