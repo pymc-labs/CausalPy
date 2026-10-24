@@ -60,7 +60,7 @@ self._model_backend.fit(
 )
 ```
 
-Experiments with non-standard fit signatures bypass this path and call `self.model.fit(...)` directly with custom arguments: `InstrumentalVariable` (two-stage IV), `InversePropensityWeighting` (propensity `fit(X, t, coords)`), and `SyntheticDifferenceInDifferences` (dict-shaped weight-fitter inputs). Those models are not forced through `build_coords` or sklearn y-normalization.
+Experiments with non-standard fit signatures bypass this path and call `self.model.fit(...)` directly with custom arguments: `InstrumentalVariable` (two-stage IV), `InversePropensityWeighting` (propensity `fit(X, t, coords)`), and `SyntheticDifferenceInDifferences` (dict-shaped weight-fitter inputs). Those models are not forced through `build_coords` or sklearn y-normalization. `HierarchicalInterruptedTimeSeries` uses the standard lifecycle but its graph also needs an auxiliary unit/event-time design bundle: its `build()` registers that bundle with `HierarchicalLaunchITS.set_aux()` before delegating, and `_finalize()` predicts the counterfactual through the adapter inside `HierarchicalLaunchITS.prediction_aux(...)`, since the adapter's `predict()` forwards only `X`.
 
 `PyMCModel` extends `pymc.Model` with a sklearn-like `fit` / `predict` / `score` interface; adapters normalize predictions and coefficients before experiments consume them. Experiments compute impact as plain xarray subtraction `y - predict(X)` and summarize coefficients from the canonical draw container without backend dispatch. `ScikitLearnAdaptor` is a mixin patched onto any `RegressorMixin` via `create_causalpy_compatible_class()` during adapter construction. Every experiment declares `supports_ols` and `supports_bayes`; validation runs in `make_model_adapter()`. When `model=None`, `_default_model_class` is instantiated (always Bayesian; `PanelRegression` requires an explicit model).
 
@@ -89,6 +89,7 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 | Class | Method | Backends | Notable quirk |
 | --- | --- | --- | --- |
 | `InterruptedTimeSeries` | ITS | OLS + Bayes | 3-period design via `treatment_end_time` |
+| `HierarchicalInterruptedTimeSeries` | Hierarchical ITS | Bayes only | Multi-unit panel on a shared calendar, per-unit launch times; `effect_type` instant/event_study/placebo/saturation; optional `calendar_effects` |
 | `PiecewiseITS` | Segmented ITS | OLS + Bayes | Fits full series; `step()`/`ramp()` transforms |
 | `DifferenceInDifferences` | DiD | OLS + Bayes | Effect from interaction coefficient |
 | `StaggeredDifferenceInDifferences` | Staggered DiD | OLS + Bayes | Fits untreated obs only |
@@ -109,6 +110,7 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 - `SyntheticDifferenceInDifferencesWeightFitter` — SyntheticDifferenceInDifferences
 - `InstrumentalVariableRegression` — InstrumentalVariable
 - `PropensityScore` — InversePropensityWeighting
+- `HierarchicalLaunchITS` — HierarchicalInterruptedTimeSeries (experimental). Non-centered unit hierarchy over intercept, trend, covariates and the launch effect; optional AR(1) residuals and shared calendar-time random walk.
 - `BayesianBasisExpansionTimeSeries` / `StateSpaceTimeSeries` — ITS alternatives (experimental). Basis expansion calibrates stock coefficient, observation-noise, trend, and Fourier priors from fitted pre-period inputs; explicit priors and custom components take precedence, and `auto_scale_priors=False` retains the legacy scales.
 
 ## Key Conventions
