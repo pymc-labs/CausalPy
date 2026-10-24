@@ -642,6 +642,46 @@ def test_rkink_bandwidth_check():
         )
 
 
+@pytest.mark.parametrize("running_variable_name", ["kink", "score"])
+def test_rkink_bandwidth_uses_running_variable_name(running_variable_name):
+    """Bandwidth keeps rows by the running variable, not a hardcoded column x.
+
+    A covariate named ``x`` lies inside the numeric window, so a query on ``x``
+    keeps every row. The stored design must keep only rows whose running
+    variable is inside the bandwidth, including values on the boundary.
+    """
+    kink_point = 0.0
+    bandwidth = 1.0
+    running = np.concatenate(
+        [np.linspace(-3, 3, 60), [kink_point - bandwidth, kink_point + bandwidth]]
+    )
+    df = pd.DataFrame(
+        {
+            running_variable_name: running,
+            "x": np.linspace(0, 1, running.size),
+            "y": running,
+            "treated": running >= kink_point,
+        }
+    )
+    inside = np.abs(running - kink_point) <= bandwidth
+
+    result = cp.RegressionKink(
+        df,
+        formula=f"y ~ 1 + {running_variable_name} + treated",
+        kink_point=kink_point,
+        running_variable_name=running_variable_name,
+        bandwidth=bandwidth,
+        model=None,
+    )
+
+    assert result.design.sizes["obs_ind"] == int(inside.sum())
+    assert int(inside.sum()) < len(df)
+    kept_running = result.design["X"].sel(coeffs=running_variable_name).values
+    assert np.all(np.abs(kept_running - kink_point) <= bandwidth)
+    assert np.any(np.isclose(kept_running, kink_point - bandwidth))
+    assert np.any(np.isclose(kept_running, kink_point + bandwidth))
+
+
 def test_rkink_epsilon_check():
     """Test that we get exceptions when epsilon parameter is <= 0"""
     with pytest.raises(ValueError):
