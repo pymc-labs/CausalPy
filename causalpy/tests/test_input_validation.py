@@ -529,6 +529,26 @@ def test_ancova_validation_2_levels():
             (),
             "C(group, Treatment)[T.1]",
         ),
+        (
+            "group-id",
+            "y ~ 1 + C(Q('group-id')) + pre",
+            (),
+            "C(Q('group-id'))[T.1]",
+        ),
+        ("group-id", "y ~ 1 + Q('group-id') + pre", (), "Q('group-id')"),
+        ("group-id", 'y ~ 1 + Q("group-id") + pre', (), 'Q("group-id")'),
+        (
+            "group-id",
+            'y ~ 1 + C(Q("group-id"), Treatment) + pre',
+            (),
+            'C(Q("group-id"), Treatment)[T.1]',
+        ),
+        (
+            "t",
+            "y ~ 1 + C(Q('treatment')) + C(Q('t')) + pre",
+            ("treatment",),
+            "C(Q('t'))[T.1]",
+        ),
     ],
 )
 def test_prepostnegd_treatment_coeff_is_group_main_effect(
@@ -537,8 +557,9 @@ def test_prepostnegd_treatment_coeff_is_group_main_effect(
     """Treatment lookup must not use a substring of an earlier coefficient name.
 
     ``t`` and ``pt`` are substrings of ``Intercept``. ``site`` is a substring of
-    the earlier label ``C(website)[T.1]``. Neither collision is the treatment
-    indicator.
+    the earlier label ``C(website)[T.1]``. ``Q('group-id')`` is the quoted
+    spelling Patsy requires for a non-identifier column. ``C(Q('treatment'))``
+    contains ``t`` but is not the group factor ``Q('t')``.
     """
     n = 8
     group = np.array([0] * n + [1] * n)

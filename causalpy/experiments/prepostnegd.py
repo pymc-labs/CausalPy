@@ -252,12 +252,18 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             )
 
     def _is_group_main_effect_factor(self, factor_name: str) -> bool:
-        """Whether a Patsy factor is the group variable itself, not a substring."""
+        """Whether a Patsy factor is the group variable itself, not a substring.
+
+        Accepts the bare name and Patsy's quoted spellings ``Q('name')`` and
+        ``Q("name")``, including as the variable argument of ``C(...)``.
+        """
         name = self.group_variable_name
-        if factor_name == name:
+        spellings = (name, f"Q('{name}')", f'Q("{name}")')
+        if factor_name in spellings:
             return True
+        alternatives = "|".join(re.escape(spelling) for spelling in spellings)
         return (
-            re.fullmatch(rf"C\(\s*{re.escape(name)}\s*(?:,.*)?\)", factor_name)
+            re.fullmatch(rf"C\(\s*(?:{alternatives})\s*(?:,.*)?\)", factor_name)
             is not None
         )
 
