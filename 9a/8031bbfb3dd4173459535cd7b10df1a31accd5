@@ -1,0 +1,16 @@
+causalpy/experiments/regression_kink.py
+  h_63db634213747e 134-135,137
+causalpy/tests/test_input_validation.py
+  h_63db634213747e 666-668,682-724
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "9a8031bbfb3dd4173459535cd7b10df1a31accd5",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
