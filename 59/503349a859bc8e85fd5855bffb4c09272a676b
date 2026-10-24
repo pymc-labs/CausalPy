@@ -1,0 +1,16 @@
+causalpy/experiments/_response_type.py
+  h_63db634213747e 21,126-166,169,175-177,179-180,190,201
+causalpy/tests/test_response_type.py
+  h_63db634213747e 197-198,204-205,207-217,292-293,331-334,338-341,345-403
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "59503349a859bc8e85fd5855bffb4c09272a676b",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

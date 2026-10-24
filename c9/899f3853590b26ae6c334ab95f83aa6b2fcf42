@@ -1,0 +1,14 @@
+causalpy/tests/test_glm_recovery.py
+  h_63db634213747e 20,24,59-61,77,83-84,87,90,94
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c9899f3853590b26ae6c334ab95f83aa6b2fcf42",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

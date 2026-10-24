@@ -1,0 +1,18 @@
+causalpy/pymc_models.py
+  h_63db634213747e 4898,4902-4907,4916,4918
+causalpy/tests/test_integration_pymc_examples.py
+  h_63db634213747e 2078
+causalpy/tests/test_public_signatures.py
+  h_63db634213747e 538-541
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "88e678736fb97b6c6798413b57b1fa7946e9bec0",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

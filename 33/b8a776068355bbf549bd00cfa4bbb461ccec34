@@ -1,0 +1,20 @@
+causalpy/experiments/graded_intervention_its.py
+  h_63db634213747e 29,40-45,165-166,277-285,287-292,295-335,380-387,393,399-405,408-409,411,417-419,421-422,424-425,428-429,434,437-438,443,445,457,461,465-469,479-484,580-582,587-598,676,686,878,920,947,1042-1043,1048,1424,1432-1437,1632,1641,1654,1754,1795-1797
+causalpy/pymc_models.py
+  h_63db634213747e 3981-3982,4074,4516-4517,4617,4704-4708
+causalpy/skl_models.py
+  h_63db634213747e 17,169,174-178,182
+causalpy/transform_optimization.py
+  h_63db634213747e 589-596
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "33b8a776068355bbf549bd00cfa4bbb461ccec34",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

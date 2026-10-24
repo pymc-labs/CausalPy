@@ -1,0 +1,16 @@
+causalpy/tests/test_piecewise_its.py
+  h_63db634213747e 1716
+causalpy/tests/test_three_period_its.py
+  h_63db634213747e 1110-1112,1283,1329
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2e065800e0f58f2ab6cc005f1f88a7bbbda216b9",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

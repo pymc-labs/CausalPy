@@ -1,0 +1,32 @@
+ARCHITECTURE.md
+  h_63db634213747e 17
+causalpy/checks/__init__.py
+  h_63db634213747e 19,44
+causalpy/checks/dress_rehearsal.py
+  h_63db634213747e 1-112
+causalpy/experiments/sc_results.py
+  h_63db634213747e 1-288
+causalpy/experiments/synthetic_control.py
+  h_63db634213747e 16,18,26,32-36,50-65,118-126,394-404,560-568,570,687-692,694,784-789,791,814-1265
+causalpy/tests/test_sc_design.py
+  h_63db634213747e 1-220
+docs/source/api/index.md
+  h_63db634213747e 27
+docs/source/notebooks/gallery.yaml
+  h_63db634213747e 37-38
+docs/source/notebooks/index.md
+  h_63db634213747e 70-76,451
+docs/source/notebooks/synthetic-control-design-pymc.ipynb
+  h_63db634213747e 1-1044
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "21c7f276dac4f98360063c2f976a70e88ca9b56c",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

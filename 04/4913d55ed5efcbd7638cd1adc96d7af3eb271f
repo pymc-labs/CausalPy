@@ -1,0 +1,16 @@
+causalpy/experiments/graded_intervention_its.py
+  h_63db634213747e 60-62,65-67,69,77-84,419-421,427-460,462-578,580-582,1208-1210,1231-1232,1636-1638,1825-1826,1848-1874,1876-1885,1894-1899,1901,1904-1905,1908
+causalpy/tests/test_transfer_function_its.py
+  h_63db634213747e 1963,1983-1984,2157-2413
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "044913d55ed5efcbd7638cd1adc96d7af3eb271f",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

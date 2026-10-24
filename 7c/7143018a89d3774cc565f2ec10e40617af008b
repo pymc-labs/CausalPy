@@ -1,0 +1,16 @@
+causalpy/pymc_models.py
+  h_63db634213747e 31,1101,1105
+causalpy/tests/test_glm.py
+  h_63db634213747e 18,877-915
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7c7143018a89d3774cc565f2ec10e40617af008b",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}

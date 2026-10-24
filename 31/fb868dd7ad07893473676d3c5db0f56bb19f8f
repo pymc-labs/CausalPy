@@ -1,0 +1,48 @@
+ARCHITECTURE.md
+  h_63db634213747e 94
+README.md
+  h_63db634213747e 133,146
+causalpy/__init__.py
+  h_63db634213747e 34,66
+causalpy/data/simulate_data.py
+  h_63db634213747e 854-994
+causalpy/experiments/__init__.py
+  h_63db634213747e 17,33
+causalpy/experiments/_results.py
+  h_63db634213747e 39,141-153,161
+causalpy/experiments/event_study.py
+  h_63db634213747e 1-547
+causalpy/reporting.py
+  h_63db634213747e 27,40,458-459,468,480-633
+causalpy/tests/test_default_models.py
+  h_63db634213747e 23-26,96-109,197
+causalpy/tests/test_event_study.py
+  h_63db634213747e 1-346
+causalpy/tests/test_public_signatures.py
+  h_63db634213747e 100,671
+docs/source/conf.py
+  h_63db634213747e 132
+docs/source/knowledgebase/reporting_statistics.md
+  h_63db634213747e 32
+docs/source/llms.txt
+  h_63db634213747e 23
+docs/source/notebooks/event-study-pymc.ipynb
+  h_63db634213747e 1-275
+docs/source/notebooks/gallery.yaml
+  h_63db634213747e 71-72
+docs/source/notebooks/index.md
+  h_63db634213747e 176-182,478
+docs/source/references.bib
+  h_63db634213747e 237-269
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "31fb868dd7ad07893473676d3c5db0f56bb19f8f",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
