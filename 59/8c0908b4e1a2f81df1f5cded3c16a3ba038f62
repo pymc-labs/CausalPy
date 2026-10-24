@@ -1,0 +1,16 @@
+causalpy/tests/test_step_ramp_timezone.py
+  h_63db634213747e 1-74
+causalpy/transforms.py
+  h_63db634213747e 44-64,73-74,181-182,194-195,298-299
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "598c0908b4e1a2f81df1f5cded3c16a3ba038f62",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
