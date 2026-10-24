@@ -1,0 +1,16 @@
+causalpy/experiments/synthetic_difference_in_differences.py
+  h_63db634213747e 241-253,266,283
+causalpy/tests/test_sdid_helpers.py
+  h_63db634213747e 561-702
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "83f90af52c1171ca480e9123fad60bf5669535bd",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
