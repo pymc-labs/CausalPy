@@ -277,10 +277,9 @@ def test_maketables_regression_kink_pymc_contract(mock_pymc_sample):
 def test_maketables_hierarchical_its_pymc_contract(mock_pymc_sample):
     """HierarchicalInterruptedTimeSeries should expose a maketables coef table.
 
-    Regression test: the generic PyMC resolver used to pick up the per-unit
-    ``beta`` (dims ``["unit", "coeffs"]``), which is ambiguous for a single
-    coefficient table. It should instead resolve to the population-level
-    ``mu_beta`` (dims ``["coeffs"]``).
+    The per-unit ``beta`` (dims ``["unit", "coeffs"]``) is ambiguous for a
+    single coefficient table, so the model declares the population-level
+    ``mu_beta`` via ``coefficient_var_names`` and the adapter resolves it.
     """
     rng = np.random.default_rng(42)
     rows = []
@@ -585,7 +584,7 @@ def test_maketables_missing_pymc_coef_variable_raises(mock_pymc_sample):
 
     with pytest.raises(
         ValueError,
-        match="must expose one of 'mu_beta', 'beta', 'b', or 'beta_z'",
+        match="must expose one of 'beta', 'b', or 'beta_z'",
     ):
         _ = result.__maketables_coef_table__
 

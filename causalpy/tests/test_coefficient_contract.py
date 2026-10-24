@@ -201,9 +201,7 @@ def test_pymc_coefficients_ignore_child_groups_named_like_coefficients():
         }
     )
 
-    with pytest.raises(
-        ValueError, match="must expose one of 'mu_beta', 'beta', 'b', or 'beta_z'"
-    ):
+    with pytest.raises(ValueError, match="must expose one of 'beta', 'b', or 'beta_z'"):
         PyMCModelAdapter(model).coefficients()
 
 

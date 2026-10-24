@@ -213,7 +213,15 @@ class TestInstant:
         assert "prob_of_effect" in es.table.columns
         assert "P(effect) =" in es.text
         table = result.parameter_summary(direction="two-sided")
-        assert "prob_nonzero" in table.columns
+        draws = result.model.idata.posterior["mu_lift"]
+        p_gt, p_lt = float((draws > 0).mean()), float((draws < 0).mean())
+        np.testing.assert_allclose(
+            table.loc["mu_lift", "p_two_sided"], 2 * min(p_gt, p_lt)
+        )
+        np.testing.assert_allclose(
+            table.loc["mu_lift", "prob_of_effect"],
+            1 - table.loc["mu_lift", "p_two_sided"],
+        )
 
     def test_effect_summary_unsupported_param_warns(self, panel, mock_pymc_sample):
         """effect_summary warns when the unsupported `period` is passed."""
@@ -411,8 +419,8 @@ class TestSaturation:
         """Effect summary table contains L/k/s rows for saturation model."""
         result = _fit(panel, "saturation")
         table = result.parameter_summary()
-        assert "L (ceiling lift)" in table.index
-        assert "k (half-saturation time)" in table.index
+        assert "median-unit L (ceiling lift)" in table.index
+        assert "median-unit k (half-saturation time)" in table.index
         assert "s (Hill exponent)" in table.index
         assert list(result.effect_summary().table.index) == ["average", "cumulative"]
 
@@ -553,7 +561,7 @@ class TestEdgeCases:
         assert post["gamma"].dims == ("chain", "draw", "unit")
 
     def test_ar_residuals(self, panel, mock_pymc_sample):
-        """AR(1) residuals add rho and z_ar to the posterior."""
+        """AR(1) residuals add rho and the latent innovations to the posterior."""
         result = cp.HierarchicalInterruptedTimeSeries(
             data=panel,
             formula="sales ~ 0 + emails + price",
@@ -570,6 +578,13 @@ class TestEdgeCases:
         assert "sigma_ar" in post
         assert post["rho"].dims == ("chain", "draw", "unit")
         assert "time_step" in post["z_ar"].dims
+        # The AR path is shared by the observed and counterfactual predictions,
+        # so the pre-launch counterfactual equals the fitted mean.
+        pre = np.flatnonzero(result._tau < 0)
+        np.testing.assert_allclose(
+            result.result.observed_pred.isel(obs_ind=pre).values,
+            result.result.counterfactual_pred.isel(obs_ind=pre).values,
+        )
 
     def test_predictive_unfitted_model(self, panel):
         """Reading draws before fit() raises GroupNotSampledException."""
@@ -713,11 +728,28 @@ class TestValidation:
                 model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
             )
 
-    def test_ar_residuals_unbalanced_panel(self, panel):
-        """Raise ValueError when ar_residuals=True on an unbalanced panel."""
-        # Drop some rows from one unit to make it unbalanced
-        bad = panel[~((panel["product"] == 0) & (panel["week_idx"] > 35))].copy()
-        with pytest.raises(ValueError, match="balanced panel"):
+    @pytest.mark.parametrize(
+        "make_bad, match",
+        [
+            # one unit stops early
+            (lambda p: p[~((p["product"] == 1) & (p["week_idx"] > 35))], "balanced"),
+            # one unit has a gap
+            (lambda p: p[~((p["product"] == 0) & (p["week_idx"] == 20))], "evenly"),
+            # same row count, different calendar weeks
+            (
+                lambda p: p.assign(
+                    week_idx=np.where(
+                        p["product"] == 2, p["week_idx"] + 1, p["week_idx"]
+                    )
+                ),
+                "balanced",
+            ),
+        ],
+    )
+    def test_ar_residuals_unbalanced_panel(self, panel, make_bad, match):
+        """Raise ValueError unless all units share the same evenly spaced times."""
+        bad = make_bad(panel.copy())
+        with pytest.raises(ValueError, match=match):
             cp.HierarchicalInterruptedTimeSeries(
                 data=bad,
                 formula="sales ~ 0 + emails",
@@ -1041,3 +1073,82 @@ def test_model_set_aux_after_build_raises(panel):
     result = _configure(panel).build()
     with pytest.raises(RuntimeError, match="already built"):
         result.model.set_aux(result._aux(effect_on=False))
+
+
+def _make_ar_panel(n_units=6, T=80, lift=8.0, rho=0.9, seed=3):
+    """Balanced panel with a step lift and strongly autocorrelated AR(1) noise."""
+    rng = np.random.default_rng(seed)
+    rows = []
+    launches = np.linspace(25, 55, n_units).round().astype(int)
+    for i, launch in enumerate(launches):
+        e = 0.0
+        alpha = rng.normal(50, 3)
+        for t in range(T):
+            e = rho * e + rng.normal(0, 1.5)
+            y = alpha + lift * float(t >= launch) + e
+            rows.append(
+                {"product": i, "week_idx": t, "launch_week": launch, "sales": y}
+            )
+    return pd.DataFrame(rows)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "effect_type, extra",
+    [
+        ("instant", {}),
+        ("event_study", {"bin_edges": [0, 4, 8, 16, 1000]}),
+    ],
+)
+def test_ar_residuals_recover_lift(genuine_pymc_sampling, effect_type, extra):
+    """With high-rho AR(1) noise, a step lift is still recovered.
+
+    Gradual (ramp-shaped) event-study effects are a known limitation under
+    strong persistence and are documented on ``ar_residuals``.
+    """
+    lift = 8.0
+    df = _make_ar_panel(lift=lift)
+    result = cp.HierarchicalInterruptedTimeSeries(
+        data=df,
+        formula="sales ~ 0",
+        unit_col="product",
+        time_col="week_idx",
+        treatment_time_col="launch_week",
+        effect_type=effect_type,
+        ar_residuals=True,
+        **extra,
+        model=HierarchicalLaunchITS(
+            sample_kwargs={
+                "tune": 500,
+                "draws": 500,
+                "chains": 2,
+                "target_accept": 0.9,
+                "progressbar": False,
+                "random_seed": 7,
+            }
+        ),
+    ).fit()
+    avg = float(result.effect_summary(cumulative=False).table.loc["average", "mean"])
+    rho = float(result.model.idata.posterior["rho"].mean())
+    assert abs(avg - lift) < 0.2 * lift, (
+        f"average effect {avg:.2f}, mean rho {rho:.2f}, true lift {lift}"
+    )
+    assert rho > 0.6
+
+
+def test_print_coefficients_respects_round_to(panel, mock_pymc_sample, capsys):
+    """round_to sets the significant figures of printed values."""
+    result = _fit(panel, "instant")
+    mu_lift = float(result.model.idata.posterior["mu_lift"].mean())
+    result.print_coefficients(round_to=2)
+    assert f"mu_lift: {mu_lift:.2g}" in capsys.readouterr().out
+    result.summary(round_to=5)
+    assert f"E[mu_lift] = {mu_lift:.5g}" in capsys.readouterr().out
+
+
+def test_placebo_check_reports_interval_width(panel, mock_pymc_sample):
+    """The placebo verdict is worded as evidence and reports HDI widths."""
+    result = _fit(panel, "placebo", bin_edges=[0, 4, 8, 30], placebo_edges=[-8, -4, 0])
+    text = result._placebo_check_text()
+    assert "anticipation" in text
+    assert "median HDI width" in text

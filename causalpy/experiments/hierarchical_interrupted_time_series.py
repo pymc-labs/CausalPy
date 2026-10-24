@@ -114,6 +114,10 @@ class HierarchicalInterruptedTimeSeries(
       (logistic-type) saturation curve in event time, ramping up smoothly and
       asymptoting at a per-unit ceiling lift ``L``, rather than jumping
       instantly to its final size. See :class:`~causalpy.pymc_models.HierarchicalLaunchITS`.
+      ``L`` is log-normal, so this parameterization assumes the launch
+      *raises* the outcome; use ``event_study`` if the effect may be negative
+      (e.g. cannibalization). Its population summaries report the median
+      unit (``exp(mu_logL)``, ``exp(mu_logk)``), not the population mean.
 
     Parameters
     ----------
@@ -146,15 +150,23 @@ class HierarchicalInterruptedTimeSeries(
         open-ended last bin); otherwise a ``ValueError`` is raised.
     placebo_edges : sequence of float, optional
         Pre-launch (negative) bin edges for ``effect_type="placebo"``. Rows
-        with ``tau`` below the smallest edge are the implicit reference.
+        with ``tau`` below the smallest edge, and pre-launch rows between the
+        largest edge and 0 (e.g. ``tau`` in ``[-4, 0)`` for
+        ``placebo_edges=[-12, -4]``), are the implicit reference.
     seasonality : dict, optional
         Shared Fourier seasonality spec, e.g. ``{"period": 52, "K": 2}``.
         If ``None`` (default), no seasonality term is included.
     ar_residuals : bool, default=False
         If ``True``, add hierarchical AR(1) residuals per unit via
-        ``pytensor.scan``. Requires a balanced panel (all units observed at
-        the same time steps). The AR coefficient is partially pooled:
-        ``rho[unit] ~ tanh(Normal(mu_rho, sigma_rho))``.
+        ``pytensor.scan``. The AR coefficient is partially pooled,
+        ``rho[unit] ~ tanh(Normal(mu_rho, sigma_rho))``. Requires a balanced
+        panel: every unit observed at the same evenly spaced calendar times,
+        with no gaps. Caution: with strong persistence (``rho`` near 1) the
+        long-run level of a gradually building effect is weakly identified and
+        can trade off against the unit trends. In simulations with ``rho`` of
+        0.9 and a ramp-shaped effect, ``event_study`` understated the average
+        effect by about a third, while step lifts and the saturation curve were
+        recovered (switching AR off overstated all three).
     calendar_effects : bool, default=False
         If ``True``, add a shared calendar-time effect: one random walk over
         the distinct values of ``time_col``, added to every unit's baseline
@@ -379,17 +391,33 @@ class HierarchicalInterruptedTimeSeries(
         unit_idx = np.asarray(units.codes, dtype=np.int64)
         n_units = len(self._unit_categories)
 
-        # Within-unit time index for AR residuals (rectangular panel required)
+        # Within-unit time index for AR residuals. The latent AR path is
+        # indexed by time step, so every unit must cover the same evenly spaced
+        # calendar times with no gaps.
         self._within_unit_tidx: np.ndarray | None = None
         self._n_time_steps: int | None = None
         if self.ar_residuals:
-            counts = np.bincount(unit_idx)
-            if counts.min() != counts.max():
+            unit_times = df.groupby(self.unit_col, sort=False)[self.time_col].apply(
+                lambda t: tuple(t.to_numpy(dtype=float))
+            )
+            reference = np.asarray(unit_times.iloc[0])
+            steps = np.diff(reference)
+            if steps.size and (not np.allclose(steps, steps[0]) or steps[0] <= 0):
                 raise ValueError(
-                    "ar_residuals=True requires a balanced panel "
-                    "(all units must have the same number of time steps)."
+                    "ar_residuals=True requires evenly spaced time steps without "
+                    f"gaps or duplicates; unit {unit_times.index[0]!r} is irregular."
                 )
-            self._n_time_steps = int(counts[0])
+            mismatched = [
+                str(u) for u, t in unit_times.items() if t != tuple(reference)
+            ]
+            if mismatched:
+                raise ValueError(
+                    "ar_residuals=True requires a balanced panel: every unit must "
+                    "be observed at the same calendar times; units "
+                    f"{sorted(mismatched)} differ from unit "
+                    f"{unit_times.index[0]!r}."
+                )
+            self._n_time_steps = len(reference)
             # Derive within-unit sequential time index from groupby ordering
             self._within_unit_tidx = (
                 df.groupby(self.unit_col, sort=False)
@@ -446,6 +474,8 @@ class HierarchicalInterruptedTimeSeries(
             self._calendar_projection = np.eye(len(calendar_grid)) - Q @ Q.T
 
         # Effect design
+        self._n_pre_bins = 0
+        self._n_post_bins = 0
         post = None
         D = None
         event_bin_labels: list[str] | None = None
@@ -733,8 +763,9 @@ class HierarchicalInterruptedTimeSeries(
         Parameters
         ----------
         round_to : int, optional
-            Unused; accepted for interface parity with other experiments.
+            Significant figures for printed values. Defaults to 3.
         """
+        fmt = f".{round_to or 3}g"
         post = self._draws("posterior")
         print(f"{self.expt_type}")
         print(f"Formula: {self.formula}")
@@ -742,24 +773,24 @@ class HierarchicalInterruptedTimeSeries(
         print(f"Units: {self._n_units}")
         if self.calendar_effects:
             cal_scale = float(post["sigma_calendar"].mean())
-            print(f"Calendar effects: on   E[sigma_calendar] = {cal_scale:.3g}")
+            print(f"Calendar effects: on   E[sigma_calendar] = {cal_scale:{fmt}}")
         if self.effect_type == "instant":
             mu = float(post["mu_lift"].mean())
             sd = float(post["sigma_lift"].mean())
-            print(f"E[mu_lift] = {mu:.3g}   E[sigma_lift] = {sd:.3g}")
+            print(f"E[mu_lift] = {mu:{fmt}}   E[sigma_lift] = {sd:{fmt}}")
         elif self.effect_type == "saturation":
             L = float(xr.ufuncs.exp(post["mu_logL"]).mean())
             k = float(xr.ufuncs.exp(post["mu_logk"]).mean())
             s = float(post["s"].mean())
             print(
-                f"E[L] (ceiling lift) = {L:.3g}   "
-                f"E[k] (half-saturation time) = {k:.3g}   "
-                f"E[s] (Hill exponent) = {s:.3g}"
+                f"Median-unit L (ceiling lift) = {L:{fmt}}   "
+                f"median-unit k (half-saturation time) = {k:{fmt}}   "
+                f"s (Hill exponent) = {s:{fmt}}"
             )
         else:
             mu_delta = post["mu_delta"].mean(("chain", "draw")).values
             for label, val in zip(self._event_bin_labels or [], mu_delta, strict=False):
-                print(f"  {label:<18}  mu_delta = {val:+.3g}")
+                print(f"  {label:<18}  mu_delta = {val:+{fmt}}")
             if self.effect_type == "placebo":
                 print(self._placebo_check_text())
 
@@ -769,7 +800,11 @@ class HierarchicalInterruptedTimeSeries(
         *,
         group: Literal["prior", "posterior"] = "posterior",
     ) -> str:
-        """Return a one-line pass/fail summary of pre-launch bins.
+        """Return a one-line summary of the pre-launch (placebo) bins.
+
+        "PASS" means every pre-launch bin's HDI contains zero, i.e. no evidence
+        of anticipation. With few pre-launch rows the intervals are wide and
+        pass easily, so the median HDI width is reported alongside.
 
         Parameters
         ----------
@@ -781,17 +816,22 @@ class HierarchicalInterruptedTimeSeries(
             Draw group to test.
         """
         mu_delta = self._draws(group)["mu_delta"]
-        n_pre = getattr(self, "_n_pre_bins", 0)
+        n_pre = self._n_pre_bins
         if n_pre == 0:
             return "Placebo check: no pre-launch bins"
         lo, hi = _hdi_bounds(mu_delta, ci_prob)
         pre_lo, pre_hi = lo[:n_pre], hi[:n_pre]
         contains_zero = (pre_lo <= 0) & (pre_hi >= 0)
-        status = "PASS" if contains_zero.all() else "FAIL"
+        width = float(np.median(pre_hi - pre_lo))
+        if contains_zero.all():
+            verdict = "PASS (no evidence of anticipation)"
+        else:
+            verdict = "FAIL (evidence of anticipation)"
         return (
-            f"Placebo check: {status} "
-            f"({int(contains_zero.sum())}/{n_pre} pre-launch bins contain 0 "
-            f"within the {int(ci_prob * 100)}% HDI)"
+            f"Placebo check: {verdict}: {int(contains_zero.sum())}/{n_pre} "
+            f"pre-launch bins contain 0 within the {int(ci_prob * 100)}% HDI "
+            f"(median HDI width {width:.3g}; wide intervals are weak evidence "
+            "either way)"
         )
 
     def predictive_for_new_unit(
@@ -977,7 +1017,7 @@ class HierarchicalInterruptedTimeSeries(
         L = xr.ufuncs.exp(draws["mu_logL"])
         k = xr.ufuncs.exp(draws["mu_logk"])
         s = draws["s"]
-        hill_curve = grid**s / (k**s + grid**s + 1e-6)
+        hill_curve = grid**s / (k**s + grid**s)
         effect_draws = L * hill_curve
         mean = effect_draws.mean(("chain", "draw")).values
         lo, hi = _hdi_bounds(effect_draws, ci_prob)
@@ -994,9 +1034,12 @@ class HierarchicalInterruptedTimeSeries(
         )
         ax.axvline(0, color="red", ls="--", label="launch")
         ax.axhline(0, color="grey", lw=0.8, ls="--")
-        ax.set_xlabel("weeks since launch (time_col units)")
-        ax.set_ylabel("population effect (ceiling-scaled Hill curve)")
-        ax.set_title("Dynamic launch effect (saturation)")
+        ax.set_xlabel(f"{self.time_col} since launch")
+        ax.set_ylabel("effect of the median unit")
+        ax.set_title(
+            "Dynamic launch effect (saturation): Hill curve at the median "
+            "unit's L and k"
+        )
         ax.legend()
         fig.tight_layout()
         return fig, ax
@@ -1011,7 +1054,7 @@ class HierarchicalInterruptedTimeSeries(
 
         fig, ax = plt.subplots(figsize=(10, 5))
         if self.effect_type == "placebo":
-            n_pre = getattr(self, "_n_pre_bins", 0)
+            n_pre = self._n_pre_bins
             ax.errorbar(
                 x[:n_pre],
                 mean[:n_pre],
@@ -1138,39 +1181,38 @@ class HierarchicalInterruptedTimeSeries(
         Parameters
         ----------
         round_to : int, optional
-            Unused; accepted for interface parity with other experiments.
+            Significant figures for printed values. Defaults to 4.
 
         Raises
         ------
         GroupNotSampledException
             If the experiment has not been fitted yet.
         """
+        fmt = f".{round_to or 4}g"
         post = self._draws("posterior")
         print("Model coefficients (population level):")
         for name in ("mu_beta", "sigma_beta"):
             if name in post:
                 vals = post[name].mean(("chain", "draw")).values
-                print(f"  {name}: {vals}")
+                print(f"  {name}: [{', '.join(f'{v:{fmt}}' for v in vals)}]")
         if "mu_beta" in post and len(self._x_std):
             orig = post["mu_beta"].mean(("chain", "draw")).values / self._x_std
             print("  mu_beta (original scale, i.e. per unit of raw covariate):")
             for label, val in zip(self.labels, orig, strict=False):
-                print(f"    {label}: {val:.4g}")
+                print(f"    {label}: {val:{fmt}}")
         if self.effect_type == "instant":
-            print(f"  mu_lift: {float(post['mu_lift'].mean()):.4g}")
-            print(f"  sigma_lift: {float(post['sigma_lift'].mean()):.4g}")
+            print(f"  mu_lift: {float(post['mu_lift'].mean()):{fmt}}")
+            print(f"  sigma_lift: {float(post['sigma_lift'].mean()):{fmt}}")
         elif self.effect_type == "saturation":
-            print(
-                f"  L (ceiling lift): {float(xr.ufuncs.exp(post['mu_logL']).mean()):.4g}"
-            )
-            print(
-                f"  k (half-saturation time): {float(xr.ufuncs.exp(post['mu_logk']).mean()):.4g}"
-            )
-            print(f"  s (Hill exponent): {float(post['s'].mean()):.4g}")
+            L = float(xr.ufuncs.exp(post["mu_logL"]).mean())
+            k = float(xr.ufuncs.exp(post["mu_logk"]).mean())
+            print(f"  median-unit L (ceiling lift): {L:{fmt}}")
+            print(f"  median-unit k (half-saturation time): {k:{fmt}}")
+            print(f"  s (Hill exponent): {float(post['s'].mean()):{fmt}}")
         else:  # event_study / placebo
             for i, label in enumerate(self._event_bin_labels or []):
                 val = float(post["mu_delta"].isel(event_bin=i).mean())
-                print(f"  mu_delta[{label}]: {val:.4g}")
+                print(f"  mu_delta[{label}]: {val:{fmt}}")
 
     def effect_summary(
         self,
@@ -1353,8 +1395,11 @@ class HierarchicalInterruptedTimeSeries(
             Significance level for HDI intervals; the effective HDI
             probability is ``hdi_prob = 1 - alpha``.
         direction : {"increase", "decrease", "two-sided"}, default="increase"
-            Direction for the tail-probability column reported per row:
-            ``P(effect > 0)``, ``P(effect < 0)``, or ``P(effect != 0)``.
+            Direction for the tail-probability column(s) reported per row:
+            ``prob_positive`` (``P(x > 0)``), ``prob_negative``
+            (``P(x < 0)``), or, for ``"two-sided"``, ``p_two_sided``
+            (``2 * min(P(x > 0), P(x < 0))``) and ``prob_of_effect``
+            (``1 - p_two_sided``), matching :meth:`effect_summary`.
         group : {"prior", "posterior"}, default "posterior"
             Draw group to summarize.
 
@@ -1372,30 +1417,35 @@ class HierarchicalInterruptedTimeSeries(
             mean = float(samples.mean())
             lo_arr, hi_arr = _hdi_bounds(samples, hdi_prob)
             lo, hi = float(lo_arr), float(hi_arr)
-            if direction == "increase":
-                prob_directional = float((samples > 0).mean())
-                prob_col = "prob_positive"
-            elif direction == "decrease":
-                prob_directional = float((samples < 0).mean())
-                prob_col = "prob_negative"
-            else:  # two-sided
-                prob_directional = float((samples != 0).mean())
-                prob_col = "prob_nonzero"
-            return {
+            row: dict[str, Any] = {
                 "parameter": name,
                 "mean": mean,
                 f"hdi_{int(hdi_prob * 100)}_low": lo,
                 f"hdi_{int(hdi_prob * 100)}_high": hi,
-                prob_col: prob_directional,
             }
+            p_gt = float((samples > 0).mean())
+            p_lt = float((samples < 0).mean())
+            if direction == "increase":
+                row["prob_positive"] = p_gt
+            elif direction == "decrease":
+                row["prob_negative"] = p_lt
+            else:  # two-sided, matching effect_summary's convention
+                row["p_two_sided"] = 2 * min(p_gt, p_lt)
+                row["prob_of_effect"] = 1 - row["p_two_sided"]
+            return row
 
         if self.effect_type == "instant":
             rows.append(_row("mu_lift", post["mu_lift"]))
             rows.append(_row("sigma_lift", post["sigma_lift"]))
         elif self.effect_type == "saturation":
-            rows.append(_row("L (ceiling lift)", xr.ufuncs.exp(post["mu_logL"])))
             rows.append(
-                _row("k (half-saturation time)", xr.ufuncs.exp(post["mu_logk"]))
+                _row("median-unit L (ceiling lift)", xr.ufuncs.exp(post["mu_logL"]))
+            )
+            rows.append(
+                _row(
+                    "median-unit k (half-saturation time)",
+                    xr.ufuncs.exp(post["mu_logk"]),
+                )
             )
             rows.append(_row("s (Hill exponent)", post["s"]))
         else:

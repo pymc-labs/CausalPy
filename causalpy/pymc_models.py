@@ -751,7 +751,8 @@ class PyMCModel(pm.Model):
             :meth:`predict`; ignored by the base implementation.
         """
         pp = self.predict(X)
-        return self.score_from_prediction(pp.posterior_predictive["mu"], y)
+        mu_data = az.extract(pp, group="posterior_predictive", var_names="mu")
+        return _unit_r2_scores(mu_data, y)
 
     def score_from_prediction(self, mu: xr.DataArray, y: xr.DataArray) -> pd.Series:
         """Compute the Bayesian :math:`R^2` from already-sampled ``mu`` draws.
@@ -769,19 +770,22 @@ class PyMCModel(pm.Model):
         y : xr.DataArray
             Observed targets to score against the posterior predictive mean.
         """
-        mu_data = mu.stack(sample=("chain", "draw"))
+        return _unit_r2_scores(mu.stack(sample=("chain", "draw")), y)
 
-        scores = {}
 
-        # Always iterate over treated_units dimension - no branching needed!
-        for i, unit in enumerate(mu_data.coords["treated_units"].values):
-            unit_mu = mu_data.sel(treated_units=unit).transpose("sample", "obs_ind")
-            unit_y = y.sel(treated_units=unit).data
-            unit_score = _bayesian_r2_score(unit_y, unit_mu.data)
-            scores[f"unit_{i}_r2"] = unit_score["r2"]
-            scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
+def _unit_r2_scores(mu_data: xr.DataArray, y: xr.DataArray) -> pd.Series:
+    """Per-treated-unit Bayesian :math:`R^2` from ``mu`` draws stacked on ``sample``."""
+    scores = {}
 
-        return pd.Series(scores)
+    # Always iterate over treated_units dimension - no branching needed!
+    for i, unit in enumerate(mu_data.coords["treated_units"].values):
+        unit_mu = mu_data.sel(treated_units=unit).transpose("sample", "obs_ind")
+        unit_y = y.sel(treated_units=unit).data
+        unit_score = _bayesian_r2_score(unit_y, unit_mu.data)
+        scores[f"unit_{i}_r2"] = unit_score["r2"]
+        scores[f"unit_{i}_r2_std"] = unit_score["r2_std"]
+
+    return pd.Series(scores)
 
 
 class LinearRegression(PyMCModel):
@@ -3792,7 +3796,8 @@ class HierarchicalLaunchITS(PyMCModel):
       non-centered); the Hill exponent ``s`` is a single shared
       population-level shape parameter. This describes an effect that ramps
       up smoothly after launch and asymptotes, rather than jumping instantly
-      to its final size.
+      to its final size. ``L`` is log-normal and therefore positive: this
+      parameterization assumes the launch raises the outcome.
 
     All hierarchical parameters use a non-centered parametrization.
 
@@ -3844,6 +3849,11 @@ class HierarchicalLaunchITS(PyMCModel):
     for the user-facing experiment wrapper that assembles ``aux`` from a long
     panel DataFrame.
     """
+
+    #: Posterior variable(s) holding the design-matrix coefficients, read by the
+    #: model adapter. The per-unit ``beta`` has an extra ``unit`` dim; the
+    #: population-level ``mu_beta`` has the canonical ``("coeffs",)`` shape.
+    coefficient_var_names: tuple[str, ...] = ("mu_beta",)
 
     def __init__(
         self,
@@ -3928,6 +3938,11 @@ class HierarchicalLaunchITS(PyMCModel):
             "mu_alpha": Prior("Normal", mu=y_mean, sigma=2 * y_std),
             "sigma_alpha": Prior("HalfNormal", sigma=y_std),
             "mu_gamma": Prior("Normal", mu=0.0, sigma=2 * y_std),
+            # X is z-scored but y is not, so covariate and seasonal effects are
+            # in raw outcome units per covariate SD / per Fourier unit.
+            "mu_beta": Prior("Normal", mu=0.0, sigma=2 * y_std, dims="coeffs"),
+            "sigma_beta": Prior("HalfNormal", sigma=y_std, dims="coeffs"),
+            "beta_season": Prior("Normal", mu=0.0, sigma=y_std, dims="fourier"),
             "sigma_gamma": Prior("HalfNormal", sigma=y_std),
             "mu_lift": Prior("Normal", mu=0.0, sigma=2 * y_std),
             "sigma_lift": Prior("HalfNormal", sigma=y_std),
@@ -4093,8 +4108,8 @@ class HierarchicalLaunchITS(PyMCModel):
 
             # Hierarchical per-unit covariate effects (non-centered)
             if n_coeffs > 0:
-                mu_beta = pm.Normal("mu_beta", 0.0, 2.0, dims="coeffs")
-                sigma_beta = pm.HalfNormal("sigma_beta", 1.0, dims="coeffs")
+                mu_beta = self.priors["mu_beta"].create_variable("mu_beta")
+                sigma_beta = self.priors["sigma_beta"].create_variable("sigma_beta")
                 z_beta = pm.Normal("z_beta", 0.0, 1.0, dims=["unit", "coeffs"])
                 beta = pm.Deterministic(
                     "beta",
@@ -4108,7 +4123,7 @@ class HierarchicalLaunchITS(PyMCModel):
             # Shared Fourier seasonality
             if F_np is not None:
                 F_ = pm.Data("F", np.asarray(F_np), dims=["obs_ind", "fourier"])
-                beta_season = pm.Normal("beta_season", 0.0, 5.0, dims="fourier")
+                beta_season = self.priors["beta_season"].create_variable("beta_season")
                 season_contrib = pt.dot(F_, beta_season)
             else:
                 season_contrib = pt.zeros(n_obs)

@@ -129,8 +129,8 @@ class HierarchicalInterruptedTimeSeriesResult:
     ``observed_pred`` and ``counterfactual_pred`` are expected outcomes on the
     canonical ``("chain", "draw", "obs_ind", "treated_units")`` dimensions
     under the actual design and with the launch effect switched off;
-    ``impact`` is ``observed - counterfactual`` on ``("chain", "draw",
-    "obs_ind")``. Rows follow the experiment's unit-then-time sorted panel.
+    ``impact`` is the observed data ``y`` minus ``counterfactual_pred``, on
+    ``("chain", "draw", "obs_ind")``. Rows follow the experiment's unit-then-time sorted panel.
     """
 
     observed_pred: xr.DataArray
