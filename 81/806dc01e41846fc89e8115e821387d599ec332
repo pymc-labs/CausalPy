@@ -1,0 +1,16 @@
+causalpy/experiments/prepostnegd.py
+  h_63db634213747e 255-259,261-262,264,266
+causalpy/tests/test_input_validation.py
+  h_63db634213747e 532-551,560-562
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "81806dc01e41846fc89e8115e821387d599ec332",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
