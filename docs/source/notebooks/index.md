@@ -53,13 +53,6 @@ The synthetic control method is a statistical method used to evaluate the effect
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} Synthetic control with scikit-learn models
-:class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/synthetic-control-sklearn.png
-:link: synthetic-control-sklearn
-:link-type: doc
-:::
-
 :::{grid-item-card} Synthetic control with `pymc` models
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/synthetic-control-pymc.png
@@ -146,13 +139,6 @@ Analysis where the treatment effect is estimated as a difference between treatme
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} Difference in Differences with scikit-learn models
-:class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/difference-in-differences-sklearn.png
-:link: difference-in-differences-sklearn
-:link-type: doc
-:::
-
 :::{grid-item-card} Difference in Differences with `pymc` models
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/difference-in-differences-pymc.png
@@ -181,13 +167,6 @@ A quasi-experimental design that uses time series methods to generate counterfac
 
 ::::{grid} 1 2 3 3
 :gutter: 3
-
-:::{grid-item-card} Interrupted Time Series (ITS) with scikit-learn models
-:class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/interrupted-time-series-sklearn.png
-:link: interrupted-time-series-sklearn
-:link-type: doc
-:::
 
 :::{grid-item-card} Interrupted Time Series (ITS) with `pymc` models
 :class-card: sd-card-h-100
@@ -266,24 +245,10 @@ A quasi-experimental design where treatment assignment is determined by a cutoff
 ::::{grid} 1 2 3 3
 :gutter: 3
 
-:::{grid-item-card} Sharp regression discontinuity with scikit-learn models
-:class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/regression-discontinuity-sklearn.png
-:link: regression-discontinuity-sklearn
-:link-type: doc
-:::
-
 :::{grid-item-card} Sharp regression discontinuity with `pymc` models
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/regression-discontinuity-pymc.png
 :link: regression-discontinuity-pymc
-:link-type: doc
-:::
-
-:::{grid-item-card} Drinking age with a scikit-learn model
-:class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/regression-discontinuity-drinking-sklearn.png
-:link: regression-discontinuity-drinking-sklearn
 :link-type: doc
 :::
 
@@ -416,6 +381,51 @@ Every CausalPy experiment can produce a self-contained HTML report summarising t
 :::
 ::::
 
+## Non-Bayesian OLS
+
+These notebooks fit scikit-learn models instead of PyMC models. Coverage is partial: only synthetic control, difference in differences, interrupted time series, and regression discontinuity have a scikit-learn example. Most of those fits are ordinary least squares. The sharp regression discontinuity notebook also includes a Gaussian process fit. Bayesian examples stay in the method sections above.
+
+## scikit-learn examples
+
+::::{grid} 1 2 3 3
+:gutter: 3
+
+:::{grid-item-card} Synthetic control with scikit-learn models
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/synthetic-control-sklearn.png
+:link: synthetic-control-sklearn
+:link-type: doc
+:::
+
+:::{grid-item-card} Difference in Differences with scikit-learn models
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/difference-in-differences-sklearn.png
+:link: difference-in-differences-sklearn
+:link-type: doc
+:::
+
+:::{grid-item-card} Interrupted Time Series (ITS) with scikit-learn models
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/interrupted-time-series-sklearn.png
+:link: interrupted-time-series-sklearn
+:link-type: doc
+:::
+
+:::{grid-item-card} Sharp regression discontinuity with scikit-learn models
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/regression-discontinuity-sklearn.png
+:link: regression-discontinuity-sklearn
+:link-type: doc
+:::
+
+:::{grid-item-card} Drinking age with a scikit-learn model
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/regression-discontinuity-drinking-sklearn.png
+:link: regression-discontinuity-drinking-sklearn
+:link-type: doc
+:::
+::::
+
 <!-- Hidden toctrees feed the left Section Navigation sidebar. -->
 
 :::{toctree}
@@ -439,7 +449,6 @@ panel-fixed-effects.ipynb
 :caption: Synthetic Control
 :maxdepth: 1
 
-synthetic-control-sklearn.ipynb
 synthetic-control-pymc.ipynb
 synthetic-control-brexit-pymc.ipynb
 synthetic-difference-in-differences-pymc.ipynb
@@ -464,7 +473,6 @@ up-down-control-geolift-pymc.ipynb
 :caption: Difference in Differences
 :maxdepth: 1
 
-difference-in-differences-sklearn.ipynb
 difference-in-differences-pymc.ipynb
 difference-in-differences-banks-pymc.ipynb
 staggered-difference-in-differences-pymc.ipynb
@@ -475,7 +483,6 @@ staggered-difference-in-differences-pymc.ipynb
 :caption: Interrupted Time Series
 :maxdepth: 1
 
-interrupted-time-series-sklearn.ipynb
 interrupted-time-series-pymc.ipynb
 interrupted-time-series-post-intervention-analysis.ipynb
 interrupted-time-series-covid.ipynb
@@ -504,9 +511,7 @@ piecewise-interrupted-time-series-pymc.ipynb
 :caption: Regression Discontinuity
 :maxdepth: 1
 
-regression-discontinuity-sklearn.ipynb
 regression-discontinuity-pymc.ipynb
-regression-discontinuity-drinking-sklearn.ipynb
 regression-discontinuity-drinking-pymc.ipynb
 regression-discontinuity-donut-pymc.ipynb
 :::
@@ -560,4 +565,16 @@ sensitivity_checks.md
 :maxdepth: 1
 
 reporting-demo.ipynb
+:::
+
+:::{toctree}
+:hidden:
+:caption: Non-Bayesian OLS
+:maxdepth: 1
+
+synthetic-control-sklearn.ipynb
+difference-in-differences-sklearn.ipynb
+interrupted-time-series-sklearn.ipynb
+regression-discontinuity-sklearn.ipynb
+regression-discontinuity-drinking-sklearn.ipynb
 :::

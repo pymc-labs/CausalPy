@@ -30,8 +30,6 @@ groups:
         intro: |
           The synthetic control method is a statistical method used to evaluate the effect of an intervention in comparative case studies. It involves the construction of a weighted combination of groups used as controls, to which the treatment group is compared.
         cards:
-          - title: Synthetic control with scikit-learn models
-            notebook: synthetic-control-sklearn
           - title: Synthetic control with `pymc` models
             notebook: synthetic-control-pymc
           - title: The effects of Brexit
@@ -60,8 +58,6 @@ groups:
         intro: |
           Analysis where the treatment effect is estimated as a difference between treatment conditions in the differences between pre-treatment to post treatment observations.
         cards:
-          - title: Difference in Differences with scikit-learn models
-            notebook: difference-in-differences-sklearn
           - title: Difference in Differences with `pymc` models
             notebook: difference-in-differences-pymc
           - title: Banking dataset with a `pymc` model
@@ -72,8 +68,6 @@ groups:
         intro: |
           A quasi-experimental design that uses time series methods to generate counterfactuals and estimate treatment effects. A series of observations are collected before and after a treatment, and the pre-treatment trend (or any time-series model) is used to predict what would have happened in the absence of treatment.
         cards:
-          - title: Interrupted Time Series (ITS) with scikit-learn models
-            notebook: interrupted-time-series-sklearn
           - title: Interrupted Time Series (ITS) with `pymc` models
             notebook: interrupted-time-series-pymc
           - title: Interrupted Time Series for fixed-period interventions
@@ -105,12 +99,8 @@ groups:
         intro: |
           A quasi-experimental design where treatment assignment is determined by a cutoff point along a running variable (e.g., test score, age, income). The treatment effect is estimated by comparing outcomes just above and below the cutoff, assuming units near the cutoff are similar except for treatment status.
         cards:
-          - title: Sharp regression discontinuity with scikit-learn models
-            notebook: regression-discontinuity-sklearn
           - title: Sharp regression discontinuity with `pymc` models
             notebook: regression-discontinuity-pymc
-          - title: Drinking age with a scikit-learn model
-            notebook: regression-discontinuity-drinking-sklearn
           - title: Drinking age - Bayesian analysis
             notebook: regression-discontinuity-drinking-pymc
           - title: Donut Regression Discontinuity
@@ -163,3 +153,21 @@ groups:
         cards:
           - title: HTML Report Generation
             notebook: reporting-demo
+
+  - title: Non-Bayesian OLS
+    intro: |
+      These notebooks fit scikit-learn models instead of PyMC models. Coverage is partial: only synthetic control, difference in differences, interrupted time series, and regression discontinuity have a scikit-learn example. Most of those fits are ordinary least squares. The sharp regression discontinuity notebook also includes a Gaussian process fit. Bayesian examples stay in the method sections above.
+    categories:
+      - title: scikit-learn examples
+        toctree_caption: Non-Bayesian OLS
+        cards:
+          - title: Synthetic control with scikit-learn models
+            notebook: synthetic-control-sklearn
+          - title: Difference in Differences with scikit-learn models
+            notebook: difference-in-differences-sklearn
+          - title: Interrupted Time Series (ITS) with scikit-learn models
+            notebook: interrupted-time-series-sklearn
+          - title: Sharp regression discontinuity with scikit-learn models
+            notebook: regression-discontinuity-sklearn
+          - title: Drinking age with a scikit-learn model
+            notebook: regression-discontinuity-drinking-sklearn
