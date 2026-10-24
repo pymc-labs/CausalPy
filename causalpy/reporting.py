@@ -716,10 +716,12 @@ def _extract_window(
     post_index : pd.Index
         Index of the post-treatment period (e.g. ``experiment.datapost.index``).
     window : str, tuple, or slice
-        Window specification: "post", inclusive (start, end) label tuple, or
-        slice. Datetime slices with integer bounds are positional (exclusive
-        stop); datetime label slices include both bounds. Slice steps are
-        applied after selection. Integer-index slices use an exclusive stop.
+        Window specification: "post", inclusive (start, end) tuple, or
+        slice. Numeric bounds are compared directly and are not truncated
+        to integers; a bound need not be an index label. Datetime slices
+        with integer bounds are positional (exclusive stop); datetime label
+        slices include both bounds. Slice steps are applied after selection.
+        Numeric-index slices use an exclusive stop.
     treated_unit : str, optional
         For multi-unit experiments, specify which treated unit to analyze
 
@@ -749,10 +751,8 @@ def _extract_window(
                 end = pd.Timestamp(end)
             window_coords = post_index[(post_index >= start) & (post_index <= end)]
         else:
-            # Integer index - filter by value
-            start_val = int(start)
-            end_val = int(end)
-            mask = (post_index >= start_val) & (post_index <= end_val)
+            # Numeric index: inclusive bounds, compared without int() truncation.
+            mask = (post_index >= start) & (post_index <= end)
             window_coords = post_index[mask]
     elif isinstance(window, slice):
         if isinstance(post_index, pd.DatetimeIndex):
@@ -781,13 +781,9 @@ def _extract_window(
                 mask = (post_index >= start) & (post_index <= stop)
                 window_coords = post_index[mask][:: window.step]
         else:
-            # For integer indices, convert slice to value-based filtering
-            start_val = (
-                int(window.start) if window.start is not None else post_index.min()
-            )
-            stop_val = (
-                int(window.stop) if window.stop is not None else post_index.max() + 1
-            )
+            # Numeric index: exclusive stop, compared without int() truncation.
+            start_val = window.start if window.start is not None else post_index.min()
+            stop_val = window.stop if window.stop is not None else post_index.max() + 1
             step = int(window.step) if window.step is not None else 1
             # Create boolean mask for values in range
             mask = (post_index >= start_val) & (post_index < stop_val)
