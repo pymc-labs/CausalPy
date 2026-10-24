@@ -131,8 +131,10 @@ class RegressionKink(BaseExperiment[KinkResult]):
     def _build_design_matrices(self) -> None:
         """Build design matrices from formula and data, applying bandwidth filtering."""
         if self.bandwidth is not np.inf:
+            fmin = self.kink_point - self.bandwidth
+            fmax = self.kink_point + self.bandwidth
             running = self.data[self.running_variable_name]
-            inside_bandwidth = (running - self.kink_point).abs() <= self.bandwidth
+            inside_bandwidth = (running >= fmin) & (running <= fmax)
             filtered_data = self.data.loc[inside_bandwidth]
             if len(filtered_data) <= 10:
                 warnings.warn(

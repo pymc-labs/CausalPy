@@ -663,7 +663,9 @@ def test_rkink_bandwidth_uses_running_variable_name(running_variable_name):
             "treated": running >= kink_point,
         }
     )
-    inside = np.abs(running - kink_point) <= bandwidth
+    fmin = kink_point - bandwidth
+    fmax = kink_point + bandwidth
+    inside = (running >= fmin) & (running <= fmax)
 
     result = cp.RegressionKink(
         df,
@@ -677,9 +679,49 @@ def test_rkink_bandwidth_uses_running_variable_name(running_variable_name):
     assert result.design.sizes["obs_ind"] == int(inside.sum())
     assert int(inside.sum()) < len(df)
     kept_running = result.design["X"].sel(coeffs=running_variable_name).values
-    assert np.all(np.abs(kept_running - kink_point) <= bandwidth)
-    assert np.any(np.isclose(kept_running, kink_point - bandwidth))
-    assert np.any(np.isclose(kept_running, kink_point + bandwidth))
+    assert np.all((kept_running >= fmin) & (kept_running <= fmax))
+    assert np.any(kept_running == fmin)
+    assert np.any(kept_running == fmax)
+
+
+def test_rkink_bandwidth_keeps_computed_endpoints():
+    """Keep running values equal to the computed bandwidth endpoints.
+
+    ``abs(running - kink) <= bandwidth`` can place a value computed as
+    ``kink ± bandwidth`` a few ulps outside the window. The stored design must
+    use the closed interval on those computed endpoints, and must still drop a
+    running value strictly outside it. The running variable is not named ``x``.
+    """
+    kink_point = 0.9918737534611899
+    bandwidth = 0.13789281030401754
+    fmin = kink_point - bandwidth
+    fmax = kink_point + bandwidth
+    running = np.array([fmin, kink_point, fmax, fmin - 1e-12, fmax + 1e-12])
+    df = pd.DataFrame(
+        {
+            "wage": running,
+            "x": np.linspace(0, 1, running.size),
+            "y": running,
+            "treated": running >= kink_point,
+        }
+    )
+
+    result = cp.RegressionKink(
+        df,
+        formula="y ~ 1 + wage + treated",
+        kink_point=kink_point,
+        running_variable_name="wage",
+        bandwidth=bandwidth,
+        model=None,
+    )
+
+    kept = result.design["X"].sel(coeffs="wage").values
+    assert result.design.sizes["obs_ind"] == 3
+    assert np.any(kept == fmin)
+    assert np.any(kept == kink_point)
+    assert np.any(kept == fmax)
+    assert not np.any(kept < fmin)
+    assert not np.any(kept > fmax)
 
 
 def test_rkink_epsilon_check():
