@@ -558,3 +558,102 @@ class TestConvertTreatmentTimeForAxis:
             axis, ts
         )
         assert result == ts
+
+
+def _panel_with_known_post_impacts(
+    treated_impacts: dict[str, float],
+) -> tuple[pd.DataFrame, list[str], list[str]]:
+    """Build a panel whose equal-weight donor synthetic is known.
+
+    Pre-period treated outcomes match the synthetic control, so each unit's
+    post-period impact equals the supplied shift. The shifts are not a special
+    named pair and need not be symmetric.
+    """
+    donor_a = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    donor_b = np.array([2.0, 1.0, 2.0, 1.0, 2.0, 1.0])
+    synthetic = 0.5 * donor_a + 0.5 * donor_b
+    columns = {"donor_a": donor_a, "donor_b": donor_b}
+    for name, impact in treated_impacts.items():
+        shift = np.zeros_like(synthetic)
+        shift[3:] = impact
+        columns[name] = synthetic + shift
+    frame = pd.DataFrame(columns, index=np.arange(len(synthetic)))
+    return frame, ["donor_a", "donor_b"], list(treated_impacts)
+
+
+def _finalize_with_equal_donor_weights(
+    frame: pd.DataFrame,
+    control_units: list[str],
+    treated_units: list[str],
+) -> SyntheticDifferenceInDifferences:
+    """Construct SDiD and finalize from injected weights. No sampler."""
+    experiment = SyntheticDifferenceInDifferences(
+        frame, 3, control_units, treated_units
+    )
+    n_controls = len(control_units)
+    n_pre = int((frame.index < 3).sum())
+    posterior = xr.Dataset(
+        {
+            "omega": (
+                ("chain", "draw", "coeffs"),
+                np.full((1, 1, n_controls), 1.0 / n_controls),
+            ),
+            "lam": (
+                ("chain", "draw", "obs_ind"),
+                np.full((1, 1, n_pre), 1.0 / n_pre),
+            ),
+            "omega0": (("chain", "draw"), np.array([[0.0]])),
+        }
+    )
+    experiment.model.idata = xr.DataTree.from_dict({"posterior": posterior})
+    experiment._finalize("posterior")
+    return experiment
+
+
+def test_multi_unit_impact_is_stored_under_each_unit_name():
+    """Each treated unit's impact is labeled with that unit, not the mean.
+
+    The failure class is storing the cross-unit average under the first name
+    (or under every name). Three unequal shifts, with the first unit neither
+    the largest nor the mean, reject a two-name special case and a mean label.
+    """
+    impacts = {"alpha": 4.0, "beta": 0.0, "gamma": 9.0}
+    frame, controls, treated = _panel_with_known_post_impacts(impacts)
+    experiment = _finalize_with_equal_donor_weights(frame, controls, treated)
+
+    stored_names = experiment.result.impact_post.treated_units.values.tolist()
+    assert stored_names == treated
+    assert experiment.result.predictions_post.treated_units.values.tolist() == treated
+    # Pooled ATT stays the equal-weighted mean. Named trajectories do not.
+    np.testing.assert_allclose(
+        float(experiment.result.tau_posterior.mean()),
+        np.mean(list(impacts.values())),
+    )
+
+    for name, impact in impacts.items():
+        stored = experiment.result.impact_post.sel(treated_units=name).values
+        np.testing.assert_allclose(stored.reshape(-1), np.full(3, impact))
+        summary = experiment.effect_summary(treated_unit=name)
+        assert summary.table.loc["average", "mean"] == pytest.approx(impact)
+
+    default = experiment.effect_summary()
+    assert default.table.loc["average", "mean"] == pytest.approx(impacts["alpha"])
+    assert default.table.loc["average", "mean"] != pytest.approx(
+        np.mean(list(impacts.values()))
+    )
+
+
+def test_single_treated_unit_impact_is_its_own_series():
+    """A single treated unit keeps its impact; it is not rewritten or dropped."""
+    impacts = {"only": 7.0}
+    frame, controls, treated = _panel_with_known_post_impacts(impacts)
+    experiment = _finalize_with_equal_donor_weights(frame, controls, treated)
+
+    assert experiment.result.impact_post.treated_units.values.tolist() == ["only"]
+    np.testing.assert_allclose(
+        experiment.result.impact_post.values.reshape(-1), np.full(3, 7.0)
+    )
+    assert experiment.effect_summary().table.loc["average", "mean"] == pytest.approx(
+        7.0
+    )
+    np.testing.assert_allclose(float(experiment.result.tau_posterior.mean()), 7.0)
