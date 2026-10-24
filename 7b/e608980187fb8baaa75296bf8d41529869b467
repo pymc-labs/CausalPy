@@ -1,0 +1,16 @@
+causalpy/experiments/piecewise_its.py
+  h_63db634213747e 358-359,383,404-407,412-413,420,422-423
+causalpy/tests/test_piecewise_its.py
+  h_63db634213747e 618-698
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7be608980187fb8baaa75296bf8d41529869b467",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
