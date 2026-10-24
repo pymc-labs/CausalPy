@@ -1,0 +1,20 @@
+causalpy/experiments/interrupted_time_series.py
+  h_63db634213747e 1304,1335,1345-1349,1356-1367
+causalpy/reporting.py
+  h_63db634213747e 719-724,754-755,784-786
+causalpy/tests/test_its_effect_summary.py
+  h_63db634213747e 493-536
+causalpy/tests/test_reporting.py
+  h_63db634213747e 2410-2441
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "64f4c2b2e02323f54e71ebba3d1ecbce2cb82d80",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
