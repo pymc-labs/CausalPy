@@ -25,7 +25,7 @@ $$
 
 $\alpha_i$ is a unit intercept, $\xi_t$ is a time intercept, $\lambda_i$ is the unit's loading, and $f_t$ is the shared factor at time $t$. There are no covariates in v1.
 
-Observations are independent Gaussian noise around that mean, with one shared positive residual scale. That is the noise around the linear factor mean. It is not a claim that serial correlation or heteroscedasticity across time has been modelled. Heavier tails stay out of v1.
+Observations are independent Gaussian noise around that mean, with one shared positive residual scale. That scale is bounded below by a fraction of the control-panel outcome spread, so a noise-free panel does not collapse the factor posterior onto a ridge of exact fits. It is the noise around the linear factor mean. It is not a claim that serial correlation or heteroscedasticity across time has been modelled. Heavier tails stay out of v1.
 
 Permissible cells are control units at every time, and each treated unit strictly before the shared treatment time. Treated post-intervention outcomes never enter the likelihood, the factor update, the loading update, the intercept update, the shrinkage update, or the residual-scale update. Changing them changes impacts only.
 
