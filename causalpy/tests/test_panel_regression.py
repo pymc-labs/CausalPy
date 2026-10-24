@@ -1006,3 +1006,179 @@ def test_panel_plot_trajectories_rejects_empty_selection(small_panel_data, selec
         result.plot_trajectories(n_sample=0, select=select)
     with pytest.raises(ValueError, match="at least one unit"):
         result.plot_trajectories(units=[])
+
+
+def _named_ols_coefs(result):
+    coefs = np.asarray(result.model.coef_, dtype=float).reshape(-1)
+    return {
+        label: float(value) for label, value in zip(result.labels, coefs, strict=True)
+    }
+
+
+def _fit_panel(data, formula, method, *, time_fe=True):
+    return cp.PanelRegression(
+        data,
+        formula=formula,
+        unit_fe_variable="unit",
+        time_fe_variable="time" if time_fe else None,
+        fe_method=method,
+        model=LinearRegression(),
+    ).fit()
+
+
+def _cited_interaction_panel():
+    """The issue's 4 by 4 balanced panel, with a planted treatment interaction."""
+    pattern = {
+        (0, 0): 0,
+        (0, 1): 1,
+        (0, 2): 0,
+        (0, 3): 2,
+        (1, 0): 1,
+        (1, 1): 0,
+        (1, 2): 2,
+        (1, 3): 0,
+        (2, 0): 0,
+        (2, 1): 2,
+        (2, 2): 1,
+        (2, 3): 3,
+        (3, 0): 2,
+        (3, 1): 0,
+        (3, 2): 3,
+        (3, 3): 1,
+    }
+    rows = []
+    for unit in range(4):
+        for time in range(4):
+            treatment = int(unit >= 2 and time >= 2)
+            x = float(pattern[(unit, time)])
+            y = (
+                10.0 * unit
+                + 1.0 * time
+                + 2.0 * treatment
+                + 3.0 * x
+                + 4.0 * treatment * x
+            )
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": treatment,
+                    "x": x,
+                    "y": y,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _constructed_term_panel(n_units, n_periods, seed):
+    """Balanced panel whose formula terms are not raw columns.
+
+    ``post:z`` and ``I(w ** 2)`` disagree with demean-then-multiply unless the
+    within transform is applied after the formula is built.
+    """
+    rng = np.random.default_rng(seed)
+    rows = []
+    for unit in range(n_units):
+        for time in range(n_periods):
+            post = int(time >= (unit % 3) + 1)
+            z = float(rng.normal())
+            w = float(rng.integers(0, 4))
+            y = (
+                7.0 * unit
+                + 0.4 * time
+                + 5.0 * post
+                - 1.5 * z
+                + 0.7 * post * z
+                - 2.0 * w**2
+            )
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "post": post,
+                    "z": z,
+                    "w": w,
+                    "y": y,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_demeaned_balanced_panel_matches_dummy_within_transform():
+    """Demeaned FE matches dummy FE on balanced panels, including constructed terms.
+
+    An additive formula that already agreed must keep agreeing. A constructed
+    term other than the cited ``treatment:x`` on the cited 4 by 4 panel must
+    also match, on more than one panel shape.
+    """
+    cited = _cited_interaction_panel()
+    interaction = "y ~ 1 + treatment + x + treatment:x"
+    dummy_interaction = "y ~ 1 + C(unit) + C(time) + treatment + x + treatment:x"
+    demeaned = _named_ols_coefs(_fit_panel(cited, interaction, "demeaned"))
+    dummies = _named_ols_coefs(_fit_panel(cited, dummy_interaction, "dummies"))
+    expected = {"treatment": 2.0, "x": 3.0, "treatment:x": 4.0}
+    for name, value in expected.items():
+        assert demeaned[name] == pytest.approx(value)
+        assert dummies[name] == pytest.approx(value)
+
+    additive = "y ~ 1 + treatment + x"
+    dummy_additive = "y ~ 1 + C(unit) + C(time) + treatment + x"
+    demeaned_additive = _named_ols_coefs(_fit_panel(cited, additive, "demeaned"))
+    dummy_additive_coefs = _named_ols_coefs(
+        _fit_panel(cited, dummy_additive, "dummies")
+    )
+    assert demeaned_additive["treatment"] == pytest.approx(
+        dummy_additive_coefs["treatment"]
+    )
+    assert demeaned_additive["x"] == pytest.approx(dummy_additive_coefs["x"])
+    assert demeaned_additive["treatment"] == pytest.approx(9.384615384615)
+    assert demeaned_additive["x"] == pytest.approx(4.230769230769)
+
+    constructed = "y ~ 1 + post + z + post:z + I(w ** 2)"
+    dummy_constructed = "y ~ 1 + C(unit) + C(time) + post + z + post:z + I(w ** 2)"
+    planted = {"post": 5.0, "z": -1.5, "post:z": 0.7, "I(w ** 2)": -2.0}
+    for n_units, n_periods, seed in ((3, 6, 11), (5, 3, 19)):
+        panel = _constructed_term_panel(n_units, n_periods, seed)
+        demeaned = _named_ols_coefs(_fit_panel(panel, constructed, "demeaned"))
+        dummies = _named_ols_coefs(_fit_panel(panel, dummy_constructed, "dummies"))
+        for name, value in planted.items():
+            assert demeaned[name] == pytest.approx(value, abs=1e-8)
+            assert dummies[name] == pytest.approx(demeaned[name])
+
+    square_rows = []
+    for unit in range(4):
+        for time in range(5):
+            w = float((unit * 3 + time) % 4)
+            square_rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "w": w,
+                    "y": 3.0 * unit + 0.5 * time + 1.25 * w - 2.0 * w**2,
+                }
+            )
+    square_panel = pd.DataFrame(square_rows)
+    square_only = "y ~ 1 + w + I(w ** 2)"
+    dummy_square_only = "y ~ 1 + C(unit) + C(time) + w + I(w ** 2)"
+    demeaned_square = _named_ols_coefs(
+        _fit_panel(square_panel, square_only, "demeaned")
+    )
+    dummy_square = _named_ols_coefs(
+        _fit_panel(square_panel, dummy_square_only, "dummies")
+    )
+    assert demeaned_square["w"] == pytest.approx(1.25, abs=1e-8)
+    assert demeaned_square["I(w ** 2)"] == pytest.approx(-2.0, abs=1e-8)
+    assert dummy_square["w"] == pytest.approx(demeaned_square["w"])
+    assert dummy_square["I(w ** 2)"] == pytest.approx(demeaned_square["I(w ** 2)"])
+
+    one_way = "y ~ 1 + post + z + post:z + I(w ** 2)"
+    dummy_one_way = "y ~ 1 + C(unit) + post + z + post:z + I(w ** 2)"
+    one_way_panel = _constructed_term_panel(4, 5, 29)
+    demeaned_one_way = _named_ols_coefs(
+        _fit_panel(one_way_panel, one_way, "demeaned", time_fe=False)
+    )
+    dummy_one_way_coefs = _named_ols_coefs(
+        _fit_panel(one_way_panel, dummy_one_way, "dummies", time_fe=False)
+    )
+    for name in planted:
+        assert demeaned_one_way[name] == pytest.approx(dummy_one_way_coefs[name])
