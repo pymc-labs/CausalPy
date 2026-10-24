@@ -508,6 +508,86 @@ def test_ancova_validation_2_levels():
         )
 
 
+@pytest.mark.parametrize(
+    ("group_name", "formula", "extra_group_columns", "expected"),
+    [
+        ("t", "y ~ 1 + C(t) + pre", (), "C(t)[T.1]"),
+        ("t", "y ~ 1 + t + pre", (), "t"),
+        ("pt", "y ~ 1 + C(pt) + pre", (), "C(pt)[T.1]"),
+        ("c", "y ~ 1 + C(c) + pre", (), "C(c)[T.1]"),
+        (
+            "site",
+            "y ~ 1 + C(website) + C(site) + pre",
+            ("website",),
+            "C(site)[T.1]",
+        ),
+        ("group", "y ~ 1 + C(group) + pre", (), "C(group)[T.1]"),
+        ("group", "y ~ 1 + group + pre", (), "group"),
+        (
+            "group",
+            "y ~ 1 + C(group, Treatment) + pre",
+            (),
+            "C(group, Treatment)[T.1]",
+        ),
+    ],
+)
+def test_prepostnegd_treatment_coeff_is_group_main_effect(
+    group_name, formula, extra_group_columns, expected
+):
+    """Treatment lookup must not use a substring of an earlier coefficient name.
+
+    ``t`` and ``pt`` are substrings of ``Intercept``. ``site`` is a substring of
+    the earlier label ``C(website)[T.1]``. Neither collision is the treatment
+    indicator.
+    """
+    n = 8
+    group = np.array([0] * n + [1] * n)
+    columns = {
+        group_name: group,
+        "pre": np.linspace(0, 1, 2 * n),
+        "y": group.astype(float),
+    }
+    for column in extra_group_columns:
+        columns[column] = group
+    result = cp.PrePostNEGD(
+        pd.DataFrame(columns),
+        formula=formula,
+        group_variable_name=group_name,
+        pretreatment_variable_name="pre",
+    )
+
+    assert result._get_treatment_effect_coeff() == expected
+
+
+def test_prepostnegd_treatment_coeff_ignores_interaction_and_missing_term():
+    """An interaction, or no group main effect, is not the treatment indicator."""
+    n = 8
+    group = np.array([0] * n + [1] * n)
+    df = pd.DataFrame(
+        {
+            "group": group,
+            "pre": np.linspace(0, 1, 2 * n),
+            "y": group.astype(float),
+        }
+    )
+    with_interaction = cp.PrePostNEGD(
+        df,
+        formula="y ~ 1 + C(group):pre + C(group) + pre",
+        group_variable_name="group",
+        pretreatment_variable_name="pre",
+    )
+    assert with_interaction._get_treatment_effect_coeff() == "C(group)[T.1]"
+
+    interaction_only = cp.PrePostNEGD(
+        df,
+        formula="y ~ 1 + C(group):pre + pre",
+        group_variable_name="group",
+        pretreatment_variable_name="pre",
+    )
+    with pytest.raises(NameError, match="treatment effect"):
+        interaction_only._get_treatment_effect_coeff()
+
+
 # Regression discontinuity
 
 
