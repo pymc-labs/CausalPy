@@ -25,7 +25,7 @@ import xarray as xr
 from matplotlib.collections import PolyCollection
 from matplotlib.colors import to_rgba
 from pymc_extras.prior import Prior
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import Lasso, LinearRegression, Ridge
 
 import causalpy as cp
 from causalpy._arviz_compat import hdi_bound_arrays
@@ -1923,6 +1923,122 @@ def test_dummy_fe_absorbs_covariate_in_time_dummy_span():
     assert _named_coefficients(result)["z"] == pytest.approx(0.0, abs=1e-8)
     stored = result.design["X"].sel(coeffs="z").to_numpy()
     assert np.allclose(stored, 0.0)
+
+
+def _time_pattern_plus_spike_panel(z_fn, n_units=4, n_times=5, spike=0.5):
+    """Time pattern plus one spike; y jumps by 10 on that row."""
+    rows = []
+    for unit in range(n_units):
+        for time in range(n_times):
+            z = float(z_fn(time))
+            y = 0.0
+            if unit == n_units - 1 and time == n_times - 1:
+                z += spike
+                y = 10.0
+            rows.append({"unit": f"u{unit}", "time": time, "z": z, "y": y})
+    return pd.DataFrame(rows)
+
+
+@pytest.mark.parametrize(
+    ("n_units", "n_times", "z_fn"),
+    [
+        pytest.param(4, 5, lambda t: 320.0 if t >= 2 else 0.0, id="step-320"),
+        pytest.param(4, 5, lambda t: 200.0 * t, id="time-200"),
+        pytest.param(6, 8, lambda t: 500.0 if t >= 3 else 0.0, id="step-500-6x8"),
+    ],
+)
+def test_dummy_fe_time_pattern_plus_spike_matches_within_estimator(
+    n_units, n_times, z_fn
+):
+    """A time pattern plus an identified spike is the two-way within estimate.
+
+    Residualizing against the time dummies isolates the spike. Absorbing the
+    raw column reports 0 and warns. Leaving it raw lets least squares split the
+    time level and report about 0. The within estimator is 20.
+    """
+    data = _time_pattern_plus_spike_panel(z_fn, n_units=n_units, n_times=n_times)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        dummies = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + C(time) + z",
+            unit_fe_variable="unit",
+            time_fe_variable="time",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    demeaned = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + z",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    ).fit()
+    assert dummies._absorbed_covariate_labels == ()
+    assert _named_coefficients(dummies)["z"] == pytest.approx(20.0, abs=1e-6)
+    assert _named_coefficients(demeaned)["z"] == pytest.approx(20.0, abs=1e-6)
+
+
+def test_dummy_fe_visible_time_pattern_plus_spike_stays_raw():
+    """A time pattern the solver can already estimate is left raw.
+
+    Residualizing would change a design column the caller can inspect. The
+    coefficient is already the two-way within estimate.
+    """
+    data = _time_pattern_plus_spike_panel(lambda t: 1.0 if t >= 2 else 0.0)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + C(time) + z",
+            unit_fe_variable="unit",
+            time_fe_variable="time",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    assert result._absorbed_covariate_labels == ()
+    assert _named_coefficients(result)["z"] == pytest.approx(20.0, abs=1e-6)
+    stored = result.design["X"].sel(coeffs="z").to_numpy()
+    assert float(stored.mean()) == pytest.approx(0.625, abs=1e-9)
+    assert float(np.ptp(stored)) == pytest.approx(1.5)
+
+
+@pytest.mark.parametrize(
+    "estimator",
+    [
+        Ridge(alpha=1.0, tol=1e-4, fit_intercept=False),
+        Lasso(alpha=0.1, tol=1e-4, fit_intercept=False),
+    ],
+)
+def test_dummy_fe_penalized_tol_does_not_rewrite_estimable_column(estimator):
+    """Ridge and Lasso ``tol`` is a convergence tolerance, not an lstsq cutoff.
+
+    Reading it as an lstsq cutoff rewrites a level-100 spike the default solver
+    can already see. The parent fit on that raw column is about 0.0027 for
+    Ridge and about 0.0013 for Lasso, not the rewritten coefficients 3.33 and 10.
+    """
+    data = _spike_within_change_panel(100.0, 0.5)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + x",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=estimator,
+        ).fit()
+    stored = result.design["X"].sel(coeffs="x").to_numpy()
+    assert float(stored.mean()) == pytest.approx(100.025, abs=1e-9)
+    assert float(np.ptp(stored)) == pytest.approx(0.5)
+    parent = type(estimator)(**estimator.get_params())
+    parent.fit(np.asarray(result.design["X"]), np.asarray(result.design["y"]).ravel())
+    names = list(result.design["X"].coords["coeffs"].values)
+    parent_coef = float(np.asarray(parent.coef_).reshape(-1)[names.index("x")])
+    assert _named_coefficients(result)["x"] == pytest.approx(
+        parent_coef, rel=1e-6, abs=1e-8
+    )
+    assert abs(parent_coef) < 0.01
 
 
 def test_absorbed_beta_prior_does_not_stick_to_caller_model(real_pymc_sampling):

@@ -148,7 +148,10 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     unit fixed effects. That coefficient is reported as 0, matching the within
     estimator, and the unit effects absorb the level. A covariate in the span
     of the time dummies is collinear with those fixed effects even when it
-    varies within unit, so that coefficient is also reported as 0. Only an
+    varies within unit, so that coefficient is also reported as 0. A time
+    pattern plus an identified within change is not that case: residualize
+    against the time dummies first, and report the two-way within
+    coefficient when the residual is identified. Only an
     exact duplicate, or a within-unit change of a few float64 ulps that least
     squares cannot see, counts as no variation. A change that is small relative
     to the column magnitude is still within variation, including a 0.5 change
@@ -423,6 +426,13 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         time pattern to its unit within deviation leaves that collinearity, so
         the column is absorbed and the time effects keep the level.
 
+        Residualize against the time dummies before that decision. If the
+        residual is unidentified, absorb the column. If the residual is
+        identified and the raw column does not increase the full design's rank
+        at the solver cutoff, store the residual. Its coefficient is the
+        two-way within estimate. Leaving the raw column lets least squares
+        split the time level and report about 0.
+
         A within-varying column can also be dropped by the solver even though it
         increases rank against the unit dummies. ``LinearRegression.fit`` drops
         singular values at or below ``tol`` (default ``1e-6``) times the full
@@ -469,6 +479,14 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         protected_indexes = [
             index for index, label in enumerate(self.labels) if label in protected
         ]
+        time_labels = (
+            set(self._get_fe_labels(self.time_fe_variable))
+            if self.time_fe_variable is not None
+            else set()
+        )
+        time_indexes = [
+            index for index, label in enumerate(self.labels) if label in time_labels
+        ]
         tol = self._least_squares_tol()
         skip = set(absorbed)
         skip.update(recoverable)
@@ -478,14 +496,29 @@ class PanelRegression(BaseExperiment[ResultBundle]):
             if label not in protected and index not in skip
         ]
         protected_block = design[:, protected_indexes]
-        for index in candidates:
-            if self._within_lies_in_fixed_effects(
-                design[:, index], protected_block, units, tol
-            ):
+        for _ in range(len(candidates)):
+            repairs = []
+            for index in candidates:
+                if index in skip:
+                    continue
+                action, residual = self._time_pattern_repair(
+                    design, index, protected_block, time_indexes, units, tol
+                )
+                if action == "keep":
+                    continue
+                repairs.append((index, action, residual))
+            if not repairs:
+                break
+            index, action, residual = max(
+                repairs, key=lambda item: float(np.linalg.norm(design[:, item[0]]))
+            )
+            if action == "absorb":
                 design[:, index] = 0.0
                 absorbed.append(index)
-                skip.add(index)
-                changed = True
+            else:
+                design[:, index] = residual
+            skip.add(index)
+            changed = True
 
         for _ in range(len(candidates)):
             hidden = self._columns_with_hidden_within_direction(
@@ -494,11 +527,19 @@ class PanelRegression(BaseExperiment[ResultBundle]):
             if not hidden:
                 break
             index = max(hidden, key=lambda i: float(np.linalg.norm(design[:, i])))
-            if self._within_lies_in_fixed_effects(
-                design[:, index], design[:, protected_indexes], units, tol
-            ):
+            action, residual = self._time_pattern_repair(
+                design,
+                index,
+                design[:, protected_indexes],
+                time_indexes,
+                units,
+                tol,
+            )
+            if action == "absorb":
                 design[:, index] = 0.0
                 absorbed.append(index)
+            elif action == "store_residual":
+                design[:, index] = residual
             else:
                 design[:, index] = self._within_deviation(design[:, index], units)
             skip.add(index)
@@ -587,11 +628,83 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         return hidden
 
     def _least_squares_tol(self) -> float:
-        """Solver cutoff for the installed model, or the sklearn default."""
-        tol = getattr(self.model, "tol", None)
-        if tol is None:
+        """lstsq cutoff for the installed model, or the sklearn default.
+
+        ``sklearn.linear_model.LinearRegression`` passes ``tol`` to
+        ``scipy.linalg.lstsq`` as ``cond``. Ridge, Lasso, and other estimators
+        use ``tol`` as a convergence tolerance. Reading that value as an lstsq
+        cutoff rewrites columns the default solver can already estimate.
+        """
+        model = self.model
+        tol = getattr(model, "tol", None)
+        if tol is None or not self._tol_is_lstsq_cutoff(model):
             return _OLS_SOLVER_TOL
         return float(tol)
+
+    @staticmethod
+    def _tol_is_lstsq_cutoff(model: Any) -> bool:
+        """Whether ``model.tol`` is the condition number passed to ``lstsq``."""
+        from sklearn.linear_model import LinearRegression as SklearnLinearRegression
+
+        if not isinstance(model, SklearnLinearRegression):
+            return False
+        return type(model).fit is SklearnLinearRegression.fit
+
+    def _time_pattern_repair(
+        self,
+        design: np.ndarray,
+        index: int,
+        protected_block: np.ndarray,
+        time_indexes: list[int],
+        units: np.ndarray,
+        tol: float,
+    ) -> tuple[Literal["absorb", "store_residual", "keep"], np.ndarray]:
+        """Repair a column that may lie in the time-dummy span.
+
+        Residualize against the time dummies before deciding the column is
+        unidentified. A pure time pattern has a zero residual and is absorbed.
+        A time pattern plus an identified within change is not absorbed. If the
+        raw column does not increase the full design's rank at the solver
+        cutoff, store that residual so the coefficient is the two-way within
+        estimate.
+        """
+        column = np.asarray(design[:, index], dtype=float)
+        residual = self._residual_against_indexes(column, design, time_indexes)
+        if self._within_lies_in_fixed_effects(residual, protected_block, units, tol):
+            return "absorb", residual
+        if time_indexes and not self._column_adds_kept_direction(design, index, tol):
+            return "store_residual", residual
+        return "keep", residual
+
+    @staticmethod
+    def _residual_against_indexes(
+        column: np.ndarray, design: np.ndarray, indexes: list[int]
+    ) -> np.ndarray:
+        """Column minus its projection onto the indexed columns.
+
+        The projection uses machine precision, not the solver cutoff, so a
+        small within change is not absorbed into a large time pattern before
+        it can be identified.
+        """
+        values = np.asarray(column, dtype=float)
+        if not indexes:
+            return values
+        block = np.asarray(design[:, indexes], dtype=float)
+        if block.ndim == 1:
+            block = block.reshape(-1, 1)
+        if block.size == 0 or block.shape[0] != values.shape[0]:
+            return values
+        coef = np.linalg.lstsq(block, values, rcond=None)[0]
+        return values - block @ coef
+
+    @staticmethod
+    def _column_adds_kept_direction(design: np.ndarray, index: int, tol: float) -> bool:
+        """Whether ``design[:, index]`` increases rank at the solver cutoff."""
+        reduced = np.array(design, dtype=float, copy=True)
+        reduced[:, index] = 0.0
+        full_rank = PanelRegression._rank_at_solver_cutoff(design, tol)
+        reduced_rank = PanelRegression._rank_at_solver_cutoff(reduced, tol)
+        return full_rank > reduced_rank
 
     @staticmethod
     def _rank_at_solver_cutoff(matrix: np.ndarray, tol: float) -> int:
