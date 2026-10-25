@@ -1675,6 +1675,45 @@ class StaggeredDifferenceInDifferences(
 
         return self._mark_non_identified_att_rows(pd.DataFrame(att_et_rows))
 
+    def _identified_post_treatment_att_draws(
+        self, bundle: StaggeredDifferenceInDifferencesResult
+    ) -> np.ndarray | None:
+        """Draw-wise unweighted mean of identified post-treatment event-time ATTs.
+
+        The event window and identification mask match
+        :meth:`_event_time_summary_frame`. Each returned value is one posterior
+        draw of the average the effect-summary sentence reports, with shape
+        ``(chain, draw)``. ``None`` when no identified post-treatment event
+        time remains.
+        """
+        mu_draws = bundle.y_pred.isel(treated_units=0)
+        tau_draws_all = self._observed_outcome.to_numpy() - mu_draws.values
+        treated_indices = np.where(
+            ~np.asarray(self.data["_is_untreated"].values, dtype=bool)
+        )[0]
+        tau_draws_treated = tau_draws_all[:, :, treated_indices]
+        treated_data = self.data[~self.data["_is_untreated"]]
+        event_time_treated = np.asarray(treated_data["event_time"].values)
+        event_times_post = np.unique(event_time_treated[~np.isnan(event_time_treated)])
+        if self.event_window is not None:
+            event_times_post = event_times_post[
+                (event_times_post >= self.event_window[0])
+                & (event_times_post <= self.event_window[1])
+            ]
+
+        att_draws: list[np.ndarray] = []
+        for event_time in sorted(event_times_post):
+            if not self._is_event_time_att_identified(int(event_time)):
+                continue
+            event_mask = event_time_treated == event_time
+            if event_mask.sum() == 0:
+                continue
+            tau_e = tau_draws_treated[:, :, np.where(event_mask)[0]].mean(axis=2)
+            att_draws.append(tau_e)
+        if not att_draws:
+            return None
+        return np.mean(np.stack(att_draws, axis=0), axis=0)
+
     def effect_summary(
         self,
         *,
@@ -1697,8 +1736,9 @@ class StaggeredDifferenceInDifferences(
             Direction for tail probability calculation (PyMC only, ignored for OLS).
         alpha : float, default=0.05
             Significance level for HDI/CI intervals (1-alpha confidence level).
-            Bayesian intervals are recomputed from the group's posterior draws
-            and do not reuse ``result.hdi_prob``.
+            Bayesian table rows are HDIs of each event-time ATT. The prose
+            interval is the HDI of the unweighted mean of identified
+            post-treatment event-time ATTs. Neither reuses ``result.hdi_prob``.
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
 

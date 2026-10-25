@@ -763,12 +763,32 @@ def _average_identified_post_bounds(frame: pd.DataFrame) -> tuple[float, float]:
     return float(post["att_lower"].mean()), float(post["att_upper"].mean())
 
 
+def _identified_post_event_draws(result, y_pred) -> np.ndarray:
+    """Draw-wise unweighted mean of identified post-treatment event-time ATTs."""
+    mu = y_pred.isel(treated_units=0)
+    tau = result._observed_outcome.to_numpy() - mu.values
+    treated_mask = ~result.data["_is_untreated"].to_numpy()
+    treated = result.data.loc[treated_mask]
+    event_time = np.asarray(treated["event_time"].values)
+    treated_tau = tau[:, :, np.where(treated_mask)[0]]
+    draws = []
+    for event in sorted(np.unique(event_time[~np.isnan(event_time)])):
+        if not result._is_event_time_att_identified(int(event)):
+            continue
+        mask = event_time == event
+        if mask.sum() == 0:
+            continue
+        draws.append(treated_tau[:, :, np.where(mask)[0]].mean(axis=2))
+    return np.mean(np.stack(draws, axis=0), axis=0)
+
+
 @pytest.mark.integration
 def test_staggered_effect_summary_recomputes_hdi_from_alpha(mock_pymc_sample):
     """effect_summary(alpha) recomputes an HDI at 1 - alpha from draws.
 
-    Reprinting the stored 94% aggregation bounds, or only relabeling them,
-    fails this check. A wider alpha must name a wider recomputed interval.
+    Reprinting the stored 94% aggregation bounds, or averaging per-event HDI
+    endpoints, fails this check. The prose interval is the HDI of the same
+    average the sentence reports. A wider alpha must name a wider interval.
     """
     df = generate_staggered_did_data(
         n_units=3,
@@ -815,9 +835,10 @@ def test_staggered_effect_summary_recomputes_hdi_from_alpha(mock_pymc_sample):
     summary_99 = result.effect_summary(alpha=0.01)
     summary_975 = result.effect_summary(alpha=0.025)
 
-    assert "average 95% HDI" in summary_95.text
-    assert "average 99% HDI" in summary_99.text
-    assert "average 97.5% HDI" in summary_975.text
+    assert "95% HDI" in summary_95.text
+    assert "99% HDI" in summary_99.text
+    assert "97.5% HDI" in summary_975.text
+    assert "average 95% HDI" not in summary_95.text
     assert result.result.hdi_prob == 0.94
 
     from causalpy._arviz_compat import hdi_bounds
@@ -873,15 +894,20 @@ def test_staggered_effect_summary_recomputes_hdi_from_alpha(mock_pymc_sample):
         check_exact=False,
         rtol=1e-12,
     )
-    lower_95, upper_95 = _average_identified_post_bounds(summary_95.table)
-    lower_99, upper_99 = _average_identified_post_bounds(summary_99.table)
+    avg_draws = _identified_post_event_draws(result, synthetic)
+    lower_95, upper_95 = hdi_bounds(avg_draws, prob=0.95, flatten_chains_draws=True)
+    lower_99, upper_99 = hdi_bounds(avg_draws, prob=0.99, flatten_chains_draws=True)
+    mean_lower, mean_upper = _average_identified_post_bounds(summary_95.table)
     assert (upper_95 - lower_95) < (upper_99 - lower_99)
+    assert not np.isclose(lower_95, mean_lower) or not np.isclose(upper_95, mean_upper)
     assert not np.isclose(lower_95, stored_lower) or not np.isclose(
         upper_95, stored_upper
     )
     assert f"[{lower_95:.2f}, {upper_95:.2f}]" in summary_95.text
     assert f"[{lower_99:.2f}, {upper_99:.2f}]" in summary_99.text
+    assert f"[{mean_lower:.2f}, {mean_upper:.2f}]" not in summary_95.text
     assert f"[{stored_lower:.2f}, {stored_upper:.2f}]" not in summary_95.text
+    assert f"{float(np.mean(avg_draws)):.2f}" in summary_95.text
 
 
 # ==============================================================================
