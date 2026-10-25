@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.gridspec import GridSpec
-from patsy import ModelDesc
+from patsy import ModelDesc, NAAction
 from scipy import stats
 from sklearn.base import RegressorMixin
 
@@ -36,6 +36,32 @@ from causalpy.reporting import EffectSummary
 
 from ._results import ResultBundle
 from .base import BaseExperiment
+
+
+class _KeptRowNAAction(NAAction):
+    """Record the positional rows Patsy keeps when it drops missing values."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.kept_rows: np.ndarray | None = None
+
+    def handle_NA(self, values, is_NAs, origins):
+        if is_NAs:
+            dropped = np.zeros(is_NAs[0].shape[0], dtype=bool)
+            for is_na in is_NAs:
+                dropped |= np.asarray(is_na, dtype=bool)
+            self.kept_rows = ~dropped
+        return super().handle_NA(values, is_NAs, origins)
+
+    def rows_for(self, data: pd.DataFrame, values: np.ndarray) -> np.ndarray:
+        """Return a positional mask aligned with ``data`` for ``values``."""
+        if self.kept_rows is not None:
+            return self.kept_rows
+        if len(values) == len(data):
+            return np.ones(len(data), dtype=bool)
+        raise ValueError(
+            "Patsy dropped formula rows without reporting which rows were kept."
+        )
 
 
 class PanelRegression(BaseExperiment[ResultBundle]):
@@ -310,6 +336,11 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         the formula. Demeaning the raw columns first would make ``treatment:x``
         the product of demeaned factors, which is not the dummy-variable
         within estimator of the same formula.
+
+        Patsy drops rows with a missing value in a used formula column before
+        the matrices are returned. The within transform uses those retained
+        rows and their unit and time labels. It does not reattach the full
+        frame index.
         """
         data = self._original_data.copy()
         if self.fe_method == "demeaned":
@@ -319,7 +350,8 @@ class PanelRegression(BaseExperiment[ResultBundle]):
             for column in self._numeric_columns_for_group_means():
                 if pd.api.types.is_bool_dtype(data[column]):
                     data[column] = data[column].astype(float)
-        y, X = build_formula_matrices(self.formula, data)
+        kept_rows = _KeptRowNAAction()
+        y, X = build_formula_matrices(self.formula, data, NA_action=kept_rows)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -334,10 +366,11 @@ class PanelRegression(BaseExperiment[ResultBundle]):
                 group_vars.append(self.time_fe_variable)
             for group_var in group_vars:
                 self._record_original_group_means(group_var)
-            y_values = self._sequential_within(y_values, data, group_vars)
+            retained = data.iloc[kept_rows.rows_for(data, y_values)]
+            y_values = self._sequential_within(y_values, retained, group_vars)
             x_values = self._sequential_within(
                 x_values,
-                data,
+                retained,
                 group_vars,
                 skip_columns=self._intercept_column_mask(X.design_info),
             )

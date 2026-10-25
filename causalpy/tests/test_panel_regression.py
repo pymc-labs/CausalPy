@@ -1182,3 +1182,107 @@ def test_demeaned_balanced_panel_matches_dummy_within_transform():
     )
     for name in planted:
         assert demeaned_one_way[name] == pytest.approx(dummy_one_way_coefs[name])
+
+
+def _panel_with_internal_missing_formula_values():
+    """Balanced panel with missing formula values that are not the last row."""
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            treatment = int(unit >= 2 and time >= 2)
+            x = float(unit * 5 + time)
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": treatment,
+                    "x": x,
+                    "unused": 1.0,
+                    "y": 100.0 + unit * 5 + time,
+                }
+            )
+    data = pd.DataFrame(rows)
+    # Not the last row. One missing outcome and one missing covariate.
+    data.loc[3, "y"] = np.nan
+    data.loc[7, "x"] = np.nan
+    # An unused column must not decide which rows the formula keeps.
+    data.loc[11, "unused"] = np.nan
+    return data
+
+
+def _sequential_group_demean(frame, columns, group_vars):
+    demeaned = frame.loc[:, columns].astype(float).copy()
+    for group_var in group_vars:
+        demeaned = demeaned - demeaned.groupby(
+            frame[group_var], observed=True
+        ).transform("mean")
+    return demeaned
+
+
+@pytest.mark.parametrize(
+    "formula",
+    [
+        "y ~ 1 + treatment + x",
+        "y ~ 1 + treatment + x + treatment:x",
+    ],
+)
+def test_demeaned_missing_formula_rows_match_dummy_retention(formula):
+    """Missing formula values must not crash demeaned init or change retained rows.
+
+    Patsy drops incomplete formula rows before the design matrix is built. The
+    within transform has to use those rows, not the full frame index, and must
+    not assume the dropped row is last.
+    """
+    data = _panel_with_internal_missing_formula_values()
+    assert int(data.index[-1]) not in {3, 7}
+    demeaned = cp.PanelRegression(
+        data,
+        formula=formula,
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    )
+    dummies = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + C(unit) + C(time) + " + formula.split("~", 1)[1],
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+
+    used = ["y", "treatment", "x"]
+    retained = data.loc[data[used].notna().all(axis=1)].copy()
+    assert len(retained) == len(data) - 2
+    assert 3 not in retained.index
+    assert 7 not in retained.index
+    assert int(data.index[-1]) in retained.index
+    assert 11 in retained.index
+
+    dummy_y = np.asarray(dummies.design["y"], dtype=float).reshape(-1)
+    np.testing.assert_allclose(dummy_y, retained["y"].to_numpy(dtype=float))
+    assert demeaned.design["y"].shape[0] == dummies.design["y"].shape[0]
+    assert demeaned.design["X"].shape[0] == retained.shape[0]
+
+    demeaned_x = np.asarray(demeaned.design["X"], dtype=float)
+    within = _sequential_group_demean(retained, ["treatment", "x"], ["unit", "time"])
+    within["treatment:x"] = retained["treatment"].to_numpy(dtype=float) * retained[
+        "x"
+    ].to_numpy(dtype=float)
+    within["treatment:x"] = _sequential_group_demean(
+        within.assign(
+            unit=retained["unit"].to_numpy(), time=retained["time"].to_numpy()
+        ),
+        ["treatment:x"],
+        ["unit", "time"],
+    )["treatment:x"]
+    for name in ("treatment", "x", "treatment:x"):
+        if name not in demeaned.labels:
+            continue
+        column = demeaned.labels.index(name)
+        np.testing.assert_allclose(
+            demeaned_x[:, column],
+            within[name].to_numpy(dtype=float),
+            atol=1e-8,
+        )
