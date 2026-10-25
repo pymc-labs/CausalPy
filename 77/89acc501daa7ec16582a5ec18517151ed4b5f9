@@ -1,0 +1,16 @@
+causalpy/checks/mccrary.py
+  h_63db634213747e 39-74,132-133
+causalpy/tests/test_method_specific_checks.py
+  h_63db634213747e 296-358
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7789acc501daa7ec16582a5ec18517151ed4b5f9",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
