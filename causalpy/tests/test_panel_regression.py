@@ -1779,6 +1779,152 @@ def test_dummy_fe_solver_cutoff_follows_model_tol():
     assert abs(float(stored.mean())) < 1.0
 
 
+def _two_spike_panel(
+    level_a: float, level_b: float, delta: float = 0.5
+) -> pd.DataFrame:
+    """Two within-unit spikes on different units; each outcome jump is 10."""
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            a = level_a
+            b = level_b
+            y = 0.0
+            if unit == 3 and time == 4:
+                a = level_a + delta
+                y = 10.0
+            if unit == 2 and time == 3:
+                b = level_b + delta
+                y += 10.0
+            rows.append(
+                {"unit": f"u{unit}", "time": time, "a": float(a), "b": float(b), "y": y}
+            )
+    return pd.DataFrame(rows)
+
+
+@pytest.mark.parametrize("level", [250.0, 1000.0, 10000.0])
+def test_dummy_fe_joint_solver_cutoff_matches_within_estimator(level):
+    """Two spikes the solver drops together must match the within estimator.
+
+    At level 250 each column increases rank against the unit dummies, so a
+    pairwise check leaves both raw and both coefficients are about 0. The
+    within estimator is 20. Larger equal pairs are included so a rewrite that
+    changes the cutoff still matches that estimator. Rewriting one column can
+    make the other estimable, so this test does not require both stored
+    columns to be centered.
+    """
+    data = _two_spike_panel(level, level)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        dummies = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + a + b",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    demeaned = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + a + b",
+        unit_fe_variable="unit",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    ).fit()
+    assert dummies._absorbed_covariate_labels == ()
+    for label in ("a", "b"):
+        assert _named_coefficients(dummies)[label] == pytest.approx(20.0, abs=1e-6)
+        assert _named_coefficients(demeaned)[label] == pytest.approx(20.0, abs=1e-6)
+
+
+def test_dummy_fe_keeps_jointly_estimable_spike_columns():
+    """A level-220 pair stays raw because the solver already reports 20.
+
+    Rewriting either column would change a design the caller can inspect.
+    """
+    data = _two_spike_panel(220.0, 220.0)
+    result = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + C(unit) + a + b",
+        unit_fe_variable="unit",
+        fe_method="dummies",
+        model=LinearRegression(),
+    ).fit()
+    assert result._absorbed_covariate_labels == ()
+    for label in ("a", "b"):
+        assert _named_coefficients(result)[label] == pytest.approx(20.0, abs=1e-6)
+        stored = result.design["X"].sel(coeffs=label).to_numpy()
+        assert float(stored.mean()) == pytest.approx(220.025, abs=1e-9)
+        assert float(np.ptp(stored)) == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    ("level_a", "level_b", "raw_label", "raw_level"),
+    [
+        (10000.0, 250.0, "b", 250.0),
+        (250.0, 10000.0, "a", 250.0),
+        (100.0, 10000.0, "a", 100.0),
+    ],
+)
+def test_dummy_fe_joint_cutoff_keeps_the_estimable_column(
+    level_a, level_b, raw_label, raw_level
+):
+    """Rewriting a hidden spike must not rewrite a column the solver can see.
+
+    A one-pass rewrite of every column that is weak against the unit dummies
+    changes the smaller column. That column stays at its raw level, and both
+    coefficients match the within estimator of 20.
+    """
+    data = _two_spike_panel(level_a, level_b)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + a + b",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    assert result._absorbed_covariate_labels == ()
+    for label in ("a", "b"):
+        assert _named_coefficients(result)[label] == pytest.approx(20.0, abs=1e-6)
+    stored = result.design["X"].sel(coeffs=raw_label).to_numpy()
+    assert float(stored.mean()) == pytest.approx(raw_level + 0.025, abs=1e-9)
+    assert float(np.ptp(stored)) == pytest.approx(0.5)
+
+
+def test_dummy_fe_absorbs_covariate_in_time_dummy_span():
+    """A pure time pattern is collinear with the time dummies, not a within effect.
+
+    The column varies within unit, so a unit-only check leaves it raw and the
+    solver splits the time level into it. The within estimate is 0.
+    """
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            z = 1.0 if time >= 2 else 0.0
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "z": z,
+                    "y": 4.0 * z + 10.0 * unit,
+                }
+            )
+    data = pd.DataFrame(rows)
+    with pytest.warns(UserWarning, match="within estimate of 0"):
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + C(time) + z",
+            unit_fe_variable="unit",
+            time_fe_variable="time",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    assert result._absorbed_covariate_labels == ("z",)
+    assert _named_coefficients(result)["z"] == pytest.approx(0.0, abs=1e-8)
+    stored = result.design["X"].sel(coeffs="z").to_numpy()
+    assert np.allclose(stored, 0.0)
+
+
 def test_absorbed_beta_prior_does_not_stick_to_caller_model(real_pymc_sampling):
     """The within-estimate pin must not survive on the caller's model or its clone.
 

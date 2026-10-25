@@ -146,14 +146,18 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     confounders but also drops time-invariant covariates from the model. A
     covariate with no within-unit variation is collinear with dummy-variable
     unit fixed effects. That coefficient is reported as 0, matching the within
-    estimator, and the unit effects absorb the level. Only an exact duplicate,
-    or a within-unit change of a few float64 ulps that least squares cannot
-    see, counts as no variation. A change that is small relative to the column
-    magnitude is still within variation, including a 0.5 change at magnitude
-    1e15, which is exactly four ulps of that magnitude. If the raw column is
-    numerically a unit level, or the solver cutoff cannot see its within change
-    against the unit dummies, it is stored as its within deviation so least
-    squares reports that coefficient instead of dropping it. The check uses the
+    estimator, and the unit effects absorb the level. A covariate in the span
+    of the time dummies is collinear with those fixed effects even when it
+    varies within unit, so that coefficient is also reported as 0. Only an
+    exact duplicate, or a within-unit change of a few float64 ulps that least
+    squares cannot see, counts as no variation. A change that is small relative
+    to the column magnitude is still within variation, including a 0.5 change
+    at magnitude 1e15, which is exactly four ulps of that magnitude. If the raw
+    column is numerically a unit level, or the solver cutoff cannot see its
+    within change against the full design, it is stored as its within deviation
+    so least squares reports that coefficient instead of dropping it. A pairwise
+    check against the unit dummies is not enough: two columns can each increase
+    that rank and still be dropped together. The check uses the
     rows the formula retains, in design order, and does not require a unique
     frame index. That coefficient is not left as an unidentified prior. The
     absorbed prior is installed only while the PyMC graph is built and is not
@@ -406,7 +410,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         self._absorb_time_invariant_covariates()
 
     def _absorb_time_invariant_covariates(self) -> None:
-        """Report the within coefficient for covariates collinear with unit FE.
+        """Report the within coefficient for covariates collinear with fixed effects.
 
         A covariate that does not vary within unit lies in the span of the unit
         dummies. Dummy-variable least squares is then unidentified, and a
@@ -414,16 +418,20 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         estimator drops the covariate, so the reported coefficient is 0 and the
         unit dummies keep the level.
 
-        A within-varying column can still be numerically a unit level. A change
-        of 0.5 at magnitude 1e8 is real variation, but float64 least squares
-        drops that direction. ``matrix_rank`` only drops a direction near machine
-        epsilon. The solver cutoff is ``tol`` (default ``1e-6``) times the
-        largest singular value, so a 0.5 change at magnitude 1e6 stays raw and
-        the coefficient is about 0. A column past about 6e13 can also drop the
-        stacked rank below the unit dummies, and a 0.5 change at magnitude 1e15
-        is exactly four ulps, so an ulp count alone would call it invariant.
-        Those columns are stored as their within deviation so the reported
-        coefficient is the within estimate. The supplied prior is left in place.
+        A within-varying column can still be numerically a unit level, or its
+        within direction can fall in the span of the time dummies. Rewriting a
+        time pattern to its unit within deviation leaves that collinearity, so
+        the column is absorbed and the time effects keep the level.
+
+        A within-varying column can also be dropped by the solver even though it
+        increases rank against the unit dummies. ``LinearRegression.fit`` drops
+        singular values at or below ``tol`` (default ``1e-6``) times the full
+        design's largest singular value. Two level-250 spikes each add a
+        direction to the dummy block, but together one within contrast falls
+        below that cutoff and both coefficients are about 0. The hidden column
+        is stored as its within deviation and the design is checked again.
+        Rewriting one can make the other estimable, so a column the solver can
+        already see stays raw. The supplied prior is left in place.
         """
         self._absorbed_covariate_labels = ()
         if self.fe_method != "dummies":
@@ -448,57 +456,133 @@ class PanelRegression(BaseExperiment[ResultBundle]):
                 recoverable.append(index)
             else:
                 absorbed.append(index)
-        hidden = self._columns_hidden_by_unit_level(protected, absorbed)
-        for index in recoverable:
-            if index not in hidden:
-                hidden.append(index)
-        if not absorbed and not hidden:
-            return
+
         design = np.array(self._X_raw, dtype=float, copy=True)
+        changed = False
+        if absorbed:
+            design[:, absorbed] = 0.0
+            changed = True
+        for index in recoverable:
+            design[:, index] = self._within_deviation(design[:, index], units)
+            changed = True
+
+        protected_indexes = [
+            index for index, label in enumerate(self.labels) if label in protected
+        ]
+        tol = self._least_squares_tol()
+        skip = set(absorbed)
+        skip.update(recoverable)
+        candidates = [
+            index
+            for index, label in enumerate(self.labels)
+            if label not in protected and index not in skip
+        ]
+        protected_block = design[:, protected_indexes]
+        for index in candidates:
+            if self._within_lies_in_fixed_effects(
+                design[:, index], protected_block, units, tol
+            ):
+                design[:, index] = 0.0
+                absorbed.append(index)
+                skip.add(index)
+                changed = True
+
+        for _ in range(len(candidates)):
+            hidden = self._columns_with_hidden_within_direction(
+                design, candidates, skip, units, tol
+            )
+            if not hidden:
+                break
+            index = max(hidden, key=lambda i: float(np.linalg.norm(design[:, i])))
+            if self._within_lies_in_fixed_effects(
+                design[:, index], design[:, protected_indexes], units, tol
+            ):
+                design[:, index] = 0.0
+                absorbed.append(index)
+            else:
+                design[:, index] = self._within_deviation(design[:, index], units)
+            skip.add(index)
+            changed = True
+
+        if not changed:
+            return
         if absorbed:
             self._absorbed_covariate_labels = tuple(
                 self.labels[index] for index in absorbed
             )
-            design[:, absorbed] = 0.0
             names = ", ".join(self.labels[index] for index in absorbed)
             warnings.warn(
-                "Covariate(s) with no within-unit variation are collinear with unit "
-                "fixed effects and are reported at the within estimate of 0: "
-                f"{names}. The unit effects absorb the level.",
+                "Covariate(s) collinear with the fixed effects are reported at the "
+                "within estimate of 0: "
+                f"{names}. The fixed effects absorb the level.",
                 UserWarning,
                 stacklevel=4,
             )
-        for index in hidden:
-            design[:, index] = self._within_deviation(design[:, index], units)
         self._X_raw = design
 
-    def _columns_hidden_by_unit_level(
-        self, protected: set[str], absorbed: list[int]
-    ) -> list[int]:
-        """Covariates the solver cannot estimate against the unit dummies.
+    def _within_lies_in_fixed_effects(
+        self,
+        column: np.ndarray,
+        protected_block: np.ndarray,
+        units: np.ndarray,
+        tol: float,
+    ) -> bool:
+        """Whether the within deviation is unidentified against the fixed effects.
 
-        ``LinearRegression.fit`` calls ``scipy.linalg.lstsq`` with
-        ``cond=self.tol`` (default ``1e-6``). Singular values below that
-        fraction of the largest are zero. ``matrix_rank`` uses a cutoff near
-        machine epsilon, so columns between the two cutoffs stay raw and the
-        coefficient is about 0. Those columns are not absorbed. They are stored
-        as their within deviation.
+        A time pattern varies within unit, so the unit-level check leaves it
+        raw. Unit demeaning does not remove a pure time pattern. The within
+        estimate is 0, and rewriting the column would leave the collinearity.
         """
-        tol = self._least_squares_tol()
-        protected_indexes = [
-            index for index, label in enumerate(self.labels) if label in protected
-        ]
-        protected_block = np.asarray(self._X_raw[:, protected_indexes], dtype=float)
-        protected_rank = self._rank_at_solver_cutoff(protected_block, tol)
-        absorbed_set = set(absorbed)
+        if not self._within_change_is_identified(column, units):
+            return True
+        if protected_block.size == 0:
+            return False
+        within = self._within_deviation(column, units)
+        stacked = np.column_stack([protected_block, within])
+        return self._rank_at_solver_cutoff(stacked, tol) <= self._rank_at_solver_cutoff(
+            protected_block, tol
+        )
+
+    def _columns_with_hidden_within_direction(
+        self,
+        design: np.ndarray,
+        candidates: list[int],
+        skip: set[int],
+        units: np.ndarray,
+        tol: float,
+    ) -> list[int]:
+        """Covariates whose within direction the full-design solver drops.
+
+        The cutoff is ``tol`` times the full design's largest singular value.
+        A column is hidden when the part of its within deviation that lies in
+        the kept subspace is at or below that cutoff, or when a larger part
+        lies in the dropped subspace. The second clause is the joint failure:
+        each level-250 spike is visible against the unit dummies alone, but
+        half of each within direction is discarded once both spikes are stacked.
+        """
+        pending = [index for index in candidates if index not in skip]
+        if not pending:
+            return []
+        singular_vectors, singular, _ = np.linalg.svd(design, full_matrices=False)
+        if singular.size == 0 or not np.isfinite(singular[0]) or singular[0] == 0.0:
+            return []
+        cutoff = float(tol) * float(singular[0])
+        kept = singular > cutoff
         hidden: list[int] = []
-        for index, label in enumerate(self.labels):
-            if label in protected or index in absorbed_set:
-                continue
-            stacked = np.column_stack(
-                [protected_block, np.asarray(self._X_raw[:, index], dtype=float)]
+        for index in pending:
+            within = self._within_deviation(design[:, index], units)
+            visible = (
+                float(np.linalg.norm(singular_vectors[:, kept].T @ within))
+                if kept.any()
+                else 0.0
             )
-            if self._rank_at_solver_cutoff(stacked, tol) <= protected_rank:
+            dropped_mask = ~kept
+            dropped = (
+                float(np.linalg.norm(singular_vectors[:, dropped_mask].T @ within))
+                if dropped_mask.any()
+                else 0.0
+            )
+            if visible <= cutoff or dropped > cutoff:
                 hidden.append(index)
         return hidden
 
