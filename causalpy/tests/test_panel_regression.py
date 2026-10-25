@@ -1006,3 +1006,111 @@ def test_panel_plot_trajectories_rejects_empty_selection(small_panel_data, selec
         result.plot_trajectories(n_sample=0, select=select)
     with pytest.raises(ValueError, match="at least one unit"):
         result.plot_trajectories(units=[])
+
+
+def _named_coefficients(result: cp.PanelRegression) -> dict[str, float]:
+    return {
+        label: float(coef)
+        for label, coef in zip(result.labels, result.model.coef_, strict=True)
+    }
+
+
+def test_dummy_fe_time_invariant_treatment_matches_within_estimator():
+    """Dummy-variable FE must not split a unit level into a time-invariant treatment.
+
+    The within estimator on this design is 0. A minimum-norm solve of the
+    collinear dummy design previously reported 15 and reduced the treated
+    unit effect by the same amount.
+    """
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": float(unit == 3),
+                    "region": float(unit == 3),
+                    "y": 10.0 * unit + 1.0 * time,
+                }
+            )
+    data = pd.DataFrame(rows)
+
+    with pytest.warns(UserWarning, match="within estimate of 0"):
+        dummies = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + C(time) + treatment + region",
+            unit_fe_variable="unit",
+            time_fe_variable="time",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    demeaned = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + treatment + region",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    ).fit()
+
+    dummy_coefs = _named_coefficients(dummies)
+    demeaned_coefs = _named_coefficients(demeaned)
+    assert dummy_coefs["treatment"] == pytest.approx(0.0, abs=1e-8)
+    assert dummy_coefs["region"] == pytest.approx(0.0, abs=1e-8)
+    assert demeaned_coefs["treatment"] == pytest.approx(0.0, abs=1e-8)
+    assert dummy_coefs["C(unit)[T.u3]"] == pytest.approx(30.0, abs=1e-8)
+
+
+def test_dummy_fe_keeps_within_varying_treatment_beside_time_invariant_covariate():
+    """Only the collinear covariate is zeroed; a switching treatment stays identified."""
+    rows = []
+    for unit in range(3):
+        for time in range(4):
+            treatment = float(time >= 2)
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": treatment,
+                    "z": float(unit),
+                    "y": 4.0 * unit + 5.0 * treatment,
+                }
+            )
+    data = pd.DataFrame(rows)
+    with pytest.warns(UserWarning, match="within estimate of 0: z"):
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + treatment + z",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    coefs = _named_coefficients(result)
+    assert coefs["treatment"] == pytest.approx(5.0, abs=1e-8)
+    assert coefs["z"] == pytest.approx(0.0, abs=1e-8)
+
+
+def test_dummies_without_unit_fe_keeps_between_unit_treatment():
+    """Do not zero a time-invariant treatment when the formula has no unit dummies."""
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            treatment = float(unit == 3)
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": treatment,
+                    "y": 10.0 * treatment + time,
+                }
+            )
+    data = pd.DataFrame(rows)
+    result = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + treatment",
+        unit_fe_variable="unit",
+        fe_method="dummies",
+        model=LinearRegression(),
+    ).fit()
+    assert _named_coefficients(result)["treatment"] == pytest.approx(10.0, abs=1e-8)

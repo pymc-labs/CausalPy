@@ -14,6 +14,7 @@
 """Panel Regression with Fixed Effects."""
 
 import re
+import warnings
 from typing import Any, Literal
 
 import matplotlib.pyplot as plt
@@ -90,7 +91,10 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     ``PanelRegression`` fits the formula after representing fixed effects with dummy variables or demeaning, but it does not select a treatment term or compute a single built-in causal effect. Any causal estimand is extracted from the fitted coefficient chosen by the analyst, and its interpretation depends on the formula and identification assumptions.
 
     The demeaned transformation (de-meaning by group) removes time-invariant
-    confounders but also drops time-invariant covariates from the model. For
+    confounders but also drops time-invariant covariates from the model. A
+    covariate with no within-unit variation is collinear with dummy-variable
+    unit fixed effects. That coefficient is reported as 0, matching the within
+    estimator, and the unit effects absorb the level. For
     the ``"dummies"`` approach (unpooled FE), individual unit effects can be
     extracted from the coefficients. For the demeaned approach, unit effects
     can be recovered post-hoc using the stored group means (``_group_means``),
@@ -322,6 +326,58 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
+        self._absorb_time_invariant_covariates()
+
+    def _absorb_time_invariant_covariates(self) -> None:
+        """Report the within coefficient for covariates collinear with unit FE.
+
+        A covariate that does not vary within unit lies in the span of the unit
+        dummies. Dummy-variable least squares is then unidentified, and a
+        minimum-norm solve splits the unit level into that covariate. The within
+        estimator drops the covariate, so the reported coefficient is 0 and the
+        unit dummies keep the level.
+        """
+        if self.fe_method != "dummies":
+            return
+        protected = set(self._get_fe_labels(self.unit_fe_variable))
+        if not protected:
+            return
+        if self.time_fe_variable is not None:
+            protected.update(self._get_fe_labels(self.time_fe_variable))
+        protected.add("Intercept")
+
+        units = self._original_data[self.unit_fe_variable].to_numpy()
+        absorbed = [
+            index
+            for index, label in enumerate(self.labels)
+            if label not in protected
+            and not self._column_varies_within_unit(self._X_raw[:, index], units)
+        ]
+        if not absorbed:
+            return
+        design = np.array(self._X_raw, dtype=float, copy=True)
+        design[:, absorbed] = 0.0
+        self._X_raw = design
+        names = ", ".join(self.labels[index] for index in absorbed)
+        warnings.warn(
+            "Covariate(s) with no within-unit variation are collinear with unit "
+            "fixed effects and are reported at the within estimate of 0: "
+            f"{names}. The unit effects absorb the level.",
+            UserWarning,
+            stacklevel=4,
+        )
+
+    @staticmethod
+    def _column_varies_within_unit(column: np.ndarray, units: np.ndarray) -> bool:
+        """Whether ``column`` changes inside any unit."""
+        values = np.asarray(column, dtype=float)
+        if values.shape[0] != len(units) or not np.isfinite(values).all():
+            return True
+        grouped = pd.Series(values).groupby(np.asarray(units), observed=True)
+        within_range = grouped.transform("max") - grouped.transform("min")
+        scale = float(np.max(np.abs(values))) if values.size else 1.0
+        tolerance = 1e-8 * max(scale, 1.0)
+        return bool(np.any(within_range.to_numpy() > tolerance))
 
     def _prepare_data(self) -> None:
         """Bundle design matrices into an ``xr.Dataset``."""
