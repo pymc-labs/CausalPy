@@ -293,6 +293,69 @@ class TestMcCraryDensityTest:
         assert result.passed is None
         assert "No observations" in result.text
 
+    def _running_result(self, x, *, n_bins, threshold=0.0, alpha=0.05):
+        from unittest.mock import Mock
+
+        mock_rd = Mock()
+        mock_rd.treatment_threshold = threshold
+        mock_rd.running_variable_name = "x"
+        mock_rd.data = pd.DataFrame({"x": np.asarray(x, dtype=float)})
+        ctx = PipelineContext(data=mock_rd.data)
+        return McCraryDensityTest(n_bins=n_bins, alpha=alpha).run(mock_rd, ctx)
+
+    def test_compares_bins_adjacent_to_threshold(self):
+        """Far-from-cutoff mass must not enter the density comparison.
+
+        Global counts on this sample are balanced (101 vs 101). The bins
+        touching the threshold are not (1 vs 100) when ``n_bins`` is 5.
+        """
+        x = np.concatenate(
+            [
+                np.full(100, -5.0),
+                np.array([-0.1]),
+                np.full(100, 0.1),
+                np.array([5.0]),
+            ]
+        )
+
+        local = self._running_result(x, n_bins=5)
+        assert local.passed is False
+        assert local.table.loc[0, "n_below"] == 1
+        assert local.table.loc[0, "n_above"] == 100
+        assert local.table.loc[0, "p_value"] == 0.0
+        assert "below: 1, above: 100" in local.text
+
+        # One bin on each side covers the whole support, which is balanced.
+        whole = self._running_result(x, n_bins=1)
+        assert whole.passed is True
+        assert whole.table.loc[0, "n_below"] == 101
+        assert whole.table.loc[0, "n_above"] == 101
+
+    def test_local_balance_is_not_the_global_count(self):
+        """A globally lopsided sample can still pass on the adjacent bins."""
+        x = np.concatenate(
+            [
+                np.full(100, -5.0),
+                np.full(50, -0.1),
+                np.full(50, 0.1),
+                np.array([5.0]),
+            ]
+        )
+        result = self._running_result(x, n_bins=5)
+        assert result.passed is True
+        assert result.table.loc[0, "n_below"] == 50
+        assert result.table.loc[0, "n_above"] == 50
+
+    def test_n_bins_changes_which_mass_is_adjacent(self):
+        """A coarser histogram must pull in mass a finer one leaves outside."""
+        x = np.concatenate([np.full(30, -1.2), np.full(4, 0.2), np.full(30, 3.0)])
+        fine = self._running_result(x, n_bins=5, threshold=0.0)
+        coarse = self._running_result(x, n_bins=1, threshold=0.0)
+        assert fine.table.loc[0, "n_below"] == 0
+        assert int(fine.table.loc[0, "n_above"]) == 4
+        assert coarse.table.loc[0, "n_below"] == 30
+        assert coarse.table.loc[0, "n_above"] == 34
+
 
 # ---------------------------------------------------------------------------
 # Edge-case and error-path tests

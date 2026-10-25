@@ -36,6 +36,42 @@ from causalpy.experiments.regression_discontinuity import RegressionDiscontinuit
 from causalpy.pipeline import PipelineContext
 
 
+def _adjacent_bin_counts(
+    running: np.ndarray, threshold: float, n_bins: int
+) -> tuple[int, int]:
+    """Count observations in the histogram bins that touch the threshold.
+
+    ``n_bins`` equal-width bins are placed on each side, anchored at the
+    threshold. Bin width is the longer side's span divided by ``n_bins``, so
+    the two adjacent bins have the same width and their counts are comparable.
+    The bin below is ``[threshold - width, threshold)``; the bin above is
+    ``[threshold, threshold + width)``, and includes its right edge when that
+    edge is the outer edge of the above-side histogram.
+    """
+    if n_bins < 1:
+        raise ValueError("n_bins must be a positive integer.")
+
+    values = np.asarray(running, dtype=float)
+    below = values[values < threshold]
+    above = values[values >= threshold]
+    if below.size == 0 and above.size == 0:
+        return 0, 0
+
+    span_below = float(threshold - below.min()) if below.size else 0.0
+    span_above = float(above.max() - threshold) if above.size else 0.0
+    span = max(span_below, span_above)
+    if span == 0.0 or not np.isfinite(span):
+        return int(below.size), int(above.size)
+
+    width = span / n_bins
+    n_left = int(np.sum(below >= threshold - width))
+    if span_above <= width:
+        n_right = int(above.size)
+    else:
+        n_right = int(np.sum(above < threshold + width))
+    return n_left, n_right
+
+
 class McCraryDensityTest:
     """Test for manipulation of the running variable at the threshold.
 
@@ -93,12 +129,8 @@ class McCraryDensityTest:
         running_var = rd.running_variable_name  # type: ignore[attr-defined]
         data = rd.data
 
-        x = data[running_var].values
-        below = x[x < threshold]
-        above = x[x >= threshold]
-
-        n_below = len(below)
-        n_above = len(above)
+        x = np.asarray(data[running_var].to_numpy(), dtype=float)
+        n_below, n_above = _adjacent_bin_counts(x, float(threshold), self.n_bins)
         n_total = n_below + n_above
 
         if n_total == 0:
