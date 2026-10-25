@@ -613,6 +613,27 @@ def test_effect_summary_3period_comparison_ols_integer(integer_data_3period):
     assert "persistence_ratio_pct" in summary.table.columns
 
 
+@pytest.mark.parametrize("alpha, coverage", [(0.025, "97.5%"), (0.001, "99.9%")])
+def test_ols_persistence_prose_names_requested_coverage(alpha, coverage):
+    """OLS persistence prose prints ``1 - alpha``, not a truncated integer percent."""
+    n = 30
+    t = np.arange(n)
+    df = pd.DataFrame({"t": t, "y": 1.0 + 0.05 * t})
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=10,
+        treatment_end_time=20,
+        formula="y ~ 1 + t",
+        model=LinearRegression(),
+    ).fit()
+
+    text = result.effect_summary(period="comparison", alpha=alpha).text
+    truncated = f"{int((1 - alpha) * 100)}%"
+
+    assert f"{coverage} CI" in text
+    assert f"{truncated} CI" not in text
+
+
 # ==============================================================================
 # Three-Period ITS Tests - Default Behavior (period=None)
 # ==============================================================================

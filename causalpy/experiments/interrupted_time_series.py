@@ -453,7 +453,10 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
         else:
             # OLS: Compute statistics for both periods
-            from causalpy.reporting import _compute_statistics_ols
+            from causalpy.reporting import (
+                _compute_statistics_ols,
+                _format_probability_as_percent,
+            )
 
             intervention_stats = _compute_statistics_ols(
                 np.asarray(intervention_impact).ravel(),
@@ -510,22 +513,22 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             )
 
             # Generate simple prose
-            ci_pct = int((1 - alpha) * 100)
+            ci_coverage = _format_probability_as_percent(1 - alpha)
             if prob_persisted is not None:
                 text = (
                     f"Effect persistence: The post-intervention effect "
-                    f"({post_stats['avg']['mean']:.1f}, {ci_pct}% CI [{post_stats['avg']['ci_lower']:.1f}, {post_stats['avg']['ci_upper']:.1f}]) "
+                    f"({post_stats['avg']['mean']:.1f}, {ci_coverage} CI [{post_stats['avg']['ci_lower']:.1f}, {post_stats['avg']['ci_upper']:.1f}]) "
                     f"was {persistence_ratio_pct:.1f}% of the intervention effect "
-                    f"({intervention_stats['avg']['mean']:.1f}, {ci_pct}% CI [{intervention_stats['avg']['ci_lower']:.1f}, {intervention_stats['avg']['ci_upper']:.1f}]), "
+                    f"({intervention_stats['avg']['mean']:.1f}, {ci_coverage} CI [{intervention_stats['avg']['ci_lower']:.1f}, {intervention_stats['avg']['ci_upper']:.1f}]), "
                     f"with a probability of {prob_persisted:.2f} that some effect persisted "
                     f"beyond the intervention period."
                 )
             else:
                 text = (
                     f"Effect persistence: The post-intervention effect "
-                    f"({post_stats['avg']['mean']:.1f}, {ci_pct}% CI [{post_stats['avg']['ci_lower']:.1f}, {post_stats['avg']['ci_upper']:.1f}]) "
+                    f"({post_stats['avg']['mean']:.1f}, {ci_coverage} CI [{post_stats['avg']['ci_lower']:.1f}, {post_stats['avg']['ci_upper']:.1f}]) "
                     f"was {persistence_ratio_pct:.1f}% of the intervention effect "
-                    f"({intervention_stats['avg']['mean']:.1f}, {ci_pct}% CI [{intervention_stats['avg']['ci_lower']:.1f}, {intervention_stats['avg']['ci_upper']:.1f}])."
+                    f"({intervention_stats['avg']['mean']:.1f}, {ci_coverage} CI [{intervention_stats['avg']['ci_lower']:.1f}, {intervention_stats['avg']['ci_upper']:.1f}])."
                 )
 
         return EffectSummary(table=table, text=_apply_prior_grouping(text, group))
