@@ -430,3 +430,30 @@ def test_legend_kwargs_multi_axis_its(mock_pymc_sample, its_data):
     custom_labels = [t.get_text() for t in custom_legend.get_texts()]
     assert custom_labels == baseline_labels
     plt.close("all")
+
+
+@pytest.mark.parametrize("model_kind", ["skl", "pymc"])
+def test_rd_plot_figure_registered_with_pyplot(mock_pymc_sample, rd_data, model_kind):
+    """
+    Test that the RD figure stays registered with pyplot after plot().
+
+    Plotnine's ``draw()`` closes the figure it builds. Without
+    re-registration, ``plt.show()`` and Jupyter's inline backend see no
+    figure and notebooks render no plot (issue #603).
+    """
+    model = (
+        LinearRegression()
+        if model_kind == "skl"
+        else cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs)
+    )
+    result = cp.RegressionDiscontinuity(
+        rd_data,
+        formula="y ~ 1 + x + treated + x:treated",
+        model=model,
+        treatment_threshold=0.5,
+    ).fit()
+
+    plt.close("all")
+    fig, _ = result.plot(show=False)
+    assert fig.number in plt.get_fignums()
+    plt.close("all")
