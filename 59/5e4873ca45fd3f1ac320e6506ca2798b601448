@@ -1,0 +1,16 @@
+causalpy/experiments/panel_regression.py
+  h_63db634213747e 23,41-66,339-343,353-354,369-370,373
+causalpy/tests/test_panel_regression.py
+  h_63db634213747e 1185-1288
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "595e4873ca45fd3f1ac320e6506ca2798b601448",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
