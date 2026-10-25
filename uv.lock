@@ -513,6 +513,7 @@ name = "causalpy"
 source = { editable = "." }
 dependencies = [
     { name = "arviz" },
+    { name = "formulaic" },
     { name = "graphviz" },
     { name = "ipython" },
     { name = "jinja2" },
@@ -610,6 +611,7 @@ requires-dist = [
     { name = "codespell", marker = "extra == 'test'" },
     { name = "daft-pgm", marker = "extra == 'docs'" },
     { name = "diff-cover", marker = "extra == 'test'" },
+    { name = "formulaic" },
     { name = "graphviz" },
     { name = "ipykernel", marker = "extra == 'docs'" },
     { name = "ipython", specifier = "!=8.7.0" },
