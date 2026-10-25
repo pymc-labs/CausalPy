@@ -1,0 +1,18 @@
+causalpy/checks/pre_treatment_placebo.py
+  h_63db634213747e 17-18,24-25,34,38-39,45-50,96-97,106-113,115-121,123-127,131-133,136,138-141,152,155-191
+causalpy/tests/test_cross_cutting_checks.py
+  h_63db634213747e 345,370-516
+docs/source/notebooks/staggered-difference-in-differences-pymc.ipynb
+  h_63db634213747e 2451,2453,2462,2466,2469
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e169246c9eab3f863a21a4649e5ace9fa5aef26a",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
