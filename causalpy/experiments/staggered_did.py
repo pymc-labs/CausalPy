@@ -1629,8 +1629,6 @@ class StaggeredDifferenceInDifferences(
                 ]
             for event_time in sorted(event_times_pre):
                 event_mask = event_time_pretreat == event_time
-                if event_mask.sum() == 0:
-                    continue
                 tau_e = tau_draws_pretreat[:, :, np.where(event_mask)[0]].mean(axis=2)
                 lower, upper = hdi_bounds(
                     tau_e, prob=hdi_prob, flatten_chains_draws=True
@@ -1659,8 +1657,6 @@ class StaggeredDifferenceInDifferences(
             ]
         for event_time in sorted(event_times_post):
             event_mask = event_time_treated == event_time
-            if event_mask.sum() == 0:
-                continue
             tau_e = tau_draws_treated[:, :, np.where(event_mask)[0]].mean(axis=2)
             lower, upper = hdi_bounds(tau_e, prob=hdi_prob, flatten_chains_draws=True)
             att_et_rows.append(
@@ -1673,7 +1669,12 @@ class StaggeredDifferenceInDifferences(
                 }
             )
 
-        return self._mark_non_identified_att_rows(pd.DataFrame(att_et_rows))
+        return self._mark_non_identified_att_rows(
+            pd.DataFrame(
+                att_et_rows,
+                columns=["event_time", "att", "att_lower", "att_upper", "n_obs"],
+            )
+        )
 
     def _identified_post_treatment_att_draws(
         self, bundle: StaggeredDifferenceInDifferencesResult
@@ -1706,8 +1707,6 @@ class StaggeredDifferenceInDifferences(
             if not self._is_event_time_att_identified(int(event_time)):
                 continue
             event_mask = event_time_treated == event_time
-            if event_mask.sum() == 0:
-                continue
             tau_e = tau_draws_treated[:, :, np.where(event_mask)[0]].mean(axis=2)
             att_draws.append(tau_e)
         if not att_draws:

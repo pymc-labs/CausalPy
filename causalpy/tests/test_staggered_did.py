@@ -910,6 +910,98 @@ def test_staggered_effect_summary_recomputes_hdi_from_alpha(mock_pymc_sample):
     assert f"{float(np.mean(avg_draws)):.2f}" in summary_95.text
 
 
+@pytest.mark.integration
+def test_staggered_effect_summary_window_and_identification(mock_pymc_sample):
+    """Summary intervals follow the event window and skip non-identified times."""
+    df = generate_staggered_did_data(
+        n_units=3,
+        n_time_periods=6,
+        treatment_cohorts={3: 1, 4: 1},
+        seed=1,
+    )
+    sample_kwargs_light = {
+        "draws": 20,
+        "tune": 20,
+        "chains": 1,
+        "cores": 1,
+        "progressbar": False,
+        "compute_convergence_checks": False,
+        "random_seed": 1,
+    }
+    result = cp.StaggeredDifferenceInDifferences(
+        df,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        event_window=(-1, 2),
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs_light),
+    ).fit()
+    observed_times = result.data["event_time"].dropna()
+    assert ((observed_times < -1) | (observed_times > 2)).any()
+
+    old = result.result.y_pred
+    n_draws = 400
+    shape = tuple(n_draws if dim == "draw" else old.sizes[dim] for dim in old.dims)
+    coords = {dim: old.coords[dim] for dim in old.dims if dim != "draw"}
+    coords["draw"] = np.arange(n_draws)
+    synthetic = xr.DataArray(
+        np.random.default_rng(0).exponential(size=shape),
+        dims=old.dims,
+        coords=coords,
+    )
+    object.__setattr__(result.result, "y_pred", synthetic)
+
+    summary = result.effect_summary(alpha=0.05)
+    assert summary.table["event_time"].between(-1, 2).all()
+    assert "95% HDI" in summary.text
+
+    post_at_zero = result.data.loc[
+        (~result.data["_is_untreated"]) & (result.data["event_time"] == 0)
+    ]
+    assert len(post_at_zero) > 0
+    result.non_identified_periods_.add(post_at_zero[result.time_variable_name].iloc[0])
+    assert not result._is_event_time_att_identified(0)
+
+    from causalpy._arviz_compat import hdi_bounds
+
+    def _windowed_average(*, identified_only: bool) -> np.ndarray:
+        mu = synthetic.isel(treated_units=0)
+        tau = result._observed_outcome.to_numpy() - mu.values
+        treated_mask = ~result.data["_is_untreated"].to_numpy()
+        treated = result.data.loc[treated_mask]
+        event_time = np.asarray(treated["event_time"].values)
+        treated_tau = tau[:, :, np.where(treated_mask)[0]]
+        draws = []
+        low, high = result.event_window
+        for event in sorted(np.unique(event_time[~np.isnan(event_time)])):
+            if event < 0 or event < low or event > high:
+                continue
+            if identified_only and not result._is_event_time_att_identified(int(event)):
+                continue
+            mask = event_time == event
+            draws.append(treated_tau[:, :, np.where(mask)[0]].mean(axis=2))
+        return np.mean(np.stack(draws, axis=0), axis=0)
+
+    skipped = result.effect_summary(alpha=0.05)
+    unidentified = skipped.table.loc[skipped.table["event_time"] == 0]
+    assert len(unidentified) == 1
+    assert not bool(unidentified["identified"].iloc[0])
+    assert unidentified["att"].isna().all()
+    kept = _windowed_average(identified_only=True)
+    included = _windowed_average(identified_only=False)
+    lower, upper = hdi_bounds(kept, prob=0.95, flatten_chains_draws=True)
+    wide_lower, wide_upper = hdi_bounds(included, prob=0.95, flatten_chains_draws=True)
+    assert f"[{lower:.2f}, {upper:.2f}]" in skipped.text
+    assert not np.isclose(lower, wide_lower) or not np.isclose(upper, wide_upper)
+
+    result.event_window = (50, 60)
+    assert result._identified_post_treatment_att_draws(result.result) is None
+    empty = result.effect_summary(alpha=0.05)
+    assert "HDI" not in empty.text
+    assert empty.table.empty or empty.table["event_time"].between(50, 60).all()
+
+
 # ==============================================================================
 # Synthetic Data Generator Tests
 # ==============================================================================
