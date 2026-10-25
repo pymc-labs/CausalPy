@@ -514,6 +514,84 @@ def _effect_summary_did(
     return EffectSummary(table=table, text=text)
 
 
+def _bundle_hdi_prob(bundle) -> float | None:
+    """Return stored interval coverage, or ``None`` when it cannot be used."""
+    raw = getattr(bundle, "hdi_prob", None)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, np.floating)):
+        return None
+    coverage = float(raw)
+    if not np.isfinite(coverage) or not (0.0 < coverage < 1.0):
+        return None
+    return coverage
+
+
+def _pre_treatment_placebo_sentence(
+    pre_treatment: pd.DataFrame,
+    *,
+    alpha: float,
+    coverage: float | None,
+) -> str | None:
+    """Describe pre-treatment rows using the placebo check's per-row rule.
+
+    A mean of zero is not evidence of parallel trends. Rows without a usable
+    standard error or a stored interval that decides ``alpha`` stay untested.
+    """
+    from causalpy.checks.pre_treatment_placebo import _row_judgment
+
+    usable = pre_treatment[np.isfinite(pre_treatment["att"].to_numpy(dtype=float))]
+    if usable.empty:
+        return None
+    judgments = [_row_judgment(row, alpha, coverage) for _, row in usable.iterrows()]
+    differs = np.fromiter(
+        (status == "differs" for status, _tested in judgments),
+        dtype=bool,
+        count=len(judgments),
+    )
+    untested = np.fromiter(
+        (status == "untested" for status, _tested in judgments),
+        dtype=bool,
+        count=len(judgments),
+    )
+    tested_at_threshold = [tested for _status, tested in judgments]
+    event_times = [
+        int(value) for value in usable.iloc[np.flatnonzero(differs)]["event_time"]
+    ]
+    untested_times = [
+        int(value) for value in usable.iloc[np.flatnonzero(untested)]["event_time"]
+    ]
+    if event_times:
+        listed = ", ".join(str(value) for value in event_times)
+        return (
+            "Pre-treatment placebo check failed: pre-treatment "
+            f"event-study estimates at event times {listed} differ from "
+            f"zero at threshold {alpha}, suggesting a possible "
+            "violation of the parallel trends assumption."
+        )
+    if untested_times:
+        listed = ", ".join(str(value) for value in untested_times)
+        return (
+            "Pre-treatment placebo check was not completed: event times "
+            f"{listed} were not tested at threshold {alpha} "
+            "because they lack a standard error or interval that decides "
+            "that level."
+        )
+    if all(tested_at_threshold):
+        return (
+            "Pre-treatment placebo check passed: no pre-treatment "
+            f"event-study estimate differs from zero at threshold "
+            f"{alpha}, consistent with parallel trends."
+        )
+    if np.all(np.isclose(usable["att"].to_numpy(dtype=float), 0.0)):
+        return (
+            "Pre-treatment placebo check passed: pre-treatment "
+            "event-study estimates are zero."
+        )
+    return (
+        "Pre-treatment placebo check passed: no pre-treatment "
+        "event-study estimate differs from zero."
+    )
+
+
 def _effect_summary_staggered_did(
     experiment,
     bundle=None,
@@ -539,10 +617,11 @@ def _effect_summary_staggered_did(
     direction : {"increase", "decrease", "two-sided"}
         Direction for interpretation
     alpha : float, default=0.06
-        Probability mass outside the credible interval. The HDI probability
-        is computed as (1 - alpha). Default 0.06 gives 94% HDI, matching
-        ArviZ's default. Only used as fallback if the result bundle doesn't
-        store the HDI probability used during interval computation.
+        Two-sided significance level for the pre-treatment placebo sentence,
+        and the tail mass used only when the result bundle does not store the
+        HDI probability. A pre-treatment row is judged at ``alpha`` only when
+        it has a usable standard error or stored bounds whose coverage decides
+        that comparison. The mean of the pre-treatment estimates is not a pass.
     min_effect : float, optional
         Not used for staggered DiD, kept for API consistency
 
@@ -590,32 +669,15 @@ def _effect_summary_staggered_did(
                 f"across event-times was {avg_post_att:.2f}."
             )
 
-    # Pre-treatment placebo check
+    # Pre-treatment placebo check. Judge each row; a cancelling mean is not a pass.
     if len(pre_treatment) > 0:
-        avg_pre_att = pre_treatment["att"].mean()
-        # When post-treatment effects exist and are non-zero, use a relative threshold.
-        # When the average post-treatment effect is (near) zero, fall back to a small
-        # absolute threshold for the placebo to avoid spuriously flagging violations.
-        if len(post_treatment) > 0:
-            if abs(avg_post_att) > 0:
-                placebo_ok = abs(avg_pre_att) < 0.1 * abs(avg_post_att)
-            else:
-                # No detectable average treatment effect; treat very small pre-treatment
-                # effects as consistent with parallel trends.
-                placebo_ok = abs(avg_pre_att) < 1e-6
-        else:
-            placebo_ok = True
-
-        if placebo_ok:
-            prose_parts.append(
-                f"Pre-treatment placebo check: Average pre-treatment effect was "
-                f"{avg_pre_att:.2f}, consistent with parallel trends assumption."
-            )
-        else:
-            prose_parts.append(
-                f"Pre-treatment placebo check: Average pre-treatment effect was "
-                f"{avg_pre_att:.2f}. This may indicate violation of parallel trends."
-            )
+        placebo_text = _pre_treatment_placebo_sentence(
+            pre_treatment,
+            alpha=alpha,
+            coverage=_bundle_hdi_prob(result_bundle),
+        )
+        if placebo_text is not None:
+            prose_parts.append(placebo_text)
 
     # Number of cohorts
     n_cohorts = len(experiment.cohorts)

@@ -3928,3 +3928,76 @@ def test_effect_summary_pymc_both_false(mock_pymc_sample, its_data):
     assert "cumulative" not in stats.table.index
     assert "relative_mean" not in stats.table.columns
     assert "average" in stats.table.index
+
+
+def test_staggered_effect_summary_does_not_pass_cancelling_pre_trends():
+    """A cancelling pre-treatment mean is not a passed placebo check."""
+    from types import SimpleNamespace
+
+    from causalpy.reporting import _effect_summary_staggered_did
+
+    def summary(pre_atts, post_atts=(5.0,), **kwargs):
+        rows = [
+            {"event_time": -(len(pre_atts) - i), "att": att, "identified": True}
+            for i, att in enumerate(pre_atts)
+        ]
+        rows.extend(
+            {"event_time": i, "att": att, "identified": True}
+            for i, att in enumerate(post_atts)
+        )
+        experiment = SimpleNamespace(
+            cohorts=[0, 1],
+            result=SimpleNamespace(att_event_time=pd.DataFrame(rows), **kwargs),
+        )
+        return _effect_summary_staggered_did(experiment, alpha=0.05).text
+
+    for pre_atts in ([100.0, -100.0], [50.0, -80.0, 30.0]):
+        text = summary(pre_atts)
+        assert "consistent with parallel trends" not in text
+        assert "Average pre-treatment effect" not in text
+        assert "was not completed" in text
+        assert "not tested at threshold 0.05" in text
+
+    zeros = summary([0.0, 0.0])
+    assert "estimates are zero" in zeros
+    assert "consistent with parallel trends" not in zeros
+
+    rows = [
+        {
+            "event_time": event_time,
+            "att": att,
+            "att_std": 1.0,
+            "n_obs": 30,
+            "identified": True,
+        }
+        for event_time, att in ((-2, 100.0), (-1, -100.0), (0, 5.0))
+    ]
+    experiment = SimpleNamespace(
+        cohorts=[0],
+        result=SimpleNamespace(att_event_time=pd.DataFrame(rows)),
+    )
+    significant = _effect_summary_staggered_did(experiment, alpha=0.05).text
+    assert "event times -2, -1" in significant
+    assert "failed" in significant
+    assert "consistent with parallel trends" not in significant
+
+    bounded = [
+        {
+            "event_time": -1,
+            "att": 0.01,
+            "att_lower": -0.2,
+            "att_upper": 0.2,
+            "identified": True,
+        },
+        {"event_time": 0, "att": 5.0, "identified": True},
+    ]
+    bundle = SimpleNamespace(
+        att_event_time=pd.DataFrame(bounded),
+        hdi_prob=0.94,
+    )
+    experiment = SimpleNamespace(cohorts=[0], result=bundle)
+    compatible = _effect_summary_staggered_did(experiment, alpha=0.05).text
+    assert "consistent with parallel trends" in compatible
+    unsupported = _effect_summary_staggered_did(experiment, alpha=0.20).text
+    assert "was not completed" in unsupported
+    assert "consistent with parallel trends" not in unsupported
