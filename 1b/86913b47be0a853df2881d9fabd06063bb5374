@@ -1,0 +1,16 @@
+causalpy/experiments/inverse_propensity_weighting.py
+  h_63db634213747e 137,251,292,332,376,378,381,386-387
+causalpy/tests/test_ipw_index_alignment.py
+  h_63db634213747e 1-162
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "1b86913b47be0a853df2881d9fabd06063bb5374",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
