@@ -364,11 +364,15 @@ class PanelRegression(BaseExperiment[ResultBundle]):
                 # (single-pass is exact only for balanced; see docstring Notes).
                 data = self._demean_transform(data, self.time_fe_variable)
 
-        y, X = build_formula_matrices(self.formula, data)
+        y, X = build_formula_matrices(self.formula, data, return_type="dataframe")
+        # Patsy drops rows with a missing value in a used column and does not
+        # keep that mask on a DesignMatrix. The dataframe index is the retained
+        # rows, in order, including when the dropped row is not last.
+        self._estimation_row_index = pd.Index(X.index)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
+        self.labels = list(X.design_info.column_names)
         self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
         self._absorb_time_invariant_covariates()
 
@@ -391,7 +395,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
             protected.update(self._get_fe_labels(self.time_fe_variable))
         protected.add("Intercept")
 
-        units = self._original_data[self.unit_fe_variable].to_numpy()
+        units = self._units_on_estimation_rows()
         absorbed = [
             index
             for index, label in enumerate(self.labels)
@@ -415,11 +419,26 @@ class PanelRegression(BaseExperiment[ResultBundle]):
             stacklevel=4,
         )
 
+    def _units_on_estimation_rows(self) -> np.ndarray:
+        """Unit labels for the rows the formula retained, in design order."""
+        positions = self._original_data.index.get_indexer(self._estimation_row_index)
+        if positions.shape[0] != self._X_raw.shape[0] or np.any(positions < 0):
+            raise DataException(
+                "Could not align unit fixed effects to the rows retained by "
+                "the formula. A length mismatch is not within-unit variation."
+            )
+        return self._original_data.iloc[positions][self.unit_fe_variable].to_numpy()
+
     @staticmethod
     def _column_varies_within_unit(column: np.ndarray, units: np.ndarray) -> bool:
-        """Whether ``column`` changes inside any unit."""
+        """Whether ``column`` changes inside any unit on the retained rows."""
         values = np.asarray(column, dtype=float)
-        if values.shape[0] != len(units) or not np.isfinite(values).all():
+        if values.shape[0] != len(units):
+            raise ValueError(
+                "Within-unit variation must be checked on the rows retained "
+                "by the formula, not on a longer original frame."
+            )
+        if not np.isfinite(values).all():
             return True
         grouped = pd.Series(values).groupby(np.asarray(units), observed=True)
         within_range = grouped.transform("max") - grouped.transform("min")

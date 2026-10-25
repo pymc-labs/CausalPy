@@ -1152,3 +1152,109 @@ def test_dummy_fe_time_invariant_treatment_posterior_is_within_estimate():
     unit_effect = result.idata.posterior["beta"].sel(coeffs="C(unit)[T.u3]")
     assert float(unit_effect.mean()) == pytest.approx(30.0, abs=1.0)
     assert "beta_within" in result.model.named_vars
+
+
+def _issue_panel_with_missing_outcome() -> pd.DataFrame:
+    """Issue panel with one missing outcome that is not the last row."""
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": float(unit == 3),
+                    "x": 0.25 * time,
+                    "y": 10.0 * unit + 1.0 * time,
+                }
+            )
+    data = pd.DataFrame(rows)
+    data.loc[7, "y"] = np.nan
+    return data
+
+
+def test_dummy_fe_missing_outcome_row_matches_within_estimator():
+    """A dropped non-final row must not skip absorption of a time-invariant treatment."""
+    data = _issue_panel_with_missing_outcome()
+    with pytest.warns(UserWarning, match="within estimate of 0"):
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + C(time) + treatment",
+            unit_fe_variable="unit",
+            time_fe_variable="time",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    coefs = _named_coefficients(result)
+    assert coefs["treatment"] == pytest.approx(0.0, abs=1e-8)
+    assert coefs["C(unit)[T.u3]"] == pytest.approx(30.0, abs=1e-8)
+
+    covariate_missing = data.copy()
+    covariate_missing.loc[7, "y"] = 10.0 * 1 + 2
+    covariate_missing.loc[3, "x"] = np.nan
+    with pytest.warns(UserWarning, match="within estimate of 0"):
+        covariate_result = cp.PanelRegression(
+            covariate_missing,
+            formula="y ~ 1 + C(unit) + treatment + x",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    covariate_coefs = _named_coefficients(covariate_result)
+    assert covariate_coefs["treatment"] == pytest.approx(0.0, abs=1e-8)
+    assert covariate_coefs["x"] == pytest.approx(4.0, abs=1e-8)
+
+
+def test_dummy_fe_missing_row_keeps_within_varying_treatment():
+    """A retained within-varying covariate stays identified after a row is dropped."""
+    rows = []
+    for unit in range(3):
+        for time in range(4):
+            treatment = float(time >= 2)
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": treatment,
+                    "z": float(unit),
+                    "y": 4.0 * unit + 5.0 * treatment,
+                }
+            )
+    data = pd.DataFrame(rows)
+    data.loc[1, "y"] = np.nan
+    with pytest.warns(UserWarning, match="within estimate of 0: z"):
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + treatment + z",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    coefs = _named_coefficients(result)
+    assert coefs["treatment"] == pytest.approx(5.0, abs=1e-8)
+    assert coefs["z"] == pytest.approx(0.0, abs=1e-8)
+
+
+def test_dummy_fe_missing_outcome_row_pymc_treatment_is_within_estimate():
+    """PyMC dummy FE reports 0 after Patsy drops a non-final missing outcome."""
+    data = _issue_panel_with_missing_outcome()
+    with pytest.warns(UserWarning, match="within estimate of 0"):
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + treatment",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=cp.pymc_models.LinearRegression(
+                sample_kwargs={
+                    "draws": 50,
+                    "tune": 50,
+                    "chains": 1,
+                    "progressbar": False,
+                    "random_seed": 1,
+                }
+            ),
+        ).fit()
+    treatment = result.idata.posterior["beta"].sel(coeffs="treatment")
+    np.testing.assert_allclose(treatment.values, 0.0, atol=1e-8)
+    unit_effect = result.idata.posterior["beta"].sel(coeffs="C(unit)[T.u3]")
+    assert float(unit_effect.mean()) == pytest.approx(30.0, abs=1.0)
