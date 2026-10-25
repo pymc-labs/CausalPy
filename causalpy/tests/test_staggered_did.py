@@ -1002,6 +1002,88 @@ def test_staggered_effect_summary_window_and_identification(mock_pymc_sample):
     assert empty.table.empty or empty.table["event_time"].between(50, 60).all()
 
 
+@pytest.mark.integration
+@pytest.mark.parametrize("empty_window", [(50, 60), (3, 3)])
+def test_staggered_effect_summary_empty_window_at_fit(
+    mock_pymc_sample, empty_window, capsys
+):
+    """A window that matches nothing at fit still has summary columns.
+
+    Setting a window that contains event times afterward recomputes those
+    times at ``1 - alpha``. It must not keep serving the empty stored frame.
+    """
+    df = generate_staggered_did_data(
+        n_units=3,
+        n_time_periods=6,
+        treatment_cohorts={3: 1, 4: 1},
+        seed=1,
+    )
+    sample_kwargs_light = {
+        "draws": 20,
+        "tune": 20,
+        "chains": 1,
+        "cores": 1,
+        "progressbar": False,
+        "compute_convergence_checks": False,
+        "random_seed": 1,
+    }
+    result = cp.StaggeredDifferenceInDifferences(
+        df,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        event_window=empty_window,
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs_light),
+    ).fit()
+    observed = result.data["event_time"].dropna()
+    assert observed.between(-4, 2).all()
+    assert not observed.between(*empty_window).any()
+
+    required = {"event_time", "att", "att_lower", "att_upper", "identified"}
+    stored = result.result.att_event_time
+    assert stored.empty
+    assert required.issubset(stored.columns)
+
+    empty = result.effect_summary(alpha=0.05)
+    assert empty.table.empty
+    assert required.issubset(empty.table.columns)
+    assert "HDI" not in empty.text
+    result.summary()
+    assert "event_time" in capsys.readouterr().out
+
+    old = result.result.y_pred
+    n_draws = 400
+    shape = tuple(n_draws if dim == "draw" else old.sizes[dim] for dim in old.dims)
+    coords = {dim: old.coords[dim] for dim in old.dims if dim != "draw"}
+    coords["draw"] = np.arange(n_draws)
+    synthetic = xr.DataArray(
+        np.random.default_rng(0).exponential(size=shape),
+        dims=old.dims,
+        coords=coords,
+    )
+    object.__setattr__(result.result, "y_pred", synthetic)
+    result.event_window = (-1, 2)
+
+    from causalpy._arviz_compat import hdi_bounds
+
+    average = result._identified_post_treatment_att_draws(result.result)
+    assert average is not None
+    lower, upper = hdi_bounds(average, prob=0.95, flatten_chains_draws=True)
+    wide_lower, wide_upper = hdi_bounds(average, prob=0.99, flatten_chains_draws=True)
+    summary = result.effect_summary(alpha=0.05)
+    summary_99 = result.effect_summary(alpha=0.01)
+    assert not summary.table.empty
+    assert summary.table["event_time"].between(-1, 2).all()
+    assert required.issubset(summary.table.columns)
+    assert f"95% HDI [{lower:.2f}, {upper:.2f}]" in summary.text
+    assert f"99% HDI [{wide_lower:.2f}, {wide_upper:.2f}]" in summary_99.text
+    assert (wide_upper - wide_lower) > (upper - lower)
+    assert result.result.att_event_time.empty
+    result.summary()
+    assert "event_time" in capsys.readouterr().out
+
+
 # ==============================================================================
 # Synthetic Data Generator Tests
 # ==============================================================================

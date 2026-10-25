@@ -658,7 +658,15 @@ class StaggeredDifferenceInDifferences(
                 }
             )
 
-        att_event_time = self._mark_non_identified_att_rows(pd.DataFrame(att_et_rows))
+        # Name the columns. An empty event window has no rows, and
+        # ``DataFrame([])`` would otherwise drop the schema that
+        # ``summary()`` and ``effect_summary`` read.
+        att_event_time = self._mark_non_identified_att_rows(
+            pd.DataFrame(
+                att_et_rows,
+                columns=["event_time", "att", "att_lower", "att_upper", "n_obs"],
+            )
+        )
 
         return att_group_time, att_event_time, hdi_prob
 

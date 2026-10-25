@@ -518,15 +518,15 @@ def _staggered_event_time_for_summary(experiment, result_bundle, *, group, alpha
     """Return the event-time table whose intervals follow ``1 - alpha``.
 
     Point-estimate models keep the stored table. Draw-carrying models
-    recompute highest-density intervals from ``result_bundle.y_pred`` instead
-    of reprinting the bounds stored at ``result_bundle.hdi_prob``.
+    recompute highest-density intervals from ``result_bundle.y_pred``
+    instead of reprinting the bounds stored at ``result_bundle.hdi_prob``.
+    A stored table that omitted interval columns, including an empty event
+    window recorded at fit, is not a point-estimate result and must not
+    block that recomputation.
     """
     del group  # The caller already resolved this group's bundle.
-    att_et = result_bundle.att_event_time
-    if "att_lower" not in att_et.columns or not has_posterior_draws(
-        result_bundle.y_pred
-    ):
-        return att_et.copy()
+    if not has_posterior_draws(result_bundle.y_pred):
+        return result_bundle.att_event_time.copy()
     return experiment._event_time_summary_frame(result_bundle, hdi_prob=1 - alpha)
 
 
