@@ -845,3 +845,73 @@ def test_effect_summary_3period_consistency_ols(datetime_data_3period):
     # Allow for small floating point differences
     assert abs(intervention_mean_from_comparison - intervention_mean_from_period) < 1e-3
     assert abs(post_mean_from_comparison - post_mean_from_period) < 1e-3
+
+
+def _fit_constant_baseline_its(
+    y: np.ndarray, treatment_time: int, treatment_end_time: int
+):
+    """Fit an OLS ITS whose pre-period outcome is exactly zero."""
+    df = pd.DataFrame({"t": np.arange(y.size), "y": y})
+    return cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+
+
+def test_ols_comparison_prob_persisted_is_positive_post_effect_probability():
+    """OLS persistence probability is P(post mean > 0), not one minus a two-sided p-value."""
+    y = np.zeros(30)
+    y[10:20] = 8
+    y[20:30] = -6
+    result = _fit_constant_baseline_its(y, treatment_time=10, treatment_end_time=20)
+    summary = result.effect_summary(
+        period="comparison", cumulative=False, relative=False
+    )
+
+    post = summary.table.loc["post_intervention"]
+    assert post["mean"] == pytest.approx(-6)
+    assert post["persistence_ratio_pct"] == pytest.approx(-75)
+    assert post["prob_persisted"] == 0
+    assert "probability of 0.00" in summary.text
+    assert "probability of 1.00" not in summary.text
+
+    # A precisely estimated positive post effect is the opposite tail.
+    y_positive = np.zeros(30)
+    y_positive[10:20] = 8
+    y_positive[20:30] = 6
+    positive = _fit_constant_baseline_its(
+        y_positive, treatment_time=10, treatment_end_time=20
+    )
+    positive_summary = positive.effect_summary(period="comparison")
+    assert positive_summary.table.loc["post_intervention", "prob_persisted"] == 1
+    assert "probability of 1.00" in positive_summary.text
+
+    # A negative but insignificant post mean is not a precise reversal, so
+    # neither tail is certain. ``1 - p`` is near 0 here and would not reject a
+    # special case that only zeroes a confidence interval lying entirely below 0.
+    y_noisy = np.zeros(30)
+    y_noisy[10:20] = 8
+    y_noisy[20:30] = np.array([-2.0, -1.0, 0.0, 1.0, -1.5, 0.5, -0.2, 0.1, -0.8, -0.4])
+    noisy = _fit_constant_baseline_its(
+        y_noisy, treatment_time=10, treatment_end_time=20
+    )
+    noisy_summary = noisy.effect_summary(period="comparison")
+    noisy_prob = float(noisy_summary.table.loc["post_intervention", "prob_persisted"])
+    assert 0 < noisy_prob < 0.5
+    assert f"{noisy_prob:.2f}" in noisy_summary.text
+    assert "probability of 1.00" not in noisy_summary.text
+
+    # One post observation has no sampling variance. A negative point is not
+    # evidence that a positive effect persisted.
+    y_single = np.zeros(21)
+    y_single[10:20] = 8
+    y_single[20] = -6
+    single = _fit_constant_baseline_its(
+        y_single, treatment_time=10, treatment_end_time=20
+    )
+    single_summary = single.effect_summary(period="comparison")
+    assert single_summary.table.loc["post_intervention", "prob_persisted"] == 0
+    assert "probability of 0.00" in single_summary.text

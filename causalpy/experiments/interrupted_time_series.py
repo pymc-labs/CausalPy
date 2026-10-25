@@ -48,6 +48,28 @@ from causalpy.utils import _as_scalar
 from .base import BaseExperiment
 
 
+def _ols_prob_mean_positive(impact: np.ndarray) -> float:
+    """Probability that the mean impact is positive under the OLS sampling model.
+
+    This is the frequentist counterpart of the Bayesian comparison probability
+    ``P(post_mean > 0)``. It uses the same Student-t model as the OLS average
+    effect: the sample mean, a ``ddof=1`` standard error, and ``n - 1`` degrees
+    of freedom. A two-sided p-value is not this probability. ``1 - p`` is near
+    1 when a reversed effect is estimated precisely.
+    """
+    values = np.asarray(impact, dtype=float).ravel()
+    mean = float(np.mean(values))
+    n = values.size
+    if n < 2:
+        return 1.0 if mean > 0.0 else 0.0
+    standard_error = float(np.std(values, ddof=1) / np.sqrt(n))
+    if not np.isfinite(standard_error) or standard_error == 0.0:
+        return 1.0 if mean > 0.0 else 0.0
+    from scipy.stats import t
+
+    return float(t.sf(0.0, df=n - 1, loc=mean, scale=standard_error))
+
+
 class InterruptedTimeSeries(BaseExperiment[CausalResult]):
     """
     The class for interrupted time series analysis.
@@ -478,12 +500,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 / (intervention_stats["avg"]["mean"] + epsilon)
             ) * 100
 
-            # For OLS, use 1 - p-value as proxy for probability
-            prob_persisted = (
-                1 - post_stats["avg"]["p_value"]
-                if "p_value" in post_stats["avg"]
-                else None
-            )
+            # Same definition as the Bayesian branch: P(post-period mean > 0).
+            prob_persisted = _ols_prob_mean_positive(post_intervention_impact)
 
             # Build simple table
             table_data = {
