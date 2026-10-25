@@ -162,6 +162,7 @@ Analysis where the treatment effect is estimated as a difference between treatme
 
 :::{grid-item-card} Hierarchical Difference-in-Differences
 :class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/hierarchical-difference-in-differences-pymc.png
 :link: hierarchical-difference-in-differences-pymc
 :link-type: doc
 :::
