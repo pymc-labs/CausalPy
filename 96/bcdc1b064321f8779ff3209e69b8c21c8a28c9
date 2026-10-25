@@ -1,0 +1,18 @@
+causalpy/checks/mccrary.py
+  h_63db634213747e 45-48,57,66,150-156
+causalpy/tests/test_method_specific_checks.py
+  h_63db634213747e 359-390
+docs/source/notebooks/regression-discontinuity-pymc.ipynb
+  h_63db634213747e 2236,2487,2504-2509,2573,2576
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "96bcdc1b064321f8779ff3209e69b8c21c8a28c9",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
