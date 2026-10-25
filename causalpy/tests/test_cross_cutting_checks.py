@@ -342,7 +342,7 @@ class TestPreTreatmentPlaceboCheckRun:
         mock_exp.result.att_event_time = pd.DataFrame(
             {
                 "event_time": [-3, -2, -1, 0, 1, 2],
-                "att": [0.001, -0.002, 0.001, 0.5, 0.6, 0.7],
+                "att": [0.0, 0.0, 0.0, 0.5, 0.6, 0.7],
             }
         )
         ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
@@ -366,6 +366,153 @@ class TestPreTreatmentPlaceboCheckRun:
         result = PreTreatmentPlaceboCheck().run(mock_exp, ctx)
         assert result.passed is False
         assert "failed" in result.text
+
+    def test_cancelling_point_estimates_fail(self):
+        """Equal-and-opposite pre-trends are not a parallel-trends pass."""
+        mock_exp = Mock()
+        mock_exp.result.att_event_time = pd.DataFrame(
+            {
+                "event_time": [-2, -1, 0],
+                "att": [100.0, -100.0, 5.0],
+            }
+        )
+        ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
+        result = PreTreatmentPlaceboCheck(threshold=0.05).run(mock_exp, ctx)
+        assert result.passed is False
+        assert "consistent with parallel trends" not in result.text
+        assert result.metadata["event_times_differing"] == [-2, -1]
+
+    def test_cancelling_estimates_fail_for_other_magnitudes(self):
+        mock_exp = Mock()
+        mock_exp.result.att_event_time = pd.DataFrame(
+            {
+                "event_time": [-3, -2, -1],
+                "att": [10.0, -6.0, -4.0],
+            }
+        )
+        ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
+        result = PreTreatmentPlaceboCheck().run(mock_exp, ctx)
+        assert result.passed is False
+        assert result.metadata["event_times_differing"] == [-3, -2, -1]
+
+    def test_small_cancelling_point_estimates_fail(self):
+        """threshold is not an absolute tolerance that lets cancelling ATTs pass."""
+        mock_exp = Mock()
+        mock_exp.result.att_event_time = pd.DataFrame(
+            {
+                "event_time": [-2, -1],
+                "att": [0.2, -0.2],
+            }
+        )
+        ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
+        result = PreTreatmentPlaceboCheck(threshold=0.05).run(mock_exp, ctx)
+        assert result.passed is False
+
+    def test_only_a_later_pre_treatment_estimate_failing_fails(self):
+        mock_exp = Mock()
+        mock_exp.result.att_event_time = pd.DataFrame(
+            {
+                "event_time": [-2, -1],
+                "att": [0.0, 80.0],
+            }
+        )
+        ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
+        result = PreTreatmentPlaceboCheck().run(mock_exp, ctx)
+        assert result.passed is False
+        assert result.metadata["event_times_differing"] == [-1]
+
+    def test_insignificant_opposite_estimates_pass(self):
+        mock_exp = Mock()
+        mock_exp.result.att_event_time = pd.DataFrame(
+            {
+                "event_time": [-2, -1, 0],
+                "att": [100.0, -100.0, 5.0],
+                "att_std": [1000.0, 1000.0, 1.0],
+                "n_obs": [30, 30, 30],
+            }
+        )
+        ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
+        result = PreTreatmentPlaceboCheck(threshold=0.05).run(mock_exp, ctx)
+        assert result.passed is True
+
+    def test_one_significant_estimate_fails_even_if_mean_cancels(self):
+        mock_exp = Mock()
+        mock_exp.result.att_event_time = pd.DataFrame(
+            {
+                "event_time": [-2, -1],
+                "att": [100.0, -100.0],
+                "att_std": [1.0, 1000.0],
+                "n_obs": [30, 30],
+            }
+        )
+        ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
+        result = PreTreatmentPlaceboCheck(threshold=0.05).run(mock_exp, ctx)
+        assert result.passed is False
+        assert result.metadata["event_times_differing"] == [-2]
+
+    def test_threshold_is_the_two_sided_alpha(self):
+        from scipy.stats import t
+
+        se = 1.0 / np.sqrt(30)
+        critical = float(t.ppf(1 - 0.025, 29)) * se
+        ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
+
+        def _result(att: float):
+            mock_exp = Mock()
+            mock_exp.result.att_event_time = pd.DataFrame(
+                {
+                    "event_time": [-1],
+                    "att": [att],
+                    "att_std": [1.0],
+                    "n_obs": [30],
+                }
+            )
+            return PreTreatmentPlaceboCheck(threshold=0.05).run(mock_exp, ctx)
+
+        assert _result(critical).passed is True
+        assert _result(critical + 0.01).passed is False
+
+    def test_intervals_excluding_zero_fail_when_mean_cancels(self):
+        mock_exp = Mock()
+        mock_exp.result.att_event_time = pd.DataFrame(
+            {
+                "event_time": [-2, -1],
+                "att": [100.0, -100.0],
+                "att_lower": [90.0, -110.0],
+                "att_upper": [110.0, -90.0],
+            }
+        )
+        ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
+        result = PreTreatmentPlaceboCheck().run(mock_exp, ctx)
+        assert result.passed is False
+        assert result.metadata["event_times_differing"] == [-2, -1]
+
+    def test_intervals_covering_zero_pass(self):
+        mock_exp = Mock()
+        mock_exp.result.att_event_time = pd.DataFrame(
+            {
+                "event_time": [-2, -1],
+                "att": [100.0, -100.0],
+                "att_lower": [-5.0, -150.0],
+                "att_upper": [150.0, 5.0],
+            }
+        )
+        ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
+        result = PreTreatmentPlaceboCheck().run(mock_exp, ctx)
+        assert result.passed is True
+
+    def test_non_identified_rows_are_not_evidence(self):
+        mock_exp = Mock()
+        mock_exp.result.att_event_time = pd.DataFrame(
+            {
+                "event_time": [-2, -1],
+                "att": [np.nan, 0.0],
+                "identified": [False, True],
+            }
+        )
+        ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
+        result = PreTreatmentPlaceboCheck().run(mock_exp, ctx)
+        assert result.passed is True
 
     def test_run_empty_pre_treatment(self):
         mock_exp = Mock()
