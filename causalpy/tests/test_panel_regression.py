@@ -1622,16 +1622,22 @@ def test_dummy_fe_large_magnitude_within_change_keeps_supplied_prior(
     assert not np.allclose(posterior.values, 0.0)
 
 
-def _spike_within_change_panel(level: float, delta: float) -> pd.DataFrame:
+def _spike_within_change_panel(
+    level: float,
+    delta: float,
+    *,
+    n_units: int = 4,
+    n_times: int = 5,
+) -> pd.DataFrame:
     """One row differs by ``delta`` at ``level``; y jumps by 10 on that row."""
     level = np.float64(level)
     delta = np.float64(delta)
     rows = []
-    for unit in range(4):
-        for time in range(5):
+    for unit in range(n_units):
+        for time in range(n_times):
             x = level
             y = 0.0
-            if unit == 3 and time == 4:
+            if unit == n_units - 1 and time == n_times - 1:
                 x = level + delta
                 y = 10.0
             rows.append({"unit": f"u{unit}", "time": time, "x": float(x), "y": y})
@@ -1690,6 +1696,87 @@ def test_dummy_fe_large_column_rank_drop_matches_within_estimator(level):
     assert dummies._absorbed_covariate_labels == ()
     stored = dummies.design["X"].sel(coeffs="x").to_numpy()
     assert np.ptp(stored) < 1.0
+
+
+@pytest.mark.parametrize(
+    ("n_units", "n_times", "level"),
+    [
+        (4, 5, 1e3),
+        (4, 5, 1e6),
+        (4, 5, 4e6),
+        (2, 2, 1e7),
+    ],
+)
+def test_dummy_fe_solver_cutoff_gap_matches_within_estimator(n_units, n_times, level):
+    """A within change below the solver cutoff must match the within estimator.
+
+    ``matrix_rank`` keeps a direction down to about 1e-15 times the largest
+    singular value. ``LinearRegression`` drops singular values below ``tol``
+    (default 1e-6) times that value. Columns in the gap stay raw and the
+    coefficient is about 0. The within estimator is 20. Listing the cited
+    magnitudes is not the cutoff: 1e3 fails the same way as 1e6 and 4e6.
+    """
+    data = _spike_within_change_panel(level, 0.5, n_units=n_units, n_times=n_times)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        dummies = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + x",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    demeaned = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + x",
+        unit_fe_variable="unit",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    ).fit()
+    assert _named_coefficients(dummies)["x"] == pytest.approx(20.0, abs=1e-6)
+    assert _named_coefficients(demeaned)["x"] == pytest.approx(20.0, abs=1e-6)
+    assert dummies._absorbed_covariate_labels == ()
+    stored = dummies.design["X"].sel(coeffs="x").to_numpy()
+    assert np.ptp(stored) < 1.0
+
+
+def test_dummy_fe_keeps_a_well_conditioned_spike_column():
+    """A 0.5 change at magnitude 100 is visible to the solver and stays raw.
+
+    The coefficient is already the within estimate. Storing the within
+    deviation would change the design column the caller can inspect.
+    """
+    data = _spike_within_change_panel(100.0, 0.5)
+    result = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + C(unit) + x",
+        unit_fe_variable="unit",
+        fe_method="dummies",
+        model=LinearRegression(),
+    ).fit()
+    assert _named_coefficients(result)["x"] == pytest.approx(20.0, abs=1e-6)
+    stored = result.design["X"].sel(coeffs="x").to_numpy()
+    assert float(stored.mean()) == pytest.approx(100.025, abs=1e-9)
+    assert float(np.ptp(stored)) == pytest.approx(0.5)
+
+
+def test_dummy_fe_solver_cutoff_follows_model_tol():
+    """A looser solver cutoff stores a column the default solver can see."""
+    data = _spike_within_change_panel(100.0, 0.5)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + x",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=LinearRegression(tol=1e-4),
+        ).fit()
+    assert _named_coefficients(result)["x"] == pytest.approx(20.0, abs=1e-6)
+    assert result._absorbed_covariate_labels == ()
+    stored = result.design["X"].sel(coeffs="x").to_numpy()
+    assert np.ptp(stored) < 1.0
+    assert abs(float(stored.mean())) < 1.0
 
 
 def test_absorbed_beta_prior_does_not_stick_to_caller_model(real_pymc_sampling):

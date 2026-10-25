@@ -85,6 +85,9 @@ class _WithinBetaPrior:
         return Deterministic(name, beta, dims=dims)
 
 
+# ``LinearRegression.fit`` passes this to ``scipy.linalg.lstsq`` as ``cond``.
+# Singular values smaller than ``tol`` times the largest are treated as zero.
+_OLS_SOLVER_TOL = 1e-6
 _PIN_NOT_INSTALLED = object()
 
 
@@ -148,17 +151,17 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     see, counts as no variation. A change that is small relative to the column
     magnitude is still within variation, including a 0.5 change at magnitude
     1e15, which is exactly four ulps of that magnitude. If the raw column is
-    numerically a unit level, or stacking it drops the design rank below the
-    unit dummies, it is stored as its within deviation so least squares reports
-    that coefficient instead of dropping it. The check uses the rows the formula
-    retains, in design order, and does not require a unique frame index. That
-    coefficient is not left as an unidentified prior. The absorbed prior is
-    installed only while the PyMC graph is built and is not left on the caller's
-    model, so a later clone does not pin those names. For the ``"dummies"``
-    approach (unpooled FE), individual unit effects can be extracted from the
-    coefficients. For the demeaned approach, unit effects can be recovered
-    post-hoc using the stored group means (``_group_means``), which are always
-    computed from the original (pre-demeaning) data.
+    numerically a unit level, or the solver cutoff cannot see its within change
+    against the unit dummies, it is stored as its within deviation so least
+    squares reports that coefficient instead of dropping it. The check uses the
+    rows the formula retains, in design order, and does not require a unique
+    frame index. That coefficient is not left as an unidentified prior. The
+    absorbed prior is installed only while the PyMC graph is built and is not
+    left on the caller's model, so a later clone does not pin those names. For
+    the ``"dummies"`` approach (unpooled FE), individual unit effects can be
+    extracted from the coefficients. For the demeaned approach, unit effects
+    can be recovered post-hoc using the stored group means (``_group_means``),
+    which are always computed from the original (pre-demeaning) data.
 
     This class does not yet implement hierarchical/partial-pooling fixed
     effects. Those semantics are intentionally kept out of scope here so
@@ -413,11 +416,14 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         A within-varying column can still be numerically a unit level. A change
         of 0.5 at magnitude 1e8 is real variation, but float64 least squares
-        drops that direction. A column past about 6e13 can also drop the stacked
-        rank below the unit dummies, and a 0.5 change at magnitude 1e15 is
-        exactly four ulps, so an ulp count alone would call it invariant. Those
-        columns are stored as their within deviation so the reported coefficient
-        is the within estimate. The supplied prior is left in place.
+        drops that direction. ``matrix_rank`` only drops a direction near machine
+        epsilon. The solver cutoff is ``tol`` (default ``1e-6``) times the
+        largest singular value, so a 0.5 change at magnitude 1e6 stays raw and
+        the coefficient is about 0. A column past about 6e13 can also drop the
+        stacked rank below the unit dummies, and a 0.5 change at magnitude 1e15
+        is exactly four ulps, so an ulp count alone would call it invariant.
+        Those columns are stored as their within deviation so the reported
+        coefficient is the within estimate. The supplied prior is left in place.
         """
         self._absorbed_covariate_labels = ()
         if self.fe_method != "dummies":
@@ -469,19 +475,21 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     def _columns_hidden_by_unit_level(
         self, protected: set[str], absorbed: list[int]
     ) -> list[int]:
-        """Covariates whose within change adds no rank in the raw dummy design.
+        """Covariates the solver cannot estimate against the unit dummies.
 
-        Float64 least squares drops a column that adds no numerical rank beyond
-        the unit dummies, even when the values vary within unit. A large column
-        can also drop the stacked rank below the protected block by inflating
-        the singular-value cutoff. Those columns are not absorbed. They are
-        stored as their within deviation.
+        ``LinearRegression.fit`` calls ``scipy.linalg.lstsq`` with
+        ``cond=self.tol`` (default ``1e-6``). Singular values below that
+        fraction of the largest are zero. ``matrix_rank`` uses a cutoff near
+        machine epsilon, so columns between the two cutoffs stay raw and the
+        coefficient is about 0. Those columns are not absorbed. They are stored
+        as their within deviation.
         """
+        tol = self._least_squares_tol()
         protected_indexes = [
             index for index, label in enumerate(self.labels) if label in protected
         ]
         protected_block = np.asarray(self._X_raw[:, protected_indexes], dtype=float)
-        protected_rank = int(np.linalg.matrix_rank(protected_block))
+        protected_rank = self._rank_at_solver_cutoff(protected_block, tol)
         absorbed_set = set(absorbed)
         hidden: list[int] = []
         for index, label in enumerate(self.labels):
@@ -490,9 +498,24 @@ class PanelRegression(BaseExperiment[ResultBundle]):
             stacked = np.column_stack(
                 [protected_block, np.asarray(self._X_raw[:, index], dtype=float)]
             )
-            if int(np.linalg.matrix_rank(stacked)) <= protected_rank:
+            if self._rank_at_solver_cutoff(stacked, tol) <= protected_rank:
                 hidden.append(index)
         return hidden
+
+    def _least_squares_tol(self) -> float:
+        """Solver cutoff for the installed model, or the sklearn default."""
+        tol = getattr(self.model, "tol", None)
+        if tol is None:
+            return _OLS_SOLVER_TOL
+        return float(tol)
+
+    @staticmethod
+    def _rank_at_solver_cutoff(matrix: np.ndarray, tol: float) -> int:
+        """Count singular values ``lstsq`` would keep at ``cond=tol``."""
+        singular = np.linalg.svd(np.asarray(matrix, dtype=float), compute_uv=False)
+        if singular.size == 0 or not np.isfinite(singular[0]) or singular[0] == 0.0:
+            return 0
+        return int(np.count_nonzero(singular > float(tol) * float(singular[0])))
 
     @staticmethod
     def _within_deviation(column: np.ndarray, units: np.ndarray) -> np.ndarray:
