@@ -1116,8 +1116,14 @@ def test_dummies_without_unit_fe_keeps_between_unit_treatment():
     assert _named_coefficients(result)["treatment"] == pytest.approx(10.0, abs=1e-8)
 
 
-def test_dummy_fe_time_invariant_treatment_posterior_is_within_estimate():
-    """PyMC dummy FE must report 0, not a Normal(0, 50) draw, for a time-invariant treatment."""
+def test_dummy_fe_time_invariant_treatment_posterior_is_within_estimate(
+    real_pymc_sampling,
+):
+    """PyMC dummy FE must report 0, not a Normal(0, 50) draw, for a time-invariant treatment.
+
+    The session sample mock stores prior draws as the posterior. The unit dummy
+    absorbs the level only in a real posterior, so this test opts out of that mock.
+    """
     rows = []
     for unit in range(4):
         for time in range(5):
@@ -1149,6 +1155,8 @@ def test_dummy_fe_time_invariant_treatment_posterior_is_within_estimate():
 
     treatment = result.idata.posterior["beta"].sel(coeffs="treatment")
     np.testing.assert_allclose(treatment.values, 0.0, atol=1e-8)
+    prior_treatment = result.idata.prior["beta"].sel(coeffs="treatment")
+    np.testing.assert_allclose(prior_treatment.values, 0.0, atol=1e-8)
     unit_effect = result.idata.posterior["beta"].sel(coeffs="C(unit)[T.u3]")
     assert float(unit_effect.mean()) == pytest.approx(30.0, abs=1.0)
     assert "beta_within" in result.model.named_vars
@@ -1235,7 +1243,9 @@ def test_dummy_fe_missing_row_keeps_within_varying_treatment():
     assert coefs["z"] == pytest.approx(0.0, abs=1e-8)
 
 
-def test_dummy_fe_missing_outcome_row_pymc_treatment_is_within_estimate():
+def test_dummy_fe_missing_outcome_row_pymc_treatment_is_within_estimate(
+    real_pymc_sampling,
+):
     """PyMC dummy FE reports 0 after Patsy drops a non-final missing outcome."""
     data = _issue_panel_with_missing_outcome()
     with pytest.warns(UserWarning, match="within estimate of 0"):
@@ -1256,6 +1266,8 @@ def test_dummy_fe_missing_outcome_row_pymc_treatment_is_within_estimate():
         ).fit()
     treatment = result.idata.posterior["beta"].sel(coeffs="treatment")
     np.testing.assert_allclose(treatment.values, 0.0, atol=1e-8)
+    prior_treatment = result.idata.prior["beta"].sel(coeffs="treatment")
+    np.testing.assert_allclose(prior_treatment.values, 0.0, atol=1e-8)
     unit_effect = result.idata.posterior["beta"].sel(coeffs="C(unit)[T.u3]")
     assert float(unit_effect.mean()) == pytest.approx(30.0, abs=1.0)
 
@@ -1332,7 +1344,9 @@ def test_dummy_fe_duplicate_index_keeps_within_varying_treatment():
     assert coefs["x"] == pytest.approx(4.0, abs=1e-8)
 
 
-def test_dummy_fe_duplicate_index_pymc_treatment_is_within_estimate():
+def test_dummy_fe_duplicate_index_pymc_treatment_is_within_estimate(
+    real_pymc_sampling,
+):
     """PyMC dummy FE reports 0 for a time-invariant treatment on a repeated index."""
     data = _duplicate_index_panel()
     with pytest.warns(UserWarning, match="within estimate of 0"):
@@ -1353,5 +1367,7 @@ def test_dummy_fe_duplicate_index_pymc_treatment_is_within_estimate():
         ).fit()
     treatment = result.idata.posterior["beta"].sel(coeffs="treatment")
     np.testing.assert_allclose(treatment.values, 0.0, atol=1e-8)
+    prior_treatment = result.idata.prior["beta"].sel(coeffs="treatment")
+    np.testing.assert_allclose(prior_treatment.values, 0.0, atol=1e-8)
     unit_effect = result.idata.posterior["beta"].sel(coeffs="C(unit)[T.u3]")
     assert float(unit_effect.mean()) == pytest.approx(30.0, abs=1.0)

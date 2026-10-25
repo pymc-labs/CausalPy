@@ -62,6 +62,14 @@ class _WithinBetaPrior:
         model = pm.modelcontext(None)
         coeff_names = [str(value) for value in model.coords["coeffs"]]
         n_treated = len(model.coords["treated_units"])
+        missing = [
+            label for label in sorted(self._absorbed) if label not in coeff_names
+        ]
+        if missing:
+            raise DataException(
+                "Could not fix the within estimate for covariate(s) absent from "
+                f"the model coefficients: {', '.join(missing)}."
+            )
         free_idx = [
             index
             for index, label in enumerate(coeff_names)
@@ -455,48 +463,32 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         return bool(np.any(within_range.to_numpy() > tolerance))
 
     def build(self) -> Self:
-        """Build the graph, fixing absorbed coefficients at the within estimate."""
+        """Build the graph, fixing absorbed coefficients at the within estimate.
+
+        :meth:`fit` and :meth:`sample_prior_predictive` both call this before
+        drawing. The design column is already zero, so the unit dummies absorb
+        the level, and the installed prior keeps the absorbed column from being
+        sampled as an unidentified free parameter.
+        """
         self._pin_absorbed_beta_prior()
         return super().build()
-
-    def fit(self, **kwargs: Any) -> Self:
-        """Fit, then report absorbed coefficients as exact zeros.
-
-        Other Parameters
-        ----------------
-        **kwargs
-            Forwarded to :meth:`BaseExperiment.fit`.
-        """
-        result = super().fit(**kwargs)
-        self._pin_reported_absorbed_coefficients()
-        return result
-
-    def sample_prior_predictive(self, **kwargs: Any) -> Self:
-        """Sample the prior phase, with absorbed coefficients fixed at 0.
-
-        Other Parameters
-        ----------------
-        **kwargs
-            Forwarded to :meth:`BaseExperiment.sample_prior_predictive`.
-        """
-        result = super().sample_prior_predictive(**kwargs)
-        self._pin_reported_absorbed_coefficients()
-        return result
 
     def _pin_absorbed_beta_prior(self) -> None:
         """Install a beta prior that does not sample absorbed columns.
 
         Model construction rebuilds ``priors`` from defaults and
         ``_user_priors`` immediately before ``build_model``. The pinned prior
-        has to live in ``_user_priors`` or that rebuild drops it.
+        has to live in ``_user_priors`` or that rebuild drops it. Forecast
+        backends are not PyMC models and have no ``_user_priors``; do not
+        assign that attribute on them.
         """
         labels = self._absorbed_covariate_labels
         if not labels:
             return
         model = self.model
-        if not hasattr(model, "default_priors"):
+        if not isinstance(model, PyMCModel):
             return
-        user_priors = dict(getattr(model, "_user_priors", None) or {})
+        user_priors = dict(model._user_priors or {})
         current = user_priors.get("beta", model.default_priors.get("beta"))
         if isinstance(current, _WithinBetaPrior):
             return
@@ -504,55 +496,6 @@ class PanelRegression(BaseExperiment[ResultBundle]):
             return
         user_priors["beta"] = _WithinBetaPrior(current, labels)
         model._user_priors = user_priors
-
-    def _pin_reported_absorbed_coefficients(self) -> None:
-        """Write 0 into stored draws for absorbed columns.
-
-        The design column is already zero, so these draws do not enter the
-        fitted mean. Replacing them removes an unidentified prior from the
-        reported coefficient.
-        """
-        labels = self._absorbed_covariate_labels
-        idata = self.idata
-        if not labels or idata is None:
-            return
-        for group in ("posterior", "prior"):
-            if group not in idata.children:
-                continue
-            dataset = idata[group].to_dataset()
-            changed = False
-            for name in ("beta", "b", "beta_z"):
-                if name not in dataset:
-                    continue
-                beta = dataset[name]
-                label_dim = next(
-                    (
-                        dim
-                        for dim in (
-                            "coeffs",
-                            "covariates",
-                            "instruments",
-                            "outcome_coeffs",
-                        )
-                        if dim in beta.dims
-                    ),
-                    None,
-                )
-                if label_dim is None:
-                    continue
-                present = [
-                    label
-                    for label in labels
-                    if label in set(map(str, beta.coords[label_dim].values))
-                ]
-                if not present:
-                    continue
-                pinned = beta.copy(deep=True)
-                pinned.loc[{label_dim: present}] = 0.0
-                dataset[name] = pinned
-                changed = True
-            if changed:
-                idata[group] = dataset
 
     def _prepare_data(self) -> None:
         """Bundle design matrices into an ``xr.Dataset``."""
