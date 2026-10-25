@@ -1114,3 +1114,41 @@ def test_dummies_without_unit_fe_keeps_between_unit_treatment():
         model=LinearRegression(),
     ).fit()
     assert _named_coefficients(result)["treatment"] == pytest.approx(10.0, abs=1e-8)
+
+
+def test_dummy_fe_time_invariant_treatment_posterior_is_within_estimate():
+    """PyMC dummy FE must report 0, not a Normal(0, 50) draw, for a time-invariant treatment."""
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": float(unit == 3),
+                    "y": 10.0 * unit + 1.0 * time,
+                }
+            )
+    data = pd.DataFrame(rows)
+    with pytest.warns(UserWarning, match="within estimate of 0"):
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + treatment",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=cp.pymc_models.LinearRegression(
+                sample_kwargs={
+                    "draws": 50,
+                    "tune": 50,
+                    "chains": 1,
+                    "progressbar": False,
+                    "random_seed": 1,
+                }
+            ),
+        ).fit()
+
+    treatment = result.idata.posterior["beta"].sel(coeffs="treatment")
+    np.testing.assert_allclose(treatment.values, 0.0, atol=1e-8)
+    unit_effect = result.idata.posterior["beta"].sel(coeffs="C(unit)[T.u3]")
+    assert float(unit_effect.mean()) == pytest.approx(30.0, abs=1.0)
+    assert "beta_within" in result.model.named_vars

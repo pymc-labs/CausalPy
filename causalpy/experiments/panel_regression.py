@@ -15,7 +15,7 @@
 
 import re
 import warnings
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -37,6 +37,48 @@ from causalpy.reporting import EffectSummary
 
 from ._results import ResultBundle
 from .base import BaseExperiment
+
+
+class _WithinBetaPrior:
+    """Normal beta prior with time-invariant columns fixed at 0.
+
+    A free ``Normal`` on a column that does not vary within unit is unidentified
+    once unit dummies are present. Sampling it returns the prior, not the within
+    estimate. The reported coefficient is a deterministic 0; identified columns
+    keep the supplied Normal prior.
+    """
+
+    def __init__(self, inner: Any, absorbed: tuple[str, ...]) -> None:
+        self._inner = inner
+        self._absorbed = set(absorbed)
+
+    def create_variable(self, name: str, xdist: bool = False) -> Any:
+        """Create ``name`` with absorbed columns fixed at 0."""
+        if xdist or getattr(self._inner, "distribution", None) != "Normal":
+            return self._inner.create_variable(name, xdist=xdist)
+        import pymc as pm
+        import pytensor.tensor as pt
+
+        model = pm.modelcontext(None)
+        coeff_names = [str(value) for value in model.coords["coeffs"]]
+        n_treated = len(model.coords["treated_units"])
+        free_idx = [
+            index
+            for index, label in enumerate(coeff_names)
+            if label not in self._absorbed
+        ]
+        mu = self._inner.parameters.get("mu", 0)
+        sigma = self._inner.parameters.get("sigma", 50)
+        beta = pt.zeros((n_treated, len(coeff_names)))
+        if free_idx:
+            free = pm.Normal(
+                f"{name}_within",
+                mu=mu,
+                sigma=sigma,
+                shape=(n_treated, len(free_idx)),
+            )
+            beta = pt.set_subtensor(beta[:, free_idx], free)
+        return pm.Deterministic(name, beta, dims=["treated_units", "coeffs"])
 
 
 class PanelRegression(BaseExperiment[ResultBundle]):
@@ -94,8 +136,9 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     confounders but also drops time-invariant covariates from the model. A
     covariate with no within-unit variation is collinear with dummy-variable
     unit fixed effects. That coefficient is reported as 0, matching the within
-    estimator, and the unit effects absorb the level. For
-    the ``"dummies"`` approach (unpooled FE), individual unit effects can be
+    estimator, and the unit effects absorb the level. That coefficient is not
+    left as an unidentified prior. For the ``"dummies"`` approach (unpooled
+    FE), individual unit effects can be
     extracted from the coefficients. For the demeaned approach, unit effects
     can be recovered post-hoc using the stored group means (``_group_means``),
     which are always computed from the original (pre-demeaning) data.
@@ -228,7 +271,8 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         # they don't demean the data before fitting.
         self._original_data = pandas_data.copy()
 
-        # Initialize storage for group means (used in demeaned transformation)
+        self._absorbed_covariate_labels: tuple[str, ...] = ()
+
         self._group_means: dict[str, pd.DataFrame] = {}
 
         # Pipeline (matches pattern of other experiment classes)
@@ -337,6 +381,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         estimator drops the covariate, so the reported coefficient is 0 and the
         unit dummies keep the level.
         """
+        self._absorbed_covariate_labels = ()
         if self.fe_method != "dummies":
             return
         protected = set(self._get_fe_labels(self.unit_fe_variable))
@@ -355,6 +400,9 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         ]
         if not absorbed:
             return
+        self._absorbed_covariate_labels = tuple(
+            self.labels[index] for index in absorbed
+        )
         design = np.array(self._X_raw, dtype=float, copy=True)
         design[:, absorbed] = 0.0
         self._X_raw = design
@@ -378,6 +426,106 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         scale = float(np.max(np.abs(values))) if values.size else 1.0
         tolerance = 1e-8 * max(scale, 1.0)
         return bool(np.any(within_range.to_numpy() > tolerance))
+
+    def build(self) -> Self:
+        """Build the graph, fixing absorbed coefficients at the within estimate."""
+        self._pin_absorbed_beta_prior()
+        return super().build()
+
+    def fit(self, **kwargs: Any) -> Self:
+        """Fit, then report absorbed coefficients as exact zeros.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Forwarded to :meth:`BaseExperiment.fit`.
+        """
+        result = super().fit(**kwargs)
+        self._pin_reported_absorbed_coefficients()
+        return result
+
+    def sample_prior_predictive(self, **kwargs: Any) -> Self:
+        """Sample the prior phase, with absorbed coefficients fixed at 0.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Forwarded to :meth:`BaseExperiment.sample_prior_predictive`.
+        """
+        result = super().sample_prior_predictive(**kwargs)
+        self._pin_reported_absorbed_coefficients()
+        return result
+
+    def _pin_absorbed_beta_prior(self) -> None:
+        """Install a beta prior that does not sample absorbed columns.
+
+        Model construction rebuilds ``priors`` from defaults and
+        ``_user_priors`` immediately before ``build_model``. The pinned prior
+        has to live in ``_user_priors`` or that rebuild drops it.
+        """
+        labels = self._absorbed_covariate_labels
+        if not labels:
+            return
+        model = self.model
+        if not hasattr(model, "default_priors"):
+            return
+        user_priors = dict(getattr(model, "_user_priors", None) or {})
+        current = user_priors.get("beta", model.default_priors.get("beta"))
+        if isinstance(current, _WithinBetaPrior):
+            return
+        if getattr(current, "distribution", None) != "Normal":
+            return
+        user_priors["beta"] = _WithinBetaPrior(current, labels)
+        model._user_priors = user_priors
+
+    def _pin_reported_absorbed_coefficients(self) -> None:
+        """Write 0 into stored draws for absorbed columns.
+
+        The design column is already zero, so these draws do not enter the
+        fitted mean. Replacing them removes an unidentified prior from the
+        reported coefficient.
+        """
+        labels = self._absorbed_covariate_labels
+        idata = self.idata
+        if not labels or idata is None:
+            return
+        for group in ("posterior", "prior"):
+            if group not in idata.children:
+                continue
+            dataset = idata[group].to_dataset()
+            changed = False
+            for name in ("beta", "b", "beta_z"):
+                if name not in dataset:
+                    continue
+                beta = dataset[name]
+                label_dim = next(
+                    (
+                        dim
+                        for dim in (
+                            "coeffs",
+                            "covariates",
+                            "instruments",
+                            "outcome_coeffs",
+                        )
+                        if dim in beta.dims
+                    ),
+                    None,
+                )
+                if label_dim is None:
+                    continue
+                present = [
+                    label
+                    for label in labels
+                    if label in set(map(str, beta.coords[label_dim].values))
+                ]
+                if not present:
+                    continue
+                pinned = beta.copy(deep=True)
+                pinned.loc[{label_dim: present}] = 0.0
+                dataset[name] = pinned
+                changed = True
+            if changed:
+                idata[group] = dataset
 
     def _prepare_data(self) -> None:
         """Bundle design matrices into an ``xr.Dataset``."""
