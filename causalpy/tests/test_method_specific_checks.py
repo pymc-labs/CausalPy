@@ -356,6 +356,38 @@ class TestMcCraryDensityTest:
         assert coarse.table.loc[0, "n_below"] == 30
         assert coarse.table.loc[0, "n_above"] == 34
 
+    def test_empty_adjacent_bin_is_not_a_pass(self):
+        """An empty bin beside a positive bin is a density jump, not balance."""
+        issue = np.concatenate(
+            [np.full(100, -5.0), np.array([-0.1]), np.full(100, 0.1), np.array([5.0])]
+        )
+        narrow = self._running_result(issue, n_bins=50)
+        assert narrow.table.loc[0, "n_below"] == 1
+        assert narrow.table.loc[0, "n_above"] == 0
+        assert narrow.passed is False
+        assert "no evidence of manipulation" not in narrow.text
+
+        one_sided = np.concatenate(
+            [np.full(30, -1.2), np.full(4, 0.2), np.full(30, 3.0)]
+        )
+        fine = self._running_result(one_sided, n_bins=5)
+        assert fine.table.loc[0, "n_below"] == 0
+        assert int(fine.table.loc[0, "n_above"]) == 4
+        assert fine.passed is False
+        assert "no evidence of manipulation" not in fine.text
+
+    def test_nonfinite_values_do_not_replace_adjacent_bins(self):
+        """A non-finite running value must not widen the histogram to every point."""
+        issue = np.concatenate(
+            [np.full(100, -5.0), np.array([-0.1]), np.full(100, 0.1), np.array([5.0])]
+        )
+        for extra in (np.inf, -np.inf, np.nan):
+            result = self._running_result(np.concatenate([issue, [extra]]), n_bins=5)
+            assert result.passed is False
+            assert result.table.loc[0, "n_below"] == 1
+            assert result.table.loc[0, "n_above"] == 100
+            assert "below: 1, above: 100" in result.text
+
 
 # ---------------------------------------------------------------------------
 # Edge-case and error-path tests

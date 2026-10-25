@@ -42,8 +42,10 @@ def _adjacent_bin_counts(
     """Count observations in the histogram bins that touch the threshold.
 
     ``n_bins`` equal-width bins are placed on each side, anchored at the
-    threshold. Bin width is the longer side's span divided by ``n_bins``, so
-    the two adjacent bins have the same width and their counts are comparable.
+    threshold. Bin width is the longer finite side's span divided by
+    ``n_bins``, so the two adjacent bins have the same width and their counts
+    are comparable. Non-finite running values are ignored: they must not set
+    the bin width or replace this comparison with a count of every observation.
     The bin below is ``[threshold - width, threshold)``; the bin above is
     ``[threshold, threshold + width)``, and includes its right edge when that
     edge is the outer edge of the above-side histogram.
@@ -52,6 +54,7 @@ def _adjacent_bin_counts(
         raise ValueError("n_bins must be a positive integer.")
 
     values = np.asarray(running, dtype=float)
+    values = values[np.isfinite(values)]
     below = values[values < threshold]
     above = values[values >= threshold]
     if below.size == 0 and above.size == 0:
@@ -60,7 +63,7 @@ def _adjacent_bin_counts(
     span_below = float(threshold - below.min()) if below.size else 0.0
     span_above = float(above.max() - threshold) if above.size else 0.0
     span = max(span_below, span_above)
-    if span == 0.0 or not np.isfinite(span):
+    if span == 0.0:
         return int(below.size), int(above.size)
 
     width = span / n_bins
@@ -144,8 +147,13 @@ class McCraryDensityTest:
         prop_above = n_above / n_total
 
         se = np.sqrt(prop_below * prop_above / n_total)
-        z_stat = (prop_below - 0.5) / se if se > 0 else 0.0
-        p_value = 2 * (1 - norm.cdf(abs(z_stat)))
+        if se > 0:
+            z_stat = (prop_below - 0.5) / se
+        else:
+            # One adjacent bin is empty. The two-proportion SE is zero, and
+            # that jump is the largest this histogram can show.
+            z_stat = np.inf if n_below > n_above else -np.inf
+        p_value = float(2 * (1 - norm.cdf(abs(z_stat))))
         passed = bool(p_value > self.alpha)
 
         table = pd.DataFrame(
