@@ -872,7 +872,6 @@ class HierarchicalLinearRegression(PyMCModel):
     --------
     >>> import numpy as np
     >>> import xarray as xr
-    >>> import pymc as pm
     >>> rng = np.random.default_rng(42)
     >>> n_groups, n_obs = 4, 40
     >>> group_idx = np.repeat(np.arange(n_groups), n_obs // n_groups).astype(np.int32)
@@ -912,7 +911,7 @@ class HierarchicalLinearRegression(PyMCModel):
     ...     sample_kwargs={"draws": 10, "tune": 10, "chains": 1, "progressbar": False},
     ...     priors=priors,
     ... )
-    >>> model.build_model(
+    >>> model.build(
     ...     X=X,
     ...     Z=Z,
     ...     y=y,
@@ -920,8 +919,7 @@ class HierarchicalLinearRegression(PyMCModel):
     ...     coords=coords,
     ...     non_centered=True,
     ... )
-    >>> with model:
-    ...     idata = pm.sample(**model.sample_kwargs)
+    >>> idata = model.sample_posterior()
     >>> "mu" in idata.posterior
     True
     """
@@ -1087,7 +1085,7 @@ class HierarchicalLinearRegression(PyMCModel):
                 dims=["obs_ind", "treated_units"],
             )
 
-    def build_model(  # type: ignore
+    def build_model(  # type: ignore[override]
         self,
         X: xr.DataArray,
         Z: xr.DataArray,
@@ -1157,7 +1155,7 @@ class HierarchicalLinearRegression(PyMCModel):
                 coords=coords,
             )
 
-    def fit(  # type: ignore
+    def build(  # type: ignore[override]
         self,
         X: xr.DataArray,
         Z: xr.DataArray,
@@ -1165,7 +1163,68 @@ class HierarchicalLinearRegression(PyMCModel):
         group_idx: np.ndarray,
         coords: dict[str, Any] | None = None,
         non_centered: bool = True,
-    ) -> az.InferenceData:
+    ) -> None:
+        """Build the hierarchical graph once, without sampling.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Fixed-effects design with dimensions ``obs_ind`` and ``coeffs``.
+        Z : xr.DataArray
+            Random-effects design with dimensions ``obs_ind`` and ``random_coeffs``.
+        y : xr.DataArray
+            Outcomes with dimensions ``obs_ind`` and ``treated_units``.
+        group_idx : np.ndarray
+            Integer group index for each observation.
+        coords : dict, optional
+            Coordinates for the model, including the group labels.
+        non_centered : bool, default True
+            Whether to use non-centered random coefficients.
+
+        Raises
+        ------
+        RuntimeError
+            If this model was already built with a different design or parameterization.
+        """
+        fingerprint = _design_fingerprint(
+            X, Z, y, group_idx, coords or {}, non_centered
+        )
+        if self._built:
+            if fingerprint != self._built_input_fingerprint:
+                raise RuntimeError(
+                    "This model is already built with different inputs. "
+                    "Assign a fresh model instead of rebuilding."
+                )
+            return
+
+        model_coords = {} if coords is None else coords.copy()
+        for data in (X, Z, y):
+            for dimension in data.dims:
+                model_coords.setdefault(str(dimension), data.get_index(dimension))
+        self.priors = {
+            **self.default_priors,
+            **self.priors_from_data(X, y),
+            **(self._user_priors or {}),
+        }
+        self.build_model(X, Z, y, group_idx, model_coords, non_centered)
+        self._build_data_nodes = {
+            "X": np.asarray(X).copy(),
+            "Z": np.asarray(Z).copy(),
+            "y": np.asarray(y).copy(),
+            "group_idx": np.asarray(group_idx).copy(),
+        }
+        self._built_input_fingerprint = fingerprint
+        self._built = True
+
+    def fit(  # type: ignore[override]
+        self,
+        X: xr.DataArray,
+        Z: xr.DataArray,
+        y: xr.DataArray,
+        group_idx: np.ndarray,
+        coords: dict[str, Any] | None = None,
+        non_centered: bool = True,
+    ) -> xr.DataTree:
         """Draw posterior and predictive samples for hierarchical linear regression.
 
         Parameters
@@ -1186,12 +1245,10 @@ class HierarchicalLinearRegression(PyMCModel):
 
         Returns
         -------
-        az.InferenceData
+        xr.DataTree
             Posterior, prior predictive, and posterior predictive samples.
         """
-        random_seed = self.sample_kwargs.get("random_seed", None)
-
-        self.build_model(
+        self.build(
             X=X,
             Z=Z,
             y=y,
@@ -1199,17 +1256,41 @@ class HierarchicalLinearRegression(PyMCModel):
             coords=coords,
             non_centered=non_centered,
         )
-        with self:
-            self.idata: az.InferenceData = pm.sample(**self.sample_kwargs)
-            self.idata.extend(pm.sample_prior_predictive(random_seed=random_seed))
-            self.idata.extend(
-                pm.sample_posterior_predictive(
-                    self.idata,
-                    progressbar=False,
-                    random_seed=random_seed,
-                )
-            )
-        return self.idata
+        self.sample_prior_predictive()
+        return self.sample_posterior()
+
+    def predict(
+        self,
+        X: xr.DataArray,
+        coords: dict[str, Any] | None = None,
+        out_of_sample: bool | None = False,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+    ) -> xr.DataTree:
+        """Reject prediction until hierarchical design updates are supported.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Fixed-effects design matrix.
+        coords : dict, optional
+            Prediction coordinates.
+        out_of_sample : bool, optional
+            Whether predictions concern new observations.
+        group : {"prior", "posterior"}, default "posterior"
+            Requested conditioning draws.
+
+        Raises
+        ------
+        NotImplementedError
+            Updating X alone cannot safely update Z and group membership.
+            The inherited score method is consequently unsupported too.
+        """
+        raise NotImplementedError(
+            "Hierarchical prediction requires joint updates of X, Z and group_idx "
+            "and is not supported yet. Fitted expectations are available as "
+            "model.require_group(group)['mu']."
+        )
 
 
 #: The observation-noise prior both weighted-sum fitters carried before #887 made
