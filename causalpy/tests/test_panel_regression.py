@@ -2004,6 +2004,127 @@ def test_dummy_fe_visible_time_pattern_plus_spike_stays_raw():
     assert float(np.ptp(stored)) == pytest.approx(1.5)
 
 
+def _level_plus_spike_panel(level: float, *, embed_level: bool) -> pd.DataFrame:
+    """Level plus one 0.5 spike, with or without that level in the outcome.
+
+    ``embed_level`` uses ``y = 3*x + unit + 0.1*time``, so the raw solver
+    already reports about 3. Otherwise y jumps by 10 on the spike row and the
+    within estimate is 20.
+    """
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            x = float(level)
+            if unit == 3 and time == 4:
+                x += 0.5
+            if embed_level:
+                y = 3.0 * x + unit + 0.1 * time
+            else:
+                y = 10.0 if unit == 3 and time == 4 else 0.0
+            rows.append({"unit": f"u{unit}", "time": time, "x": x, "y": y})
+    return pd.DataFrame(rows)
+
+
+@pytest.mark.parametrize("level", [300.0, 350.0])
+def test_dummy_fe_level_plus_spike_keeps_a_column_the_solver_estimates(level):
+    """A level the outcome follows must stay raw when time dummies are present.
+
+    Residualizing against the time dummies alone stores a time pattern and
+    reports about 0.6 at level 300. At level 350 that residual is absorbed and
+    the warning says the within estimate is 0. The within estimate is 3, and
+    the raw solver already reports it.
+    """
+    data = _level_plus_spike_panel(level, embed_level=True)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + C(time) + x",
+            unit_fe_variable="unit",
+            time_fe_variable="time",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    demeaned = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + x",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    ).fit()
+    assert result._absorbed_covariate_labels == ()
+    assert _named_coefficients(result)["x"] == pytest.approx(3.0, abs=1e-3)
+    assert _named_coefficients(demeaned)["x"] == pytest.approx(3.0, abs=1e-6)
+    stored = result.design["X"].sel(coeffs="x").to_numpy()
+    assert float(stored.mean()) == pytest.approx(level + 0.025, abs=1e-6)
+    assert float(np.ptp(stored)) == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize("level", [300.0, 350.0])
+def test_dummy_fe_level_plus_spike_jump_matches_within_estimator(level):
+    """The same level is repaired when the outcome does not follow it.
+
+    The design matches the embedded-level panel, but y jumps only on the spike
+    row. The raw solver reports about 0. The within estimate is 20.
+    """
+    data = _level_plus_spike_panel(level, embed_level=False)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        dummies = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + C(time) + x",
+            unit_fe_variable="unit",
+            time_fe_variable="time",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    demeaned = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + x",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    ).fit()
+    assert dummies._absorbed_covariate_labels == ()
+    assert _named_coefficients(dummies)["x"] == pytest.approx(20.0, abs=1e-6)
+    assert _named_coefficients(demeaned)["x"] == pytest.approx(20.0, abs=1e-6)
+
+
+@pytest.mark.parametrize("level", [250.0, 1000.0])
+def test_dummy_fe_two_spikes_with_time_effects_match_within_estimator(level):
+    """Two level spikes with time dummies must match the within estimator.
+
+    Without time dummies the unit-dummy repair reports 20. With time dummies,
+    residualizing against those columns alone stores a time pattern and both
+    coefficients are about 0. The within estimate is 20. No warning.
+    """
+    data = _two_spike_panel(level, level)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        dummies = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + C(time) + a + b",
+            unit_fe_variable="unit",
+            time_fe_variable="time",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    demeaned = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + a + b",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    ).fit()
+    assert dummies._absorbed_covariate_labels == ()
+    for label in ("a", "b"):
+        assert _named_coefficients(dummies)[label] == pytest.approx(20.0, abs=1e-6)
+        assert _named_coefficients(demeaned)[label] == pytest.approx(20.0, abs=1e-6)
+
+
 @pytest.mark.parametrize(
     "estimator",
     [

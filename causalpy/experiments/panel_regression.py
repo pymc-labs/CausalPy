@@ -148,11 +148,14 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     unit fixed effects. That coefficient is reported as 0, matching the within
     estimator, and the unit effects absorb the level. A covariate in the span
     of the time dummies is collinear with those fixed effects even when it
-    varies within unit, so that coefficient is also reported as 0. A time
-    pattern plus an identified within change is not that case: residualize
-    against the time dummies first, and report the two-way within
-    coefficient when the residual is identified. Only an
-    exact duplicate, or a within-unit change of a few float64 ulps that least
+    varies within unit, so that coefficient is also reported as 0. A level or
+    time pattern plus an identified within change is not that case.
+    Residualize against the intercept and the time dummies first: treatment
+    coding does not span a constant, so omitting the intercept leaves the
+    level in the residual. If that residual is unidentified, the within
+    estimate is 0. If the raw solver already reports the residual's
+    coefficient, leave the column in place. Otherwise store the residual.
+    Only an exact duplicate, or a within-unit change of a few float64 ulps that least
     squares cannot see, counts as no variation. A change that is small relative
     to the column magnitude is still within variation, including a 0.5 change
     at magnitude 1e15, which is exactly four ulps of that magnitude. If the raw
@@ -426,12 +429,15 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         time pattern to its unit within deviation leaves that collinearity, so
         the column is absorbed and the time effects keep the level.
 
-        Residualize against the time dummies before that decision. If the
-        residual is unidentified, absorb the column. If the residual is
-        identified and the raw column does not increase the full design's rank
-        at the solver cutoff, store the residual. Its coefficient is the
-        two-way within estimate. Leaving the raw column lets least squares
-        split the time level and report about 0.
+        Residualize against the intercept and the time dummies before that
+        decision. Treatment coding is zero on the reference period, so a level
+        is not in the time-dummy span until the intercept is included. If the
+        residual is unidentified, absorb the column. If it is identified and
+        the raw column does not increase rank, store the residual only when
+        the raw solver does not already report that coefficient. Replacing a
+        column the solver already estimates changes a design the caller can
+        inspect. Leaving an unestimated raw column lets least squares split
+        the level and report about 0.
 
         A within-varying column can also be dropped by the solver even though it
         increases rank against the unit dummies. ``LinearRegression.fit`` drops
@@ -540,6 +546,11 @@ class PanelRegression(BaseExperiment[ResultBundle]):
                 absorbed.append(index)
             elif action == "store_residual":
                 design[:, index] = residual
+            elif time_indexes and self._replacement_matches_raw_solver(
+                design, index, residual, tol
+            ):
+                skip.add(index)
+                continue
             else:
                 design[:, index] = self._within_deviation(design[:, index], units)
             skip.add(index)
@@ -659,22 +670,75 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         units: np.ndarray,
         tol: float,
     ) -> tuple[Literal["absorb", "store_residual", "keep"], np.ndarray]:
-        """Repair a column that may lie in the time-dummy span.
+        """Repair a column that may lie in the time-effect span.
 
-        Residualize against the time dummies before deciding the column is
-        unidentified. A pure time pattern has a zero residual and is absorbed.
-        A time pattern plus an identified within change is not absorbed. If the
-        raw column does not increase the full design's rank at the solver
-        cutoff, store that residual so the coefficient is the two-way within
-        estimate.
+        Residualize against the intercept and the time dummies before deciding
+        the column is unidentified. A pure time pattern has a zero residual
+        and is absorbed. A level plus an identified within change is not. Store
+        that residual only when the raw solver does not already report its
+        coefficient.
         """
         column = np.asarray(design[:, index], dtype=float)
-        residual = self._residual_against_indexes(column, design, time_indexes)
+        residual = self._residual_against_indexes(
+            column, design, self._time_effect_indexes(time_indexes)
+        )
         if self._within_lies_in_fixed_effects(residual, protected_block, units, tol):
             return "absorb", residual
-        if time_indexes and not self._column_adds_kept_direction(design, index, tol):
+        if (
+            time_indexes
+            and not self._column_adds_kept_direction(design, index, tol)
+            and not self._replacement_matches_raw_solver(design, index, residual, tol)
+        ):
             return "store_residual", residual
         return "keep", residual
+
+    def _time_effect_indexes(self, time_indexes: list[int]) -> list[int]:
+        """Time dummies plus the intercept, the span of a pure time level.
+
+        Treatment-coded time dummies are zero on the reference period, so they
+        do not contain a constant. Residualizing a level against those columns
+        alone leaves a time pattern whose mean is the level divided by the
+        number of periods.
+        """
+        if not time_indexes:
+            return list(time_indexes)
+        indexes = list(time_indexes)
+        for position, label in enumerate(self.labels):
+            if label == "Intercept" and position not in indexes:
+                indexes.append(position)
+                break
+        return indexes
+
+    def _replacement_matches_raw_solver(
+        self,
+        design: np.ndarray,
+        index: int,
+        replacement: np.ndarray,
+        tol: float,
+    ) -> bool:
+        """Whether lstsq already reports the coefficient of ``replacement``.
+
+        A level the outcome follows can be estimable even when its unique
+        singular value sits just below the cutoff. At level 300 that gap is
+        about 3e-5. Storing the residual would replace that column. A spike
+        the outcome does not follow is reported near 0, not at the within
+        estimate, and the coefficients disagree.
+        """
+        y = np.asarray(self._y_raw, dtype=float).reshape(-1)
+        raw = self._lstsq_coefficient(design, y, index, tol)
+        repaired = np.array(design, dtype=float, copy=True)
+        repaired[:, index] = replacement
+        repaired_coef = self._lstsq_coefficient(repaired, y, index, tol)
+        scale = max(1.0, abs(raw), abs(repaired_coef))
+        return abs(raw - repaired_coef) <= 1e-3 * scale
+
+    @staticmethod
+    def _lstsq_coefficient(
+        design: np.ndarray, y: np.ndarray, index: int, tol: float
+    ) -> float:
+        """Min-norm coefficient ``lstsq`` reports at ``cond=tol``."""
+        coef = np.linalg.lstsq(np.asarray(design, dtype=float), y, rcond=tol)[0]
+        return float(coef[index])
 
     @staticmethod
     def _residual_against_indexes(
