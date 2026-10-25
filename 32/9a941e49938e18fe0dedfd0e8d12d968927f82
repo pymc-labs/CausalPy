@@ -1,0 +1,18 @@
+causalpy/reporting.py
+  h_63db634213747e 517-594,620-624,672,674-680
+causalpy/tests/test_reporting.py
+  h_63db634213747e 3931-4003
+docs/source/notebooks/staggered-difference-in-differences-pymc.ipynb
+  h_63db634213747e 1486,1514,2573,2716,2992,2996
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "329a941e49938e18fe0dedfd0e8d12d968927f82",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
