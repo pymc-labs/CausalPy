@@ -20,6 +20,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 from matplotlib import pyplot as plt
 from sklearn.linear_model import LinearRegression
 
@@ -728,11 +729,7 @@ def test_staggered_did_effect_summary(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_staggered_did_hdi_prob_stored_and_reported(mock_pymc_sample):
-    """Test that Bayesian results store hdi_prob and report it correctly in prose.
-
-    This verifies the fix for the mismatch between computed interval bounds
-    (94% by default) and reported percentage in effect_summary prose.
-    """
+    """Plot aggregation stores 0.94; effect_summary follows 1 - alpha."""
     df = generate_staggered_did_data(
         n_units=30, n_time_periods=10, treatment_cohorts={5: 10, 8: 10}, seed=42
     )
@@ -746,17 +743,145 @@ def test_staggered_did_hdi_prob_stored_and_reported(mock_pymc_sample):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    # Verify hdi_prob is stored on the result bundle
     assert hasattr(result.result, "hdi_prob"), (
         "Bayesian result should have hdi_prob attr"
     )
     assert result.result.hdi_prob == 0.94, "Default hdi_prob should be 0.94"
 
-    # Verify effect summary prose reports the correct percentage
     summary = result.effect_summary()
-    assert "94% HDI" in summary.text, (
-        f"Effect summary should report '94% HDI' but got: {summary.text}"
+    assert "95% HDI" in summary.text, (
+        f"Default effect_summary should report '95% HDI' but got: {summary.text}"
     )
+    assert "94% HDI" not in summary.text
+    assert result.result.hdi_prob == 0.94
+
+
+def _average_identified_post_bounds(frame: pd.DataFrame) -> tuple[float, float]:
+    post = frame[frame["event_time"] >= 0]
+    if "identified" in post.columns:
+        post = post[post["identified"]]
+    return float(post["att_lower"].mean()), float(post["att_upper"].mean())
+
+
+@pytest.mark.integration
+def test_staggered_effect_summary_recomputes_hdi_from_alpha(mock_pymc_sample):
+    """effect_summary(alpha) recomputes an HDI at 1 - alpha from draws.
+
+    Reprinting the stored 94% aggregation bounds, or only relabeling them,
+    fails this check. A wider alpha must name a wider recomputed interval.
+    """
+    df = generate_staggered_did_data(
+        n_units=3,
+        n_time_periods=6,
+        treatment_cohorts={3: 1, 4: 1},
+        seed=1,
+    )
+    sample_kwargs_light = {
+        "draws": 20,
+        "tune": 20,
+        "chains": 1,
+        "cores": 1,
+        "progressbar": False,
+        "compute_convergence_checks": False,
+        "random_seed": 1,
+    }
+    result = cp.StaggeredDifferenceInDifferences(
+        df,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs_light),
+    ).fit()
+
+    stored_lower, stored_upper = _average_identified_post_bounds(
+        result.result.att_event_time
+    )
+    # Replace the mock draws with a skewed posterior large enough that a 95%
+    # HDI is strictly inside a 99% HDI. The bundle is frozen.
+    old = result.result.y_pred
+    n_draws = 400
+    shape = tuple(n_draws if dim == "draw" else old.sizes[dim] for dim in old.dims)
+    coords = {dim: old.coords[dim] for dim in old.dims if dim != "draw"}
+    coords["draw"] = np.arange(n_draws)
+    synthetic = xr.DataArray(
+        np.random.default_rng(0).exponential(size=shape),
+        dims=old.dims,
+        coords=coords,
+    )
+    object.__setattr__(result.result, "y_pred", synthetic)
+
+    summary_95 = result.effect_summary(alpha=0.05)
+    summary_99 = result.effect_summary(alpha=0.01)
+    summary_975 = result.effect_summary(alpha=0.025)
+
+    assert "average 95% HDI" in summary_95.text
+    assert "average 99% HDI" in summary_99.text
+    assert "average 97.5% HDI" in summary_975.text
+    assert result.result.hdi_prob == 0.94
+
+    from causalpy._arviz_compat import hdi_bounds
+
+    def _oracle(prob: float) -> pd.DataFrame:
+        mu = synthetic.isel(treated_units=0)
+        tau = result._observed_outcome.to_numpy() - mu.values
+        rows = []
+        treated = result.data.loc[~result.data["_is_untreated"]]
+        event_time = np.asarray(treated["event_time"].values)
+        treated_tau = tau[:, :, np.where(~result.data["_is_untreated"].to_numpy())[0]]
+        for event in sorted(np.unique(event_time[~np.isnan(event_time)])):
+            mask = event_time == event
+            tau_e = treated_tau[:, :, np.where(mask)[0]].mean(axis=2)
+            lower, upper = hdi_bounds(tau_e, prob=prob, flatten_chains_draws=True)
+            rows.append(
+                {
+                    "event_time": int(event),
+                    "att_lower": lower,
+                    "att_upper": upper,
+                }
+            )
+        frame = pd.DataFrame(rows)
+        frame = frame[frame["event_time"] >= 0]
+        return frame
+
+    oracle_95 = _oracle(0.95)
+    oracle_99 = _oracle(0.99)
+    got_95 = summary_95.table.loc[
+        summary_95.table["event_time"] >= 0, ["event_time", "att_lower", "att_upper"]
+    ]
+    got_99 = summary_99.table.loc[
+        summary_99.table["event_time"] >= 0, ["event_time", "att_lower", "att_upper"]
+    ]
+    # Non-identified cells are masked to NaN in the summary; compare identified rows.
+    if "identified" in summary_95.table.columns:
+        identified = summary_95.table.loc[
+            summary_95.table["event_time"] >= 0, "identified"
+        ].to_numpy()
+        got_95 = got_95.loc[identified]
+        got_99 = got_99.loc[identified]
+        oracle_95 = oracle_95[oracle_95["event_time"].isin(got_95["event_time"])]
+        oracle_99 = oracle_99[oracle_99["event_time"].isin(got_99["event_time"])]
+    pd.testing.assert_frame_equal(
+        got_95.reset_index(drop=True),
+        oracle_95.reset_index(drop=True),
+        check_exact=False,
+        rtol=1e-12,
+    )
+    pd.testing.assert_frame_equal(
+        got_99.reset_index(drop=True),
+        oracle_99.reset_index(drop=True),
+        check_exact=False,
+        rtol=1e-12,
+    )
+    lower_95, upper_95 = _average_identified_post_bounds(summary_95.table)
+    lower_99, upper_99 = _average_identified_post_bounds(summary_99.table)
+    assert (upper_95 - lower_95) < (upper_99 - lower_99)
+    assert not np.isclose(lower_95, stored_lower) or not np.isclose(
+        upper_95, stored_upper
+    )
+    assert f"[{lower_95:.2f}, {upper_95:.2f}]" in summary_95.text
+    assert f"[{lower_99:.2f}, {upper_99:.2f}]" in summary_99.text
+    assert f"[{stored_lower:.2f}, {stored_upper:.2f}]" not in summary_95.text
 
 
 # ==============================================================================
