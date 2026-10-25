@@ -1,0 +1,16 @@
+causalpy/skl_models.py
+  h_63db634213747e 52-55
+causalpy/tests/test_weighted_proportion.py
+  h_63db634213747e 1-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e0a156a3cf59cf8fc02e2a83299908d7067be8f2",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
