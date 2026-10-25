@@ -15,7 +15,7 @@
 Functions that generate data sets used in examples
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -1146,6 +1146,12 @@ def generate_hdid_data(
     sigma_treatment_slope: float = 0.45,
     run_validation: bool = True,
     output_path: Path | None = None,
+    *,
+    intercept: float = 80.0,
+    post_effect: float = 0.0,
+    trend_weight: float = 0.55,
+    include_covariate_effects: bool = True,
+    include_region_effects: bool = True,
 ) -> tuple[pd.DataFrame, dict[str, Any]]:
     r"""Generate hierarchical DiD data.
 
@@ -1184,6 +1190,19 @@ def generate_hdid_data(
         Whether to run simulator panel validation.
     output_path : Path | None, default=None
         Optional default output path stored in the generated config.
+    intercept : float, default=80.0
+        Population baseline outcome before other contributions.
+    post_effect : float, default=0.0
+        Common post-treatment change for treated and control stores.
+    trend_weight : float, default=0.55
+        Linear outcome change per month.
+    include_covariate_effects : bool, default=True
+        Whether customer age, tenure, purchase history, log store size, and
+        urban status contribute to the outcome. False sets their outcome
+        coefficients to zero without changing the generated covariates.
+    include_region_effects : bool, default=True
+        Whether region contributes to the outcome. False sets regional effects
+        to zero without changing the generated region assignments.
 
     Returns
     -------
@@ -1198,6 +1217,27 @@ def generate_hdid_data(
     config_kwargs: dict[str, Any] = {}
     if output_path is not None:
         config_kwargs["output_path"] = Path(output_path)
+    outcome = hdid.Outcome(
+        intercept=intercept,
+        post_effect=post_effect,
+        trend_weight=trend_weight,
+        att_effect=att_effect,
+        noise_parameters={"loc": 0.0, "scale": sigma_noise},
+        store_intercept_parameters={"loc": 0.0, "scale": sigma_store_intercept},
+        treatment_slope_parameters={"loc": 0.0, "scale": sigma_treatment_slope},
+    )
+    if not include_covariate_effects:
+        outcome = replace(
+            outcome,
+            age_weight=0.0,
+            tenure_weight=0.0,
+            history_weight=0.0,
+            log_store_size_weight=0.0,
+            urban_weight=0.0,
+        )
+    region = hdid.Region()
+    if not include_region_effects:
+        region = replace(region, effects=tuple(0.0 for _ in region.effects))
     config = hdid.Config(
         seed=seed,
         n_stores_total=n_stores_total,
@@ -1209,12 +1249,8 @@ def generate_hdid_data(
             units_max=units_max,
             units_parameters={"lam": float(units_rate)},
         ),
-        outcome=hdid.Outcome(
-            att_effect=att_effect,
-            noise_parameters={"loc": 0.0, "scale": sigma_noise},
-            store_intercept_parameters={"loc": 0.0, "scale": sigma_store_intercept},
-            treatment_slope_parameters={"loc": 0.0, "scale": sigma_treatment_slope},
-        ),
+        outcome=outcome,
+        region=region,
         run_validation=run_validation,
         **config_kwargs,
     )

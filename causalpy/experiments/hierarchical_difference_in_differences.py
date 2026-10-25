@@ -487,6 +487,11 @@ class HierarchicalDifferenceInDifferences(
            coefficient from generalized linear mixed-effects models revisited
            and expanded. *Journal of the Royal Society Interface*, 14(134),
            20170213. https://doi.org/10.1098/rsif.2017.0213
+        .. [3] easystats, performance: ``icc()`` adjusted ICC calculation.
+           https://github.com/easystats/performance/blob/main/R/icc.R
+        .. [4] easystats, insight: ``.compute_variance_random()`` mean
+           observation-level random-effect variance used by ``get_variance()``.
+           https://github.com/easystats/insight/blob/main/R/compute_variances.R
         """
         required = {"sigma_random", "sigma_fixed"}
         if required.difference(posterior.data_vars):
