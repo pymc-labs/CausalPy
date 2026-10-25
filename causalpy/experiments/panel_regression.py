@@ -136,9 +136,10 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     confounders but also drops time-invariant covariates from the model. A
     covariate with no within-unit variation is collinear with dummy-variable
     unit fixed effects. That coefficient is reported as 0, matching the within
-    estimator, and the unit effects absorb the level. That coefficient is not
-    left as an unidentified prior. For the ``"dummies"`` approach (unpooled
-    FE), individual unit effects can be
+    estimator, and the unit effects absorb the level. The check uses the rows
+    the formula retains, in design order, and does not require a unique frame
+    index. That coefficient is not left as an unidentified prior. For the
+    ``"dummies"`` approach (unpooled FE), individual unit effects can be
     extracted from the coefficients. For the demeaned approach, unit effects
     can be recovered post-hoc using the stored group means (``_group_means``),
     which are always computed from the original (pre-demeaning) data.
@@ -364,11 +365,13 @@ class PanelRegression(BaseExperiment[ResultBundle]):
                 # (single-pass is exact only for balanced; see docstring Notes).
                 data = self._demean_transform(data, self.time_fe_variable)
 
-        y, X = build_formula_matrices(self.formula, data, return_type="dataframe")
         # Patsy drops rows with a missing value in a used column and does not
-        # keep that mask on a DesignMatrix. The dataframe index is the retained
-        # rows, in order, including when the dropped row is not last.
-        self._estimation_row_index = pd.Index(X.index)
+        # keep that mask on a DesignMatrix. A positional index on this copy
+        # records retained rows in design order. The caller's index may repeat,
+        # so label lookup cannot recover those rows.
+        data.index = pd.RangeIndex(len(data))
+        y, X = build_formula_matrices(self.formula, data, return_type="dataframe")
+        self._estimation_row_positions = np.asarray(X.index, dtype=int)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
@@ -421,8 +424,13 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
     def _units_on_estimation_rows(self) -> np.ndarray:
         """Unit labels for the rows the formula retained, in design order."""
-        positions = self._original_data.index.get_indexer(self._estimation_row_index)
-        if positions.shape[0] != self._X_raw.shape[0] or np.any(positions < 0):
+        positions = np.asarray(self._estimation_row_positions)
+        n_rows = len(self._original_data)
+        if (
+            positions.shape != (self._X_raw.shape[0],)
+            or np.any(positions < 0)
+            or np.any(positions >= n_rows)
+        ):
             raise DataException(
                 "Could not align unit fixed effects to the rows retained by "
                 "the formula. A length mismatch is not within-unit variation."

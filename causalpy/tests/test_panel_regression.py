@@ -1258,3 +1258,100 @@ def test_dummy_fe_missing_outcome_row_pymc_treatment_is_within_estimate():
     np.testing.assert_allclose(treatment.values, 0.0, atol=1e-8)
     unit_effect = result.idata.posterior["beta"].sel(coeffs="C(unit)[T.u3]")
     assert float(unit_effect.mean()) == pytest.approx(30.0, abs=1.0)
+
+
+def _duplicate_index_panel(missing_outcome_at: int | None = None) -> pd.DataFrame:
+    """4 by 5 panel whose index repeats, so label lookup is not row identity."""
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": float(unit == 3),
+                    "x": 0.25 * time,
+                    "y": 10.0 * unit + 1.0 * time,
+                }
+            )
+    data = pd.DataFrame(rows)
+    data.index = np.tile(np.arange(5), 4)
+    if missing_outcome_at is not None:
+        data.iloc[missing_outcome_at, data.columns.get_loc("y")] = np.nan
+    return data
+
+
+def test_dummy_fe_duplicate_index_time_invariant_treatment_matches_within_estimator():
+    """A non-unique index must not block the within estimate of a constant treatment."""
+    data = _duplicate_index_panel()
+    with pytest.warns(UserWarning, match="within estimate of 0"):
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + treatment",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    coefs = _named_coefficients(result)
+    assert coefs["treatment"] == pytest.approx(0.0, abs=1e-8)
+    assert coefs["C(unit)[T.u3]"] == pytest.approx(30.0, abs=1e-8)
+
+    missing = _duplicate_index_panel(missing_outcome_at=7)
+    with pytest.warns(UserWarning, match="within estimate of 0"):
+        missing_result = cp.PanelRegression(
+            missing,
+            formula="y ~ 1 + C(unit) + treatment",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    missing_coefs = _named_coefficients(missing_result)
+    assert missing_coefs["treatment"] == pytest.approx(0.0, abs=1e-8)
+    assert missing_coefs["C(unit)[T.u3]"] == pytest.approx(30.0, abs=1e-8)
+
+
+def test_dummy_fe_duplicate_index_keeps_within_varying_treatment():
+    """A non-unique index must not absorb a treatment that varies on retained rows."""
+    data = _duplicate_index_panel()
+    data["treatment"] = (data["time"] >= 2).astype(float)
+    data["y"] = (
+        4.0 * data["unit"].str[-1].astype(float)
+        + 5.0 * data["treatment"]
+        + 4.0 * data["x"]
+    )
+    data.iloc[1, data.columns.get_loc("y")] = np.nan
+    result = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + C(unit) + treatment + x",
+        unit_fe_variable="unit",
+        fe_method="dummies",
+        model=LinearRegression(),
+    ).fit()
+    coefs = _named_coefficients(result)
+    assert coefs["treatment"] == pytest.approx(5.0, abs=1e-8)
+    assert coefs["x"] == pytest.approx(4.0, abs=1e-8)
+
+
+def test_dummy_fe_duplicate_index_pymc_treatment_is_within_estimate():
+    """PyMC dummy FE reports 0 for a time-invariant treatment on a repeated index."""
+    data = _duplicate_index_panel()
+    with pytest.warns(UserWarning, match="within estimate of 0"):
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + treatment",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=cp.pymc_models.LinearRegression(
+                sample_kwargs={
+                    "draws": 50,
+                    "tune": 50,
+                    "chains": 1,
+                    "progressbar": False,
+                    "random_seed": 1,
+                }
+            ),
+        ).fit()
+    treatment = result.idata.posterior["beta"].sel(coeffs="treatment")
+    np.testing.assert_allclose(treatment.values, 0.0, atol=1e-8)
+    unit_effect = result.idata.posterior["beta"].sel(coeffs="C(unit)[T.u3]")
+    assert float(unit_effect.mean()) == pytest.approx(30.0, abs=1.0)
