@@ -160,3 +160,68 @@ def test_doubly_robust_uses_the_row_outcome_not_the_index_label():
     np.testing.assert_allclose(control, expected_control, atol=1e-10)
     np.testing.assert_allclose(treated, expected_treated, atol=1e-10)
     np.testing.assert_allclose(ate, expected_treated - expected_control, atol=1e-10)
+
+
+def _with_missing_covariate(index, missing_at):
+    """Return a frame whose propensity covariate is missing at one position."""
+    frame = _frame(index)
+    frame.iloc[missing_at, frame.columns.get_loc("age")] = np.nan
+    return frame
+
+
+@pytest.mark.parametrize(
+    ("index", "missing_at"),
+    [
+        (range(8), 7),
+        (range(8), 2),
+        (range(4, 12), 7),
+        (range(100, 108), 2),
+        ([4, 4, 4, 4, 4, 4, 4, 4], 3),
+    ],
+)
+def test_get_ate_uses_the_formula_rows_patsy_keeps(index, missing_at):
+    """Incomplete formula rows are omitted; kept rows stay in stored order.
+
+    A default index with only the last covariate missing used to return the
+    contrast of the kept rows by label accident. A non-overlapping or
+    duplicate index must still weight each kept row's own outcome, and must
+    not restore label alignment to do so.
+    """
+    frame = _with_missing_covariate(index, missing_at)
+    kept = frame.iloc[[i for i in range(len(frame)) if i != missing_at]]
+    experiment = _ipw(frame)
+    assert len(experiment.X) == len(kept)
+    assert len(experiment.y) == len(kept)
+    np.testing.assert_allclose(experiment.y, kept["outcome"].to_numpy(dtype=float))
+
+    experiment.model.idata = _posterior(len(experiment.X), 0.4)
+    expected_raw, expected_robust, expected_overlap = _positional_contrasts(kept, 0.4)
+    raw = experiment.get_ate(0, experiment.idata, method="raw")[0]
+    robust = experiment.get_ate(0, experiment.idata, method="robust")[0]
+    overlap = experiment.get_ate(0, experiment.idata, method="overlap")[0]
+    np.testing.assert_allclose(raw, expected_raw, atol=1e-12)
+    np.testing.assert_allclose(robust, expected_robust, atol=1e-12)
+    np.testing.assert_allclose(overlap, expected_overlap, atol=1e-12)
+
+    ate, treated, control = experiment._compute_ate_doubly_robust(
+        np.full(len(kept), 0.4)
+    )
+    y = kept["outcome"].to_numpy(dtype=float)
+    t = kept["trt"].to_numpy(dtype=float)
+    design = np.column_stack(
+        [
+            np.ones(len(kept)),
+            kept["age"].to_numpy(dtype=float),
+            kept["race"].to_numpy(dtype=float),
+        ]
+    )
+    m0 = np.linalg.lstsq(design[t == 0], y[t == 0], rcond=None)[0]
+    m1 = np.linalg.lstsq(design[t == 1], y[t == 1], rcond=None)[0]
+    m0_pred = design @ m0
+    m1_pred = design @ m1
+    propensity = 0.4
+    expected_control = np.mean((1 - t) * (y - m0_pred) / (1 - propensity) + m0_pred)
+    expected_treated = np.mean(t * (y - m1_pred) / propensity + m1_pred)
+    np.testing.assert_allclose(control, expected_control, atol=1e-10)
+    np.testing.assert_allclose(treated, expected_treated, atol=1e-10)
+    np.testing.assert_allclose(ate, expected_treated - expected_control, atol=1e-10)
