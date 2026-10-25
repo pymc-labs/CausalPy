@@ -40,12 +40,12 @@ from .base import BaseExperiment
 
 
 class _WithinBetaPrior:
-    """Normal beta prior with time-invariant columns fixed at 0.
+    """Beta prior with time-invariant columns fixed at 0.
 
-    A free ``Normal`` on a column that does not vary within unit is unidentified
-    once unit dummies are present. Sampling it returns the prior, not the within
-    estimate. The reported coefficient is a deterministic 0; identified columns
-    keep the supplied Normal prior.
+    A free draw on a column that does not vary within unit is unidentified once
+    unit dummies are present. Sampling it returns the prior, not the within
+    estimate. The reported coefficient is a deterministic 0. Identified columns
+    keep the supplied prior, whatever distribution that prior uses.
     """
 
     def __init__(self, inner: Any, absorbed: tuple[str, ...]) -> None:
@@ -54,14 +54,11 @@ class _WithinBetaPrior:
 
     def create_variable(self, name: str, xdist: bool = False) -> Any:
         """Create ``name`` with absorbed columns fixed at 0."""
-        if xdist or getattr(self._inner, "distribution", None) != "Normal":
-            return self._inner.create_variable(name, xdist=xdist)
         import pymc as pm
         import pytensor.tensor as pt
 
         model = pm.modelcontext(None)
         coeff_names = [str(value) for value in model.coords["coeffs"]]
-        n_treated = len(model.coords["treated_units"])
         missing = [
             label for label in sorted(self._absorbed) if label not in coeff_names
         ]
@@ -70,23 +67,22 @@ class _WithinBetaPrior:
                 "Could not fix the within estimate for covariate(s) absent from "
                 f"the model coefficients: {', '.join(missing)}."
             )
-        free_idx = [
-            index
-            for index, label in enumerate(coeff_names)
-            if label not in self._absorbed
+        absorbed_idx = [
+            index for index, label in enumerate(coeff_names) if label in self._absorbed
         ]
-        mu = self._inner.parameters.get("mu", 0)
-        sigma = self._inner.parameters.get("sigma", 50)
-        beta = pt.zeros((n_treated, len(coeff_names)))
-        if free_idx:
-            free = pm.Normal(
-                f"{name}_within",
-                mu=mu,
-                sigma=sigma,
-                shape=(n_treated, len(free_idx)),
+        if xdist:
+            from pymc.dims import Deterministic
+        else:
+            Deterministic = pm.Deterministic
+        within = self._inner.create_variable(f"{name}_within", xdist=xdist)
+        if getattr(within, "ndim", 0) != 2:
+            raise DataException(
+                "Could not fix the within estimate because the beta prior did not "
+                "return a treated-unit by coefficient matrix."
             )
-            beta = pt.set_subtensor(beta[:, free_idx], free)
-        return pm.Deterministic(name, beta, dims=["treated_units", "coeffs"])
+        beta = pt.set_subtensor(within[:, absorbed_idx], 0.0)
+        dims = getattr(self._inner, "dims", None) or ["treated_units", "coeffs"]
+        return Deterministic(name, beta, dims=dims)
 
 
 class PanelRegression(BaseExperiment[ResultBundle]):
@@ -337,10 +333,17 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
     @staticmethod
     def _is_fe_factor(factor_name: str, variable: str) -> bool:
-        """Whether a Patsy factor categorically encodes the given variable."""
+        """Whether a Patsy factor categorically encodes the given variable.
+
+        ``C(variable)`` and ``C(Q("variable"))`` (either quote) are the same
+        factor. A spaced column name has no other Patsy form. Whitespace and a
+        coding option such as ``Treatment`` do not make it a different factor.
+        """
+        escaped = re.escape(variable)
+        quoted = r"Q\(\s*(['\"])" + escaped + r"\1\s*\)"
         return (
             re.match(
-                rf"^C\(\s*{re.escape(variable)}\s*(?:,|\))",
+                rf"^C\(\s*(?:{escaped}|{quoted})\s*(?:,|\))",
                 factor_name,
             )
             is not None
@@ -467,14 +470,14 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         :meth:`fit` and :meth:`sample_prior_predictive` both call this before
         drawing. The design column is already zero, so the unit dummies absorb
-        the level, and the installed prior keeps the absorbed column from being
-        sampled as an unidentified free parameter.
+        the level, and the installed prior reports that column as a
+        deterministic 0 instead of an unidentified draw.
         """
         self._pin_absorbed_beta_prior()
         return super().build()
 
     def _pin_absorbed_beta_prior(self) -> None:
-        """Install a beta prior that does not sample absorbed columns.
+        """Install a beta prior that reports absorbed columns at 0.
 
         Model construction rebuilds ``priors`` from defaults and
         ``_user_priors`` immediately before ``build_model``. The pinned prior
@@ -492,8 +495,11 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         current = user_priors.get("beta", model.default_priors.get("beta"))
         if isinstance(current, _WithinBetaPrior):
             return
-        if getattr(current, "distribution", None) != "Normal":
-            return
+        if not hasattr(current, "create_variable"):
+            raise DataException(
+                "Could not fix the within estimate because the beta prior "
+                "cannot create a variable."
+            )
         user_priors["beta"] = _WithinBetaPrior(current, labels)
         model._user_priors = user_priors
 

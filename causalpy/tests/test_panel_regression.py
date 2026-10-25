@@ -22,6 +22,7 @@ import pytest
 import xarray as xr
 from matplotlib.collections import PolyCollection
 from matplotlib.colors import to_rgba
+from pymc_extras.prior import Prior
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
@@ -276,12 +277,14 @@ def test_panel_regression_validation_errors(small_panel_data):
     [
         ("y ~ C( unit ) + treatment + x1", "unit"),
         ("y ~ C(unit, Treatment) + treatment + x1", "unit"),
+        ('y ~ C(Q("unit")) + treatment + x1', "unit"),
         ("y ~ C( time ) + treatment + x1", "time"),
         ("y ~ C(time, Sum) + treatment + x1", "time"),
+        ('y ~ C(Q("time")) + treatment + x1', "time"),
     ],
 )
 def test_demeaned_rejects_patsy_fe_variants(small_panel_data, formula, variable):
-    """Whitespace and coding options must not bypass the demeaned FE guard."""
+    """Whitespace, coding options, and Q() must not bypass the demeaned FE guard."""
     with pytest.raises(ValueError, match=rf"do not include C\({variable}\)"):
         cp.PanelRegression(
             data=small_panel_data,
@@ -1062,6 +1065,65 @@ def test_dummy_fe_time_invariant_treatment_matches_within_estimator():
     assert dummy_coefs["C(unit)[T.u3]"] == pytest.approx(30.0, abs=1e-8)
 
 
+def _time_invariant_treatment_panel(unit_column: str = "unit") -> pd.DataFrame:
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            rows.append(
+                {
+                    unit_column: f"u{unit}",
+                    "time": time,
+                    "treatment": float(unit == 3),
+                    "y": 10.0 * unit + 1.0 * time,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+@pytest.mark.parametrize(
+    ("unit_column", "formula", "unit_label", "time_fe"),
+    [
+        (
+            "unit",
+            'y ~ 1 + C(Q("unit")) + C(time) + treatment',
+            'C(Q("unit"))[T.u3]',
+            "time",
+        ),
+        (
+            "unit id",
+            'y ~ 1 + C(Q("unit id")) + treatment',
+            'C(Q("unit id"))[T.u3]',
+            None,
+        ),
+        (
+            "unit",
+            'y ~ 1 + C(Q("unit"), Treatment) + treatment',
+            'C(Q("unit"), Treatment)[T.u3]',
+            None,
+        ),
+    ],
+)
+def test_dummy_fe_absorbs_quoted_unit_factor(unit_column, formula, unit_label, time_fe):
+    """Q() unit factors are unit dummies, so a constant treatment stays at 0.
+
+    A bare-name matcher left these designs unabsorbed. Treatment and the
+    treated unit dummy were both 15.
+    """
+    data = _time_invariant_treatment_panel(unit_column)
+    with pytest.warns(UserWarning, match="within estimate of 0"):
+        result = cp.PanelRegression(
+            data,
+            formula=formula,
+            unit_fe_variable=unit_column,
+            time_fe_variable=time_fe,
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    coefs = _named_coefficients(result)
+    assert coefs["treatment"] == pytest.approx(0.0, abs=1e-8)
+    assert coefs[unit_label] == pytest.approx(30.0, abs=1e-8)
+
+
 def test_dummy_fe_keeps_within_varying_treatment_beside_time_invariant_covariate():
     """Only the collinear covariate is zeroed; a switching treatment stays identified."""
     rows = []
@@ -1160,6 +1222,76 @@ def test_dummy_fe_time_invariant_treatment_posterior_is_within_estimate(
     unit_effect = result.idata.posterior["beta"].sel(coeffs="C(unit)[T.u3]")
     assert float(unit_effect.mean()) == pytest.approx(30.0, abs=1.0)
     assert "beta_within" in result.model.named_vars
+
+
+@pytest.mark.parametrize(
+    ("beta_prior", "kept_prior"),
+    [
+        (
+            Prior(
+                "StudentT",
+                nu=4,
+                mu=0,
+                sigma=50,
+                dims=["treated_units", "coeffs"],
+            ),
+            "StudentT",
+        ),
+        (
+            Prior(
+                "Normal",
+                mu=Prior("Normal", mu=0, sigma=10),
+                sigma=Prior("HalfNormal", sigma=5),
+                dims=["treated_units", "coeffs"],
+            ),
+            "beta_within_mu",
+        ),
+    ],
+)
+def test_dummy_fe_any_beta_prior_treatment_is_within_estimate(
+    real_pymc_sampling,
+    beta_prior,
+    kept_prior,
+):
+    """Absorbed columns are a deterministic 0 for every beta prior.
+
+    A scalar-Normal pin warned that StudentT treatment was 0 while sampling a
+    free draw, and raised NotImplementedError for a hierarchical Normal.
+    Identified columns keep the supplied prior.
+    """
+    data = _time_invariant_treatment_panel()
+    with pytest.warns(UserWarning, match="within estimate of 0"):
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + treatment",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=cp.pymc_models.LinearRegression(
+                priors={"beta": beta_prior},
+                sample_kwargs={
+                    "draws": 50,
+                    "tune": 50,
+                    "chains": 1,
+                    "progressbar": False,
+                    "random_seed": 1,
+                },
+            ),
+        ).fit()
+
+    treatment = result.idata.posterior["beta"].sel(coeffs="treatment")
+    np.testing.assert_allclose(treatment.values, 0.0, atol=1e-8)
+    prior_treatment = result.idata.prior["beta"].sel(coeffs="treatment")
+    np.testing.assert_allclose(prior_treatment.values, 0.0, atol=1e-8)
+    unit_effect = result.idata.posterior["beta"].sel(coeffs="C(unit)[T.u3]")
+    assert float(unit_effect.mean()) == pytest.approx(30.0, abs=1.0)
+    intercept = result.idata.posterior["beta"].sel(coeffs="Intercept")
+    assert not np.allclose(intercept.values, 0.0)
+    if kept_prior == "StudentT":
+        within = result.model.named_vars["beta_within"]
+        assert within.owner is not None
+        assert "StudentT" in type(within.owner.op).__name__
+    else:
+        assert kept_prior in result.model.named_vars
 
 
 def _issue_panel_with_missing_outcome() -> pd.DataFrame:
