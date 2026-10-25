@@ -25,6 +25,120 @@ from causalpy.data import hdid
 from causalpy.data.simulate_data import generate_hdid_data
 
 
+@pytest.mark.parametrize("include_covariate_effects", [True, False])
+@pytest.mark.parametrize("include_region_effects", [True, False])
+def test_generate_hdid_data_flags_only_remove_selected_outcome_contributions(
+    include_covariate_effects, include_region_effects
+):
+    """Flags preserve sampled data and remove only the specified outcome terms."""
+    full_panel, params = generate_hdid_data(seed=42)
+    panel, _ = generate_hdid_data(
+        seed=42,
+        include_covariate_effects=include_covariate_effects,
+        include_region_effects=include_region_effects,
+    )
+    pd.testing.assert_frame_equal(
+        panel.drop(columns="purchase_amount"),
+        full_panel.drop(columns="purchase_amount"),
+    )
+
+    outcome = params["config"].outcome
+    removed = np.zeros(len(panel))
+    if not include_covariate_effects:
+        removed += (
+            outcome.age_weight * (panel.customer_age - outcome.age_center)
+            + outcome.tenure_weight * panel.customer_tenure
+            + outcome.history_weight
+            * (panel.pre_purchase_history - outcome.history_center)
+            + outcome.log_store_size_weight * np.log(panel.store_size)
+            + outcome.urban_weight * panel.urban
+        )
+    if not include_region_effects:
+        region = params["config"].region
+        effects = dict(zip(region.labels, region.effects, strict=True))
+        removed += panel.region.map(effects).astype(float).to_numpy()
+
+    # Both outcomes are rounded to cents, so their difference can differ from
+    # the unrounded contribution by up to one cent (plus float32 precision).
+    np.testing.assert_allclose(
+        full_panel.purchase_amount - panel.purchase_amount,
+        removed,
+        atol=0.011,
+        rtol=0,
+    )
+
+
+@pytest.mark.parametrize(
+    ("parameter", "value", "predictor"),
+    [
+        ("intercept", 82.0, None),
+        ("post_effect", 2.0, "post_treatment"),
+        ("trend_weight", 2.55, "month"),
+    ],
+)
+def test_generate_hdid_data_outcome_controls(parameter, value, predictor):
+    """Each numeric control changes only its corresponding outcome contribution."""
+    baseline, _ = generate_hdid_data(seed=42)
+    panel, _ = generate_hdid_data(seed=42, **{parameter: value})
+    pd.testing.assert_frame_equal(
+        panel.drop(columns="purchase_amount"),
+        baseline.drop(columns="purchase_amount"),
+    )
+    expected_change = 2.0 if predictor is None else 2.0 * panel[predictor]
+    np.testing.assert_allclose(
+        panel.purchase_amount - baseline.purchase_amount,
+        expected_change,
+        atol=0.011,
+        rtol=0,
+    )
+
+
+@pytest.mark.parametrize("seed", [42, 656, 20260296])
+def test_generate_hdid_data_reproduces_recovery_configuration(seed):
+    """The generation function reproduces the previously validated recovery DGP."""
+    config = hdid.Config(
+        seed=seed,
+        n_stores_total=200,
+        n_stores_treated=100,
+        n_months=4,
+        pre_months=2,
+        store=hdid.Store(units_min=5, units_max=5, units_parameters={"lam": 5.0}),
+        region=hdid.Region(effects=(0.0, 0.0, 0.0, 0.0)),
+        outcome=hdid.Outcome(
+            intercept=5.0,
+            post_effect=1.0,
+            trend_weight=0.0,
+            age_weight=0.0,
+            tenure_weight=0.0,
+            history_weight=0.0,
+            log_store_size_weight=0.0,
+            urban_weight=0.0,
+            store_intercept_parameters={"loc": 0.0, "scale": 1.3},
+            treatment_slope_parameters={"loc": 0.0, "scale": 1.5},
+            noise_parameters={"loc": 0.0, "scale": 2.0},
+        ),
+    )
+    expected = hdid.HDiDSimulator(config).simulate()
+    panel, _ = generate_hdid_data(
+        seed=seed,
+        n_stores_total=200,
+        n_stores_treated=100,
+        n_months=4,
+        pre_months=2,
+        units_min=5,
+        units_max=5,
+        units_lam=5.0,
+        sigma_noise=2.0,
+        sigma_treatment_slope=1.5,
+        intercept=5.0,
+        post_effect=1.0,
+        trend_weight=0.0,
+        include_covariate_effects=False,
+        include_region_effects=False,
+    )
+    pd.testing.assert_frame_equal(panel, expected)
+
+
 class TestHDiDSimulationParameterClasses:
     def test_store_sample_dispatches_configured_distribution(self):
         """Validate that Store.sample dispatches to the configured RNG distribution."""
@@ -185,6 +299,17 @@ class TestHDiDSimulator:
         assert params["n_stores"] == 4
         assert params["n_treated_stores"] == 2
         params["simulator"].validate_panel(panel)
+
+        original_config = hdid.Config(
+            seed=123,
+            n_stores_total=4,
+            n_stores_treated=2,
+            n_months=4,
+            pre_months=2,
+            store=hdid.Store(units_min=2, units_max=3, units_parameters={"lam": 2.0}),
+        )
+        expected = hdid.HDiDSimulator(original_config).simulate()
+        pd.testing.assert_frame_equal(panel, expected)
 
     def test_validate_config_rejects_invalid_time_window(self):
         """Validate that invalid pre/post time windows are rejected."""

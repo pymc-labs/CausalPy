@@ -17,6 +17,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
+import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -29,11 +30,101 @@ from causalpy.custom_exceptions import (
     FormulaException,
     GroupNotSampledException,
 )
+from causalpy.data.simulate_data import generate_hdid_data
 from causalpy.experiments import hierarchical_difference_in_differences as hdid_module
 from causalpy.experiments.hierarchical_difference_in_differences import (
     HierarchicalDifferenceInDifferences,
 )
 from causalpy.pymc_models import HierarchicalLinearRegression
+
+
+@pytest.mark.correctness
+@pytest.mark.parametrize("seed", [42, 656, 20260296])
+def test_hdid_recovers_variance_parameters_and_icc(seed, genuine_pymc_sampling):
+    """Recover generating parameters through the real simulator and HDID fit."""
+    data, _ = generate_hdid_data(
+        seed=seed,
+        n_stores_total=200,
+        n_stores_treated=100,
+        n_months=4,
+        pre_months=2,
+        units_min=5,
+        units_max=5,
+        units_lam=5.0,
+        sigma_store_intercept=1.3,
+        sigma_treatment_slope=1.5,
+        sigma_noise=2.0,
+        intercept=5.0,
+        post_effect=1.0,
+        trend_weight=0.0,
+        include_covariate_effects=False,
+        include_region_effects=False,
+    )
+    experiment = hdid_module.HierarchicalDifferenceInDifferences(
+        data,
+        "purchase_amount ~ 1 + post_treatment + treated + post_treatment:treated "
+        "+ (1 + post_treatment:treated | store_id)",
+        time_variable_name="month",
+        unit_variable_name="customer_id",
+        model=HierarchicalLinearRegression(
+            sample_kwargs={
+                "draws": 2000,
+                "tune": 2000,
+                "chains": 4,
+                "cores": 1,
+                "target_accept": 0.95,
+                "progressbar": False,
+                "random_seed": seed,
+            },
+            prior_sample_kwargs={"draws": 10, "random_seed": seed},
+        ),
+    ).fit()
+
+    posterior = experiment.idata.posterior
+    draws = {
+        term: posterior["beta_fixed"].sel(coeffs=term, drop=True).squeeze(drop=True)
+        for term in ["1", "post_treatment", "treated", "post_treatment:treated"]
+    }
+    draws.update(
+        {
+            "intercept_sd": posterior["sigma_random"]
+            .sel(random_coeffs="1|store_id", drop=True)
+            .squeeze(drop=True),
+            "response_sd": posterior["sigma_random"]
+            .sel(random_coeffs="post_treatment:treated|store_id", drop=True)
+            .squeeze(drop=True),
+            "noise_sd": posterior["sigma_fixed"].squeeze(drop=True),
+            "icc": experiment.result.icc.squeeze(drop=True),
+        }
+    )
+    # The population target uses the generating variances, not the empirical
+    # covariance of the particular store effects drawn for this dataset.
+    treated_post_fraction = (data["treated"] * data["post_treatment"]).mean()
+    random_variance = 1.3**2 + treated_post_fraction * 1.5**2
+    truth = {
+        "1": 5.0,
+        "post_treatment": 1.0,
+        "treated": 2.2,
+        "post_treatment:treated": 4.0,
+        "intercept_sd": 1.3,
+        "response_sd": 1.5,
+        "noise_sd": 2.0,
+        "icc": random_variance / (random_variance + 2.0**2),
+    }
+    summary = az.summary(xr.Dataset(draws), ci_kind="hdi", ci_prob=0.94)
+    print(summary.assign(truth=pd.Series(truth)).to_string())
+    assert int(experiment.idata.sample_stats["diverging"].sum()) == 0
+    assert summary["r_hat"].max() < 1.01
+    assert summary["ess_bulk"].min() > 400
+    assert summary["ess_tail"].min() > 400
+
+    # Sampling uncertainty varies across simulated datasets. Require both
+    # agreement within posterior uncertainty and informative absolute precision.
+    max_sd = pd.Series([0.4, 0.2, 0.5, 0.5, 0.25, 0.4, 0.1, 0.08], index=truth)
+    standardized_error = (summary["mean"] - pd.Series(truth)).abs() / summary["sd"]
+    assert (standardized_error < 3.5).all(), standardized_error
+    assert (summary["sd"] < max_sd).all(), summary["sd"]
+    assert abs(summary.loc["icc", "mean"] - truth["icc"]) < 0.1
 
 
 class _FixedPosteriorHDiDModel(HierarchicalLinearRegression):
