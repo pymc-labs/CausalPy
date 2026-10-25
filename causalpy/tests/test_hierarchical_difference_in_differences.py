@@ -13,25 +13,30 @@
 #   limitations under the License.
 """Tests for hierarchical difference in differences."""
 
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import pymc as pm
 import pytest
 import xarray as xr
-from arviz import InferenceData
 
-from causalpy.custom_exceptions import DataException, FormulaException
+from causalpy.custom_exceptions import (
+    DataException,
+    FormulaException,
+    GroupNotSampledException,
+)
 from causalpy.experiments import hierarchical_difference_in_differences as hdid_module
 from causalpy.experiments.hierarchical_difference_in_differences import (
     HierarchicalDifferenceInDifferences,
 )
-from causalpy.pymc_models import HierarchicalLinearRegression, PyMCModel
+from causalpy.pymc_models import HierarchicalLinearRegression
 
 
-class _FixedPosteriorHDiDModel(PyMCModel):
+class _FixedPosteriorHDiDModel(HierarchicalLinearRegression):
     """PyMCModel test double with deterministic hierarchical posterior draws."""
 
     def __init__(
@@ -45,8 +50,24 @@ class _FixedPosteriorHDiDModel(PyMCModel):
         self.beta_random = beta_random
         self.mu = mu
 
-    def fit(self, **kwargs: Any) -> None:  # type: ignore[override]
-        self.fit_kwargs = kwargs
+    def build(self, **kwargs: Any) -> None:
+        self.build_kwargs = kwargs
+        self._built = True
+
+    def sample_posterior(self, **kwargs: Any) -> xr.DataTree:
+        if self.idata is None:
+            self.idata = xr.DataTree()
+        self.idata["posterior"] = self._sample_draws()
+        return self.idata
+
+    def sample_prior_predictive(self, **kwargs: Any) -> xr.DataTree:
+        if self.idata is None:
+            self.idata = xr.DataTree()
+        self.idata["prior"] = self._sample_draws() + 1
+        return self.idata
+
+    def _sample_draws(self) -> xr.Dataset:
+        kwargs = self.build_kwargs
         beta_fixed = self.beta_fixed
         if beta_fixed is None:
             beta_fixed = np.zeros((1, 2, 1, len(kwargs["coords"]["coeffs"])))
@@ -101,7 +122,7 @@ class _FixedPosteriorHDiDModel(PyMCModel):
                 "obs_ind": kwargs["coords"]["obs_ind"],
             },
         )
-        self.idata = InferenceData(posterior=posterior)
+        return posterior
 
 
 class TestHierarchicalDifferenceInDifferencesInterface:
@@ -185,12 +206,13 @@ class TestHierarchicalDifferenceInDifferencesInterface:
     def _experiment(
         data: pd.DataFrame,
         *,
-        model: PyMCModel | None = None,
+        model: HierarchicalLinearRegression | None = None,
         non_centered: bool = True,
+        fit: bool = True,
     ) -> HierarchicalDifferenceInDifferences:
         if model is None:
             model = _FixedPosteriorHDiDModel()
-        return HierarchicalDifferenceInDifferences(
+        experiment = HierarchicalDifferenceInDifferences(
             data=data,
             formula=(
                 "y ~ 1 + post_treatment + treated + post_treatment:treated "
@@ -201,6 +223,7 @@ class TestHierarchicalDifferenceInDifferencesInterface:
             model=model,
             non_centered=non_centered,
         )
+        return experiment.fit() if fit else experiment
 
     def test_group_variable_is_inferred_from_random_effects_formula(
         self, monkeypatch: pytest.MonkeyPatch
@@ -246,8 +269,8 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         )
         expected = mean_random_variance / (mean_random_variance + sigma_fixed)
 
-        assert result.icc is not None
-        xr.testing.assert_allclose(result.icc, expected)
+        assert result.result.icc is not None
+        xr.testing.assert_allclose(result.result.icc, expected)
 
     @pytest.mark.parametrize("missing_variable", ["sigma_fixed", "sigma_random"])
     def test_posterior_data(
@@ -263,9 +286,7 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         assert idata is not None
         del idata.posterior[missing_variable]
 
-        result._compute_icc()
-
-        assert result.icc is None
+        assert result._compute_icc(idata.posterior.to_dataset()) is None
 
     def test_observation_random_variance_uses_full_covariance_matrix(self) -> None:
         """Validate that ICC variance includes random-effect covariance."""
@@ -401,8 +422,8 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         idata = result.idata
         assert idata is not None
         expected = idata.posterior["beta_fixed"].sel(coeffs=result.did_term)
-        xr.testing.assert_identical(result.att, expected)
-        xr.testing.assert_identical(result.causal_impact, expected)
+        xr.testing.assert_identical(result.result.causal_impact, expected)
+        xr.testing.assert_identical(result.result.causal_impact, expected)
 
     def test_group_effects_selects_random_effects_posterior(
         self, monkeypatch: pytest.MonkeyPatch
@@ -417,7 +438,7 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         idata = result.idata
         assert idata is not None
         expected = idata.posterior["beta_random"]
-        xr.testing.assert_identical(result.group_effects, expected)
+        xr.testing.assert_identical(result.result.group_effects, expected)
 
     def test_plot_group_effects_prepares_selected_forest_data(
         self, monkeypatch: pytest.MonkeyPatch
@@ -434,10 +455,10 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         recorded: dict[str, Any] = {}
 
         def mock_plot_forest(plot_data: xr.Dataset, **kwargs: Any) -> np.ndarray:
-            recorded["plot_data"] = plot_data
+            recorded["plot_data"] = plot_data.posterior.to_dataset()
             recorded["kwargs"] = kwargs
             _, ax = plt.subplots()
-            return np.array([ax])
+            return SimpleNamespace(get_viz=lambda *args, **kwargs: ax)
 
         monkeypatch.setattr(hdid_module.az, "plot_forest", mock_plot_forest)
 
@@ -450,7 +471,7 @@ class TestHierarchicalDifferenceInDifferencesInterface:
 
         plot_data = recorded["plot_data"]
         expected = (
-            result.group_effects.sel(random_coeffs=random_coeff, drop=True)
+            result.result.group_effects.sel(random_coeffs=random_coeff, drop=True)
             .squeeze("treated_units", drop=True)
             .rename("group_deviation")
         )
@@ -459,13 +480,12 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         assert plot_data.coords["groups"].values.tolist() == result.group_labels
         assert recorded["kwargs"]["var_names"] == ["group_deviation"]
         assert recorded["kwargs"]["combined"] is False
-        assert recorded["kwargs"]["hdi_prob"] == 0.8
-        assert recorded["kwargs"]["figsize"] == (8, 5.0)
-        assert isinstance(
-            recorded["kwargs"]["labeller"], hdid_module.az.labels.NoVarLabeller
-        )
+        assert recorded["kwargs"]["ci_probs"] == (0.5, 0.8)
+        assert recorded["kwargs"]["ci_kind"] == "hdi"
+        assert recorded["kwargs"]["figure_kwargs"]["figsize"] == (8, 5.0)
+        assert recorded["kwargs"]["labels"] == ["groups"]
         assert ax.get_xlabel() == "Deviation from population coefficient"
-        assert ax.get_title() == "Group-Level Deviations (80% HDI)"
+        assert ax.get_title() == "Posterior group deviations (80% HDI)"
         np.testing.assert_allclose(ax.lines[-1].get_xdata(), [0, 0])
         assert set(idata.posterior.data_vars) == posterior_vars
         plt.close(fig)
@@ -551,11 +571,14 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         idata = result.idata
         assert idata is not None
         if case == "missing-idata":
-            result.model.idata = None
+            result.model = _FixedPosteriorHDiDModel()
+            with pytest.raises(GroupNotSampledException):
+                result.get_plot_data()
+            return
         elif case == "missing-mu":
             del idata.posterior["mu"]
         elif case == "no-counterfactual":
-            result.y_pred_counterfactual = None
+            result._result = replace(result.result, y_pred_counterfactual=None)
         elif case == "dataarray-hdi":
             original_hdi = hdid_module.az.hdi
 
@@ -631,7 +654,7 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         )
 
         result = self._experiment(data, model=model)
-        assert result.y_pred_counterfactual is not None
+        assert result.result.y_pred_counterfactual is not None
         plot_data = result.get_plot_data()
         treated_post = plot_data["treated"].astype(bool) & plot_data[
             "post_treatment"
@@ -681,17 +704,17 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         if case.startswith("missing-"):
             del idata.posterior[missing_variable]
 
-        result._compute_counterfactual()
+        counterfactual = result._compute_counterfactual(idata.posterior.to_dataset())
 
         if case in {"missing-mu", "missing-beta-fixed"}:
-            assert result.y_pred_counterfactual is None
+            assert counterfactual is None
         else:
-            assert result.y_pred_counterfactual is not None
+            assert counterfactual is not None
             did_design = result.X.sel(coeffs=result.did_term)
             expected = idata.posterior["mu"] - (
                 idata.posterior["beta_fixed"].sel(coeffs=result.did_term) * did_design
             ).transpose(*idata.posterior["mu"].dims)
-            xr.testing.assert_allclose(result.y_pred_counterfactual, expected)
+            xr.testing.assert_allclose(counterfactual, expected)
 
     def test_public_plot_returns_figure_and_axis(
         self, monkeypatch: pytest.MonkeyPatch
@@ -722,7 +745,7 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         if case == "missing-mu":
             del idata.posterior["mu"]
         elif case == "no-counterfactual":
-            result.y_pred_counterfactual = None
+            result._result = replace(result.result, y_pred_counterfactual=None)
 
         fig, ax = result._plot()
 
@@ -743,7 +766,7 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         idata = result.idata
         assert idata is not None
         if case == "no-icc":
-            result.icc = None
+            result._result = replace(result.result, icc=None)
         elif case == "missing-sigma":
             del idata.posterior["sigma_fixed"]
         posterior_vars = set(idata.posterior.data_vars)
@@ -809,7 +832,7 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         idata = result.idata
         assert idata is not None
         if case == "missing-posterior":
-            idata.posterior = idata.posterior.drop_vars(
+            idata["posterior"] = idata.posterior.to_dataset().drop_vars(
                 ["sigma_fixed", "sigma_random", "beta_fixed", "beta_random"]
             )
         elif case == "no-random-att":
@@ -866,7 +889,7 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         } <= set(summary.table.columns)
         assert summary.text
 
-    def test_fit_model_delegates_to_hierarchical_regression(
+    def test_build_delegates_to_hierarchical_regression(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Validate that fitting delegates to hierarchical regression inputs."""
@@ -875,12 +898,12 @@ class TestHierarchicalDifferenceInDifferencesInterface:
         model = _FixedPosteriorHDiDModel()
         result = self._experiment(data, model=model, non_centered=False)
 
-        assert model.fit_kwargs["X"] is result.X
-        assert model.fit_kwargs["Z"] is result.Z
-        assert model.fit_kwargs["y"] is result.y
-        np.testing.assert_array_equal(model.fit_kwargs["group_idx"], result.group_idx)
-        assert model.fit_kwargs["coords"] is result.coords
-        assert model.fit_kwargs["non_centered"] is False
+        assert model.build_kwargs["X"] is result.X
+        assert model.build_kwargs["Z"] is result.Z
+        assert model.build_kwargs["y"] is result.y
+        np.testing.assert_array_equal(model.build_kwargs["group_idx"], result.group_idx)
+        assert model.build_kwargs["coords"] is result.coords
+        assert model.build_kwargs["non_centered"] is False
 
     @pytest.mark.integration
     def test_real_hierarchical_regression_backend_with_mocked_sampling(
@@ -905,6 +928,7 @@ class TestHierarchicalDifferenceInDifferencesInterface:
                 unit_variable_name="customer_id",
             )
 
+        result.fit(draws=4, tune=4, chains=1, progressbar=False, random_seed=42)
         assert isinstance(result.model, HierarchicalLinearRegression)
         warning_messages = [str(warning.message) for warning in warnings]
         assert any("fewer than 10" in message for message in warning_messages)
@@ -912,8 +936,8 @@ class TestHierarchicalDifferenceInDifferencesInterface:
             "fewer than 5 observations" in message for message in warning_messages
         )
         assert result.did_term == "post_treatment:treated"
-        assert result.y_pred_counterfactual is not None
-        assert result.causal_impact.dims == ("chain", "draw", "treated_units")
+        assert result.result.y_pred_counterfactual is not None
+        assert result.result.causal_impact.dims == ("chain", "draw", "treated_units")
         idata = result.idata
         assert idata is not None
         assert {
@@ -1099,3 +1123,174 @@ class TestHierarchicalDifferenceInDifferencesInterface:
 
         with pytest.raises(FormulaException, match=match):
             self._experiment(data)
+
+
+@pytest.fixture
+def unfitted_hdid():
+    """A small real hierarchical graph, with sampling controlled by each test."""
+    helpers = TestHierarchicalDifferenceInDifferencesInterface
+    return helpers._experiment(
+        helpers._panel_data(),
+        model=HierarchicalLinearRegression(
+            sample_kwargs={
+                "draws": 4,
+                "tune": 4,
+                "chains": 1,
+                "progressbar": False,
+                "random_seed": 42,
+            },
+            prior_sample_kwargs={"draws": 4, "random_seed": 42},
+        ),
+        fit=False,
+    )
+
+
+def test_hdid_construction_is_lazy_and_build_is_idempotent(unfitted_hdid):
+    experiment = unfitted_hdid
+    assert experiment.idata is None
+    assert not experiment.model.basic_RVs
+    assert not experiment.is_fitted
+    assert not experiment.has_prior_predictive
+    assert experiment.build() is experiment
+    variables = tuple(experiment.model.basic_RVs)
+    assert variables
+    assert experiment.build() is experiment
+    assert tuple(experiment.model.basic_RVs) == variables
+    assert experiment.idata is None
+
+
+@pytest.mark.parametrize(
+    "method_name",
+    [
+        "plot",
+        "get_plot_data",
+        "summary",
+        "effect_summary",
+        "plot_group_effects",
+        "plot_variance_components",
+    ],
+)
+@pytest.mark.parametrize("group", ["prior", "posterior"])
+def test_hdid_readers_require_the_requested_phase(unfitted_hdid, method_name, group):
+    with pytest.raises(GroupNotSampledException):
+        getattr(unfitted_hdid, method_name)(group=group)
+
+
+def test_hdid_sampling_phases_refit_and_model_replacement(
+    unfitted_hdid, mock_pymc_sample
+):
+    experiment = unfitted_hdid
+    assert experiment.sample_prior_predictive() is experiment
+    prior = experiment.prior_result
+    assert experiment.has_prior_predictive
+    assert not experiment.is_fitted
+    xr.testing.assert_identical(
+        prior.causal_impact,
+        experiment.model.require_group("prior")["beta_fixed"].sel(
+            coeffs=experiment.did_term
+        ),
+    )
+    assert "Prior predictive check" in experiment.effect_summary(group="prior").text
+    with pytest.raises(GroupNotSampledException):
+        experiment.effect_summary()
+    fig, ax = experiment.plot(group="prior", show=False)
+    assert "Prior population effect" in ax.get_title()
+    assert not any(text.get_text() == "Fitted treated\nsample gap" for text in ax.texts)
+    plt.close(fig)
+    assert "y_counterfactual" in experiment.get_plot_data(group="prior")
+
+    assert experiment.fit() is experiment
+    posterior = experiment.result
+    assert experiment.prior_result is prior
+    xr.testing.assert_identical(
+        posterior.causal_impact,
+        experiment.model.require_group("posterior")["beta_fixed"].sel(
+            coeffs=experiment.did_term
+        ),
+    )
+    experiment.sample_prior_predictive(draws=5)
+    assert experiment.result is posterior
+    refreshed_prior = experiment.prior_result
+    assert refreshed_prior is not prior
+    with pytest.warns(UserWarning, match="Refitting"):
+        experiment.fit()
+    assert experiment.result is not posterior
+    assert experiment.prior_result is refreshed_prior
+
+    experiment.model = HierarchicalLinearRegression()
+    assert not experiment.is_fitted
+    assert not experiment.has_prior_predictive
+    assert experiment.idata is None
+    with pytest.raises(GroupNotSampledException):
+        _ = experiment.result
+    with pytest.raises(GroupNotSampledException):
+        _ = experiment.prior_result
+
+
+@pytest.mark.parametrize("random_modifier", [False, True])
+def test_hdid_rejects_unsupported_treatment_modifiers(random_modifier):
+    data = TestHierarchicalDifferenceInDifferencesInterface._panel_data()
+    data["x"] = np.arange(len(data)) % 3
+    fixed = "y ~ 1 + post_treatment * treated + x"
+    random = "(post_treatment:treated | store_id)"
+    if random_modifier:
+        random = "(post_treatment:treated + post_treatment:treated:x | store_id)"
+    else:
+        fixed += " + post_treatment:treated:x"
+    with pytest.raises(FormulaException, match="treatment-effect modifiers"):
+        HierarchicalDifferenceInDifferences(
+            data, fixed + " + " + random, "month", "customer_id"
+        )
+
+
+@pytest.mark.parametrize("changed_input", ["Z", "group_idx", "non_centered"])
+def test_hlr_rebuild_checks_hierarchical_inputs(unfitted_hdid, changed_input):
+    experiment = unfitted_hdid.build()
+    kwargs = {
+        "X": experiment.X,
+        "Z": experiment.Z,
+        "y": experiment.y,
+        "group_idx": experiment.group_idx,
+        "coords": experiment.coords,
+        "non_centered": experiment.non_centered,
+    }
+    if changed_input == "Z":
+        kwargs["Z"] = experiment.Z + 1
+    elif changed_input == "group_idx":
+        kwargs["group_idx"] = experiment.group_idx[::-1]
+    else:
+        kwargs["non_centered"] = not experiment.non_centered
+    with pytest.raises(RuntimeError, match="different inputs"):
+        experiment.model.build(**kwargs)
+
+
+@pytest.mark.parametrize("method", ["predict", "score"])
+def test_hlr_rejects_prediction_before_changing_design(unfitted_hdid, method):
+    experiment = unfitted_hdid.build()
+    original = experiment.model["X"].get_value().copy()
+    args = [experiment.X.isel(obs_ind=slice(None, None, -1))]
+    if method == "score":
+        args.append(experiment.y)
+    with pytest.raises(
+        NotImplementedError, match="joint updates of X, Z and group_idx"
+    ):
+        getattr(experiment.model, method)(*args)
+    np.testing.assert_array_equal(experiment.model["X"].get_value(), original)
+
+
+@pytest.mark.parametrize("method", ["sample_prior_predictive", "fit"])
+def test_hlr_sampling_restores_hierarchical_training_data(
+    unfitted_hdid, mock_pymc_sample, method
+):
+    experiment = unfitted_hdid.build()
+    model = experiment.model
+    original = {
+        name: model[name].get_value().copy() for name in ("X", "Z", "y", "group_idx")
+    }
+    with model:
+        pm.set_data({name: np.zeros_like(value) for name, value in original.items()})
+
+    getattr(experiment, method)()
+
+    for name, value in original.items():
+        np.testing.assert_array_equal(model[name].get_value(), value)

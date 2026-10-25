@@ -14,7 +14,7 @@
 """Hierarchical difference in differences."""
 
 import warnings
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
 import arviz as az
 import matplotlib.pyplot as plt
@@ -22,15 +22,19 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from causalpy._arviz_compat import hdi
 from causalpy._formula import parse_formula
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import DataException, FormulaException
+from causalpy.experiments._results import HierarchicalDifferenceInDifferencesResult
 from causalpy.experiments.base import BaseExperiment
-from causalpy.pymc_models import HierarchicalLinearRegression, PyMCModel
+from causalpy.pymc_models import HierarchicalLinearRegression
 from causalpy.reporting import EffectSummary
 
 
-class HierarchicalDifferenceInDifferences(BaseExperiment):
+class HierarchicalDifferenceInDifferences(
+    BaseExperiment[HierarchicalDifferenceInDifferencesResult]
+):
     """Analyse hierarchical difference-in-differences designs.
 
     This Bayesian experiment class extends
@@ -65,22 +69,20 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
         Binary column identifying treated/control assignment.
     post_treatment_variable_name : str, default="post_treatment"
         Binary column identifying post-treatment periods.
-    model : PyMCModel, optional
+    model : HierarchicalLinearRegression, optional
         Bayesian model backend. Defaults to
         :class:`~causalpy.pymc_models.HierarchicalLinearRegression`.
     non_centered : bool, default=True
         Whether to use the non-centered hierarchical parameterization.
-    **kwargs
-        Additional keyword arguments accepted for API compatibility with other
-        experiment classes.
 
     Attributes
     ----------
-    causal_impact : xr.DataArray
-        Posterior samples for the population-average ATT.
-    icc : xr.DataArray or None
-        Posterior samples of the adjusted generalized intraclass correlation,
-        averaged over the observed random-effects design.
+    result : HierarchicalDifferenceInDifferencesResult
+        Posterior population effect, group deviations, counterfactual and ICC,
+        available after :meth:`fit`.
+    prior_result : HierarchicalDifferenceInDifferencesResult
+        The corresponding prior quantities, available after
+        :meth:`sample_prior_predictive`.
 
     Notes
     -----
@@ -91,7 +93,7 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
     shared transition from pre- to post-treatment periods.
 
     For MCMC diagnostics, use ArviZ directly on ``result.model.idata``, for
-    example :func:`arviz.plot_trace` or :func:`arviz.plot_ppc`.
+    example :func:`arviz.plot_trace` or :func:`arviz.plot_ppc_dist`.
     """
 
     supports_ols = False
@@ -107,9 +109,8 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
         *,
         treated_variable_name: str = "treated",
         post_treatment_variable_name: str = "post_treatment",
-        model: PyMCModel | None = None,
+        model: HierarchicalLinearRegression | None = None,
         non_centered: bool = True,
-        **kwargs: Any,
     ) -> None:
         self.expt_type = "Hierarchical Difference in Differences"
         self.formula = formula
@@ -121,17 +122,11 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
 
         self.data = data.copy()
         self.data.index.name = "obs_ind"
-        self.icc: xr.DataArray | None = None
-        self.y_pred_counterfactual: xr.DataArray | None = None
-
-        if model is None:
-            model = HierarchicalLinearRegression()
         super().__init__(model=model)
 
         self._build_design_matrices()
         self.input_validation()
         self._prepare_data()
-        self.algorithm()
 
     def _build_design_matrices(self) -> None:
         """Build mixed-model matrices from the formula."""
@@ -157,13 +152,43 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
             )
         return inferred_group_variable
 
-    def algorithm(self) -> None:
-        """Fit the model and compute derived posterior quantities."""
-        self._fit_model()
-        self._extract_att()
-        self._extract_group_effects()
-        self._compute_counterfactual()
-        self._compute_icc()
+    def build(self) -> Self:
+        """Build the hierarchical graph without sampling.
+
+        Returns
+        -------
+        Self
+            The same experiment, for chaining.
+        """
+        model = self.model
+        if not isinstance(model, HierarchicalLinearRegression):
+            raise TypeError("HDID requires a HierarchicalLinearRegression model.")
+        model.build(
+            X=self.X,
+            Z=self.Z,
+            y=self.y,
+            group_idx=self.group_idx,
+            coords=self.coords,
+            non_centered=self.non_centered,
+        )
+        return self
+
+    def _draws(self, group: Literal["prior", "posterior"]) -> xr.Dataset:
+        """Read a sampling phase as a dataset for the effect calculations."""
+        return self._model_backend.require_idata().children[group].to_dataset()
+
+    def _finalize(self, group: Literal["prior", "posterior"]) -> None:
+        """Publish one complete result bundle for the sampled phase."""
+        draws = self._draws(group)
+        self._assign_bundle(
+            group,
+            HierarchicalDifferenceInDifferencesResult(
+                causal_impact=draws["beta_fixed"].sel(coeffs=self.did_term),
+                group_effects=draws["beta_random"],
+                y_pred_counterfactual=self._compute_counterfactual(draws),
+                icc=self._compute_icc(draws),
+            ),
+        )
 
     def input_validation(self) -> None:
         """Validate panel structure, treatment timing, and model matrices."""
@@ -406,6 +431,17 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
             f"{self.post_treatment_variable_name}:{self.treated_variable_name}",
             f"{self.treated_variable_name}:{self.post_treatment_variable_name}",
         }
+        for label in self.labels + self.random_effect_labels:
+            term = label.split("|", maxsplit=1)[0]
+            factors = set(term.split(":"))
+            if {
+                self.post_treatment_variable_name,
+                self.treated_variable_name,
+            } <= factors and term not in candidate_pairs:
+                raise FormulaException(
+                    "HDID does not support treatment-effect modifiers beyond the "
+                    f"two-way DiD interaction. Unsupported term: {label!r}."
+                )
         matches = [label for label in self.labels if label in candidate_pairs]
         if len(matches) != 1:
             raise FormulaException(
@@ -414,31 +450,7 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
             )
         return matches[0]
 
-    def _fit_model(self) -> None:
-        """Fit the hierarchical regression backend."""
-        self.model.fit(  # type: ignore[call-arg]
-            X=self.X,
-            Z=self.Z,
-            y=self.y,
-            group_idx=self.group_idx,
-            coords=self.coords,
-            non_centered=self.non_centered,
-        )
-
-    def _extract_att(self) -> None:
-        """Extract posterior samples for the population-average ATT coefficient."""
-        did_idx = self.labels.index(self.did_term)
-        posterior = self._model_backend.require_idata().posterior
-        self.att = posterior["beta_fixed"].sel(coeffs=self.did_term)
-        self.causal_impact = self.att
-        self._did_term_index = did_idx
-
-    def _extract_group_effects(self) -> None:
-        """Extract posterior samples for group-level random-effect deviations."""
-        posterior = self._model_backend.require_idata().posterior
-        self.group_effects = posterior["beta_random"]
-
-    def _compute_icc(self) -> None:
+    def _compute_icc(self, posterior: xr.Dataset) -> xr.DataArray | None:
         r"""Compute the adjusted generalized intraclass correlation.
 
         Random slopes make the random-effect variance depend on the observed
@@ -476,21 +488,19 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
            and expanded. *Journal of the Royal Society Interface*, 14(134),
            20170213. https://doi.org/10.1098/rsif.2017.0213
         """
-        posterior = self._model_backend.require_idata().posterior
         required = {"sigma_random", "sigma_fixed"}
         if required.difference(posterior.data_vars):
-            self.icc = None
-            return
+            return None
 
-        random_effect_covariance = self._random_effect_covariance()
+        random_effect_covariance = self._random_effect_covariance(posterior)
         residual_variance = posterior["sigma_fixed"] ** 2
         observation_random_variance = self._observation_random_variance(
             self.Z, random_effect_covariance
         )
         mean_random_variance = observation_random_variance.mean("obs_ind")
-        self.icc = mean_random_variance / (mean_random_variance + residual_variance)
+        return mean_random_variance / (mean_random_variance + residual_variance)
 
-    def _random_effect_covariance(self) -> xr.DataArray:
+    def _random_effect_covariance(self, posterior: xr.Dataset) -> xr.DataArray:
         """Build the posterior random-effects covariance matrix.
 
         The current hierarchical regression backend estimates independent
@@ -500,7 +510,6 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
         row_dim = "random_coeffs_row"
         column_dim = "random_coeffs_column"
         labels = self.random_effect_labels
-        posterior = self._model_backend.require_idata().posterior
         identity = xr.DataArray(
             np.eye(len(labels)),
             dims=(row_dim, column_dim),
@@ -532,10 +541,7 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
         samples: xr.DataArray, hdi_prob: float = HDI_PROB
     ) -> xr.DataArray:
         """Return ArviZ HDI output as a data array."""
-        hdi = az.hdi(samples, hdi_prob=hdi_prob)
-        if isinstance(hdi, xr.Dataset):
-            return next(iter(hdi.data_vars.values()))
-        return hdi
+        return hdi(samples, prob=hdi_prob)
 
     @classmethod
     def _scalar_hdi_bounds(
@@ -547,18 +553,16 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
         upper = float(np.asarray(hdi_data.sel(hdi="higher")).reshape(()))
         return lower, upper
 
-    def _compute_counterfactual(self) -> None:
+    def _compute_counterfactual(self, posterior: xr.Dataset) -> xr.DataArray | None:
         """Compute counterfactual predictions for the treated outcome.
 
         The counterfactual removes the fixed DiD interaction and any matching
         group-level random DiD slope from the posterior fitted outcomes. The
-        resulting posterior samples are stored on ``y_pred_counterfactual``.
+        resulting samples belong to the requested phase's result bundle.
         """
-        posterior = self._model_backend.require_idata().posterior
         required = {"mu", "beta_fixed"}
         if required.difference(posterior.data_vars):
-            self.y_pred_counterfactual = None
-            return
+            return None
 
         mu = posterior["mu"]
         fixed_att = posterior["beta_fixed"].sel(coeffs=self.did_term)
@@ -582,7 +586,7 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
                 *mu.dims
             )
 
-        self.y_pred_counterfactual = mu - did_contribution
+        return mu - did_contribution
 
     def _did_random_effect_labels(self) -> list[str]:
         """Return random-effect labels corresponding to the DiD interaction."""
@@ -638,9 +642,12 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
             )
         return pd.DataFrame(rows).sort_values(self.time_variable_name)
 
-    def _variance_components_posterior(self) -> xr.Dataset | None:
-        """Return posterior draws for variance components and ICC."""
-        posterior = self._model_backend.require_idata().posterior
+    def _variance_components_posterior(
+        self, group: Literal["prior", "posterior"] = "posterior"
+    ) -> xr.Dataset | None:
+        """Return the requested draws for variance components and ICC."""
+        bundle = self._require_bundle(group)
+        posterior = self._draws(group)
         required = {"sigma_random", "sigma_fixed"}
         if required.difference(posterior.data_vars):
             return None
@@ -651,23 +658,26 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
                 "residual_variance": posterior["sigma_fixed"] ** 2,
             }
         )
-        if self.icc is not None:
-            components["icc"] = self.icc
+        if bundle.icc is not None:
+            components["icc"] = bundle.icc
         return components
 
     def plot_group_effects(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         random_coeff: str | None = None,
         hdi_prob: float = HDI_PROB,
         combined: bool = True,
         show: bool = True,
         **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Plot posterior random-effects group deviations.
+        """Plot random-effects group deviations from the requested sampling phase.
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Sampling phase to display; the corresponding phase must have run.
         random_coeff : str, optional
             Random-effect coefficient to plot. If omitted, all random-effect
             coefficients are shown.
@@ -680,8 +690,6 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
             ``True``.
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
-        **kwargs
-            Additional keyword arguments forwarded to :func:`arviz.plot_forest`.
 
         Returns
         -------
@@ -689,6 +697,12 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
             The figure that was created.
         ax : matplotlib.axes.Axes
             Axes containing the forest plot.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Additional keyword arguments forwarded to :func:`arviz.plot_forest`.
+            This is a third-party forwarder for ArviZ figure and label configuration.
 
         Notes
         -----
@@ -699,7 +713,8 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
         model-implied values rather than separately identified treatment-response
         deviations.
         """
-        posterior = self._model_backend.require_idata().posterior
+        bundle = self._require_bundle(group)
+        posterior = self._draws(group)
         if "beta_random" not in posterior:
             raise ValueError(
                 "Posterior does not contain beta_random random-effects group deviations."
@@ -707,7 +722,7 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
         if not 0 < hdi_prob < 1:
             raise ValueError("hdi_prob must be in (0, 1).")
 
-        group_effects = self.group_effects
+        group_effects = bundle.group_effects
         if random_coeff is not None:
             available_coeffs = group_effects.coords["random_coeffs"].values.tolist()
             if random_coeff not in available_coeffs:
@@ -723,21 +738,27 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
         plot_data = group_effects.rename("group_deviation").to_dataset()
         plot_dims = set(group_effects.dims).difference({"chain", "draw"})
         n_rows = int(np.prod([group_effects.sizes[dim] for dim in plot_dims]))
-        kwargs.setdefault("labeller", az.labels.NoVarLabeller())
-        kwargs.setdefault("figsize", (8, max(4, 0.4 * n_rows + 1)))
+        kwargs.setdefault(
+            "labels",
+            [dim for dim in group_effects.dims if dim not in ("chain", "draw")],
+        )
+        kwargs.setdefault("figure_kwargs", {"figsize": (8, max(4, 0.4 * n_rows + 1))})
 
-        axes = az.plot_forest(
-            plot_data,
+        forest = az.plot_forest(
+            xr.DataTree.from_dict({group: plot_data}),
             var_names=["group_deviation"],
+            group=group,
+            backend="matplotlib",
             combined=combined,
-            hdi_prob=hdi_prob,
+            ci_kind="hdi",
+            ci_probs=(0.5 if hdi_prob > 0.5 else hdi_prob / 2, hdi_prob),
             **kwargs,
         )
-        ax = axes.ravel()[0] if hasattr(axes, "ravel") else axes[0]
+        ax = forest.get_viz("plot", sel={"column": "forest"})
         fig = ax.figure
         ax.axvline(0, color="black", linestyle="--", linewidth=0.8)
         ax.set_xlabel("Deviation from population coefficient")
-        ax.set_title(f"Group-Level Deviations ({hdi_prob:.0%} HDI)")
+        ax.set_title(f"{group.title()} group deviations ({hdi_prob:.0%} HDI)")
         fig.tight_layout()
         if show:
             plt.show()
@@ -746,23 +767,23 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
     def plot_variance_components(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         hdi_prob: float = HDI_PROB,
         show: bool = True,
         **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Plot posterior distributions for hierarchical variance components.
+        """Plot hierarchical variance components from the requested sampling phase.
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Sampling phase to display; the corresponding phase must have run.
         hdi_prob : float
             Probability mass of the highest density interval. Must be in
             ``(0, 1)``. Defaults to :data:`~causalpy.constants.HDI_PROB`
             (currently 0.94).
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
-        **kwargs
-            Additional keyword arguments forwarded to
-            :func:`arviz.plot_posterior`.
 
         Returns
         -------
@@ -770,40 +791,57 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
             The figure that was created.
         ax : matplotlib.axes.Axes
             First axes returned by ArviZ.
+
+        Other Parameters
+        ----------------
+        **kwargs
+            Additional keyword arguments forwarded to :func:`arviz.plot_dist`.
+            This is a third-party forwarder for ArviZ figure and label configuration.
         """
         if not 0 < hdi_prob < 1:
             raise ValueError("hdi_prob must be in (0, 1).")
 
-        components = self._variance_components_posterior()
+        components = self._variance_components_posterior(group)
         if components is None:
             raise ValueError(
                 "Posterior is missing variance component variables: "
                 "['sigma_fixed', 'sigma_random']."
             )
-        idata = az.InferenceData(posterior=components)
+        idata = xr.DataTree.from_dict({group: components})
 
-        axes = az.plot_posterior(
+        plots = az.plot_dist(
             idata,
             var_names=list(components.data_vars),
-            hdi_prob=hdi_prob,
+            group=group,
+            backend="matplotlib",
+            ci_kind="hdi",
+            ci_prob=hdi_prob,
             **kwargs,
         )
-        ax = axes.ravel()[0] if hasattr(axes, "ravel") else axes
-        fig = ax.figure
+        fig = plots.get_viz("figure")
+        ax = fig.axes[0]
         fig.suptitle("Hierarchical DiD Variance Components")
         if show:
             plt.show()
         return fig, ax
 
-    def summary(self, round_to: int | None = 2) -> None:
+    def summary(
+        self,
+        round_to: int | None = 2,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+    ) -> None:
         """Print a summary of the hierarchical DiD results.
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Sampling phase to read; the corresponding phase must have run.
         round_to : int, optional
             Number of decimals used to round results. Defaults to 2. Use
             ``None`` to return raw numbers.
         """
+        self._require_bundle(group)
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
         print(f"Outcome: {self.outcome_variable_name}")
@@ -819,18 +857,18 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
         print(f"Fixed effects: {len(self.labels)}")
         print(f"Random effects: {len(self.random_effect_labels)}")
         print("\nResults:")
-        print(self._causal_impact_summary_stat(round_to))
-        variance_components = self._variance_components_summary(round_to)
+        print(self._causal_impact_summary_stat(round_to, group=group))
+        variance_components = self._variance_components_summary(round_to, group=group)
         if variance_components is not None:
             print("\nVariance components:")
             print(variance_components.to_string())
 
-        fixed_effects = self._fixed_effects_summary(round_to)
+        fixed_effects = self._fixed_effects_summary(round_to, group=group)
         if fixed_effects is not None:
             print("\nFixed effects:")
             print(fixed_effects.to_string())
 
-        random_att = self._random_att_summary(round_to)
+        random_att = self._random_att_summary(round_to, group=group)
         if random_att is not None:
             print("\nGroup-level ATT deviations:")
             print(random_att.to_string())
@@ -841,27 +879,39 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
         var_names: list[str],
         round_to: int | None = 2,
         coords: dict[str, list[str]] | None = None,
+        group: Literal["prior", "posterior"] = "posterior",
     ) -> pd.DataFrame | None:
         """Return an ArviZ summary table for selected posterior variables."""
-        idata = self._model_backend.require_idata()
-        missing_vars = set(var_names).difference(idata.posterior.data_vars)
+        self._require_bundle(group)
+        draws = self._draws(group)
+        missing_vars = set(var_names).difference(draws.data_vars)
         if missing_vars:
             return None
 
-        summary = az.summary(idata, var_names=var_names, coords=coords)
-        columns = [
-            column
-            for column in ["mean", "sd", "hdi_3%", "hdi_97%"]
-            if column in summary.columns
-        ]
+        summary = az.summary(
+            draws, var_names=var_names, coords=coords, ci_kind="hdi", ci_prob=HDI_PROB
+        )
+        columns = ["mean", "sd", "hdi94_lb", "hdi94_ub"]
         table = summary[columns].copy()
         return table.round(round_to) if round_to is not None else table
 
-    def _fixed_effects_summary(self, round_to: int | None = 2) -> pd.DataFrame | None:
+    def _fixed_effects_summary(
+        self,
+        round_to: int | None = 2,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+    ) -> pd.DataFrame | None:
         """Return posterior summaries for population-level coefficients."""
-        return self._posterior_summary(var_names=["beta_fixed"], round_to=round_to)
+        return self._posterior_summary(
+            var_names=["beta_fixed"], round_to=round_to, group=group
+        )
 
-    def _random_att_summary(self, round_to: int | None = 2) -> pd.DataFrame | None:
+    def _random_att_summary(
+        self,
+        round_to: int | None = 2,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+    ) -> pd.DataFrame | None:
         """Return posterior summaries for group-level ATT deviations."""
         random_att_labels = self._did_random_effect_labels()
         if not random_att_labels:
@@ -870,42 +920,52 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
             var_names=["beta_random"],
             coords={"random_coeffs": random_att_labels},
             round_to=round_to,
+            group=group,
         )
 
     def _variance_components_summary(
-        self, round_to: int | None = 2
+        self,
+        round_to: int | None = 2,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
     ) -> pd.DataFrame | None:
         """Return summaries for random-effect variance, residual variance, and ICC."""
-        components = self._variance_components_posterior()
+        components = self._variance_components_posterior(group)
         if components is None:
             return None
 
         summary = az.summary(
-            az.InferenceData(posterior=components),
+            components,
             var_names=list(components.data_vars),
+            ci_kind="hdi",
+            ci_prob=HDI_PROB,
         )
-        columns = [
-            column
-            for column in ["mean", "sd", "hdi_3%", "hdi_97%"]
-            if column in summary.columns
-        ]
+        columns = ["mean", "sd", "hdi94_lb", "hdi94_ub"]
         table = summary[columns].copy()
 
         return table.round(round_to) if round_to is not None else table
 
-    def _causal_impact_summary_stat(self, round_to: int | None = None) -> str:
+    def _causal_impact_summary_stat(
+        self,
+        round_to: int | None = None,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+    ) -> str:
         """Return a compact ATT summary string."""
-        att_mean = float(self.causal_impact.mean())
-        lower, upper = self._scalar_hdi_bounds(self.causal_impact, hdi_prob=HDI_PROB)
+        effect = self._require_bundle(group).causal_impact
+        att_mean = float(effect.mean())
+        lower, upper = self._scalar_hdi_bounds(effect, hdi_prob=HDI_PROB)
         if round_to is not None:
             att_mean = round(att_mean, round_to)
             lower = round(lower, round_to)
             upper = round(upper, round_to)
-        return f"Causal impact = {att_mean} ({HDI_PROB:.0%} HDI [{lower}, {upper}])"
+        label = "Prior population effect" if group == "prior" else "Population ATT"
+        return f"{label} = {att_mean} ({HDI_PROB:.0%} HDI [{lower}, {upper}])"
 
     def plot(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         round_to: int | None = 2,
         hdi_prob: float = HDI_PROB,
         figsize: tuple[float, float] | None = None,
@@ -916,6 +976,8 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Sampling phase to read; the corresponding phase must have run.
         round_to : int, optional
             Number of decimals used to round numerical results in the figure
             title. Defaults to 2. Use ``None`` to return raw numbers.
@@ -941,6 +1003,7 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
             The axes object containing the plot.
         """
         return self._render_plot(
+            group=group,
             show=show,
             legend_kwargs=legend_kwargs,
             round_to=round_to,
@@ -950,6 +1013,8 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
 
     def _plot(
         self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
         round_to: int | None = 2,
         hdi_prob: float = HDI_PROB,
         figsize: tuple[float, float] | None = None,
@@ -958,7 +1023,8 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
         """Plot observed, fitted, and counterfactual outcome trends."""
         if not 0 < hdi_prob < 1:
             raise ValueError("hdi_prob must be in (0, 1).")
-        posterior = self._model_backend.require_idata().posterior
+        bundle = self._require_bundle(group)
+        posterior = self._draws(group)
 
         trend = self.data.groupby(
             [self.time_variable_name, self.treated_variable_name], observed=True
@@ -1005,7 +1071,7 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
                     linewidth=0,
                 )
 
-            counterfactual = self.y_pred_counterfactual
+            counterfactual = bundle.y_pred_counterfactual
             if counterfactual is not None:
                 counterfactual_summary = self._posterior_trend_summary(
                     counterfactual,
@@ -1027,15 +1093,16 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
                     alpha=0.2,
                     linewidth=0,
                 )
-                self._plot_causal_impact_arrow(
-                    ax,
-                    treated_summary=self._posterior_trend_summary(
-                        posterior["mu"],
-                        treated_value=1,
-                        hdi_prob=hdi_prob,
-                    ),
-                    counterfactual_summary=counterfactual_summary,
-                )
+                if group == "posterior":
+                    self._plot_causal_impact_arrow(
+                        ax,
+                        treated_summary=self._posterior_trend_summary(
+                            posterior["mu"],
+                            treated_value=1,
+                            hdi_prob=hdi_prob,
+                        ),
+                        counterfactual_summary=counterfactual_summary,
+                    )
 
         post_times = self.data.loc[
             self.data[self.post_treatment_variable_name].astype(bool),
@@ -1050,7 +1117,7 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
             label="Treatment start",
         )
 
-        ax.set_title(self._causal_impact_summary_stat(round_to))
+        ax.set_title(self._causal_impact_summary_stat(round_to, group=group))
         ax.set_xlabel(self.time_variable_name)
         ax.set_ylabel(self.outcome_variable_name)
         ax.legend(fontsize=LEGEND_FONT_SIZE)
@@ -1084,7 +1151,7 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
             arrowprops={"arrowstyle": "<-", "color": "green", "lw": 2},
         )
         ax.annotate(
-            "causal\nimpact",
+            "Fitted treated\nsample gap",
             xy=(time_value, np.mean([counterfactual_mean, treated_mean])),
             xytext=(5, 0),
             textcoords="offset points",
@@ -1092,23 +1159,27 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
             va="center",
         )
 
-    def get_plot_data(self, hdi_prob: float = HDI_PROB, **kwargs: Any) -> pd.DataFrame:
-        """Return observed data plus fitted posterior summaries when available.
+    def get_plot_data(
+        self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+        hdi_prob: float = HDI_PROB,
+    ) -> pd.DataFrame:
+        """Return observed data and fitted summaries for the requested sampling phase.
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Sampling phase to read; the corresponding phase must have run.
         hdi_prob : float
             Probability mass of the highest density interval. Must be in
             ``(0, 1)``. Defaults to :data:`~causalpy.constants.HDI_PROB`
             (currently 0.94).
-        **kwargs
-            Reserved for forward-compatibility; not consumed by this
-            implementation.
 
         Returns
         -------
         pd.DataFrame
-            Copy of the experiment data with posterior fitted outcome summaries.
+            Copy of the experiment data with fitted outcome summaries.
             If available, counterfactual summaries are included as ``y_counterfactual``,
             ``y_counterfactual_lower``, and ``y_counterfactual_upper``.
         """
@@ -1116,16 +1187,17 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
             raise ValueError("hdi_prob must be in (0, 1).")
 
         plot_data = self.data.copy().reset_index(drop=True)
-        idata = self.idata
-        if idata is not None and "mu" in idata.posterior:
-            mu = idata.posterior["mu"]
+        bundle = self._require_bundle(group)
+        draws = self._draws(group)
+        if "mu" in draws:
+            mu = draws["mu"]
             self._append_posterior_columns(
                 plot_data,
                 prefix="y_fitted",
                 samples=mu,
                 hdi_prob=hdi_prob,
             )
-            counterfactual = self.y_pred_counterfactual
+            counterfactual = bundle.y_pred_counterfactual
             if counterfactual is not None:
                 self._append_posterior_columns(
                     plot_data,
@@ -1138,10 +1210,10 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
     def effect_summary(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
         alpha: float = 0.05,
         min_effect: float | None = None,
-        **kwargs: Any,
     ) -> EffectSummary:
         """Generate a decision-ready summary of the HDiD ATT.
 
@@ -1150,6 +1222,8 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Sampling phase to read; the corresponding phase must have run.
         direction : {"increase", "decrease", "two-sided"}, default="increase"
             Direction for tail probability calculation.
         alpha : float, default=0.05
@@ -1157,9 +1231,6 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
             is ``1 - alpha``.
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold.
-        **kwargs
-            Reserved for forward-compatibility; not consumed by this
-            implementation.
 
         Returns
         -------
@@ -1169,7 +1240,8 @@ class HierarchicalDifferenceInDifferences(BaseExperiment):
         from causalpy.reporting import _effect_summary_did
 
         return _effect_summary_did(
-            self,
+            self._require_bundle(group),
+            group=group,
             direction=direction,
             alpha=alpha,
             min_effect=min_effect,
