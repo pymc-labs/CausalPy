@@ -15,6 +15,8 @@
 Tests for Panel Regression with Fixed Effects
 """
 
+import warnings
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -1503,3 +1505,118 @@ def test_dummy_fe_duplicate_index_pymc_treatment_is_within_estimate(
     np.testing.assert_allclose(prior_treatment.values, 0.0, atol=1e-8)
     unit_effect = result.idata.posterior["beta"].sel(coeffs="C(unit)[T.u3]")
     assert float(unit_effect.mean()) == pytest.approx(30.0, abs=1.0)
+
+
+def _large_magnitude_within_change_panel() -> pd.DataFrame:
+    """One row differs by 0.5 at magnitude 1e8; the within coefficient is 20."""
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            x = 1e8
+            y = 0.0
+            if unit == 3 and time == 4:
+                x = 1e8 + 0.5
+                y = 10.0
+            rows.append({"unit": f"u{unit}", "time": time, "x": x, "y": y})
+    return pd.DataFrame(rows)
+
+
+def test_within_unit_variation_ignores_only_float_noise():
+    """A few ulps are float noise. A 0.5 change at magnitude 1e8 is not."""
+    units = np.array(["u0", "u0", "u0"])
+    level = np.float64(1e8)
+    spacing = np.spacing(level)
+    varies = cp.PanelRegression._column_varies_within_unit
+    assert not varies(np.array([level, level, level]), units)
+    assert not varies(np.array([level, level, level + 2 * spacing]), units)
+    assert varies(np.array([level, level, level + 1000 * spacing]), units)
+    assert varies(np.array([level, level, level + 0.5]), units)
+
+
+def test_dummy_fe_large_magnitude_within_change_matches_within_estimator():
+    """Dummy FE must report the within coefficient when the raw column is a unit level.
+
+    A relative 1e-8 cutoff absorbs a 0.5 change at magnitude 1e8 and warns that
+    the within estimate is 0. Leaving the raw column in the design is not enough:
+    float64 least squares then drops the within direction and reports about 0.
+    """
+    data = _large_magnitude_within_change_panel()
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        dummies = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + x",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    demeaned = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + x",
+        unit_fe_variable="unit",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    ).fit()
+    assert _named_coefficients(dummies)["x"] == pytest.approx(20.0, abs=1e-6)
+    assert _named_coefficients(demeaned)["x"] == pytest.approx(20.0, abs=1e-6)
+    assert dummies._absorbed_covariate_labels == ()
+    stored = dummies.design["X"].sel(coeffs="x").to_numpy()
+    assert np.ptp(stored) < 1.0
+
+
+def test_dummy_fe_does_not_recenter_a_well_scaled_within_column():
+    """A well-scaled within change stays on the raw column."""
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            treatment = float(time >= 2)
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": treatment,
+                    "y": 3.0 * treatment + unit,
+                }
+            )
+    result = cp.PanelRegression(
+        pd.DataFrame(rows),
+        formula="y ~ 1 + C(unit) + treatment",
+        unit_fe_variable="unit",
+        fe_method="dummies",
+        model=LinearRegression(),
+    ).fit()
+    stored = result.design["X"].sel(coeffs="treatment").to_numpy()
+    assert set(np.unique(np.round(stored, 10))) == {0.0, 1.0}
+    assert _named_coefficients(result)["treatment"] == pytest.approx(3.0, abs=1e-8)
+
+
+def test_dummy_fe_large_magnitude_within_change_keeps_supplied_prior(
+    real_pymc_sampling,
+):
+    """A within-varying column keeps its prior; the posterior is the within estimate."""
+    data = _large_magnitude_within_change_panel()
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + x",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=cp.pymc_models.LinearRegression(
+                sample_kwargs={
+                    "draws": 50,
+                    "tune": 50,
+                    "chains": 1,
+                    "progressbar": False,
+                    "random_seed": 1,
+                }
+            ),
+        ).fit()
+    priors = result.model._user_priors or {}
+    assert type(priors.get("beta")).__name__ != "WithinBetaPrior"
+    assert "beta_within" not in result.model.named_vars
+    prior = result.idata.prior["beta"].sel(coeffs="x")
+    assert not np.allclose(prior.values, 0.0)
+    posterior = result.idata.posterior["beta"].sel(coeffs="x")
+    assert float(posterior.mean()) == pytest.approx(20.0, abs=5.0)
+    assert not np.allclose(posterior.values, 0.0)

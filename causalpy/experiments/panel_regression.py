@@ -140,13 +140,18 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     confounders but also drops time-invariant covariates from the model. A
     covariate with no within-unit variation is collinear with dummy-variable
     unit fixed effects. That coefficient is reported as 0, matching the within
-    estimator, and the unit effects absorb the level. The check uses the rows
-    the formula retains, in design order, and does not require a unique frame
-    index. That coefficient is not left as an unidentified prior. For the
-    ``"dummies"`` approach (unpooled FE), individual unit effects can be
-    extracted from the coefficients. For the demeaned approach, unit effects
-    can be recovered post-hoc using the stored group means (``_group_means``),
-    which are always computed from the original (pre-demeaning) data.
+    estimator, and the unit effects absorb the level. Only an exact duplicate,
+    or a within-unit change of a few float64 ulps, counts as no variation. A
+    change that is small relative to the column magnitude is still within
+    variation. If the raw column is numerically a unit level, it is stored as
+    its within deviation so least squares reports that coefficient instead of
+    dropping it. The check uses the rows the formula retains, in design order,
+    and does not require a unique frame index. That coefficient is not left as
+    an unidentified prior. For the ``"dummies"`` approach (unpooled FE),
+    individual unit effects can be extracted from the coefficients. For the
+    demeaned approach, unit effects can be recovered post-hoc using the stored
+    group means (``_group_means``), which are always computed from the original
+    (pre-demeaning) data.
 
     This class does not yet implement hierarchical/partial-pooling fixed
     effects. Those semantics are intentionally kept out of scope here so
@@ -398,6 +403,12 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         minimum-norm solve splits the unit level into that covariate. The within
         estimator drops the covariate, so the reported coefficient is 0 and the
         unit dummies keep the level.
+
+        A within-varying column can still be numerically a unit level. A change
+        of 0.5 at magnitude 1e8 is real variation, but float64 least squares
+        drops that direction. The column is stored as its within deviation so
+        the reported coefficient is the within estimate. The supplied prior is
+        left in place.
         """
         self._absorbed_covariate_labels = ()
         if self.fe_method != "dummies":
@@ -416,22 +427,63 @@ class PanelRegression(BaseExperiment[ResultBundle]):
             if label not in protected
             and not self._column_varies_within_unit(self._X_raw[:, index], units)
         ]
-        if not absorbed:
+        hidden = self._columns_hidden_by_unit_level(protected, absorbed)
+        if not absorbed and not hidden:
             return
-        self._absorbed_covariate_labels = tuple(
-            self.labels[index] for index in absorbed
-        )
         design = np.array(self._X_raw, dtype=float, copy=True)
-        design[:, absorbed] = 0.0
+        if absorbed:
+            self._absorbed_covariate_labels = tuple(
+                self.labels[index] for index in absorbed
+            )
+            design[:, absorbed] = 0.0
+            names = ", ".join(self.labels[index] for index in absorbed)
+            warnings.warn(
+                "Covariate(s) with no within-unit variation are collinear with unit "
+                "fixed effects and are reported at the within estimate of 0: "
+                f"{names}. The unit effects absorb the level.",
+                UserWarning,
+                stacklevel=4,
+            )
+        for index in hidden:
+            design[:, index] = self._within_deviation(design[:, index], units)
         self._X_raw = design
-        names = ", ".join(self.labels[index] for index in absorbed)
-        warnings.warn(
-            "Covariate(s) with no within-unit variation are collinear with unit "
-            "fixed effects and are reported at the within estimate of 0: "
-            f"{names}. The unit effects absorb the level.",
-            UserWarning,
-            stacklevel=4,
+
+    def _columns_hidden_by_unit_level(
+        self, protected: set[str], absorbed: list[int]
+    ) -> list[int]:
+        """Covariates whose within change adds no rank in the raw dummy design.
+
+        Float64 least squares drops a column that adds no numerical rank beyond
+        the unit dummies, even when the values vary within unit. Those columns
+        are not absorbed. They are stored as their within deviation.
+        """
+        protected_indexes = [
+            index for index, label in enumerate(self.labels) if label in protected
+        ]
+        protected_block = np.asarray(self._X_raw[:, protected_indexes], dtype=float)
+        protected_rank = int(np.linalg.matrix_rank(protected_block))
+        absorbed_set = set(absorbed)
+        hidden: list[int] = []
+        for index, label in enumerate(self.labels):
+            if label in protected or index in absorbed_set:
+                continue
+            stacked = np.column_stack(
+                [protected_block, np.asarray(self._X_raw[:, index], dtype=float)]
+            )
+            if int(np.linalg.matrix_rank(stacked)) == protected_rank:
+                hidden.append(index)
+        return hidden
+
+    @staticmethod
+    def _within_deviation(column: np.ndarray, units: np.ndarray) -> np.ndarray:
+        """Column minus its unit mean, so least squares sees the within change."""
+        values = np.asarray(column, dtype=float)
+        means = (
+            pd.Series(values)
+            .groupby(np.asarray(units), observed=True)
+            .transform("mean")
         )
+        return values - means.to_numpy()
 
     def _units_on_estimation_rows(self) -> np.ndarray:
         """Unit labels for the rows the formula retained, in design order."""
@@ -450,7 +502,12 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
     @staticmethod
     def _column_varies_within_unit(column: np.ndarray, units: np.ndarray) -> bool:
-        """Whether ``column`` changes inside any unit on the retained rows."""
+        """Whether ``column`` changes inside any unit on the retained rows.
+
+        Exact duplicates, and a within-unit range of only a few float64 ulps of
+        that unit's magnitude, are not variation. A relative cutoff is not used:
+        at large magnitude it treats a real change as float noise.
+        """
         values = np.asarray(column, dtype=float)
         if values.shape[0] != len(units):
             raise ValueError(
@@ -459,11 +516,19 @@ class PanelRegression(BaseExperiment[ResultBundle]):
             )
         if not np.isfinite(values).all():
             return True
-        grouped = pd.Series(values).groupby(np.asarray(units), observed=True)
-        within_range = grouped.transform("max") - grouped.transform("min")
-        scale = float(np.max(np.abs(values))) if values.size else 1.0
-        tolerance = 1e-8 * max(scale, 1.0)
-        return bool(np.any(within_range.to_numpy() > tolerance))
+        if values.size == 0:
+            return False
+        units_array = np.asarray(units)
+        grouped = pd.Series(values).groupby(units_array, observed=True)
+        within_range = (grouped.transform("max") - grouped.transform("min")).to_numpy()
+        magnitude = (
+            pd.Series(np.abs(values))
+            .groupby(units_array, observed=True)
+            .transform("max")
+            .to_numpy()
+        )
+        # Four ulps is float noise. A relative 1e-8 cutoff is not: at 1e8 it is 1.0.
+        return bool(np.any(within_range > 4.0 * np.spacing(magnitude)))
 
     def build(self) -> Self:
         """Build the graph, fixing absorbed coefficients at the within estimate.
