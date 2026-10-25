@@ -150,11 +150,12 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     of the time dummies is collinear with those fixed effects even when it
     varies within unit, so that coefficient is also reported as 0. A level or
     time pattern plus an identified within change is not that case.
-    Residualize against the intercept and the time dummies first: treatment
-    coding does not span a constant, so omitting the intercept leaves the
-    level in the residual. If that residual is unidentified, the within
-    estimate is 0. If the raw solver already reports the residual's
-    coefficient, leave the column in place. Otherwise store the residual.
+    Residualize against a constant and the time dummies first. Treatment
+    coding does not span a constant. The constant is the ``Intercept`` column
+    when Patsy includes it, and a column of ones when the formula drops it.
+    If that residual is unidentified, the within estimate is 0. If the raw
+    solver already reports the residual's coefficient, leave the column in
+    place. Otherwise store the residual.
     Only an exact duplicate, or a within-unit change of a few float64 ulps that least
     squares cannot see, counts as no variation. A change that is small relative
     to the column magnitude is still within variation, including a 0.5 change
@@ -429,15 +430,16 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         time pattern to its unit within deviation leaves that collinearity, so
         the column is absorbed and the time effects keep the level.
 
-        Residualize against the intercept and the time dummies before that
+        Residualize against a constant and the time dummies before that
         decision. Treatment coding is zero on the reference period, so a level
-        is not in the time-dummy span until the intercept is included. If the
-        residual is unidentified, absorb the column. If it is identified and
-        the raw column does not increase rank, store the residual only when
-        the raw solver does not already report that coefficient. Replacing a
-        column the solver already estimates changes a design the caller can
-        inspect. Leaving an unestimated raw column lets least squares split
-        the level and report about 0.
+        is not in the time-dummy span until a constant is included. A formula
+        that drops the intercept does not add that column; the projection uses
+        a column of ones instead. If the residual is unidentified, absorb the
+        column. If it is identified and the raw column does not increase rank,
+        store the residual only when the raw solver does not already report
+        that coefficient. Replacing a column the solver already estimates
+        changes a design the caller can inspect. Leaving an unestimated raw
+        column lets least squares split the level and report about 0.
 
         A within-varying column can also be dropped by the solver even though it
         increases rank against the unit dummies. ``LinearRegression.fit`` drops
@@ -672,15 +674,21 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     ) -> tuple[Literal["absorb", "store_residual", "keep"], np.ndarray]:
         """Repair a column that may lie in the time-effect span.
 
-        Residualize against the intercept and the time dummies before deciding
-        the column is unidentified. A pure time pattern has a zero residual
-        and is absorbed. A level plus an identified within change is not. Store
-        that residual only when the raw solver does not already report its
-        coefficient.
+        Residualize against a constant and the time dummies before deciding
+        the column is unidentified. The constant is the ``Intercept`` column
+        when that label exists, and a column of ones when the formula drops
+        it. A pure time pattern has a zero residual and is absorbed. A level
+        plus an identified within change is not. Store that residual only when
+        the raw solver does not already report its coefficient.
         """
         column = np.asarray(design[:, index], dtype=float)
+        indexes = self._time_effect_indexes(time_indexes)
         residual = self._residual_against_indexes(
-            column, design, self._time_effect_indexes(time_indexes)
+            column,
+            design,
+            indexes,
+            add_constant=bool(time_indexes)
+            and not any(self.labels[i] == "Intercept" for i in indexes),
         )
         if self._within_lies_in_fixed_effects(residual, protected_block, units, tol):
             return "absorb", residual
@@ -693,12 +701,12 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         return "keep", residual
 
     def _time_effect_indexes(self, time_indexes: list[int]) -> list[int]:
-        """Time dummies plus the intercept, the span of a pure time level.
+        """Time-dummy indexes, plus ``Intercept`` when that column exists.
 
         Treatment-coded time dummies are zero on the reference period, so they
-        do not contain a constant. Residualizing a level against those columns
-        alone leaves a time pattern whose mean is the level divided by the
-        number of periods.
+        do not contain a constant. When Patsy has no ``Intercept`` column the
+        residualizer supplies a column of ones; this method only returns
+        indexes that exist in the design.
         """
         if not time_indexes:
             return list(time_indexes)
@@ -742,22 +750,33 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
     @staticmethod
     def _residual_against_indexes(
-        column: np.ndarray, design: np.ndarray, indexes: list[int]
+        column: np.ndarray,
+        design: np.ndarray,
+        indexes: list[int],
+        *,
+        add_constant: bool = False,
     ) -> np.ndarray:
         """Column minus its projection onto the indexed columns.
 
-        The projection uses machine precision, not the solver cutoff, so a
-        small within change is not absorbed into a large time pattern before
-        it can be identified.
+        ``add_constant`` appends a column of ones. Treatment-coded time dummies
+        do not span a constant, and ``y ~ 0 + ...`` has no ``Intercept`` column
+        to project onto. The projection uses machine precision, not the solver
+        cutoff, so a small within change is not absorbed into a large time
+        pattern before it can be identified.
         """
         values = np.asarray(column, dtype=float)
-        if not indexes:
+        parts: list[np.ndarray] = []
+        if indexes:
+            block = np.asarray(design[:, indexes], dtype=float)
+            if block.ndim == 1:
+                block = block.reshape(-1, 1)
+            if block.size and block.shape[0] == values.shape[0]:
+                parts.append(block)
+        if add_constant:
+            parts.append(np.ones((values.shape[0], 1)))
+        if not parts:
             return values
-        block = np.asarray(design[:, indexes], dtype=float)
-        if block.ndim == 1:
-            block = block.reshape(-1, 1)
-        if block.size == 0 or block.shape[0] != values.shape[0]:
-            return values
+        block = parts[0] if len(parts) == 1 else np.column_stack(parts)
         coef = np.linalg.lstsq(block, values, rcond=None)[0]
         return values - block @ coef
 

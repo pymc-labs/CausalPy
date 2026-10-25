@@ -2125,6 +2125,112 @@ def test_dummy_fe_two_spikes_with_time_effects_match_within_estimator(level):
         assert _named_coefficients(demeaned)[label] == pytest.approx(20.0, abs=1e-6)
 
 
+_NO_INTERCEPT_TIME_FORMULAS = (
+    "y ~ 0 + C(unit) + C(time) + x",
+    "y ~ C(unit) + C(time) + x - 1",
+)
+
+
+@pytest.mark.parametrize("formula", _NO_INTERCEPT_TIME_FORMULAS)
+@pytest.mark.parametrize("level", [280.0, 290.0, 300.0, 350.0])
+def test_dummy_fe_level_plus_spike_without_intercept_matches_within_estimator(
+    formula, level
+):
+    """A dropped intercept must not leave a level in the time residual.
+
+    ``0 +`` and ``- 1`` keep every unit dummy and omit ``Intercept``. Treatment
+    coded time dummies do not span a constant, so residualizing against those
+    columns alone stores a time pattern (about 1.5 at levels 280 and 290) or
+    absorbs the column and warns. The within estimate is 3. No warning.
+    """
+    data = _level_plus_spike_panel(level, embed_level=True)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        result = cp.PanelRegression(
+            data,
+            formula=formula,
+            unit_fe_variable="unit",
+            time_fe_variable="time",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    demeaned = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + x",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    ).fit()
+    assert "Intercept" not in result.labels
+    assert result._absorbed_covariate_labels == ()
+    assert _named_coefficients(result)["x"] == pytest.approx(
+        _named_coefficients(demeaned)["x"], abs=1e-6
+    )
+    assert _named_coefficients(result)["x"] == pytest.approx(3.0, abs=1e-6)
+
+
+@pytest.mark.parametrize("formula", _NO_INTERCEPT_TIME_FORMULAS)
+@pytest.mark.parametrize("level", [280.0, 300.0, 350.0])
+def test_dummy_fe_level_plus_spike_jump_without_intercept_matches_within_estimator(
+    formula, level
+):
+    """The same no-intercept design is repaired when the outcome does not follow it.
+
+    The parent solver reports about 1e-5. Absorbing the column warns that the
+    within estimate is 0. The within estimate is 20.
+    """
+    data = _level_plus_spike_panel(level, embed_level=False)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        result = cp.PanelRegression(
+            data,
+            formula=formula,
+            unit_fe_variable="unit",
+            time_fe_variable="time",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    demeaned = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + x",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    ).fit()
+    assert result._absorbed_covariate_labels == ()
+    assert _named_coefficients(result)["x"] == pytest.approx(20.0, abs=1e-6)
+    assert _named_coefficients(demeaned)["x"] == pytest.approx(20.0, abs=1e-6)
+
+
+@pytest.mark.parametrize("formula", _NO_INTERCEPT_TIME_FORMULAS)
+def test_dummy_fe_no_intercept_keeps_a_level_the_solver_estimates(formula):
+    """A level the cutoff can already see stays raw when the intercept is dropped.
+
+    Level 100 is above ``LinearRegression``'s cutoff, so the raw solver reports
+    the within estimate of 3. Replacing that column would change a design the
+    caller can inspect.
+    """
+    level = 100.0
+    data = _level_plus_spike_panel(level, embed_level=True)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        result = cp.PanelRegression(
+            data,
+            formula=formula,
+            unit_fe_variable="unit",
+            time_fe_variable="time",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    assert result._absorbed_covariate_labels == ()
+    assert _named_coefficients(result)["x"] == pytest.approx(3.0, abs=1e-6)
+    stored = result.design["X"].sel(coeffs="x").to_numpy()
+    assert float(stored.mean()) == pytest.approx(level + 0.025, abs=1e-6)
+    assert float(np.ptp(stored)) == pytest.approx(0.5)
+
+
 @pytest.mark.parametrize(
     "estimator",
     [
