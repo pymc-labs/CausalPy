@@ -85,6 +85,9 @@ class _WithinBetaPrior:
         return Deterministic(name, beta, dims=dims)
 
 
+_PIN_NOT_INSTALLED = object()
+
+
 class PanelRegression(BaseExperiment[ResultBundle]):
     """Panel regression with fixed effects estimation.
 
@@ -141,17 +144,21 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     covariate with no within-unit variation is collinear with dummy-variable
     unit fixed effects. That coefficient is reported as 0, matching the within
     estimator, and the unit effects absorb the level. Only an exact duplicate,
-    or a within-unit change of a few float64 ulps, counts as no variation. A
-    change that is small relative to the column magnitude is still within
-    variation. If the raw column is numerically a unit level, it is stored as
-    its within deviation so least squares reports that coefficient instead of
-    dropping it. The check uses the rows the formula retains, in design order,
-    and does not require a unique frame index. That coefficient is not left as
-    an unidentified prior. For the ``"dummies"`` approach (unpooled FE),
-    individual unit effects can be extracted from the coefficients. For the
-    demeaned approach, unit effects can be recovered post-hoc using the stored
-    group means (``_group_means``), which are always computed from the original
-    (pre-demeaning) data.
+    or a within-unit change of a few float64 ulps that least squares cannot
+    see, counts as no variation. A change that is small relative to the column
+    magnitude is still within variation, including a 0.5 change at magnitude
+    1e15, which is exactly four ulps of that magnitude. If the raw column is
+    numerically a unit level, or stacking it drops the design rank below the
+    unit dummies, it is stored as its within deviation so least squares reports
+    that coefficient instead of dropping it. The check uses the rows the formula
+    retains, in design order, and does not require a unique frame index. That
+    coefficient is not left as an unidentified prior. The absorbed prior is
+    installed only while the PyMC graph is built and is not left on the caller's
+    model, so a later clone does not pin those names. For the ``"dummies"``
+    approach (unpooled FE), individual unit effects can be extracted from the
+    coefficients. For the demeaned approach, unit effects can be recovered
+    post-hoc using the stored group means (``_group_means``), which are always
+    computed from the original (pre-demeaning) data.
 
     This class does not yet implement hierarchical/partial-pooling fixed
     effects. Those semantics are intentionally kept out of scope here so
@@ -406,9 +413,11 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         A within-varying column can still be numerically a unit level. A change
         of 0.5 at magnitude 1e8 is real variation, but float64 least squares
-        drops that direction. The column is stored as its within deviation so
-        the reported coefficient is the within estimate. The supplied prior is
-        left in place.
+        drops that direction. A column past about 6e13 can also drop the stacked
+        rank below the unit dummies, and a 0.5 change at magnitude 1e15 is
+        exactly four ulps, so an ulp count alone would call it invariant. Those
+        columns are stored as their within deviation so the reported coefficient
+        is the within estimate. The supplied prior is left in place.
         """
         self._absorbed_covariate_labels = ()
         if self.fe_method != "dummies":
@@ -421,13 +430,22 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         protected.add("Intercept")
 
         units = self._units_on_estimation_rows()
-        absorbed = [
-            index
-            for index, label in enumerate(self.labels)
-            if label not in protected
-            and not self._column_varies_within_unit(self._X_raw[:, index], units)
-        ]
+        absorbed: list[int] = []
+        recoverable: list[int] = []
+        for index, label in enumerate(self.labels):
+            if label in protected:
+                continue
+            column = self._X_raw[:, index]
+            if self._column_varies_within_unit(column, units):
+                continue
+            if self._within_change_is_identified(column, units):
+                recoverable.append(index)
+            else:
+                absorbed.append(index)
         hidden = self._columns_hidden_by_unit_level(protected, absorbed)
+        for index in recoverable:
+            if index not in hidden:
+                hidden.append(index)
         if not absorbed and not hidden:
             return
         design = np.array(self._X_raw, dtype=float, copy=True)
@@ -454,8 +472,10 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         """Covariates whose within change adds no rank in the raw dummy design.
 
         Float64 least squares drops a column that adds no numerical rank beyond
-        the unit dummies, even when the values vary within unit. Those columns
-        are not absorbed. They are stored as their within deviation.
+        the unit dummies, even when the values vary within unit. A large column
+        can also drop the stacked rank below the protected block by inflating
+        the singular-value cutoff. Those columns are not absorbed. They are
+        stored as their within deviation.
         """
         protected_indexes = [
             index for index, label in enumerate(self.labels) if label in protected
@@ -470,20 +490,41 @@ class PanelRegression(BaseExperiment[ResultBundle]):
             stacked = np.column_stack(
                 [protected_block, np.asarray(self._X_raw[:, index], dtype=float)]
             )
-            if int(np.linalg.matrix_rank(stacked)) == protected_rank:
+            if int(np.linalg.matrix_rank(stacked)) <= protected_rank:
                 hidden.append(index)
         return hidden
 
     @staticmethod
     def _within_deviation(column: np.ndarray, units: np.ndarray) -> np.ndarray:
-        """Column minus its unit mean, so least squares sees the within change."""
-        values = np.asarray(column, dtype=float)
-        means = (
-            pd.Series(values)
-            .groupby(np.asarray(units), observed=True)
-            .transform("mean")
+        """Column minus its unit mean, so least squares sees the within change.
+
+        Subtract a within-unit reference before the mean. At large magnitude,
+        ``value - mean(value)`` swallows a small within change that is still
+        exactly representable as a difference from another row in the unit.
+        """
+        values = pd.Series(np.asarray(column, dtype=float))
+        units_array = np.asarray(units)
+        shifted = values - values.groupby(units_array, observed=True).transform("min")
+        centered = shifted - shifted.groupby(units_array, observed=True).transform(
+            "mean"
         )
-        return values - means.to_numpy()
+        return centered.to_numpy()
+
+    @staticmethod
+    def _within_change_is_identified(column: np.ndarray, units: np.ndarray) -> bool:
+        """Whether least squares can see the within deviation next to an intercept.
+
+        ``LinearRegression`` drops a column whose singular value is below its
+        default ``tol`` (1e-6) times the largest singular value. A few ulps of a
+        moderate magnitude fail that cutoff. A 0.5 change at magnitude 1e15 is
+        exactly four ulps, so the ulp check calls it invariant, but the within
+        deviation is large enough that the within estimator is not zero.
+        """
+        deviation = PanelRegression._within_deviation(column, units)
+        if deviation.size == 0 or not np.isfinite(deviation).all():
+            return False
+        intercept_scale = float(np.sqrt(deviation.size))
+        return bool(np.linalg.norm(deviation) > 1e-6 * intercept_scale)
 
     def _units_on_estimation_rows(self) -> np.ndarray:
         """Unit labels for the rows the formula retained, in design order."""
@@ -536,37 +577,53 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         :meth:`fit` and :meth:`sample_prior_predictive` both call this before
         drawing. The design column is already zero, so the unit dummies absorb
         the level, and the installed prior reports that column as a
-        deterministic 0 instead of an unidentified draw.
+        deterministic 0 instead of an unidentified draw. The pin is removed
+        from the caller's model after the graph is built, so a clone does not
+        inherit absorbed names.
         """
-        self._pin_absorbed_beta_prior()
-        return super().build()
+        previous_user_priors = self._install_absorbed_beta_prior()
+        try:
+            return super().build()
+        finally:
+            self._restore_user_priors(previous_user_priors)
 
-    def _pin_absorbed_beta_prior(self) -> None:
+    def _install_absorbed_beta_prior(self) -> Any:
         """Install a beta prior that reports absorbed columns at 0.
 
         Model construction rebuilds ``priors`` from defaults and
         ``_user_priors`` immediately before ``build_model``. The pinned prior
-        has to live in ``_user_priors`` or that rebuild drops it. Forecast
-        backends are not PyMC models and have no ``_user_priors``; do not
-        assign that attribute on them.
+        has to live in ``_user_priors`` or that rebuild drops it. The previous
+        value is returned so :meth:`build` can restore it. Forecast backends
+        are not PyMC models and have no ``_user_priors``; do not assign that
+        attribute on them.
         """
         labels = self._absorbed_covariate_labels
         if not labels:
-            return
+            return _PIN_NOT_INSTALLED
         model = self.model
         if not isinstance(model, PyMCModel):
-            return
+            return _PIN_NOT_INSTALLED
         user_priors = dict(model._user_priors or {})
         current = user_priors.get("beta", model.default_priors.get("beta"))
         if isinstance(current, _WithinBetaPrior):
-            return
+            return _PIN_NOT_INSTALLED
         if not hasattr(current, "create_variable"):
             raise DataException(
                 "Could not fix the within estimate because the beta prior "
                 "cannot create a variable."
             )
         user_priors["beta"] = _WithinBetaPrior(current, labels)
+        previous = model._user_priors
         model._user_priors = user_priors
+        return previous
+
+    def _restore_user_priors(self, previous: Any) -> None:
+        """Put the caller's priors back after the graph has absorbed them."""
+        if previous is _PIN_NOT_INSTALLED:
+            return
+        model = self.model
+        if isinstance(model, PyMCModel):
+            model._user_priors = previous
 
     def _prepare_data(self) -> None:
         """Bundle design matrices into an ``xr.Dataset``."""
@@ -653,10 +710,15 @@ class PanelRegression(BaseExperiment[ResultBundle]):
                 group_var, observed=True
             )[numeric_cols].mean()
 
-        # Demean each numeric column
+        # Subtract a within-group reference before the mean. At large magnitude,
+        # value - mean(value) swallows a small within change that is still
+        # representable as a difference from another row in the group.
         for col in numeric_cols:
-            group_mean = data.groupby(group_var, observed=True)[col].transform("mean")
-            data[col] = data[col] - group_mean
+            grouped = data.groupby(group_var, observed=True)[col]
+            shifted = data[col] - grouped.transform("min")
+            data[col] = shifted - shifted.groupby(
+                data[group_var], observed=True
+            ).transform("mean")
 
         return data
 

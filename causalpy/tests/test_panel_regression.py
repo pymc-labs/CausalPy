@@ -1620,3 +1620,132 @@ def test_dummy_fe_large_magnitude_within_change_keeps_supplied_prior(
     posterior = result.idata.posterior["beta"].sel(coeffs="x")
     assert float(posterior.mean()) == pytest.approx(20.0, abs=5.0)
     assert not np.allclose(posterior.values, 0.0)
+
+
+def _spike_within_change_panel(level: float, delta: float) -> pd.DataFrame:
+    """One row differs by ``delta`` at ``level``; y jumps by 10 on that row."""
+    level = np.float64(level)
+    delta = np.float64(delta)
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            x = level
+            y = 0.0
+            if unit == 3 and time == 4:
+                x = level + delta
+                y = 10.0
+            rows.append({"unit": f"u{unit}", "time": time, "x": float(x), "y": y})
+    return pd.DataFrame(rows)
+
+
+def test_dummy_fe_four_ulps_at_moderate_magnitude_stays_absorbed():
+    """Exactly four ulps at magnitude 1e8 is float noise, not a within effect.
+
+    The within deviation is invisible next to an intercept, so dummy FE must
+    still report 0 and warn. Treating every four-ulp change as variation would
+    leave this column raw.
+    """
+    level = np.float64(1e8)
+    data = _spike_within_change_panel(level, 4 * np.spacing(level))
+    with pytest.warns(UserWarning, match="within estimate of 0"):
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + x",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    assert result._absorbed_covariate_labels == ("x",)
+    assert _named_coefficients(result)["x"] == pytest.approx(0.0, abs=1e-8)
+
+
+@pytest.mark.parametrize("level", [6e13, 1e14, 1e15])
+def test_dummy_fe_large_column_rank_drop_matches_within_estimator(level):
+    """A large column that hides the within change must match the within estimator.
+
+    Past about 6e13, stacking the raw column drops the design rank below the
+    unit dummies, so an equality check misses it and dummy FE reports 0. At
+    1e15 a 0.5 change is exactly four ulps, so the ulp check absorbs it and
+    warns that the within estimate is 0. The within estimator is 20.
+    """
+    data = _spike_within_change_panel(level, 0.5)
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="within estimate of 0")
+        dummies = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + x",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    demeaned = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + x",
+        unit_fe_variable="unit",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    ).fit()
+    assert _named_coefficients(dummies)["x"] == pytest.approx(20.0, abs=1e-6)
+    assert _named_coefficients(demeaned)["x"] == pytest.approx(20.0, abs=1e-6)
+    assert dummies._absorbed_covariate_labels == ()
+    stored = dummies.design["X"].sel(coeffs="x").to_numpy()
+    assert np.ptp(stored) < 1.0
+
+
+def test_absorbed_beta_prior_does_not_stick_to_caller_model(real_pymc_sampling):
+    """The within-estimate pin must not survive on the caller's model or its clone.
+
+    The graph built for an invariant treatment still reports 0. After that
+    build, ``_user_priors`` is the caller's original value. A clone fitted to a
+    formula that omits the absorbed name must not raise, and a clone fitted to
+    a within-varying treatment must not draw a deterministic 0.
+    """
+    model = cp.pymc_models.LinearRegression(
+        prior_sample_kwargs={"draws": 20, "random_seed": 1}
+    )
+    assert model._user_priors is None
+    with pytest.warns(UserWarning, match="within estimate of 0"):
+        result = cp.PanelRegression(
+            _time_invariant_treatment_panel(),
+            formula="y ~ 1 + C(unit) + treatment",
+            unit_fe_variable="unit",
+            fe_method="dummies",
+            model=model,
+        ).sample_prior_predictive()
+    assert result.model is model
+    assert model._user_priors is None
+    invariant_prior = result.idata.prior["beta"].sel(coeffs="treatment")
+    np.testing.assert_allclose(invariant_prior.values, 0.0, atol=1e-8)
+
+    cloned = model._clone()
+    assert cloned._user_priors is None
+    omitted = cp.PanelRegression(
+        _spike_within_change_panel(1.0, 0.5),
+        formula="y ~ 1 + C(unit) + x",
+        unit_fe_variable="unit",
+        fe_method="dummies",
+        model=cloned,
+    ).sample_prior_predictive()
+    assert "treatment" not in omitted.labels
+
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            treatment = float(time >= 2)
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": treatment,
+                    "y": 4.0 * treatment + unit,
+                }
+            )
+    varied = cp.PanelRegression(
+        pd.DataFrame(rows),
+        formula="y ~ 1 + C(unit) + treatment",
+        unit_fe_variable="unit",
+        fe_method="dummies",
+        model=model._clone(),
+    ).sample_prior_predictive()
+    varying_prior = varied.idata.prior["beta"].sel(coeffs="treatment")
+    assert not np.allclose(varying_prior.values, 0.0)
