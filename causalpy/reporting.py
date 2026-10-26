@@ -514,13 +514,29 @@ def _effect_summary_did(
     return EffectSummary(table=table, text=text)
 
 
+def _staggered_event_time_for_summary(experiment, result_bundle, *, group, alpha):
+    """Return the event-time table whose intervals follow ``1 - alpha``.
+
+    Point-estimate models keep the stored table. Draw-carrying models
+    recompute highest-density intervals from ``result_bundle.y_pred``
+    instead of reprinting the bounds stored at ``result_bundle.hdi_prob``.
+    A stored table that omitted interval columns, including an empty event
+    window recorded at fit, is not a point-estimate result and must not
+    block that recomputation.
+    """
+    del group  # The caller already resolved this group's bundle.
+    if not has_posterior_draws(result_bundle.y_pred):
+        return result_bundle.att_event_time.copy()
+    return experiment._event_time_summary_frame(result_bundle, hdi_prob=1 - alpha)
+
+
 def _effect_summary_staggered_did(
     experiment,
     bundle=None,
     *,
     group: Literal["prior", "posterior"] = "posterior",
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
-    alpha: float = 0.06,
+    alpha: float = 0.05,
     min_effect: float | None = None,
 ):
     """Generate effect summary for Staggered Difference-in-Differences experiments.
@@ -538,11 +554,15 @@ def _effect_summary_staggered_did(
         defaults to ``experiment.result`` when omitted
     direction : {"increase", "decrease", "two-sided"}
         Direction for interpretation
-    alpha : float, default=0.06
-        Probability mass outside the credible interval. The HDI probability
-        is computed as (1 - alpha). Default 0.06 gives 94% HDI, matching
-        ArviZ's default. Only used as fallback if the result bundle doesn't
-        store the HDI probability used during interval computation.
+    alpha : float, default=0.05
+        Significance level for the reported interval. Bayesian summaries
+        recompute HDIs from the posterior draws with probability ``1 - alpha``.
+        Per-event table rows are HDIs of each event-time ATT. The prose
+        interval is the HDI of the unweighted mean of identified
+        post-treatment event-time ATTs, not the mean of those per-event
+        endpoints. Both are independent of the project-wide ``HDI_PROB`` and
+        of ``bundle.hdi_prob``, which record the probability used for plot
+        aggregation.
     min_effect : float, optional
         Not used for staggered DiD, kept for API consistency
 
@@ -552,7 +572,9 @@ def _effect_summary_staggered_did(
         Summary with table of event-time ATTs and prose interpretation
     """
     result_bundle = bundle if bundle is not None else experiment.result
-    att_et = result_bundle.att_event_time.copy()
+    att_et = _staggered_event_time_for_summary(
+        experiment, result_bundle, group=group, alpha=alpha
+    )
 
     # Separate pre-treatment (placebo) and post-treatment effects
     pre_treatment = att_et[att_et["event_time"] < 0]
@@ -568,23 +590,26 @@ def _effect_summary_staggered_did(
     # Generate prose summary
     prose_parts = []
 
-    # Overall ATT (average across all post-treatment periods)
+    # Overall ATT (unweighted mean of identified post-treatment event times).
+    # The interval is the HDI of that average, not the mean of per-event HDIs.
     if len(post_treatment) > 0:
-        avg_post_att = post_treatment["att"].mean()
-        if "att_lower" in post_treatment.columns:
-            # Bayesian model - use stored hdi_prob from experiment
-            avg_lower = post_treatment["att_lower"].mean()
-            avg_upper = post_treatment["att_upper"].mean()
-            # Use the HDI probability that was actually used to compute the intervals
-            hdi_prob = getattr(result_bundle, "hdi_prob", 1 - alpha)
-            hdi_pct = int(hdi_prob * 100)
+        if "att_lower" in post_treatment.columns and has_posterior_draws(
+            result_bundle.y_pred
+        ):
+            avg_draws = experiment._identified_post_treatment_att_draws(result_bundle)
+            avg_post_att = float(np.mean(avg_draws))
+            avg_lower, avg_upper = hdi_bounds(
+                avg_draws, prob=1 - alpha, flatten_chains_draws=True
+            )
+            hdi_coverage = _format_probability_as_percent(1 - alpha)
             prose_parts.append(
                 f"Staggered DiD analysis: The average post-treatment effect "
                 f"across event-times was {avg_post_att:.2f} "
-                f"(average {hdi_pct}% HDI [{avg_lower:.2f}, {avg_upper:.2f}])."
+                f"({hdi_coverage} HDI [{avg_lower:.2f}, {avg_upper:.2f}])."
             )
         else:
             # OLS model
+            avg_post_att = post_treatment["att"].mean()
             prose_parts.append(
                 f"Staggered DiD analysis: The average post-treatment effect "
                 f"across event-times was {avg_post_att:.2f}."
