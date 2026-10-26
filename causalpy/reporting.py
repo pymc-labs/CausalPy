@@ -1412,7 +1412,7 @@ def _generate_prose_detailed_ols(
     str
         Detailed multi-paragraph narrative report
     """
-    ci_pct = int((1 - alpha) * 100)
+    ci_coverage = _format_probability_as_percent(1 - alpha)
 
     # Format window string
     if len(window_coords) > 0:
@@ -1443,19 +1443,19 @@ def _generate_prose_detailed_ols(
             f"During the {prefix} ({window_str}), the response variable had "
             f"an average value of approx. {fmt_num(observed_avg)}. By contrast, in the "
             f"absence of an intervention, we would have expected an average response of "
-            f"{fmt_num(counterfactual_avg)}. The {ci_pct}% confidence interval of this "
+            f"{fmt_num(counterfactual_avg)}. The {ci_coverage} confidence interval of this "
             f"counterfactual prediction is [{fmt_num(cf_interval_lower)}, "
             f"{fmt_num(cf_interval_upper)}]. Subtracting this prediction "
             f"from the observed response yields an estimate of the causal effect the "
             f"intervention had on the response variable. This effect is {fmt_num(avg_mean)} "
-            f"with a {ci_pct}% confidence interval of [{fmt_num(avg_lower)}, "
+            f"with a {ci_coverage} confidence interval of [{fmt_num(avg_lower)}, "
             f"{fmt_num(avg_upper)}]."
         )
     else:
         para1 = (
             f"During the {prefix} ({window_str}), the estimated average causal "
             f"effect of the intervention is {fmt_num(avg_mean)} "
-            f"({ci_pct}% CI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]). "
+            f"({ci_coverage} CI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]). "
             f"This represents the difference between the observed response and the "
             f"counterfactual prediction of what would have occurred without the intervention."
         )
@@ -1475,13 +1475,13 @@ def _generate_prose_detailed_ols(
                 f"Summing up the individual data points during the {prefix}, "
                 f"the response variable had an overall value of {fmt_num(observed_cum)}. "
                 f"By contrast, had the intervention not taken place, we would have expected "
-                f"a sum of {fmt_num(counterfactual_cum)}. The {ci_pct}% confidence interval "
+                f"a sum of {fmt_num(counterfactual_cum)}. The {ci_coverage} confidence interval "
                 f"of this prediction is [{fmt_num(cum_cf_lower)}, {fmt_num(cum_cf_upper)}]."
             )
         else:
             para2 = (
                 f"The cumulative effect over the {prefix} "
-                f"was {fmt_num(cum_mean)} ({ci_pct}% CI [{fmt_num(cum_lower)}, "
+                f"was {fmt_num(cum_mean)} ({ci_coverage} CI [{fmt_num(cum_lower)}, "
                 f"{fmt_num(cum_upper)}])."
             )
         paragraphs.append(para2)
@@ -1492,12 +1492,12 @@ def _generate_prose_detailed_ols(
     significance_parts = []
     if ci_excludes_zero:
         significance_parts.append(
-            f"The {ci_pct}% confidence interval of the effect [{fmt_num(avg_lower)}, "
+            f"The {ci_coverage} confidence interval of the effect [{fmt_num(avg_lower)}, "
             f"{fmt_num(avg_upper)}] does not include zero (p-value {fmt_num(p_val, 3)})."
         )
     else:
         significance_parts.append(
-            f"The {ci_pct}% confidence interval of the effect [{fmt_num(avg_lower)}, "
+            f"The {ci_coverage} confidence interval of the effect [{fmt_num(avg_lower)}, "
             f"{fmt_num(avg_upper)}] includes zero (p-value {fmt_num(p_val, 3)})."
         )
 
@@ -1507,7 +1507,7 @@ def _generate_prose_detailed_ols(
         rel_upper = stats["avg"]["relative_ci_upper"]
         significance_parts.append(
             f"Relative to the counterfactual, the effect represents a "
-            f"{fmt_num(rel_mean)}% change ({ci_pct}% CI [{fmt_num(rel_lower)}%, "
+            f"{fmt_num(rel_mean)}% change ({ci_coverage} CI [{fmt_num(rel_lower)}%, "
             f"{fmt_num(rel_upper)}%])."
         )
 
@@ -1783,7 +1783,7 @@ def _generate_table_did_ols(stats):
 
 def _generate_prose_did_ols(stats, alpha=0.05):
     """Generate prose summary for DiD with OLS model."""
-    ci_pct = int((1 - alpha) * 100)
+    ci_coverage = _format_probability_as_percent(1 - alpha)
 
     def fmt_num(x, decimals=2):
         return f"{x:.{decimals}f}"
@@ -1795,7 +1795,7 @@ def _generate_prose_did_ols(stats, alpha=0.05):
 
     prose = (
         f"The treatment effect was {fmt_num(mean)} "
-        f"({ci_pct}% CI [{fmt_num(lower)}, {fmt_num(upper)}]), "
+        f"({ci_coverage} CI [{fmt_num(lower)}, {fmt_num(upper)}]), "
         f"with a p-value of {fmt_num(p_val, 3)}."
     )
 
@@ -1887,7 +1887,7 @@ def _generate_table_rd_ols(stats):
 
 def _generate_prose_rd_ols(stats, alpha=0.05):
     """Generate prose summary for RD with OLS model."""
-    ci_pct = int((1 - alpha) * 100)
+    ci_coverage = _format_probability_as_percent(1 - alpha)
 
     def fmt_num(x, decimals=2):
         return f"{x:.{decimals}f}"
@@ -1899,7 +1899,7 @@ def _generate_prose_rd_ols(stats, alpha=0.05):
 
     prose = (
         f"The discontinuity at threshold was {fmt_num(mean)} "
-        f"({ci_pct}% CI [{fmt_num(lower)}, {fmt_num(upper)}]), "
+        f"({ci_coverage} CI [{fmt_num(lower)}, {fmt_num(upper)}]), "
         f"with a p-value of {fmt_num(p_val, 3)}."
     )
 

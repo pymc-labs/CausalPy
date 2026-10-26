@@ -3575,6 +3575,57 @@ def test_generate_prose_detailed_ols_basic():
     assert "does not include zero" in prose
 
 
+@pytest.mark.parametrize(
+    ("alpha", "coverage"),
+    [
+        (0.05, "95%"),
+        (0.01, "99%"),
+        (0.025, "97.5%"),
+        (0.001, "99.9%"),
+    ],
+)
+def test_ols_prose_renders_coverage_from_alpha(alpha, coverage):
+    """OLS prose names the interval as ``1 - alpha``, including non-integers."""
+    from causalpy.reporting import (
+        _generate_prose_detailed_ols,
+        _generate_prose_did_ols,
+        _generate_prose_rd_ols,
+    )
+
+    window_coords = pd.Index([10, 11, 12])
+    detailed = _generate_prose_detailed_ols(
+        {
+            "avg": {
+                "mean": 2.5,
+                "ci_lower": 1.0,
+                "ci_upper": 4.0,
+                "p_value": 0.03,
+            }
+        },
+        window_coords,
+        alpha=alpha,
+        cumulative=False,
+        relative=False,
+        observed_avg=52.5,
+        counterfactual_avg=50.0,
+    )
+    scalar = {
+        "mean": 2.5,
+        "ci_lower": 1.0,
+        "ci_upper": 4.0,
+        "p_value": 0.03,
+    }
+    did = _generate_prose_did_ols(scalar, alpha=alpha)
+    rd = _generate_prose_rd_ols(scalar, alpha=alpha)
+
+    truncated = f"{int((1 - alpha) * 100)}%"
+    for prose in (detailed, did, rd):
+        assert f"{coverage} confidence interval" in prose or f"{coverage} CI" in prose
+        if truncated != coverage:
+            assert f"{truncated} confidence interval" not in prose
+            assert f"{truncated} CI" not in prose
+
+
 def test_generate_prose_detailed_ols_counterfactual_interval():
     """Test OLS counterfactual interval brackets counterfactual mean."""
     from causalpy.reporting import _generate_prose_detailed_ols
