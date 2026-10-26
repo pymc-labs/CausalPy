@@ -658,7 +658,15 @@ class StaggeredDifferenceInDifferences(
                 }
             )
 
-        att_event_time = self._mark_non_identified_att_rows(pd.DataFrame(att_et_rows))
+        # Name the columns. An empty event window has no rows, and
+        # ``DataFrame([])`` would otherwise drop the schema that
+        # ``summary()`` and ``effect_summary`` read.
+        att_event_time = self._mark_non_identified_att_rows(
+            pd.DataFrame(
+                att_et_rows,
+                columns=["event_time", "att", "att_lower", "att_upper", "n_obs"],
+            )
+        )
 
         return att_group_time, att_event_time, hdi_prob
 
@@ -1595,6 +1603,124 @@ class StaggeredDifferenceInDifferences(
 
         return self._mark_non_identified_att_rows(pd.DataFrame(att_et_rows))
 
+    def _event_time_summary_frame(
+        self,
+        bundle: StaggeredDifferenceInDifferencesResult,
+        *,
+        hdi_prob: float,
+    ) -> pd.DataFrame:
+        """Recompute event-time ATT HDIs from the bundle's posterior draws.
+
+        Plot aggregation stores equal-tailed bounds at ``bundle.hdi_prob``.
+        ``effect_summary`` must not reprint those bounds: its interval is the
+        highest-density interval of each event-time ATT at ``hdi_prob``.
+        """
+        from causalpy._arviz_compat import hdi_bounds
+
+        mu_draws = bundle.y_pred.isel(treated_units=0)
+        y_observed = self._observed_outcome.to_numpy()
+        tau_draws_all = y_observed - mu_draws.values
+        att_et_rows: list[dict] = []
+
+        pretreat_idx_positions = self._get_pretreatment_positions()
+        pretreatment_data = self.data.iloc[pretreat_idx_positions]
+        if len(pretreatment_data) > 0:
+            tau_draws_pretreat = tau_draws_all[:, :, pretreat_idx_positions]
+            event_time_pretreat = np.asarray(pretreatment_data["event_time"].values)
+            event_times_pre = np.unique(
+                event_time_pretreat[~np.isnan(event_time_pretreat)]
+            )
+            if self.event_window is not None:
+                event_times_pre = event_times_pre[
+                    (event_times_pre >= self.event_window[0])
+                    & (event_times_pre <= self.event_window[1])
+                ]
+            for event_time in sorted(event_times_pre):
+                event_mask = event_time_pretreat == event_time
+                tau_e = tau_draws_pretreat[:, :, np.where(event_mask)[0]].mean(axis=2)
+                lower, upper = hdi_bounds(
+                    tau_e, prob=hdi_prob, flatten_chains_draws=True
+                )
+                att_et_rows.append(
+                    {
+                        "event_time": int(event_time),
+                        "att": float(tau_e.mean()),
+                        "att_lower": lower,
+                        "att_upper": upper,
+                        "n_obs": int(event_mask.sum()),
+                    }
+                )
+
+        treated_indices = np.where(
+            ~np.asarray(self.data["_is_untreated"].values, dtype=bool)
+        )[0]
+        tau_draws_treated = tau_draws_all[:, :, treated_indices]
+        treated_data = self.data[~self.data["_is_untreated"]]
+        event_time_treated = np.asarray(treated_data["event_time"].values)
+        event_times_post = np.unique(event_time_treated[~np.isnan(event_time_treated)])
+        if self.event_window is not None:
+            event_times_post = event_times_post[
+                (event_times_post >= self.event_window[0])
+                & (event_times_post <= self.event_window[1])
+            ]
+        for event_time in sorted(event_times_post):
+            event_mask = event_time_treated == event_time
+            tau_e = tau_draws_treated[:, :, np.where(event_mask)[0]].mean(axis=2)
+            lower, upper = hdi_bounds(tau_e, prob=hdi_prob, flatten_chains_draws=True)
+            att_et_rows.append(
+                {
+                    "event_time": int(event_time),
+                    "att": float(tau_e.mean()),
+                    "att_lower": lower,
+                    "att_upper": upper,
+                    "n_obs": int(event_mask.sum()),
+                }
+            )
+
+        return self._mark_non_identified_att_rows(
+            pd.DataFrame(
+                att_et_rows,
+                columns=["event_time", "att", "att_lower", "att_upper", "n_obs"],
+            )
+        )
+
+    def _identified_post_treatment_att_draws(
+        self, bundle: StaggeredDifferenceInDifferencesResult
+    ) -> np.ndarray | None:
+        """Draw-wise unweighted mean of identified post-treatment event-time ATTs.
+
+        The event window and identification mask match
+        :meth:`_event_time_summary_frame`. Each returned value is one posterior
+        draw of the average the effect-summary sentence reports, with shape
+        ``(chain, draw)``. ``None`` when no identified post-treatment event
+        time remains.
+        """
+        mu_draws = bundle.y_pred.isel(treated_units=0)
+        tau_draws_all = self._observed_outcome.to_numpy() - mu_draws.values
+        treated_indices = np.where(
+            ~np.asarray(self.data["_is_untreated"].values, dtype=bool)
+        )[0]
+        tau_draws_treated = tau_draws_all[:, :, treated_indices]
+        treated_data = self.data[~self.data["_is_untreated"]]
+        event_time_treated = np.asarray(treated_data["event_time"].values)
+        event_times_post = np.unique(event_time_treated[~np.isnan(event_time_treated)])
+        if self.event_window is not None:
+            event_times_post = event_times_post[
+                (event_times_post >= self.event_window[0])
+                & (event_times_post <= self.event_window[1])
+            ]
+
+        att_draws: list[np.ndarray] = []
+        for event_time in sorted(event_times_post):
+            if not self._is_event_time_att_identified(int(event_time)):
+                continue
+            event_mask = event_time_treated == event_time
+            tau_e = tau_draws_treated[:, :, np.where(event_mask)[0]].mean(axis=2)
+            att_draws.append(tau_e)
+        if not att_draws:
+            return None
+        return np.mean(np.stack(att_draws, axis=0), axis=0)
+
     def effect_summary(
         self,
         *,
@@ -1617,6 +1743,9 @@ class StaggeredDifferenceInDifferences(
             Direction for tail probability calculation (PyMC only, ignored for OLS).
         alpha : float, default=0.05
             Significance level for HDI/CI intervals (1-alpha confidence level).
+            Bayesian table rows are HDIs of each event-time ATT. The prose
+            interval is the HDI of the unweighted mean of identified
+            post-treatment event-time ATTs. Neither reuses ``result.hdi_prob``.
         min_effect : float, optional
             Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
 

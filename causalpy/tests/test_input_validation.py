@@ -508,6 +508,107 @@ def test_ancova_validation_2_levels():
         )
 
 
+@pytest.mark.parametrize(
+    ("group_name", "formula", "extra_group_columns", "expected"),
+    [
+        ("t", "y ~ 1 + C(t) + pre", (), "C(t)[T.1]"),
+        ("t", "y ~ 1 + t + pre", (), "t"),
+        ("pt", "y ~ 1 + C(pt) + pre", (), "C(pt)[T.1]"),
+        ("c", "y ~ 1 + C(c) + pre", (), "C(c)[T.1]"),
+        (
+            "site",
+            "y ~ 1 + C(website) + C(site) + pre",
+            ("website",),
+            "C(site)[T.1]",
+        ),
+        ("group", "y ~ 1 + C(group) + pre", (), "C(group)[T.1]"),
+        ("group", "y ~ 1 + group + pre", (), "group"),
+        (
+            "group",
+            "y ~ 1 + C(group, Treatment) + pre",
+            (),
+            "C(group, Treatment)[T.1]",
+        ),
+        (
+            "group-id",
+            "y ~ 1 + C(Q('group-id')) + pre",
+            (),
+            "C(Q('group-id'))[T.1]",
+        ),
+        ("group-id", "y ~ 1 + Q('group-id') + pre", (), "Q('group-id')"),
+        ("group-id", 'y ~ 1 + Q("group-id") + pre', (), 'Q("group-id")'),
+        (
+            "group-id",
+            'y ~ 1 + C(Q("group-id"), Treatment) + pre',
+            (),
+            'C(Q("group-id"), Treatment)[T.1]',
+        ),
+        (
+            "t",
+            "y ~ 1 + C(Q('treatment')) + C(Q('t')) + pre",
+            ("treatment",),
+            "C(Q('t'))[T.1]",
+        ),
+    ],
+)
+def test_prepostnegd_treatment_coeff_is_group_main_effect(
+    group_name, formula, extra_group_columns, expected
+):
+    """Treatment lookup must not use a substring of an earlier coefficient name.
+
+    ``t`` and ``pt`` are substrings of ``Intercept``. ``site`` is a substring of
+    the earlier label ``C(website)[T.1]``. ``Q('group-id')`` is the quoted
+    spelling Patsy requires for a non-identifier column. ``C(Q('treatment'))``
+    contains ``t`` but is not the group factor ``Q('t')``.
+    """
+    n = 8
+    group = np.array([0] * n + [1] * n)
+    columns = {
+        group_name: group,
+        "pre": np.linspace(0, 1, 2 * n),
+        "y": group.astype(float),
+    }
+    for column in extra_group_columns:
+        columns[column] = group
+    result = cp.PrePostNEGD(
+        pd.DataFrame(columns),
+        formula=formula,
+        group_variable_name=group_name,
+        pretreatment_variable_name="pre",
+    )
+
+    assert result._get_treatment_effect_coeff() == expected
+
+
+def test_prepostnegd_treatment_coeff_ignores_interaction_and_missing_term():
+    """An interaction, or no group main effect, is not the treatment indicator."""
+    n = 8
+    group = np.array([0] * n + [1] * n)
+    df = pd.DataFrame(
+        {
+            "group": group,
+            "pre": np.linspace(0, 1, 2 * n),
+            "y": group.astype(float),
+        }
+    )
+    with_interaction = cp.PrePostNEGD(
+        df,
+        formula="y ~ 1 + C(group):pre + C(group) + pre",
+        group_variable_name="group",
+        pretreatment_variable_name="pre",
+    )
+    assert with_interaction._get_treatment_effect_coeff() == "C(group)[T.1]"
+
+    interaction_only = cp.PrePostNEGD(
+        df,
+        formula="y ~ 1 + C(group):pre + pre",
+        group_variable_name="group",
+        pretreatment_variable_name="pre",
+    )
+    with pytest.raises(NameError, match="treatment effect"):
+        interaction_only._get_treatment_effect_coeff()
+
+
 # Regression discontinuity
 
 
@@ -640,6 +741,88 @@ def test_rkink_bandwidth_check():
             kink_point=kink,
             bandwidth=-1,
         )
+
+
+@pytest.mark.parametrize("running_variable_name", ["kink", "score"])
+def test_rkink_bandwidth_uses_running_variable_name(running_variable_name):
+    """Bandwidth keeps rows by the running variable, not a hardcoded column x.
+
+    A covariate named ``x`` lies inside the numeric window, so a query on ``x``
+    keeps every row. The stored design must keep only rows whose running
+    variable is inside the bandwidth, including values on the boundary.
+    """
+    kink_point = 0.0
+    bandwidth = 1.0
+    running = np.concatenate(
+        [np.linspace(-3, 3, 60), [kink_point - bandwidth, kink_point + bandwidth]]
+    )
+    df = pd.DataFrame(
+        {
+            running_variable_name: running,
+            "x": np.linspace(0, 1, running.size),
+            "y": running,
+            "treated": running >= kink_point,
+        }
+    )
+    fmin = kink_point - bandwidth
+    fmax = kink_point + bandwidth
+    inside = (running >= fmin) & (running <= fmax)
+
+    result = cp.RegressionKink(
+        df,
+        formula=f"y ~ 1 + {running_variable_name} + treated",
+        kink_point=kink_point,
+        running_variable_name=running_variable_name,
+        bandwidth=bandwidth,
+        model=None,
+    )
+
+    assert result.design.sizes["obs_ind"] == int(inside.sum())
+    assert int(inside.sum()) < len(df)
+    kept_running = result.design["X"].sel(coeffs=running_variable_name).values
+    assert np.all((kept_running >= fmin) & (kept_running <= fmax))
+    assert np.any(kept_running == fmin)
+    assert np.any(kept_running == fmax)
+
+
+def test_rkink_bandwidth_keeps_computed_endpoints():
+    """Keep running values equal to the computed bandwidth endpoints.
+
+    ``abs(running - kink) <= bandwidth`` can place a value computed as
+    ``kink ± bandwidth`` a few ulps outside the window. The stored design must
+    use the closed interval on those computed endpoints, and must still drop a
+    running value strictly outside it. The running variable is not named ``x``.
+    """
+    kink_point = 0.9918737534611899
+    bandwidth = 0.13789281030401754
+    fmin = kink_point - bandwidth
+    fmax = kink_point + bandwidth
+    running = np.array([fmin, kink_point, fmax, fmin - 1e-12, fmax + 1e-12])
+    df = pd.DataFrame(
+        {
+            "wage": running,
+            "x": np.linspace(0, 1, running.size),
+            "y": running,
+            "treated": running >= kink_point,
+        }
+    )
+
+    result = cp.RegressionKink(
+        df,
+        formula="y ~ 1 + wage + treated",
+        kink_point=kink_point,
+        running_variable_name="wage",
+        bandwidth=bandwidth,
+        model=None,
+    )
+
+    kept = result.design["X"].sel(coeffs="wage").values
+    assert result.design.sizes["obs_ind"] == 3
+    assert np.any(kept == fmin)
+    assert np.any(kept == kink_point)
+    assert np.any(kept == fmax)
+    assert not np.any(kept < fmin)
+    assert not np.any(kept > fmax)
 
 
 def test_rkink_epsilon_check():
