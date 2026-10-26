@@ -1,0 +1,16 @@
+causalpy/tests/test_its_effect_summary.py
+  h_63db634213747e 537-614
+causalpy/tests/test_reporting.py
+  h_63db634213747e 2441-2458
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c1f9a959242c2c820536ce917a59672ff4952b83",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
