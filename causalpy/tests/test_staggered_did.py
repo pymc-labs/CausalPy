@@ -805,6 +805,48 @@ def test_generate_staggered_did_data_too_many_units():
         )
 
 
+def test_generate_staggered_did_data_fills_effects_forward():
+    """Missing event-times keep the latest mapped effect already in the past."""
+    quiet = {"unit_fe_scale": 0.0, "time_fe_scale": 0.0, "sigma": 0.0, "seed": 0}
+
+    gap = generate_staggered_did_data(
+        n_units=1,
+        n_time_periods=8,
+        treatment_cohorts={0: 1},
+        treatment_effects={0: 1.0, 5: 0.0},
+        **quiet,
+    )
+    assert gap["tau"].tolist() == [1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0]
+    assert (gap["y"] - gap["y0"]).tolist() == gap["tau"].tolist()
+
+    delayed = generate_staggered_did_data(
+        n_units=1,
+        n_time_periods=5,
+        treatment_cohorts={0: 1},
+        treatment_effects={3: 4.0},
+        **quiet,
+    )
+    assert delayed["tau"].tolist() == [0.0, 0.0, 0.0, 4.0, 4.0]
+
+    stepped = generate_staggered_did_data(
+        n_units=1,
+        n_time_periods=7,
+        treatment_cohorts={0: 1},
+        treatment_effects={0: 1.0, 2: 3.0, 5: 0.0},
+        **quiet,
+    )
+    assert stepped["tau"].tolist() == [1.0, 1.0, 3.0, 3.0, 3.0, 0.0, 0.0]
+
+    never = generate_staggered_did_data(
+        n_units=1,
+        n_time_periods=4,
+        treatment_cohorts={},
+        treatment_effects={3: 4.0},
+        **quiet,
+    )
+    assert never["tau"].tolist() == [0.0, 0.0, 0.0, 0.0]
+
+
 # ==============================================================================
 # Additional Coverage Tests
 # ==============================================================================
