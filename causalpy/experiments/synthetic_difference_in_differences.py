@@ -238,6 +238,19 @@ class SyntheticDifferenceInDifferences(
             }
         )
 
+    def _period_ordered_outcomes(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return control and treated outcomes with pre-period rows first.
+
+        Pre-period rows are those with ``index < treatment_time`` (the rows in
+        ``datapre``, in that stored order). Post-period rows follow
+        (``datapost``). Callers that slice ``[:T_pre]`` / ``[T_pre:]`` then
+        use the documented periods, not the first ``T_pre`` stored rows.
+        """
+        ordered = pd.concat([self.datapre, self.datapost])
+        Y_co = ordered[self.control_units].to_numpy().T  # (N_co, T)
+        y_tr = ordered[self.treated_units].to_numpy().mean(axis=1)  # (T,)
+        return Y_co, y_tr
+
     def _fit_inputs(
         self,
     ) -> tuple[dict[str, xr.DataArray], dict[str, xr.DataArray], dict[str, Any]]:
@@ -250,8 +263,7 @@ class SyntheticDifferenceInDifferences(
                 "implemented. Please use a PyMC model."
             )
 
-        Y_co = self.data[self.control_units].to_numpy().T  # (N_co, T)
-        y_tr = self.data[self.treated_units].to_numpy().mean(axis=1)  # (T,)
+        Y_co, y_tr = self._period_ordered_outcomes()
         T_pre = self.datapre.shape[0]
         return self._build_weight_fitter_inputs(Y_co, y_tr, T_pre)
 
@@ -268,8 +280,7 @@ class SyntheticDifferenceInDifferences(
         """
         omega, omega0, lam, n_chains, n_draws = self._extract_weight_posteriors(group)
 
-        Y_co = self.data[self.control_units].to_numpy().T  # (N_co, T)
-        y_tr = self.data[self.treated_units].to_numpy().mean(axis=1)  # (T,)
+        Y_co, y_tr = self._period_ordered_outcomes()
         T_pre = self.datapre.shape[0]
 
         sc_all, gaps = self._compute_synthetic_and_gaps(omega, omega0, Y_co, y_tr)

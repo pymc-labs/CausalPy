@@ -502,10 +502,18 @@ class TestPreTreatmentPlaceboCheckRun:
         assert result.metadata["event_times_differing"] == [-2]
 
     def test_threshold_is_the_two_sided_alpha(self):
+        """Points strictly inside and outside the two-sided 5% region.
+
+        The exact ``t.ppf`` critical value is not required to pass. Rounding
+        can put ``2 * t.sf(t.ppf(...), df)`` on either side of ``alpha``, and
+        the rule rejects only when ``p_value < alpha``.
+        """
         from scipy.stats import t
 
         se = 1.0 / np.sqrt(30)
         critical = float(t.ppf(1 - 0.025, 29)) * se
+        inside = 0.5 * critical
+        outside = critical + se
         ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
 
         def _result(att: float):
@@ -520,8 +528,8 @@ class TestPreTreatmentPlaceboCheckRun:
             )
             return PreTreatmentPlaceboCheck(threshold=0.05).run(mock_exp, ctx)
 
-        assert _result(critical).passed is True
-        assert _result(critical + 0.01).passed is False
+        assert _result(inside).passed is True
+        assert _result(outside).passed is False
 
     def test_bounds_without_coverage_are_not_a_verdict(self):
         mock_exp = Mock()

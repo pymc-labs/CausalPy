@@ -615,6 +615,87 @@ def test_piecewise_its_extract_interruption_times():
     assert len(result.interruption_times) == 2
 
 
+def _piecewise_post_window_frame(time, knots, time_col):
+    """Build a series whose effect is the sum of unit steps at ``knots``."""
+    time = pd.Series(time, name=time_col)
+    if isinstance(knots[0], str):
+        thresholds = pd.Series(pd.to_datetime(list(knots)))
+    else:
+        thresholds = pd.Series(knots, dtype=float)
+    outcome = np.zeros(len(time), dtype=float)
+    for threshold in thresholds:
+        outcome += (time >= threshold).astype(float)
+    return pd.DataFrame({time_col: time, "y": outcome}), thresholds
+
+
+def _step_term(time_col, knot):
+    if time_col == "date":
+        return f"step(date, '{knot}')"
+    return f"step(t, {knot})"
+
+
+@pytest.mark.parametrize(
+    ("time_col", "knots"),
+    [
+        ("t", (25, 10)),
+        ("t", (12.5, 3.5)),
+        ("t", (30, 4.25, 18)),
+        ("date", ("2020-06-01", "2020-01-15", "2020-03-01")),
+    ],
+)
+def test_piecewise_its_post_window_starts_at_earliest_interruption(time_col, knots):
+    """Post window starts at the earliest knot, not the first formula term."""
+    if time_col == "date":
+        time = pd.date_range("2020-01-01", periods=200, freq="D")
+    else:
+        time = np.unique(
+            np.concatenate([np.arange(0, 40), np.asarray(knots, dtype=float)])
+        )
+
+    df, thresholds = _piecewise_post_window_frame(time, knots, time_col)
+    earliest = min(thresholds)
+    # The cited failure is formula order. Every case keeps a later knot first.
+    assert thresholds.iloc[0] != earliest
+
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + " + " + ".join(_step_term(time_col, knot) for knot in knots),
+        model=LinearRegression(),
+    ).fit()
+
+    assert result.interruption_times[0] != earliest
+    post = df.loc[df[time_col] >= earliest]
+    assert result.datapost[time_col].iloc[0] == earliest
+    pd.testing.assert_series_equal(
+        result.datapost[time_col].reset_index(drop=True),
+        post[time_col].reset_index(drop=True),
+        check_names=False,
+    )
+
+    summary = result.effect_summary(relative=False)
+    post_outcome = post["y"].to_numpy()
+    assert summary.table.loc["average", "mean"] == pytest.approx(post_outcome.mean())
+    assert summary.table.loc["cumulative", "mean"] == pytest.approx(post_outcome.sum())
+
+
+def test_piecewise_its_cited_formula_order_probe():
+    """The reported probe: later knot first, effects 1 at 10 and 2 at 25."""
+    t = np.arange(40)
+    df = pd.DataFrame({"t": t, "y": 1 * (t >= 10) + 2 * (t >= 25)})
+    result = cp.PiecewiseITS(
+        df,
+        formula="y ~ 1 + step(t, 25) + step(t, 10)",
+        model=LinearRegression(),
+    ).fit()
+
+    assert result.interruption_times == [25, 10]
+    assert result.datapost["t"].iloc[0] == 10
+    assert len(result.datapost) == 30
+    summary = result.effect_summary(relative=False)
+    assert summary.table.loc["average", "mean"] == pytest.approx(2)
+    assert summary.table.loc["cumulative", "mean"] == pytest.approx(60)
+
+
 # ==============================================================================
 # Integration tests with PyMC model
 # ==============================================================================

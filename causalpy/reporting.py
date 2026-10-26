@@ -592,13 +592,29 @@ def _pre_treatment_placebo_sentence(
     )
 
 
+def _staggered_event_time_for_summary(experiment, result_bundle, *, group, alpha):
+    """Return the event-time table whose intervals follow ``1 - alpha``.
+
+    Point-estimate models keep the stored table. Draw-carrying models
+    recompute highest-density intervals from ``result_bundle.y_pred``
+    instead of reprinting the bounds stored at ``result_bundle.hdi_prob``.
+    A stored table that omitted interval columns, including an empty event
+    window recorded at fit, is not a point-estimate result and must not
+    block that recomputation.
+    """
+    del group  # The caller already resolved this group's bundle.
+    if not has_posterior_draws(result_bundle.y_pred):
+        return result_bundle.att_event_time.copy()
+    return experiment._event_time_summary_frame(result_bundle, hdi_prob=1 - alpha)
+
+
 def _effect_summary_staggered_did(
     experiment,
     bundle=None,
     *,
     group: Literal["prior", "posterior"] = "posterior",
     direction: Literal["increase", "decrease", "two-sided"] = "increase",
-    alpha: float = 0.06,
+    alpha: float = 0.05,
     min_effect: float | None = None,
 ):
     """Generate effect summary for Staggered Difference-in-Differences experiments.
@@ -616,10 +632,16 @@ def _effect_summary_staggered_did(
         defaults to ``experiment.result`` when omitted
     direction : {"increase", "decrease", "two-sided"}
         Direction for interpretation
-    alpha : float, default=0.06
-        Two-sided significance level for the pre-treatment placebo sentence,
-        and the tail mass used only when the result bundle does not store the
-        HDI probability. A pre-treatment row is judged at ``alpha`` only when
+    alpha : float, default=0.05
+        Significance level for the reported interval, and the two-sided
+        threshold for the pre-treatment placebo sentence. Bayesian summaries
+        recompute HDIs from the posterior draws with probability ``1 - alpha``.
+        Per-event table rows are HDIs of each event-time ATT. The prose
+        interval is the HDI of the unweighted mean of identified
+        post-treatment event-time ATTs, not the mean of those per-event
+        endpoints. Both are independent of the project-wide ``HDI_PROB`` and
+        of ``bundle.hdi_prob``, which record the probability used for plot
+        aggregation. A pre-treatment row is judged at ``alpha`` only when
         it has a usable standard error or stored bounds whose coverage decides
         that comparison. The mean of the pre-treatment estimates is not a pass.
     min_effect : float, optional
@@ -631,7 +653,9 @@ def _effect_summary_staggered_did(
         Summary with table of event-time ATTs and prose interpretation
     """
     result_bundle = bundle if bundle is not None else experiment.result
-    att_et = result_bundle.att_event_time.copy()
+    att_et = _staggered_event_time_for_summary(
+        experiment, result_bundle, group=group, alpha=alpha
+    )
 
     # Separate pre-treatment (placebo) and post-treatment effects
     pre_treatment = att_et[att_et["event_time"] < 0]
@@ -647,23 +671,26 @@ def _effect_summary_staggered_did(
     # Generate prose summary
     prose_parts = []
 
-    # Overall ATT (average across all post-treatment periods)
+    # Overall ATT (unweighted mean of identified post-treatment event times).
+    # The interval is the HDI of that average, not the mean of per-event HDIs.
     if len(post_treatment) > 0:
-        avg_post_att = post_treatment["att"].mean()
-        if "att_lower" in post_treatment.columns:
-            # Bayesian model - use stored hdi_prob from experiment
-            avg_lower = post_treatment["att_lower"].mean()
-            avg_upper = post_treatment["att_upper"].mean()
-            # Use the HDI probability that was actually used to compute the intervals
-            hdi_prob = getattr(result_bundle, "hdi_prob", 1 - alpha)
-            hdi_pct = int(hdi_prob * 100)
+        if "att_lower" in post_treatment.columns and has_posterior_draws(
+            result_bundle.y_pred
+        ):
+            avg_draws = experiment._identified_post_treatment_att_draws(result_bundle)
+            avg_post_att = float(np.mean(avg_draws))
+            avg_lower, avg_upper = hdi_bounds(
+                avg_draws, prob=1 - alpha, flatten_chains_draws=True
+            )
+            hdi_coverage = _format_probability_as_percent(1 - alpha)
             prose_parts.append(
                 f"Staggered DiD analysis: The average post-treatment effect "
                 f"across event-times was {avg_post_att:.2f} "
-                f"(average {hdi_pct}% HDI [{avg_lower:.2f}, {avg_upper:.2f}])."
+                f"({hdi_coverage} HDI [{avg_lower:.2f}, {avg_upper:.2f}])."
             )
         else:
             # OLS model
+            avg_post_att = post_treatment["att"].mean()
             prose_parts.append(
                 f"Staggered DiD analysis: The average post-treatment effect "
                 f"across event-times was {avg_post_att:.2f}."
@@ -1474,7 +1501,7 @@ def _generate_prose_detailed_ols(
     str
         Detailed multi-paragraph narrative report
     """
-    ci_pct = int((1 - alpha) * 100)
+    ci_coverage = _format_probability_as_percent(1 - alpha)
 
     # Format window string
     if len(window_coords) > 0:
@@ -1505,19 +1532,19 @@ def _generate_prose_detailed_ols(
             f"During the {prefix} ({window_str}), the response variable had "
             f"an average value of approx. {fmt_num(observed_avg)}. By contrast, in the "
             f"absence of an intervention, we would have expected an average response of "
-            f"{fmt_num(counterfactual_avg)}. The {ci_pct}% confidence interval of this "
+            f"{fmt_num(counterfactual_avg)}. The {ci_coverage} confidence interval of this "
             f"counterfactual prediction is [{fmt_num(cf_interval_lower)}, "
             f"{fmt_num(cf_interval_upper)}]. Subtracting this prediction "
             f"from the observed response yields an estimate of the causal effect the "
             f"intervention had on the response variable. This effect is {fmt_num(avg_mean)} "
-            f"with a {ci_pct}% confidence interval of [{fmt_num(avg_lower)}, "
+            f"with a {ci_coverage} confidence interval of [{fmt_num(avg_lower)}, "
             f"{fmt_num(avg_upper)}]."
         )
     else:
         para1 = (
             f"During the {prefix} ({window_str}), the estimated average causal "
             f"effect of the intervention is {fmt_num(avg_mean)} "
-            f"({ci_pct}% CI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]). "
+            f"({ci_coverage} CI [{fmt_num(avg_lower)}, {fmt_num(avg_upper)}]). "
             f"This represents the difference between the observed response and the "
             f"counterfactual prediction of what would have occurred without the intervention."
         )
@@ -1537,13 +1564,13 @@ def _generate_prose_detailed_ols(
                 f"Summing up the individual data points during the {prefix}, "
                 f"the response variable had an overall value of {fmt_num(observed_cum)}. "
                 f"By contrast, had the intervention not taken place, we would have expected "
-                f"a sum of {fmt_num(counterfactual_cum)}. The {ci_pct}% confidence interval "
+                f"a sum of {fmt_num(counterfactual_cum)}. The {ci_coverage} confidence interval "
                 f"of this prediction is [{fmt_num(cum_cf_lower)}, {fmt_num(cum_cf_upper)}]."
             )
         else:
             para2 = (
                 f"The cumulative effect over the {prefix} "
-                f"was {fmt_num(cum_mean)} ({ci_pct}% CI [{fmt_num(cum_lower)}, "
+                f"was {fmt_num(cum_mean)} ({ci_coverage} CI [{fmt_num(cum_lower)}, "
                 f"{fmt_num(cum_upper)}])."
             )
         paragraphs.append(para2)
@@ -1554,12 +1581,12 @@ def _generate_prose_detailed_ols(
     significance_parts = []
     if ci_excludes_zero:
         significance_parts.append(
-            f"The {ci_pct}% confidence interval of the effect [{fmt_num(avg_lower)}, "
+            f"The {ci_coverage} confidence interval of the effect [{fmt_num(avg_lower)}, "
             f"{fmt_num(avg_upper)}] does not include zero (p-value {fmt_num(p_val, 3)})."
         )
     else:
         significance_parts.append(
-            f"The {ci_pct}% confidence interval of the effect [{fmt_num(avg_lower)}, "
+            f"The {ci_coverage} confidence interval of the effect [{fmt_num(avg_lower)}, "
             f"{fmt_num(avg_upper)}] includes zero (p-value {fmt_num(p_val, 3)})."
         )
 
@@ -1569,7 +1596,7 @@ def _generate_prose_detailed_ols(
         rel_upper = stats["avg"]["relative_ci_upper"]
         significance_parts.append(
             f"Relative to the counterfactual, the effect represents a "
-            f"{fmt_num(rel_mean)}% change ({ci_pct}% CI [{fmt_num(rel_lower)}%, "
+            f"{fmt_num(rel_mean)}% change ({ci_coverage} CI [{fmt_num(rel_lower)}%, "
             f"{fmt_num(rel_upper)}%])."
         )
 
@@ -1646,7 +1673,10 @@ def _compute_statistics_ols(
         se_cum = np.std(impact, ddof=1) * np.sqrt(n)
         ci_cum_lower = cum_effect - t_critical * se_cum
         ci_cum_upper = cum_effect + t_critical * se_cum
-        t_stat_cum = cum_effect / se_cum if se_cum > 0 else 0
+        # t-statistic = coefficient / standard error. Do not substitute 0 when
+        # the standard error is 0: a nonzero effect then has an infinite
+        # t-statistic and a two-sided p-value of 0, matching the average row.
+        t_stat_cum = cum_effect / se_cum
         p_value_cum = 2 * (1 - t.cdf(abs(t_stat_cum), df=df))
 
         stats["cum"] = {
@@ -1670,15 +1700,18 @@ def _compute_statistics_ols(
         stats["avg"]["relative_ci_upper"] = float(ci_rel_upper)
 
         if cumulative:
-            # Cumulative relative effect
-            cum_relative = np.sum(relative_effect)
-            se_cum_rel = np.std(relative_effect, ddof=1) * np.sqrt(n)
-            ci_cum_rel_lower = cum_relative - t_critical * se_cum_rel
-            ci_cum_rel_upper = cum_relative + t_critical * se_cum_rel
+            # Percentage change of the cumulative totals, not the sum of
+            # per-period percentages. The counterfactual is the fixed point
+            # prediction, so the interval is the cumulative-effect interval
+            # scaled by 100 / sum(counterfactual).
+            cum_counterfactual = np.sum(counterfactual)
+            scale = 100.0 / cum_counterfactual
+            cum_relative = cum_effect * scale
+            rel_bounds = np.sort([ci_cum_lower * scale, ci_cum_upper * scale])
 
             stats["cum"]["relative_mean"] = float(cum_relative)
-            stats["cum"]["relative_ci_lower"] = float(ci_cum_rel_lower)
-            stats["cum"]["relative_ci_upper"] = float(ci_cum_rel_upper)
+            stats["cum"]["relative_ci_lower"] = float(rel_bounds[0])
+            stats["cum"]["relative_ci_upper"] = float(rel_bounds[1])
 
     return stats
 
@@ -1842,7 +1875,7 @@ def _generate_table_did_ols(stats):
 
 def _generate_prose_did_ols(stats, alpha=0.05):
     """Generate prose summary for DiD with OLS model."""
-    ci_pct = int((1 - alpha) * 100)
+    ci_coverage = _format_probability_as_percent(1 - alpha)
 
     def fmt_num(x, decimals=2):
         return f"{x:.{decimals}f}"
@@ -1854,7 +1887,7 @@ def _generate_prose_did_ols(stats, alpha=0.05):
 
     prose = (
         f"The treatment effect was {fmt_num(mean)} "
-        f"({ci_pct}% CI [{fmt_num(lower)}, {fmt_num(upper)}]), "
+        f"({ci_coverage} CI [{fmt_num(lower)}, {fmt_num(upper)}]), "
         f"with a p-value of {fmt_num(p_val, 3)}."
     )
 
@@ -1946,7 +1979,7 @@ def _generate_table_rd_ols(stats):
 
 def _generate_prose_rd_ols(stats, alpha=0.05):
     """Generate prose summary for RD with OLS model."""
-    ci_pct = int((1 - alpha) * 100)
+    ci_coverage = _format_probability_as_percent(1 - alpha)
 
     def fmt_num(x, decimals=2):
         return f"{x:.{decimals}f}"
@@ -1958,7 +1991,7 @@ def _generate_prose_rd_ols(stats, alpha=0.05):
 
     prose = (
         f"The discontinuity at threshold was {fmt_num(mean)} "
-        f"({ci_pct}% CI [{fmt_num(lower)}, {fmt_num(upper)}]), "
+        f"({ci_coverage} CI [{fmt_num(lower)}, {fmt_num(upper)}]), "
         f"with a p-value of {fmt_num(p_val, 3)}."
     )
 
