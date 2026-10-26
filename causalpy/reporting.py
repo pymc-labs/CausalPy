@@ -1609,7 +1609,10 @@ def _compute_statistics_ols(
         se_cum = np.std(impact, ddof=1) * np.sqrt(n)
         ci_cum_lower = cum_effect - t_critical * se_cum
         ci_cum_upper = cum_effect + t_critical * se_cum
-        t_stat_cum = cum_effect / se_cum if se_cum > 0 else 0
+        # t-statistic = coefficient / standard error. Do not substitute 0 when
+        # the standard error is 0: a nonzero effect then has an infinite
+        # t-statistic and a two-sided p-value of 0, matching the average row.
+        t_stat_cum = cum_effect / se_cum
         p_value_cum = 2 * (1 - t.cdf(abs(t_stat_cum), df=df))
 
         stats["cum"] = {

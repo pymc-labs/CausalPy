@@ -2505,6 +2505,64 @@ def test_compute_statistics_ols_small_sample(mock_pymc_sample):
     assert "p_value" in stats["avg"]
 
 
+@pytest.mark.parametrize("n_post", [2, 6, 11])
+@pytest.mark.parametrize("impact", [5.0, -2.5, 1.0])
+def test_ols_zero_se_cumulative_p_value_is_zero(n_post, impact):
+    """A nonzero constant impact has cumulative p-value 0 when the SE is 0.
+
+    The t-statistic is the coefficient divided by its standard error. A nonzero
+    cumulative effect divided by a zero standard error is infinite, so the
+    two-sided p-value is 0. It must not be reported as 1, and the check is the
+    numeric table value, not the printed sentence.
+    """
+    from causalpy.reporting import _compute_statistics_ols
+
+    impact_values = np.full(n_post, impact)
+    counterfactual = np.zeros(n_post)
+    stats = _compute_statistics_ols(
+        impact_values,
+        counterfactual,
+        alpha=0.05,
+        cumulative=True,
+        relative=False,
+    )
+
+    cumulative = stats["cum"]
+    assert cumulative["mean"] == pytest.approx(impact * n_post)
+    assert cumulative["ci_lower"] == pytest.approx(cumulative["mean"])
+    assert cumulative["ci_upper"] == pytest.approx(cumulative["mean"])
+    assert cumulative["ci_lower"] > 0 or cumulative["ci_upper"] < 0
+    assert cumulative["p_value"] == 0.0
+
+
+@pytest.mark.parametrize("n_post", [3, 6])
+def test_effect_summary_ols_zero_se_cumulative_p_value(n_post):
+    """Public OLS effect_summary reports cumulative p-value 0 for a constant impact."""
+    from sklearn.linear_model import LinearRegression
+
+    n_pre = 8
+    impact = 5.0
+    t = np.arange(n_pre + n_post)
+    y = np.zeros(n_pre + n_post)
+    y[n_pre:] = impact
+    df = pd.DataFrame({"t": t, "y": y})
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=n_pre,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+
+    summary = result.effect_summary(cumulative=True, relative=False)
+    row = summary.table.loc["cumulative"]
+
+    assert row["mean"] == pytest.approx(impact * n_post)
+    assert row["ci_lower"] == pytest.approx(row["mean"])
+    assert row["ci_upper"] == pytest.approx(row["mean"])
+    assert row["ci_lower"] > 0
+    assert row["p_value"] == 0.0
+
+
 def test_ols_cumulative_relative_effect_is_ratio_of_cumulative_totals():
     """Cumulative relative effect is the percentage change of the totals.
 
