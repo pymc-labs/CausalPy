@@ -43,7 +43,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         Any eager dataframe Narwhals supports, such as pandas, Polars, or
         PyArrow. Converted to pandas internally.
     formula : str
-        A patsy formula for the propensity model, such as ``"trt ~ 1 + age + race"``. The left-hand side must evaluate to binary 0/1 treatment values, and the right-hand side sets the covariates used to estimate propensity scores.
+        A patsy formula for the propensity model, such as ``"trt ~ 1 + age + race"``. The left-hand side must be a numeric 0/1 column (a bool or string treatment column is expanded by patsy into two columns and fails), and the right-hand side sets the covariates used to estimate propensity scores.
     outcome_variable : str
         A string denoting the outcome variable in data to be reweighted.
     weighting_scheme : str
@@ -623,7 +623,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         method : str | None, optional
             Weighting scheme to apply.  One of ``'robust'``, ``'raw'``,
             ``'overlap'``, or ``'doubly_robust'``.  If ``None``, falls back
-            to ``self.weighting_scheme``.
+            to ``self.weighting_scheme``.  Any other value silently falls back to ``'doubly_robust'``.
         prop_draws : int, optional
             Number of posterior draws used for the propensity score histogram.
             Defaults to 100.
