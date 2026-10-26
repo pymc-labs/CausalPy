@@ -41,6 +41,27 @@ import pandas as pd
 import patsy
 
 
+def _threshold_in_column_timezone(
+    threshold: int | float | str | pd.Timestamp, origin: pd.Timestamp
+) -> pd.Timestamp:
+    """Parse ``threshold`` so it is compared in the time column's timezone.
+
+    A string or timezone-naive timestamp is a wall time in ``origin``'s
+    timezone when that column is timezone-aware. An already timezone-aware
+    threshold is converted to the same timezone. Naive columns keep the
+    parsed timestamp unchanged.
+    """
+    parsed = (
+        threshold if isinstance(threshold, pd.Timestamp) else pd.Timestamp(threshold)
+    )
+    origin_tz = origin.tzinfo
+    if origin_tz is None:
+        return parsed
+    if parsed.tzinfo is None:
+        return parsed.tz_localize(origin_tz)
+    return parsed.tz_convert(origin_tz)
+
+
 class StepTransform:
     """
     Stateful transform for step function (level change) at threshold.
@@ -49,7 +70,8 @@ class StepTransform:
 
     Works with both numeric and datetime time columns. For datetime,
     the threshold can be specified as a string ('2020-01-01') or
-    pd.Timestamp.
+    pd.Timestamp. A string threshold is a wall time in the time column's
+    timezone.
 
     The transform is "stateful" because it remembers the datetime origin
     from the training data, ensuring consistent behavior when predicting
@@ -156,12 +178,8 @@ class StepTransform:
     def _parse_threshold(
         self, threshold: int | float | str | pd.Timestamp
     ) -> pd.Timestamp:
-        """Parse threshold to pd.Timestamp, handling various input types."""
-        if isinstance(threshold, pd.Timestamp):
-            return threshold
-        else:
-            # Assume it's something pandas can convert (str or numeric)
-            return pd.Timestamp(threshold)
+        assert self._origin is not None
+        return _threshold_in_column_timezone(threshold, self._origin)
 
 
 class RampTransform:
@@ -173,7 +191,8 @@ class RampTransform:
 
     Works with both numeric and datetime time columns. For datetime,
     the threshold can be specified as a string ('2020-01-01') or
-    pd.Timestamp.
+    pd.Timestamp. A string threshold is a wall time in the time column's
+    timezone.
 
     Notes
     -----
@@ -276,12 +295,8 @@ class RampTransform:
     def _parse_threshold(
         self, threshold: int | float | str | pd.Timestamp
     ) -> pd.Timestamp:
-        """Parse threshold to pd.Timestamp."""
-        if isinstance(threshold, pd.Timestamp):
-            return threshold
-        else:
-            # Assume it's something pandas can convert (str or numeric)
-            return pd.Timestamp(threshold)
+        assert self._origin is not None
+        return _threshold_in_column_timezone(threshold, self._origin)
 
 
 class ElapsedDaysTransform:
