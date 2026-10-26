@@ -1,0 +1,16 @@
+causalpy/experiments/interrupted_time_series.py
+  h_63db634213747e 1362,1364
+causalpy/reporting.py
+  h_63db634213747e 719-720,753-754
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "db670bebcec0d20fb154033bd8f394da3157e5f9",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
