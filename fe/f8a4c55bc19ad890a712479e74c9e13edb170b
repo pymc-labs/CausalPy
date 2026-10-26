@@ -1,0 +1,16 @@
+causalpy/tests/test_cross_cutting_checks.py
+  h_63db634213747e 643-736
+causalpy/tests/test_reporting.py
+  h_63db634213747e 4207-4239
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fef8a4c55bc19ad890a712479e74c9e13edb170b",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
