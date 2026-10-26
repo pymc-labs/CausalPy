@@ -622,7 +622,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.5.3" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==2.4.0" },
     { name = "mypy", marker = "extra == 'lint'", specifier = "==2.4.0" },
-    { name = "myst-nb", marker = "extra == 'docs'", specifier = "<=1.0.0" },
+    { name = "myst-nb", marker = "extra == 'docs'", specifier = "<=1.4.0" },
     { name = "narwhals", specifier = ">=1.13.1" },
     { name = "nbconvert", marker = "extra == 'dev'" },
     { name = "nbconvert", marker = "extra == 'docs'" },
@@ -3074,7 +3074,7 @@ wheels = [
 
 [[package]]
 name = "myst-nb"
-version = "1.0.0"
+version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "importlib-metadata" },
@@ -3088,9 +3088,9 @@ dependencies = [
     { name = "sphinx" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/80/84/4440f67c4289c88d6dab41737e5e31db70a57d96856f9171f7ebc4ac7a3f/myst_nb-1.0.0.tar.gz", hash = "sha256:9077e42a1c6b441ea55078506f83555dda5d6c816ef4930841d71d239e3e0c5e", size = 75496, upload-time = "2023-11-08T22:05:51.317Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bd/b4/ff1abeea67e8cfe0a8c033389f6d1d8b0bfecfd611befb5cbdeab884fce6/myst_nb-1.4.0.tar.gz", hash = "sha256:c145598de62446a6fd009773dd071a40d3b76106ace780de1abdfc6961f614c2", size = 82285, upload-time = "2026-03-02T21:14:56.95Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5a/7e/68c5c66645633765dbacea20983132a2e850a1a4883c3539972bcf8d8829/myst_nb-1.0.0-py3-none-any.whl", hash = "sha256:ee8febc6dd7d9e32bede0c66a9b962b2e2fdab697428ee9fbfd4919d82380911", size = 79943, upload-time = "2023-11-08T22:05:49.26Z" },
+    { url = "https://files.pythonhosted.org/packages/94/93/0a378b48488879a1d925b42a804edfc6e0cd0ef854220f2dce738a46e7e9/myst_nb-1.4.0-py3-none-any.whl", hash = "sha256:0e2c86e7d3b82c3aa51383f82d6268f7714f3b772c23a796ab09538a8e68b4e4", size = 82555, upload-time = "2026-03-02T21:14:55.652Z" },
 ]
 
 [[package]]

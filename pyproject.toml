@@ -98,7 +98,7 @@ docs = [
     "daft-pgm",
     "pymc-bart",
     "linkify-it-py",
-    "myst-nb<=1.0.0",
+    "myst-nb<=1.4.0",
     "pylint>=4.1.1",
     "sphinx",
     "sphinx-autodoc-typehints",
