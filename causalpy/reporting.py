@@ -716,11 +716,10 @@ def _extract_window(
     post_index : pd.Index
         Index of the post-treatment period (e.g. ``experiment.datapost.index``).
     window : str, tuple, or slice
-        Window specification: "post", inclusive (start, end) tuple, or slice.
-        Datetime slices
-        with integer bounds are positional (exclusive stop); datetime label
-        slices include both bounds. Slice steps are applied after selection.
-        Numeric-index slices use an exclusive stop.
+        Window specification: "post", inclusive (start, end) label tuple, or
+        slice. Datetime slices with integer bounds are positional (exclusive
+        stop); datetime label slices include both bounds. Slice steps are
+        applied after selection. Integer-index slices use an exclusive stop.
     treated_unit : str, optional
         For multi-unit experiments, specify which treated unit to analyze
 
