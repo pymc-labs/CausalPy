@@ -1,0 +1,60 @@
+.github/workflows/ci.yml
+  h_63db634213747e 44,49,71
+.github/workflows/zizmor.yml
+  h_63db634213747e 42
+causalpy/data/simulate_data.py
+  h_63db634213747e 731-734,821-822,828-829
+causalpy/experiments/interrupted_time_series.py
+  h_63db634213747e 51-72,478-481,506-507,534,538,540,547,549
+causalpy/experiments/inverse_propensity_weighting.py
+  h_63db634213747e 123-128,130-133,135-137,146-147,261,302,342,386,388,391,396-397
+causalpy/experiments/piecewise_its.py
+  h_63db634213747e 358-359,383,404-407,412-413,420,422-423
+causalpy/experiments/prepostnegd.py
+  h_63db634213747e 16,254-269,277-291
+causalpy/experiments/regression_kink.py
+  h_63db634213747e 136-138
+causalpy/experiments/staggered_did.py
+  h_63db634213747e 661-669,1606-1723,1746-1748
+causalpy/experiments/synthetic_difference_in_differences.py
+  h_63db634213747e 241-253,266,283
+causalpy/reporting.py
+  h_63db634213747e 517-532,539,557-565,575-577,593-594,596-604,608,612,1440,1471,1476,1483,1503,1509,1520,1525,1535,1639-1646,1649-1650,1814,1826,1918,1930
+causalpy/skl_models.py
+  h_63db634213747e 52-55
+causalpy/tests/test_input_validation.py
+  h_63db634213747e 511-611,746-827
+causalpy/tests/test_ipw_index_alignment.py
+  h_63db634213747e 1-227
+causalpy/tests/test_its_effect_summary.py
+  h_63db634213747e 616-636,869-938
+causalpy/tests/test_piecewise_its.py
+  h_63db634213747e 618-698
+causalpy/tests/test_reporting.py
+  h_63db634213747e 2566-2652,3636-3686
+causalpy/tests/test_sdid_helpers.py
+  h_63db634213747e 561-702
+causalpy/tests/test_staggered_did.py
+  h_63db634213747e 23,732,752-951,953-1084,1133-1174
+causalpy/tests/test_weighted_proportion.py
+  h_63db634213747e 1-81
+docs/source/_static/contributors.json
+  h_63db634213747e 18,24
+docs/source/_static/contributors.svg
+  h_63db634213747e 2,6,56,61,66,71,81,83-84,86,91,93-94,96,100-104,106-111,115-116,120-121,125-126,130-131,135-136,140-141,145-146,150-151,155-156,160-161,165-171,175-176,180-181,185-186,190-191,195-196,200-201,205-206,210-211
+pyproject.toml
+  h_63db634213747e 101
+uv.lock
+  h_63db634213747e 625,3077,3091,3093,3975-4020,4744-4764,4995,4999,5001,5003,5745,5753,5755
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fcdb56f165c1c5d0e2e942ad1f2d0ed81f86e241",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
