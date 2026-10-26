@@ -33,7 +33,7 @@ import causalpy as cp
 from causalpy.checks.bandwidth import BandwidthSensitivity
 from causalpy.checks.base import Check, CheckResult
 from causalpy.checks.leave_one_out import LeaveOneOut
-from causalpy.checks.mccrary import McCraryDensityTest
+from causalpy.checks.mccrary import McCraryDensityTest, _adjacent_bin_counts
 from causalpy.checks.placebo_in_space import (
     _PLACEBO_COLOUR,
     _TREATED_COLOUR,
@@ -387,6 +387,62 @@ class TestMcCraryDensityTest:
             assert result.table.loc[0, "n_below"] == 1
             assert result.table.loc[0, "n_above"] == 100
             assert "below: 1, above: 100" in result.text
+
+    def test_left_endpoint_counted_when_span_fits_in_one_bin(self):
+        """A one-bin left side includes its minimum even when the rebuilt edge misses it.
+
+        ``threshold - width`` sits above the minimum for these samples, so a
+        comparison against that edge drops the whole left side. For ``-1.9`` the
+        rebuilt edge is exactly one ulp above the minimum. The right side already
+        counts a side that fits in one bin; the left side must too.
+        """
+        threshold = 0.7
+        cited = np.array([-0.2, 1.0])
+        # Not the cited endpoint. ``0.7 - (0.7 - -1.9)`` is one ulp above -1.9.
+        other = np.array([-1.9, 1.0])
+        for sample, expected, one_ulp in (
+            (cited, (1, 1), False),
+            (np.concatenate([np.full(50, -0.2), np.full(50, 1.0)]), (50, 50), False),
+            (other, (1, 1), True),
+        ):
+            minimum = float(np.min(sample[sample < threshold]))
+            span = max(threshold - minimum, float(np.max(sample)) - threshold)
+            edge = threshold - span
+            assert edge > minimum
+            if one_ulp:
+                assert edge == np.nextafter(minimum, np.inf)
+            assert _adjacent_bin_counts(sample, threshold, 1) == expected
+            result = self._running_result(sample, n_bins=1, threshold=threshold)
+            assert result.passed is True
+            assert result.table.loc[0, "n_below"] == expected[0]
+            assert result.table.loc[0, "n_above"] == expected[1]
+            assert "no evidence of manipulation" in result.text
+
+        # Integer sample at threshold 0 does not hit the ulp miss and still passes.
+        integers = np.concatenate([np.full(100, -1), np.full(102, 1)])
+        assert _adjacent_bin_counts(integers, 0.0, 1) == (100, 102)
+        integer_result = self._running_result(integers, n_bins=1, threshold=0.0)
+        assert integer_result.passed is True
+
+    def test_mass_outside_longer_right_window_stays_out(self):
+        """A longer right span still excludes mass beyond the adjacent bin."""
+        # width = 5 / 5 = 1. 5.0 is outside [0, 1); -0.2 fits in the left bin.
+        x = np.array([-0.2, 0.2, 5.0])
+        assert _adjacent_bin_counts(x, 0.0, 5) == (1, 1)
+        result = self._running_result(x, n_bins=5, threshold=0.0)
+        assert result.table.loc[0, "n_below"] == 1
+        assert result.table.loc[0, "n_above"] == 1
+
+    def test_degenerate_histograms_do_not_invent_a_bin(self):
+        """Invalid bin counts and zero-width or one-sided samples stay explicit."""
+        with pytest.raises(ValueError, match="n_bins"):
+            _adjacent_bin_counts(np.array([-1.0, 1.0]), 0.0, 0)
+
+        # Every finite point sits on the threshold, so there is no width to split.
+        assert _adjacent_bin_counts(np.array([0.5, 0.5]), 0.5, 4) == (0, 2)
+        # A missing side must not set the width, and the present side is counted.
+        assert _adjacent_bin_counts(np.array([0.2, 1.5]), 0.0, 1) == (0, 2)
+        assert _adjacent_bin_counts(np.array([-1.5, -0.2]), 0.0, 1) == (2, 0)
 
 
 # ---------------------------------------------------------------------------

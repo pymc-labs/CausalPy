@@ -46,9 +46,12 @@ def _adjacent_bin_counts(
     ``n_bins``, so the two adjacent bins have the same width and their counts
     are comparable. Non-finite running values are ignored: they must not set
     the bin width or replace this comparison with a count of every observation.
-    The bin below is ``[threshold - width, threshold)``; the bin above is
-    ``[threshold, threshold + width)``, and includes its right edge when that
-    edge is the outer edge of the above-side histogram.
+    The bin below is ``[threshold - width, threshold)``. When the left span
+    fits in one bin, every finite observation below the threshold is counted:
+    rebuilding that edge as ``threshold - width`` can sit one ulp above the
+    minimum and drop it. The bin above is ``[threshold, threshold + width)``,
+    and includes its right edge when that edge is the outer edge of the
+    above-side histogram.
     """
     if n_bins < 1:
         raise ValueError("n_bins must be a positive integer.")
@@ -67,7 +70,13 @@ def _adjacent_bin_counts(
         return int(below.size), int(above.size)
 
     width = span / n_bins
-    n_left = int(np.sum(below >= threshold - width))
+    # Same rule as the right side: a side that fits in one bin is counted
+    # whole. Comparing against the rebuilt edge drops a minimum that is one
+    # ulp left of ``threshold - width``.
+    if span_below <= width:
+        n_left = int(below.size)
+    else:
+        n_left = int(np.sum(below >= threshold - width))
     if span_above <= width:
         n_right = int(above.size)
     else:
