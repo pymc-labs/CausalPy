@@ -2438,6 +2438,24 @@ def test_extract_window_does_not_truncate_float_bounds():
     _, float_coords = _extract_window(float_impact, float_index, (1.9, 3.1))
     pd.testing.assert_index_equal(float_coords, pd.Index([2.4]))
 
+    # Integer inclusive end 6 excludes 5 and includes 6. A negative start of
+    # -0.5 keeps -0.25; int(-0.5) == 0 would drop it. Open numeric slices hit
+    # the None-bound sides of the same comparison.
+    _, integer_end = _extract_window(impact, index, (5.5, 6))
+    pd.testing.assert_index_equal(integer_end, pd.Index([6]))
+    signed_index = pd.Index([-1.0, -0.25, 0.0, 0.5])
+    signed_impact = xr.DataArray(
+        np.arange(len(signed_index)),
+        dims=["obs_ind"],
+        coords={"obs_ind": signed_index},
+    )
+    _, negative_start = _extract_window(signed_impact, signed_index, (-0.5, 0.0))
+    pd.testing.assert_index_equal(negative_start, pd.Index([-0.25, 0.0]))
+    _, open_stop = _extract_window(signed_impact, signed_index, slice(-0.5, None))
+    pd.testing.assert_index_equal(open_stop, pd.Index([-0.25, 0.0, 0.5]))
+    _, open_start = _extract_window(impact, index, slice(None, 6))
+    pd.testing.assert_index_equal(open_start, pd.Index([0, 1, 2, 3, 4, 5]))
+
 
 def test_datetime_window_rejects_mixed_positional_and_label_bounds():
     """Mixed slice semantics must not silently convert integers to timestamps."""
