@@ -640,6 +640,100 @@ class TestPreTreatmentPlaceboCheckRun:
         assert result.passed is None
         assert "No pre-treatment" in result.text
 
+    def test_non_finite_pre_treatment_att_is_not_a_pass(self):
+        """A pre-treatment row with a non-finite ATT is not evidence."""
+        mock_exp = Mock()
+        mock_exp.result.att_event_time = pd.DataFrame(
+            {"event_time": [-1, 0], "att": [np.nan, 1.0]}
+        )
+        ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
+        result = PreTreatmentPlaceboCheck().run(mock_exp, ctx)
+        assert result.passed is None
+        assert result.table is not None
+        assert list(result.table["event_time"]) == [-1]
+        assert "No pre-treatment" in result.text
+
+    def test_mixed_compatible_rows_are_not_a_zero_panel(self):
+        """An insignificant nonzero row beside an untested zero is not a failure.
+
+        It is also not the all-zero sentence, and a non-finite stored coverage
+        must not be treated as a usable interval probability.
+        """
+        mock_exp = Mock()
+        mock_exp.result.hdi_prob = np.nan
+        mock_exp.result.att_event_time = pd.DataFrame(
+            {
+                "event_time": [-2, -1],
+                "att": [0.2, 0.0],
+                "att_std": [1000.0, np.nan],
+                "n_obs": [30, np.nan],
+            }
+        )
+        ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
+        result = PreTreatmentPlaceboCheck(threshold=0.05).run(mock_exp, ctx)
+        assert result.passed is True
+        assert "estimates are zero" not in result.text
+        assert "threshold" not in result.text
+        assert "differs from zero" in result.text
+        assert result.metadata["event_times_differing"] == []
+        assert result.metadata["event_times_untested"] == []
+
+    def test_zero_standard_error_decides_the_threshold(self):
+        """A stored standard error of zero is a threshold decision, not a skip."""
+        ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
+
+        def _result(att: float):
+            mock_exp = Mock()
+            mock_exp.result.att_event_time = pd.DataFrame(
+                {
+                    "event_time": [-1],
+                    "att": [att],
+                    "att_std": [0.0],
+                    "n_obs": [30],
+                }
+            )
+            return PreTreatmentPlaceboCheck(threshold=0.05).run(mock_exp, ctx)
+
+        exact = _result(0.0)
+        assert exact.passed is True
+        assert "threshold" in exact.text
+        shifted = _result(1.0)
+        assert shifted.passed is False
+        assert shifted.metadata["event_times_differing"] == [-1]
+
+    def test_unusable_coverage_and_non_finite_row_stay_untested(self):
+        from types import SimpleNamespace
+
+        from causalpy.checks.pre_treatment_placebo import (
+            _row_judgment,
+            _stored_coverage,
+        )
+
+        assert _stored_coverage(SimpleNamespace()) is None
+        assert _stored_coverage(SimpleNamespace(result=None)) is None
+        assert (
+            _stored_coverage(SimpleNamespace(result=SimpleNamespace(hdi_prob=1.5)))
+            is None
+        )
+        assert (
+            _stored_coverage(SimpleNamespace(result=SimpleNamespace(hdi_prob=np.nan)))
+            is None
+        )
+        status, tested = _row_judgment(pd.Series({"att": np.nan}), 0.05, None)
+        assert (status, tested) == ("untested", False)
+
+    def test_untested_exact_zeros_use_the_zero_sentence(self):
+        """Exact zeros that were not tested at threshold use the zero sentence."""
+        mock_exp = Mock()
+        mock_exp.result.att_event_time = pd.DataFrame(
+            {"event_time": [-1], "att": [0.0]}
+        )
+        ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
+        result = PreTreatmentPlaceboCheck(threshold=0.05).run(mock_exp, ctx)
+        assert result.passed is True
+        assert "estimates are zero" in result.text
+        assert "threshold" not in result.text
+
 
 # ---------------------------------------------------------------------------
 # clone_model tests

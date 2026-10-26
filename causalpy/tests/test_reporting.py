@@ -4204,4 +4204,37 @@ def test_staggered_effect_summary_does_not_pass_cancelling_pre_trends():
     assert "consistent with parallel trends" in compatible
     unsupported = _effect_summary_staggered_did(experiment, alpha=0.20).text
     assert "was not completed" in unsupported
+    out_of_range = summary([0.0, 0.0], hdi_prob=np.nan)
+    assert "estimates are zero" in out_of_range
+    impossible = summary([0.0, 0.0], hdi_prob=1.5)
+    assert "estimates are zero" in impossible
+
+    non_finite = summary([np.nan])
+    assert "Pre-treatment placebo" not in non_finite
+    assert "was not completed" not in non_finite
+
+    mixed = [
+        {
+            "event_time": -2,
+            "att": 0.2,
+            "att_std": 1000.0,
+            "n_obs": 30,
+            "identified": True,
+        },
+        {"event_time": -1, "att": 0.0, "identified": True},
+        {"event_time": 0, "att": 5.0, "identified": True},
+    ]
+    experiment = SimpleNamespace(
+        cohorts=[0],
+        result=SimpleNamespace(
+            att_event_time=pd.DataFrame(mixed),
+            y_pred=SimpleNamespace(sizes={}),
+        ),
+    )
+    mixed_text = _effect_summary_staggered_did(experiment, alpha=0.05).text
+    assert "differs from zero" in mixed_text
+    assert "estimates are zero" not in mixed_text
+    assert "threshold" not in mixed_text
+    assert "failed" not in mixed_text
+
     assert "consistent with parallel trends" not in unsupported
