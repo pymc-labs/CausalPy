@@ -432,24 +432,19 @@ def test_legend_kwargs_multi_axis_its(mock_pymc_sample, its_data):
     plt.close("all")
 
 
-@pytest.mark.parametrize("model_kind", ["skl", "pymc"])
-def test_rd_plot_figure_registered_with_pyplot(mock_pymc_sample, rd_data, model_kind):
+def test_rd_plot_figure_registered_with_pyplot(rd_data):
     """
     Test that the RD figure stays registered with pyplot after plot().
 
     Plotnine's ``draw()`` closes the figure it builds. Without
     re-registration, ``plt.show()`` and Jupyter's inline backend see no
-    figure and notebooks render no plot (issue #603).
+    figure and notebooks render no plot (issue #603). The draw path is the
+    same for every model type, so a scikit-learn model is enough.
     """
-    model = (
-        LinearRegression()
-        if model_kind == "skl"
-        else cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs)
-    )
     result = cp.RegressionDiscontinuity(
         rd_data,
         formula="y ~ 1 + x + treated + x:treated",
-        model=model,
+        model=LinearRegression(),
         treatment_threshold=0.5,
     ).fit()
 
