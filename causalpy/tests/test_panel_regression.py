@@ -1286,3 +1286,116 @@ def test_demeaned_missing_formula_rows_match_dummy_retention(formula):
             within[name].to_numpy(dtype=float),
             atol=1e-8,
         )
+
+
+def test_demeaned_log_interaction_matches_dummy_fe():
+    """A named interaction other than treatment:x is the within transform of the product."""
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            treated = int(unit >= 1 and time >= 2)
+            exposure = float(1 + unit + 2 * time)
+            log_exposure = np.log(exposure)
+            y = (
+                4.0 * unit
+                + 0.25 * time
+                + 1.7 * treated
+                - 0.8 * log_exposure
+                + 2.4 * treated * log_exposure
+            )
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treated": treated,
+                    "exposure": exposure,
+                    "y": y,
+                }
+            )
+    panel = pd.DataFrame(rows)
+    formula = "y ~ 1 + treated + np.log(exposure) + treated:np.log(exposure)"
+    dummy = (
+        "y ~ 1 + C(unit) + C(time) + treated + np.log(exposure) "
+        "+ treated:np.log(exposure)"
+    )
+    demeaned = _named_ols_coefs(_fit_panel(panel, formula, "demeaned"))
+    dummies = _named_ols_coefs(_fit_panel(panel, dummy, "dummies"))
+    expected = {
+        "treated": 1.7,
+        "np.log(exposure)": -0.8,
+        "treated:np.log(exposure)": 2.4,
+    }
+    for name, value in expected.items():
+        assert demeaned[name] == pytest.approx(value, abs=1e-8)
+        assert dummies[name] == pytest.approx(value, abs=1e-8)
+
+
+def test_demeaned_intercept_only_keeps_intercept_and_demeans_outcome():
+    """An intercept-only formula has no regressor columns left to demean."""
+    rows = []
+    for unit in range(3):
+        for time in range(4):
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "y": 10.0 * unit + 1.0 * time + 0.5,
+                }
+            )
+    panel = pd.DataFrame(rows)
+    result = cp.PanelRegression(
+        panel,
+        formula="y ~ 1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    )
+    within_y = _sequential_group_demean(panel, ["y"], ["unit", "time"])
+    np.testing.assert_allclose(
+        np.asarray(result.design["y"], dtype=float).reshape(-1),
+        within_y["y"].to_numpy(dtype=float),
+    )
+    intercept = np.asarray(result.design["X"], dtype=float)
+    assert intercept.shape == (len(panel), 1)
+    np.testing.assert_allclose(intercept, np.ones((len(panel), 1)))
+    recorded = result._group_means["unit"].copy()
+    result._record_original_group_means("unit")
+    pd.testing.assert_frame_equal(result._group_means["unit"], recorded)
+
+
+def test_sequential_within_preserves_one_dimensional_outcome():
+    """A one-column outcome vector stays one-dimensional after demeaning."""
+    panel = _cited_interaction_panel()
+    result = cp.PanelRegression(
+        panel,
+        formula="y ~ 1 + treatment",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    )
+    transformed = result._sequential_within(
+        panel["y"].to_numpy(dtype=float),
+        panel,
+        ["unit"],
+    )
+    assert transformed.ndim == 1
+    expected = panel["y"] - panel.groupby("unit", observed=True)["y"].transform("mean")
+    np.testing.assert_allclose(transformed, expected.to_numpy(dtype=float))
+
+
+def test_kept_row_action_reports_alignment_and_rejects_unreported_drops():
+    """Row alignment must not guess when Patsy drops rows without a mask."""
+    from causalpy.experiments.panel_regression import _KeptRowNAAction
+
+    action = _KeptRowNAAction()
+    assert action.handle_NA([], [], []) == []
+    assert action.kept_rows is None
+    data = pd.DataFrame({"y": [1.0, 2.0]})
+    np.testing.assert_array_equal(
+        action.rows_for(data, np.array([1.0, 2.0])),
+        np.ones(2, dtype=bool),
+    )
+    with pytest.raises(ValueError, match="without reporting which rows were kept"):
+        action.rows_for(data, np.array([1.0]))
