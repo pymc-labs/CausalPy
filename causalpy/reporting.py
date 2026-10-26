@@ -716,9 +716,8 @@ def _extract_window(
     post_index : pd.Index
         Index of the post-treatment period (e.g. ``experiment.datapost.index``).
     window : str, tuple, or slice
-        Window specification: "post", inclusive (start, end) tuple, or
-        slice. Numeric bounds are compared directly and are not truncated
-        to integers; a bound need not be an index label. Datetime slices
+        Window specification: "post", inclusive (start, end) tuple, or slice.
+        Datetime slices
         with integer bounds are positional (exclusive stop); datetime label
         slices include both bounds. Slice steps are applied after selection.
         Numeric-index slices use an exclusive stop.
@@ -751,7 +750,8 @@ def _extract_window(
                 end = pd.Timestamp(end)
             window_coords = post_index[(post_index >= start) & (post_index <= end)]
         else:
-            # Numeric index: inclusive bounds, compared without int() truncation.
+            # Numeric index: inclusive bounds, compared directly and not truncated
+            # to integers. A bound need not be an index label.
             mask = (post_index >= start) & (post_index <= end)
             window_coords = post_index[mask]
     elif isinstance(window, slice):
