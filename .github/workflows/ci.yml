@@ -41,12 +41,12 @@ jobs:
           enable-cache: true
       - name: Run prek on changed files in PRs
         if: github.event_name == 'pull_request'
-        uses: j178/prek-action@1382ad72dea72f9d53832f2bcb65b3e87a947204 # v3.0.1
+        uses: j178/prek-action@af4d4fcb6922b8e6f65c0426947125fcc38794ce # v3.0.2
         with:
           extra-args: --from-ref ${{ github.event.pull_request.base.sha }} --to-ref ${{ github.event.pull_request.head.sha }}
       - name: Run prek on all files on pushes
         if: github.event_name != 'pull_request'
-        uses: j178/prek-action@1382ad72dea72f9d53832f2bcb65b3e87a947204 # v3.0.1
+        uses: j178/prek-action@af4d4fcb6922b8e6f65c0426947125fcc38794ce # v3.0.2
         with:
           extra-args: --all-files
 
@@ -68,7 +68,7 @@ jobs:
       # of truth (.pre-commit-config.yaml). This eliminates the dual-pin /
       # duplicated-args drift surface that previously lived in this job.
       - name: Run pyproject2conda via prek hook
-        uses: j178/prek-action@1382ad72dea72f9d53832f2bcb65b3e87a947204 # v3.0.1
+        uses: j178/prek-action@af4d4fcb6922b8e6f65c0426947125fcc38794ce # v3.0.2
         with:
           extra-args: pyproject2conda-yaml --all-files
       - name: Check environment.yml is in sync with pyproject.toml
