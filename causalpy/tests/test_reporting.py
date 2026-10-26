@@ -2505,6 +2505,151 @@ def test_compute_statistics_ols_small_sample(mock_pymc_sample):
     assert "p_value" in stats["avg"]
 
 
+@pytest.mark.parametrize("n_post", [2, 6, 11])
+@pytest.mark.parametrize("impact", [5.0, -2.5, 1.0])
+def test_ols_zero_se_cumulative_p_value_is_zero(n_post, impact):
+    """A nonzero constant impact has cumulative p-value 0 when the SE is 0.
+
+    The t-statistic is the coefficient divided by its standard error. A nonzero
+    cumulative effect divided by a zero standard error is infinite, so the
+    two-sided p-value is 0. It must not be reported as 1, and the check is the
+    numeric table value, not the printed sentence.
+    """
+    from causalpy.reporting import _compute_statistics_ols
+
+    impact_values = np.full(n_post, impact)
+    counterfactual = np.zeros(n_post)
+    stats = _compute_statistics_ols(
+        impact_values,
+        counterfactual,
+        alpha=0.05,
+        cumulative=True,
+        relative=False,
+    )
+
+    cumulative = stats["cum"]
+    assert cumulative["mean"] == pytest.approx(impact * n_post)
+    assert cumulative["ci_lower"] == pytest.approx(cumulative["mean"])
+    assert cumulative["ci_upper"] == pytest.approx(cumulative["mean"])
+    assert cumulative["ci_lower"] > 0 or cumulative["ci_upper"] < 0
+    assert cumulative["p_value"] == 0.0
+
+
+@pytest.mark.parametrize("n_post", [3, 6])
+def test_effect_summary_ols_zero_se_cumulative_p_value(n_post):
+    """Public OLS effect_summary reports cumulative p-value 0 for a constant impact."""
+    from sklearn.linear_model import LinearRegression
+
+    n_pre = 8
+    impact = 5.0
+    t = np.arange(n_pre + n_post)
+    y = np.zeros(n_pre + n_post)
+    y[n_pre:] = impact
+    df = pd.DataFrame({"t": t, "y": y})
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=n_pre,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+
+    summary = result.effect_summary(cumulative=True, relative=False)
+    row = summary.table.loc["cumulative"]
+
+    assert row["mean"] == pytest.approx(impact * n_post)
+    assert row["ci_lower"] == pytest.approx(row["mean"])
+    assert row["ci_upper"] == pytest.approx(row["mean"])
+    assert row["ci_lower"] > 0
+    assert row["p_value"] == 0.0
+
+
+def test_ols_cumulative_relative_effect_is_ratio_of_cumulative_totals():
+    """Cumulative relative effect is the percentage change of the totals.
+
+    It is not the sum of per-period percentages. The interval is the cumulative
+    effect interval scaled by ``100 / sum(counterfactual)``, including when the
+    counterfactual varies and the window is not the cited 10-point design.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    from causalpy.reporting import _compute_statistics_ols
+
+    cases = [
+        (np.array([1.0, 2.0, 0.5]), np.array([4.0, 10.0, 2.0])),
+        (np.array([1.0, -0.5, 3.0, 0.25]), np.array([5.0, 8.0, 2.0, 20.0])),
+        (np.array([1.0, 4.0]), np.array([-2.0, -6.0])),
+        (np.ones(10), np.full(10, 5.0)),
+    ]
+    for impact, counterfactual in cases:
+        stats = _compute_statistics_ols(
+            impact,
+            counterfactual,
+            alpha=0.05,
+            cumulative=True,
+            relative=True,
+        )
+        scale = 100.0 / np.sum(counterfactual)
+        expected = float(np.sum(impact) * scale)
+        period_sum = float(np.sum((impact / counterfactual) * 100))
+        assert stats["cum"]["relative_mean"] == pytest.approx(expected)
+        if not np.isclose(period_sum, expected):
+            assert stats["cum"]["relative_mean"] != pytest.approx(period_sum)
+        assert stats["avg"]["relative_mean"] == pytest.approx(
+            float(np.mean((impact / counterfactual) * 100))
+        )
+        bounds = sorted(
+            [
+                stats["cum"]["ci_lower"] * scale,
+                stats["cum"]["ci_upper"] * scale,
+            ]
+        )
+        assert stats["cum"]["relative_ci_lower"] == pytest.approx(bounds[0])
+        assert stats["cum"]["relative_ci_upper"] == pytest.approx(bounds[1])
+
+    # Public path: constant counterfactual 5, constant impact 1, 10 post points.
+    cited = cp.InterruptedTimeSeries(
+        pd.DataFrame(
+            {
+                "t": np.arange(30),
+                "y": np.concatenate([np.full(20, 5.0), np.full(10, 6.0)]),
+            }
+        ),
+        treatment_time=20,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+    cited_table = cited.effect_summary(relative=True, cumulative=True).table
+    assert cited_table.loc["cumulative", "relative_mean"] == pytest.approx(20.0)
+    assert cited_table.loc["cumulative", "relative_mean"] != pytest.approx(200.0)
+
+    # Unequal post counterfactual, window length other than 10.
+    t_pre = np.arange(12)
+    t_post = np.arange(12, 17)
+    counterfactual = 3.0 + 0.4 * t_post
+    impact = np.array([1.0, -0.5, 2.0, 0.25, 1.5])
+    varied = cp.InterruptedTimeSeries(
+        pd.DataFrame(
+            {
+                "t": np.concatenate([t_pre, t_post]),
+                "y": np.concatenate([3.0 + 0.4 * t_pre, counterfactual + impact]),
+            }
+        ),
+        treatment_time=12,
+        formula="y ~ 1 + t",
+        model=LinearRegression(),
+    ).fit()
+    varied_table = varied.effect_summary(relative=True, cumulative=True).table
+    expected_varied = float(np.sum(impact) / np.sum(counterfactual) * 100)
+    period_sum_varied = float(np.sum(impact / counterfactual * 100))
+    assert varied_table.loc["cumulative", "relative_mean"] == pytest.approx(
+        expected_varied
+    )
+    assert varied_table.loc["cumulative", "relative_mean"] != pytest.approx(
+        period_sum_varied
+    )
+    assert not np.isclose(expected_varied, period_sum_varied)
+
+
 def test_generate_table_scalar_all_tail_probabilities():
     """Test _generate_table_scalar includes all tail probability columns."""
     from causalpy.reporting import _generate_table_scalar
@@ -3486,6 +3631,57 @@ def test_generate_prose_detailed_ols_basic():
     assert "2.50" in prose
     assert "95% confidence interval" in prose
     assert "does not include zero" in prose
+
+
+@pytest.mark.parametrize(
+    ("alpha", "coverage"),
+    [
+        (0.05, "95%"),
+        (0.01, "99%"),
+        (0.025, "97.5%"),
+        (0.001, "99.9%"),
+    ],
+)
+def test_ols_prose_renders_coverage_from_alpha(alpha, coverage):
+    """OLS prose names the interval as ``1 - alpha``, including non-integers."""
+    from causalpy.reporting import (
+        _generate_prose_detailed_ols,
+        _generate_prose_did_ols,
+        _generate_prose_rd_ols,
+    )
+
+    window_coords = pd.Index([10, 11, 12])
+    detailed = _generate_prose_detailed_ols(
+        {
+            "avg": {
+                "mean": 2.5,
+                "ci_lower": 1.0,
+                "ci_upper": 4.0,
+                "p_value": 0.03,
+            }
+        },
+        window_coords,
+        alpha=alpha,
+        cumulative=False,
+        relative=False,
+        observed_avg=52.5,
+        counterfactual_avg=50.0,
+    )
+    scalar = {
+        "mean": 2.5,
+        "ci_lower": 1.0,
+        "ci_upper": 4.0,
+        "p_value": 0.03,
+    }
+    did = _generate_prose_did_ols(scalar, alpha=alpha)
+    rd = _generate_prose_rd_ols(scalar, alpha=alpha)
+
+    truncated = f"{int((1 - alpha) * 100)}%"
+    for prose in (detailed, did, rd):
+        assert f"{coverage} confidence interval" in prose or f"{coverage} CI" in prose
+        if truncated != coverage:
+            assert f"{truncated} confidence interval" not in prose
+            assert f"{truncated} CI" not in prose
 
 
 def test_generate_prose_detailed_ols_counterfactual_interval():
