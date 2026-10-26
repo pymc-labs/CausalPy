@@ -2505,6 +2505,93 @@ def test_compute_statistics_ols_small_sample(mock_pymc_sample):
     assert "p_value" in stats["avg"]
 
 
+def test_ols_cumulative_relative_effect_is_ratio_of_cumulative_totals():
+    """Cumulative relative effect is the percentage change of the totals.
+
+    It is not the sum of per-period percentages. The interval is the cumulative
+    effect interval scaled by ``100 / sum(counterfactual)``, including when the
+    counterfactual varies and the window is not the cited 10-point design.
+    """
+    from sklearn.linear_model import LinearRegression
+
+    from causalpy.reporting import _compute_statistics_ols
+
+    cases = [
+        (np.array([1.0, 2.0, 0.5]), np.array([4.0, 10.0, 2.0])),
+        (np.array([1.0, -0.5, 3.0, 0.25]), np.array([5.0, 8.0, 2.0, 20.0])),
+        (np.array([1.0, 4.0]), np.array([-2.0, -6.0])),
+        (np.ones(10), np.full(10, 5.0)),
+    ]
+    for impact, counterfactual in cases:
+        stats = _compute_statistics_ols(
+            impact,
+            counterfactual,
+            alpha=0.05,
+            cumulative=True,
+            relative=True,
+        )
+        scale = 100.0 / np.sum(counterfactual)
+        expected = float(np.sum(impact) * scale)
+        period_sum = float(np.sum((impact / counterfactual) * 100))
+        assert stats["cum"]["relative_mean"] == pytest.approx(expected)
+        if not np.isclose(period_sum, expected):
+            assert stats["cum"]["relative_mean"] != pytest.approx(period_sum)
+        assert stats["avg"]["relative_mean"] == pytest.approx(
+            float(np.mean((impact / counterfactual) * 100))
+        )
+        bounds = sorted(
+            [
+                stats["cum"]["ci_lower"] * scale,
+                stats["cum"]["ci_upper"] * scale,
+            ]
+        )
+        assert stats["cum"]["relative_ci_lower"] == pytest.approx(bounds[0])
+        assert stats["cum"]["relative_ci_upper"] == pytest.approx(bounds[1])
+
+    # Public path: constant counterfactual 5, constant impact 1, 10 post points.
+    cited = cp.InterruptedTimeSeries(
+        pd.DataFrame(
+            {
+                "t": np.arange(30),
+                "y": np.concatenate([np.full(20, 5.0), np.full(10, 6.0)]),
+            }
+        ),
+        treatment_time=20,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+    cited_table = cited.effect_summary(relative=True, cumulative=True).table
+    assert cited_table.loc["cumulative", "relative_mean"] == pytest.approx(20.0)
+    assert cited_table.loc["cumulative", "relative_mean"] != pytest.approx(200.0)
+
+    # Unequal post counterfactual, window length other than 10.
+    t_pre = np.arange(12)
+    t_post = np.arange(12, 17)
+    counterfactual = 3.0 + 0.4 * t_post
+    impact = np.array([1.0, -0.5, 2.0, 0.25, 1.5])
+    varied = cp.InterruptedTimeSeries(
+        pd.DataFrame(
+            {
+                "t": np.concatenate([t_pre, t_post]),
+                "y": np.concatenate([3.0 + 0.4 * t_pre, counterfactual + impact]),
+            }
+        ),
+        treatment_time=12,
+        formula="y ~ 1 + t",
+        model=LinearRegression(),
+    ).fit()
+    varied_table = varied.effect_summary(relative=True, cumulative=True).table
+    expected_varied = float(np.sum(impact) / np.sum(counterfactual) * 100)
+    period_sum_varied = float(np.sum(impact / counterfactual * 100))
+    assert varied_table.loc["cumulative", "relative_mean"] == pytest.approx(
+        expected_varied
+    )
+    assert varied_table.loc["cumulative", "relative_mean"] != pytest.approx(
+        period_sum_varied
+    )
+    assert not np.isclose(expected_varied, period_sum_varied)
+
+
 def test_generate_table_scalar_all_tail_probabilities():
     """Test _generate_table_scalar includes all tail probability columns."""
     from causalpy.reporting import _generate_table_scalar

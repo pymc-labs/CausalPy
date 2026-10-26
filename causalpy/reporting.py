@@ -1608,15 +1608,18 @@ def _compute_statistics_ols(
         stats["avg"]["relative_ci_upper"] = float(ci_rel_upper)
 
         if cumulative:
-            # Cumulative relative effect
-            cum_relative = np.sum(relative_effect)
-            se_cum_rel = np.std(relative_effect, ddof=1) * np.sqrt(n)
-            ci_cum_rel_lower = cum_relative - t_critical * se_cum_rel
-            ci_cum_rel_upper = cum_relative + t_critical * se_cum_rel
+            # Percentage change of the cumulative totals, not the sum of
+            # per-period percentages. The counterfactual is the fixed point
+            # prediction, so the interval is the cumulative-effect interval
+            # scaled by 100 / sum(counterfactual).
+            cum_counterfactual = np.sum(counterfactual)
+            scale = 100.0 / cum_counterfactual
+            cum_relative = cum_effect * scale
+            rel_bounds = np.sort([ci_cum_lower * scale, ci_cum_upper * scale])
 
             stats["cum"]["relative_mean"] = float(cum_relative)
-            stats["cum"]["relative_ci_lower"] = float(ci_cum_rel_lower)
-            stats["cum"]["relative_ci_upper"] = float(ci_cum_rel_upper)
+            stats["cum"]["relative_ci_lower"] = float(rel_bounds[0])
+            stats["cum"]["relative_ci_upper"] = float(rel_bounds[1])
 
     return stats
 
