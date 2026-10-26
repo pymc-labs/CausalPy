@@ -14,7 +14,8 @@
 """Panel Regression with Fixed Effects."""
 
 import re
-from typing import Any, Literal
+import warnings
+from typing import Any, Literal, Self
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -36,6 +37,58 @@ from causalpy.reporting import EffectSummary
 
 from ._results import ResultBundle
 from .base import BaseExperiment
+
+
+class _WithinBetaPrior:
+    """Beta prior with time-invariant columns fixed at 0.
+
+    A free draw on a column that does not vary within unit is unidentified once
+    unit dummies are present. Sampling it returns the prior, not the within
+    estimate. The reported coefficient is a deterministic 0. Identified columns
+    keep the supplied prior, whatever distribution that prior uses.
+    """
+
+    def __init__(self, inner: Any, absorbed: tuple[str, ...]) -> None:
+        self._inner = inner
+        self._absorbed = set(absorbed)
+
+    def create_variable(self, name: str, xdist: bool = False) -> Any:
+        """Create ``name`` with absorbed columns fixed at 0."""
+        import pymc as pm
+        import pytensor.tensor as pt
+
+        model = pm.modelcontext(None)
+        coeff_names = [str(value) for value in model.coords["coeffs"]]
+        missing = [
+            label for label in sorted(self._absorbed) if label not in coeff_names
+        ]
+        if missing:
+            raise DataException(
+                "Could not fix the within estimate for covariate(s) absent from "
+                f"the model coefficients: {', '.join(missing)}."
+            )
+        absorbed_idx = [
+            index for index, label in enumerate(coeff_names) if label in self._absorbed
+        ]
+        if xdist:
+            from pymc.dims import Deterministic
+        else:
+            Deterministic = pm.Deterministic
+        within = self._inner.create_variable(f"{name}_within", xdist=xdist)
+        if getattr(within, "ndim", 0) != 2:
+            raise DataException(
+                "Could not fix the within estimate because the beta prior did not "
+                "return a treated-unit by coefficient matrix."
+            )
+        beta = pt.set_subtensor(within[:, absorbed_idx], 0.0)
+        dims = getattr(self._inner, "dims", None) or ["treated_units", "coeffs"]
+        return Deterministic(name, beta, dims=dims)
+
+
+# ``LinearRegression.fit`` passes this to ``scipy.linalg.lstsq`` as ``cond``.
+# Singular values smaller than ``tol`` times the largest are treated as zero.
+_OLS_SOLVER_TOL = 1e-6
+_PIN_NOT_INSTALLED = object()
 
 
 class PanelRegression(BaseExperiment[ResultBundle]):
@@ -90,7 +143,32 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     ``PanelRegression`` fits the formula after representing fixed effects with dummy variables or demeaning, but it does not select a treatment term or compute a single built-in causal effect. Any causal estimand is extracted from the fitted coefficient chosen by the analyst, and its interpretation depends on the formula and identification assumptions.
 
     The demeaned transformation (de-meaning by group) removes time-invariant
-    confounders but also drops time-invariant covariates from the model. For
+    confounders but also drops time-invariant covariates from the model. A
+    covariate with no within-unit variation is collinear with dummy-variable
+    unit fixed effects. That coefficient is reported as 0, matching the within
+    estimator, and the unit effects absorb the level. A covariate in the span
+    of the time dummies is collinear with those fixed effects even when it
+    varies within unit, so that coefficient is also reported as 0. A level or
+    time pattern plus an identified within change is not that case.
+    Residualize against a constant and the time dummies first. Treatment
+    coding does not span a constant. The constant is the ``Intercept`` column
+    when Patsy includes it, and a column of ones when the formula drops it.
+    If that residual is unidentified, the within estimate is 0. If the raw
+    solver already reports the residual's coefficient, leave the column in
+    place. Otherwise store the residual.
+    Only an exact duplicate, or a within-unit change of a few float64 ulps that least
+    squares cannot see, counts as no variation. A change that is small relative
+    to the column magnitude is still within variation, including a 0.5 change
+    at magnitude 1e15, which is exactly four ulps of that magnitude. If the raw
+    column is numerically a unit level, or the solver cutoff cannot see its
+    within change against the full design, it is stored as its within deviation
+    so least squares reports that coefficient instead of dropping it. A pairwise
+    check against the unit dummies is not enough: two columns can each increase
+    that rank and still be dropped together. The check uses the
+    rows the formula retains, in design order, and does not require a unique
+    frame index. That coefficient is not left as an unidentified prior. The
+    absorbed prior is installed only while the PyMC graph is built and is not
+    left on the caller's model, so a later clone does not pin those names. For
     the ``"dummies"`` approach (unpooled FE), individual unit effects can be
     extracted from the coefficients. For the demeaned approach, unit effects
     can be recovered post-hoc using the stored group means (``_group_means``),
@@ -224,7 +302,8 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         # they don't demean the data before fitting.
         self._original_data = pandas_data.copy()
 
-        # Initialize storage for group means (used in demeaned transformation)
+        self._absorbed_covariate_labels: tuple[str, ...] = ()
+
         self._group_means: dict[str, pd.DataFrame] = {}
 
         # Pipeline (matches pattern of other experiment classes)
@@ -280,10 +359,17 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
     @staticmethod
     def _is_fe_factor(factor_name: str, variable: str) -> bool:
-        """Whether a Patsy factor categorically encodes the given variable."""
+        """Whether a Patsy factor categorically encodes the given variable.
+
+        ``C(variable)`` and ``C(Q("variable"))`` (either quote) are the same
+        factor. A spaced column name has no other Patsy form. Whitespace and a
+        coding option such as ``Treatment`` do not make it a different factor.
+        """
+        escaped = re.escape(variable)
+        quoted = r"Q\(\s*(['\"])" + escaped + r"\1\s*\)"
         return (
             re.match(
-                rf"^C\(\s*{re.escape(variable)}\s*(?:,|\))",
+                rf"^C\(\s*(?:{escaped}|{quoted})\s*(?:,|\))",
                 factor_name,
             )
             is not None
@@ -316,12 +402,531 @@ class PanelRegression(BaseExperiment[ResultBundle]):
                 # (single-pass is exact only for balanced; see docstring Notes).
                 data = self._demean_transform(data, self.time_fe_variable)
 
-        y, X = build_formula_matrices(self.formula, data)
+        # Patsy drops rows with a missing value in a used column and does not
+        # keep that mask on a DesignMatrix. A positional index on this copy
+        # records retained rows in design order. The caller's index may repeat,
+        # so label lookup cannot recover those rows.
+        data.index = pd.RangeIndex(len(data))
+        y, X = build_formula_matrices(self.formula, data, return_type="dataframe")
+        self._estimation_row_positions = np.asarray(X.index, dtype=int)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
+        self.labels = list(X.design_info.column_names)
         self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
+        self._absorb_time_invariant_covariates()
+
+    def _absorb_time_invariant_covariates(self) -> None:
+        """Report the within coefficient for covariates collinear with fixed effects.
+
+        A covariate that does not vary within unit lies in the span of the unit
+        dummies. Dummy-variable least squares is then unidentified, and a
+        minimum-norm solve splits the unit level into that covariate. The within
+        estimator drops the covariate, so the reported coefficient is 0 and the
+        unit dummies keep the level.
+
+        A within-varying column can still be numerically a unit level, or its
+        within direction can fall in the span of the time dummies. Rewriting a
+        time pattern to its unit within deviation leaves that collinearity, so
+        the column is absorbed and the time effects keep the level.
+
+        Residualize against a constant and the time dummies before that
+        decision. Treatment coding is zero on the reference period, so a level
+        is not in the time-dummy span until a constant is included. A formula
+        that drops the intercept does not add that column; the projection uses
+        a column of ones instead. If the residual is unidentified, absorb the
+        column. If it is identified and the raw column does not increase rank,
+        store the residual only when the raw solver does not already report
+        that coefficient. Replacing a column the solver already estimates
+        changes a design the caller can inspect. Leaving an unestimated raw
+        column lets least squares split the level and report about 0.
+
+        A within-varying column can also be dropped by the solver even though it
+        increases rank against the unit dummies. ``LinearRegression.fit`` drops
+        singular values at or below ``tol`` (default ``1e-6``) times the full
+        design's largest singular value. Two level-250 spikes each add a
+        direction to the dummy block, but together one within contrast falls
+        below that cutoff and both coefficients are about 0. The hidden column
+        is stored as its within deviation and the design is checked again.
+        Rewriting one can make the other estimable, so a column the solver can
+        already see stays raw. The supplied prior is left in place.
+        """
+        self._absorbed_covariate_labels = ()
+        if self.fe_method != "dummies":
+            return
+        protected = set(self._get_fe_labels(self.unit_fe_variable))
+        if not protected:
+            return
+        if self.time_fe_variable is not None:
+            protected.update(self._get_fe_labels(self.time_fe_variable))
+        protected.add("Intercept")
+
+        units = self._units_on_estimation_rows()
+        absorbed: list[int] = []
+        recoverable: list[int] = []
+        for index, label in enumerate(self.labels):
+            if label in protected:
+                continue
+            column = self._X_raw[:, index]
+            if self._column_varies_within_unit(column, units):
+                continue
+            if self._within_change_is_identified(column, units):
+                recoverable.append(index)
+            else:
+                absorbed.append(index)
+
+        design = np.array(self._X_raw, dtype=float, copy=True)
+        changed = False
+        if absorbed:
+            design[:, absorbed] = 0.0
+            changed = True
+        for index in recoverable:
+            design[:, index] = self._within_deviation(design[:, index], units)
+            changed = True
+
+        protected_indexes = [
+            index for index, label in enumerate(self.labels) if label in protected
+        ]
+        time_labels = (
+            set(self._get_fe_labels(self.time_fe_variable))
+            if self.time_fe_variable is not None
+            else set()
+        )
+        time_indexes = [
+            index for index, label in enumerate(self.labels) if label in time_labels
+        ]
+        tol = self._least_squares_tol()
+        skip = set(absorbed)
+        skip.update(recoverable)
+        candidates = [
+            index
+            for index, label in enumerate(self.labels)
+            if label not in protected and index not in skip
+        ]
+        protected_block = design[:, protected_indexes]
+        for _ in range(len(candidates)):
+            repairs = []
+            for index in candidates:
+                if index in skip:
+                    continue
+                action, residual = self._time_pattern_repair(
+                    design, index, protected_block, time_indexes, units, tol
+                )
+                if action == "keep":
+                    continue
+                repairs.append((index, action, residual))
+            if not repairs:
+                break
+            index, action, residual = max(
+                repairs, key=lambda item: float(np.linalg.norm(design[:, item[0]]))
+            )
+            if action == "absorb":
+                design[:, index] = 0.0
+                absorbed.append(index)
+            else:
+                design[:, index] = residual
+            skip.add(index)
+            changed = True
+
+        for _ in range(len(candidates)):
+            hidden = self._columns_with_hidden_within_direction(
+                design, candidates, skip, units, tol
+            )
+            if not hidden:
+                break
+            index = max(hidden, key=lambda i: float(np.linalg.norm(design[:, i])))
+            action, residual = self._time_pattern_repair(
+                design,
+                index,
+                design[:, protected_indexes],
+                time_indexes,
+                units,
+                tol,
+            )
+            if action == "absorb":
+                design[:, index] = 0.0
+                absorbed.append(index)
+            elif action == "store_residual":
+                design[:, index] = residual
+            elif time_indexes and self._replacement_matches_raw_solver(
+                design, index, residual, tol
+            ):
+                skip.add(index)
+                continue
+            else:
+                design[:, index] = self._within_deviation(design[:, index], units)
+            skip.add(index)
+            changed = True
+
+        if not changed:
+            return
+        if absorbed:
+            self._absorbed_covariate_labels = tuple(
+                self.labels[index] for index in absorbed
+            )
+            names = ", ".join(self.labels[index] for index in absorbed)
+            warnings.warn(
+                "Covariate(s) collinear with the fixed effects are reported at the "
+                "within estimate of 0: "
+                f"{names}. The fixed effects absorb the level.",
+                UserWarning,
+                stacklevel=4,
+            )
+        self._X_raw = design
+
+    def _within_lies_in_fixed_effects(
+        self,
+        column: np.ndarray,
+        protected_block: np.ndarray,
+        units: np.ndarray,
+        tol: float,
+    ) -> bool:
+        """Whether the within deviation is unidentified against the fixed effects.
+
+        A time pattern varies within unit, so the unit-level check leaves it
+        raw. Unit demeaning does not remove a pure time pattern. The within
+        estimate is 0, and rewriting the column would leave the collinearity.
+        """
+        if not self._within_change_is_identified(column, units):
+            return True
+        if protected_block.size == 0:
+            return False
+        within = self._within_deviation(column, units)
+        stacked = np.column_stack([protected_block, within])
+        return self._rank_at_solver_cutoff(stacked, tol) <= self._rank_at_solver_cutoff(
+            protected_block, tol
+        )
+
+    def _columns_with_hidden_within_direction(
+        self,
+        design: np.ndarray,
+        candidates: list[int],
+        skip: set[int],
+        units: np.ndarray,
+        tol: float,
+    ) -> list[int]:
+        """Covariates whose within direction the full-design solver drops.
+
+        The cutoff is ``tol`` times the full design's largest singular value.
+        A column is hidden when the part of its within deviation that lies in
+        the kept subspace is at or below that cutoff, or when a larger part
+        lies in the dropped subspace. The second clause is the joint failure:
+        each level-250 spike is visible against the unit dummies alone, but
+        half of each within direction is discarded once both spikes are stacked.
+        """
+        pending = [index for index in candidates if index not in skip]
+        if not pending:
+            return []
+        singular_vectors, singular, _ = np.linalg.svd(design, full_matrices=False)
+        if singular.size == 0 or not np.isfinite(singular[0]) or singular[0] == 0.0:
+            return []
+        cutoff = float(tol) * float(singular[0])
+        kept = singular > cutoff
+        hidden: list[int] = []
+        for index in pending:
+            within = self._within_deviation(design[:, index], units)
+            visible = (
+                float(np.linalg.norm(singular_vectors[:, kept].T @ within))
+                if kept.any()
+                else 0.0
+            )
+            dropped_mask = ~kept
+            dropped = (
+                float(np.linalg.norm(singular_vectors[:, dropped_mask].T @ within))
+                if dropped_mask.any()
+                else 0.0
+            )
+            if visible <= cutoff or dropped > cutoff:
+                hidden.append(index)
+        return hidden
+
+    def _least_squares_tol(self) -> float:
+        """lstsq cutoff for the installed model, or the sklearn default.
+
+        ``sklearn.linear_model.LinearRegression`` passes ``tol`` to
+        ``scipy.linalg.lstsq`` as ``cond``. Ridge, Lasso, and other estimators
+        use ``tol`` as a convergence tolerance. Reading that value as an lstsq
+        cutoff rewrites columns the default solver can already estimate.
+        """
+        model = self.model
+        tol = getattr(model, "tol", None)
+        if tol is None or not self._tol_is_lstsq_cutoff(model):
+            return _OLS_SOLVER_TOL
+        return float(tol)
+
+    @staticmethod
+    def _tol_is_lstsq_cutoff(model: Any) -> bool:
+        """Whether ``model.tol`` is the condition number passed to ``lstsq``."""
+        from sklearn.linear_model import LinearRegression as SklearnLinearRegression
+
+        if not isinstance(model, SklearnLinearRegression):
+            return False
+        return type(model).fit is SklearnLinearRegression.fit
+
+    def _time_pattern_repair(
+        self,
+        design: np.ndarray,
+        index: int,
+        protected_block: np.ndarray,
+        time_indexes: list[int],
+        units: np.ndarray,
+        tol: float,
+    ) -> tuple[Literal["absorb", "store_residual", "keep"], np.ndarray]:
+        """Repair a column that may lie in the time-effect span.
+
+        Residualize against a constant and the time dummies before deciding
+        the column is unidentified. The constant is the ``Intercept`` column
+        when that label exists, and a column of ones when the formula drops
+        it. A pure time pattern has a zero residual and is absorbed. A level
+        plus an identified within change is not. Store that residual only when
+        the raw solver does not already report its coefficient.
+        """
+        column = np.asarray(design[:, index], dtype=float)
+        indexes = self._time_effect_indexes(time_indexes)
+        residual = self._residual_against_indexes(
+            column,
+            design,
+            indexes,
+            add_constant=bool(time_indexes)
+            and not any(self.labels[i] == "Intercept" for i in indexes),
+        )
+        if self._within_lies_in_fixed_effects(residual, protected_block, units, tol):
+            return "absorb", residual
+        if (
+            time_indexes
+            and not self._column_adds_kept_direction(design, index, tol)
+            and not self._replacement_matches_raw_solver(design, index, residual, tol)
+        ):
+            return "store_residual", residual
+        return "keep", residual
+
+    def _time_effect_indexes(self, time_indexes: list[int]) -> list[int]:
+        """Time-dummy indexes, plus ``Intercept`` when that column exists.
+
+        Treatment-coded time dummies are zero on the reference period, so they
+        do not contain a constant. When Patsy has no ``Intercept`` column the
+        residualizer supplies a column of ones; this method only returns
+        indexes that exist in the design.
+        """
+        if not time_indexes:
+            return list(time_indexes)
+        indexes = list(time_indexes)
+        for position, label in enumerate(self.labels):
+            if label == "Intercept" and position not in indexes:
+                indexes.append(position)
+                break
+        return indexes
+
+    def _replacement_matches_raw_solver(
+        self,
+        design: np.ndarray,
+        index: int,
+        replacement: np.ndarray,
+        tol: float,
+    ) -> bool:
+        """Whether lstsq already reports the coefficient of ``replacement``.
+
+        A level the outcome follows can be estimable even when its unique
+        singular value sits just below the cutoff. At level 300 that gap is
+        about 3e-5. Storing the residual would replace that column. A spike
+        the outcome does not follow is reported near 0, not at the within
+        estimate, and the coefficients disagree.
+        """
+        y = np.asarray(self._y_raw, dtype=float).reshape(-1)
+        raw = self._lstsq_coefficient(design, y, index, tol)
+        repaired = np.array(design, dtype=float, copy=True)
+        repaired[:, index] = replacement
+        repaired_coef = self._lstsq_coefficient(repaired, y, index, tol)
+        scale = max(1.0, abs(raw), abs(repaired_coef))
+        return abs(raw - repaired_coef) <= 1e-3 * scale
+
+    @staticmethod
+    def _lstsq_coefficient(
+        design: np.ndarray, y: np.ndarray, index: int, tol: float
+    ) -> float:
+        """Min-norm coefficient ``lstsq`` reports at ``cond=tol``."""
+        coef = np.linalg.lstsq(np.asarray(design, dtype=float), y, rcond=tol)[0]
+        return float(coef[index])
+
+    @staticmethod
+    def _residual_against_indexes(
+        column: np.ndarray,
+        design: np.ndarray,
+        indexes: list[int],
+        *,
+        add_constant: bool = False,
+    ) -> np.ndarray:
+        """Column minus its projection onto the indexed columns.
+
+        ``add_constant`` appends a column of ones. Treatment-coded time dummies
+        do not span a constant, and ``y ~ 0 + ...`` has no ``Intercept`` column
+        to project onto. The projection uses machine precision, not the solver
+        cutoff, so a small within change is not absorbed into a large time
+        pattern before it can be identified.
+        """
+        values = np.asarray(column, dtype=float)
+        parts: list[np.ndarray] = []
+        if indexes:
+            block = np.asarray(design[:, indexes], dtype=float)
+            if block.ndim == 1:
+                block = block.reshape(-1, 1)
+            if block.size and block.shape[0] == values.shape[0]:
+                parts.append(block)
+        if add_constant:
+            parts.append(np.ones((values.shape[0], 1)))
+        if not parts:
+            return values
+        block = parts[0] if len(parts) == 1 else np.column_stack(parts)
+        coef = np.linalg.lstsq(block, values, rcond=None)[0]
+        return values - block @ coef
+
+    @staticmethod
+    def _column_adds_kept_direction(design: np.ndarray, index: int, tol: float) -> bool:
+        """Whether ``design[:, index]`` increases rank at the solver cutoff."""
+        reduced = np.array(design, dtype=float, copy=True)
+        reduced[:, index] = 0.0
+        full_rank = PanelRegression._rank_at_solver_cutoff(design, tol)
+        reduced_rank = PanelRegression._rank_at_solver_cutoff(reduced, tol)
+        return full_rank > reduced_rank
+
+    @staticmethod
+    def _rank_at_solver_cutoff(matrix: np.ndarray, tol: float) -> int:
+        """Count singular values ``lstsq`` would keep at ``cond=tol``."""
+        singular = np.linalg.svd(np.asarray(matrix, dtype=float), compute_uv=False)
+        if singular.size == 0 or not np.isfinite(singular[0]) or singular[0] == 0.0:
+            return 0
+        return int(np.count_nonzero(singular > float(tol) * float(singular[0])))
+
+    @staticmethod
+    def _within_deviation(column: np.ndarray, units: np.ndarray) -> np.ndarray:
+        """Column minus its unit mean, so least squares sees the within change.
+
+        Subtract a within-unit reference before the mean. At large magnitude,
+        ``value - mean(value)`` swallows a small within change that is still
+        exactly representable as a difference from another row in the unit.
+        """
+        values = pd.Series(np.asarray(column, dtype=float))
+        units_array = np.asarray(units)
+        shifted = values - values.groupby(units_array, observed=True).transform("min")
+        centered = shifted - shifted.groupby(units_array, observed=True).transform(
+            "mean"
+        )
+        return centered.to_numpy()
+
+    @staticmethod
+    def _within_change_is_identified(column: np.ndarray, units: np.ndarray) -> bool:
+        """Whether least squares can see the within deviation next to an intercept.
+
+        ``LinearRegression`` drops a column whose singular value is below its
+        default ``tol`` (1e-6) times the largest singular value. A few ulps of a
+        moderate magnitude fail that cutoff. A 0.5 change at magnitude 1e15 is
+        exactly four ulps, so the ulp check calls it invariant, but the within
+        deviation is large enough that the within estimator is not zero.
+        """
+        deviation = PanelRegression._within_deviation(column, units)
+        if deviation.size == 0 or not np.isfinite(deviation).all():
+            return False
+        intercept_scale = float(np.sqrt(deviation.size))
+        return bool(np.linalg.norm(deviation) > 1e-6 * intercept_scale)
+
+    def _units_on_estimation_rows(self) -> np.ndarray:
+        """Unit labels for the rows the formula retained, in design order."""
+        positions = np.asarray(self._estimation_row_positions)
+        n_rows = len(self._original_data)
+        if (
+            positions.shape != (self._X_raw.shape[0],)
+            or np.any(positions < 0)
+            or np.any(positions >= n_rows)
+        ):
+            raise DataException(
+                "Could not align unit fixed effects to the rows retained by "
+                "the formula. A length mismatch is not within-unit variation."
+            )
+        return self._original_data.iloc[positions][self.unit_fe_variable].to_numpy()
+
+    @staticmethod
+    def _column_varies_within_unit(column: np.ndarray, units: np.ndarray) -> bool:
+        """Whether ``column`` changes inside any unit on the retained rows.
+
+        Exact duplicates, and a within-unit range of only a few float64 ulps of
+        that unit's magnitude, are not variation. A relative cutoff is not used:
+        at large magnitude it treats a real change as float noise.
+        """
+        values = np.asarray(column, dtype=float)
+        if values.shape[0] != len(units):
+            raise ValueError(
+                "Within-unit variation must be checked on the rows retained "
+                "by the formula, not on a longer original frame."
+            )
+        if not np.isfinite(values).all():
+            return True
+        if values.size == 0:
+            return False
+        units_array = np.asarray(units)
+        grouped = pd.Series(values).groupby(units_array, observed=True)
+        within_range = (grouped.transform("max") - grouped.transform("min")).to_numpy()
+        magnitude = (
+            pd.Series(np.abs(values))
+            .groupby(units_array, observed=True)
+            .transform("max")
+            .to_numpy()
+        )
+        # Four ulps is float noise. A relative 1e-8 cutoff is not: at 1e8 it is 1.0.
+        return bool(np.any(within_range > 4.0 * np.spacing(magnitude)))
+
+    def build(self) -> Self:
+        """Build the graph, fixing absorbed coefficients at the within estimate.
+
+        :meth:`fit` and :meth:`sample_prior_predictive` both call this before
+        drawing. The design column is already zero, so the unit dummies absorb
+        the level, and the installed prior reports that column as a
+        deterministic 0 instead of an unidentified draw. The pin is removed
+        from the caller's model after the graph is built, so a clone does not
+        inherit absorbed names.
+        """
+        previous_user_priors = self._install_absorbed_beta_prior()
+        try:
+            return super().build()
+        finally:
+            self._restore_user_priors(previous_user_priors)
+
+    def _install_absorbed_beta_prior(self) -> Any:
+        """Install a beta prior that reports absorbed columns at 0.
+
+        Model construction rebuilds ``priors`` from defaults and
+        ``_user_priors`` immediately before ``build_model``. The pinned prior
+        has to live in ``_user_priors`` or that rebuild drops it. The previous
+        value is returned so :meth:`build` can restore it. Forecast backends
+        are not PyMC models and have no ``_user_priors``; do not assign that
+        attribute on them.
+        """
+        labels = self._absorbed_covariate_labels
+        if not labels:
+            return _PIN_NOT_INSTALLED
+        model = self.model
+        if not isinstance(model, PyMCModel):
+            return _PIN_NOT_INSTALLED
+        user_priors = dict(model._user_priors or {})
+        current = user_priors.get("beta", model.default_priors.get("beta"))
+        if isinstance(current, _WithinBetaPrior):
+            return _PIN_NOT_INSTALLED
+        if not hasattr(current, "create_variable"):
+            raise DataException(
+                "Could not fix the within estimate because the beta prior "
+                "cannot create a variable."
+            )
+        user_priors["beta"] = _WithinBetaPrior(current, labels)
+        previous = model._user_priors
+        model._user_priors = user_priors
+        return previous
+
+    def _restore_user_priors(self, previous: Any) -> None:
+        """Put the caller's priors back after the graph has absorbed them."""
+        if previous is _PIN_NOT_INSTALLED:
+            return
+        model = self.model
+        if isinstance(model, PyMCModel):
+            model._user_priors = previous
 
     def _prepare_data(self) -> None:
         """Bundle design matrices into an ``xr.Dataset``."""
@@ -408,10 +1013,15 @@ class PanelRegression(BaseExperiment[ResultBundle]):
                 group_var, observed=True
             )[numeric_cols].mean()
 
-        # Demean each numeric column
+        # Subtract a within-group reference before the mean. At large magnitude,
+        # value - mean(value) swallows a small within change that is still
+        # representable as a difference from another row in the group.
         for col in numeric_cols:
-            group_mean = data.groupby(group_var, observed=True)[col].transform("mean")
-            data[col] = data[col] - group_mean
+            grouped = data.groupby(group_var, observed=True)[col]
+            shifted = data[col] - grouped.transform("min")
+            data[col] = shifted - shifted.groupby(
+                data[group_var], observed=True
+            ).transform("mean")
 
         return data
 
