@@ -11,6 +11,10 @@
 
 ## Modules
 
+:::{seealso}
+{doc}`../notebooks/sensitivity_checks` explains which checks in `causalpy.checks` apply to each method and how to read their results.
+:::
+
 ```{eval-rst}
 .. currentmodule:: causalpy
 .. autosummary::
