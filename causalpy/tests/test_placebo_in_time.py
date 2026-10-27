@@ -35,6 +35,7 @@ from causalpy.checks.operating_characteristics import (
     compute_assurance_rates,
 )
 from causalpy.checks.placebo_in_time import PlaceboFoldResult, PlaceboInTime
+from causalpy.custom_exceptions import BadIndexException
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.pipeline import Pipeline, PipelineContext
 from causalpy.steps.report import GenerateReport
@@ -3368,6 +3369,71 @@ def test_comparison_frequency_is_enforced_for_generated_calibrated_windows(monke
         result.metadata["skipped_folds"][0]["reason"]
         == "comparison index does not match the complete requested frequency grid"
     )
+
+
+def test_string_treatment_times_on_datetime_index_fail_before_fitting():
+    """Explicit starts must be timestamps on a DatetimeIndex, like treatment_time."""
+    calls = []
+
+    def factory(data, treatment_time):  # pragma: no cover - must not fit
+        calls.append(treatment_time)
+        return _make_fake_bayesian_experiment(data, treatment_time)
+
+    check = _monthly_descriptive_check(
+        n_folds=1, treatment_times=["2010-01-01"], experiment_factory=factory
+    )
+    with pytest.raises(BadIndexException, match="treatment_times must be pd.Timestamp"):
+        check.run(_monthly_descriptive_experiment())
+    assert calls == []
+
+
+def test_generated_calendar_skip_warns(monkeypatch):
+    """A fold skipped for a calendar gap warns like a fold skipped for history."""
+    index = pd.date_range("2010-01-01", periods=100, freq="D")
+    data = pd.DataFrame({"y": 0.0}, index=index.drop(pd.Timestamp("2010-03-17")))
+    check = PlaceboInTime(
+        n_folds=3,
+        intervention_length=pd.Timedelta(days=10),
+        comparison_frequency="D",
+        experiment_factory=_make_fake_bayesian_experiment,
+        make_figures=False,
+    )
+    monkeypatch.setattr(check, "_build_status_quo_model", _fake_status_quo_result)
+    with pytest.warns(
+        UserWarning,
+        match=r"1 fold\(s\) had a comparison window that does not match the "
+        r"complete comparison_frequency='D' grid",
+    ):
+        result = check.run(
+            _make_fake_bayesian_experiment(data, pd.Timestamp("2010-04-01"))
+        )
+    assert [fold["reason"] for fold in result.metadata["skipped_folds"]] == [
+        "comparison index does not match the complete requested frequency grid"
+    ]
+
+
+def test_random_shortfall_warning_names_comparison_frequency():
+    """A random shortfall under a calendar grid names the grid and how to fix it."""
+    data = pd.DataFrame(
+        {"y": 0.0}, index=pd.date_range("2010-01-01", periods=200, freq="D")
+    )
+    check = PlaceboInTime(
+        n_folds=2,
+        selection_method="random",
+        random_seed=0,
+        intervention_length=pd.Timedelta(days=14),
+        comparison_frequency="W",
+        calibrate=False,
+        make_figures=False,
+        experiment_factory=_make_fake_bayesian_experiment,
+    )
+    with pytest.warns(
+        UserWarning,
+        match=r"only 0 of 2 .* comparison_frequency='W' grid constraints\. .*"
+        r"check that comparison_frequency matches the data index",
+    ):
+        result = check.run(_make_fake_bayesian_experiment(data, data.index[180]))
+    assert result.table["reason"].tolist() == ["insufficient_feasible_random_folds"] * 2
 
 
 def test_descriptive_plot_accepts_property_cycle_without_colors():
