@@ -1671,7 +1671,7 @@ class PlaceboInTime:
                     )
                 )
             calendar_advice = (
-                ", or check that comparison_frequency matches the data index "
+                ". Check that comparison_frequency matches the data index "
                 "frequency with no missing dates"
                 if calendar_mismatch_folds
                 or (
@@ -1680,14 +1680,18 @@ class PlaceboInTime:
                 )
                 else ""
             )
+            metadata_note = (
+                "the observed and required pre-period rows"
+                if insufficient_pre_period_folds
+                else "each skipped fold and its reason"
+            )
             warnings.warn(
                 "PlaceboInTime skipped folds because "
                 + "; ".join(warning_parts)
                 + ". Use fewer folds or an experiment_factory tailored to "
                 "the eligible fold data"
                 + calendar_advice
-                + "; skipped_folds metadata records the "
-                "observed and required pre-period rows.",
+                + f"; skipped_folds metadata records {metadata_note}.",
                 stacklevel=3,
             )
 

@@ -3387,6 +3387,52 @@ def test_string_treatment_times_on_datetime_index_fail_before_fitting():
     assert calls == []
 
 
+@pytest.mark.parametrize(
+    ("start", "match"),
+    [
+        pytest.param(
+            pd.Timestamp("2010-01-01").to_pydatetime(),
+            "treatment_times must be pd.Timestamp",
+            id="datetime",
+        ),
+        pytest.param(
+            np.datetime64("2010-01-01"),
+            "treatment_times must be pd.Timestamp",
+            id="datetime64",
+        ),
+        pytest.param(
+            pd.Timestamp("2010-01-01", tz="UTC"),
+            "timezone-aware or both be timezone-naive",
+            id="tz-mismatch",
+        ),
+    ],
+)
+def test_non_matching_treatment_times_on_datetime_index_fail_before_fitting(
+    start, match
+):
+    """Any start that does not match a naive DatetimeIndex fails in the preflight."""
+    check = _monthly_descriptive_check(n_folds=1, treatment_times=[start])
+    with pytest.raises(BadIndexException, match=match):
+        check.run(_monthly_descriptive_experiment())
+
+
+def test_timestamp_treatment_times_on_integer_index_fail_before_fitting():
+    """A timestamp start on an integer index fails in the preflight."""
+    data = pd.DataFrame({"y": 0.0}, index=np.arange(20))
+    check = PlaceboInTime(
+        n_folds=1,
+        treatment_times=[pd.Timestamp("2010-01-01")],
+        intervention_length=2,
+        calibrate=False,
+        experiment_factory=_make_fake_bayesian_experiment,
+        make_figures=False,
+    )
+    with pytest.raises(
+        BadIndexException, match="treatment_times must not be pd.Timestamp"
+    ):
+        check.run(_make_fake_bayesian_experiment(data, 18))
+
+
 def test_generated_calendar_skip_warns(monkeypatch):
     """A fold skipped for a calendar gap warns like a fold skipped for history."""
     index = pd.date_range("2010-01-01", periods=100, freq="D")
@@ -3402,7 +3448,9 @@ def test_generated_calendar_skip_warns(monkeypatch):
     with pytest.warns(
         UserWarning,
         match=r"1 fold\(s\) had a comparison window that does not match the "
-        r"complete comparison_frequency='D' grid",
+        r"complete comparison_frequency='D' grid\. .*fold data\. Check that "
+        r"comparison_frequency matches the data index frequency with no missing "
+        r"dates; skipped_folds metadata records each skipped fold and its reason\.$",
     ):
         result = check.run(
             _make_fake_bayesian_experiment(data, pd.Timestamp("2010-04-01"))
@@ -3430,7 +3478,8 @@ def test_random_shortfall_warning_names_comparison_frequency():
     with pytest.warns(
         UserWarning,
         match=r"only 0 of 2 .* comparison_frequency='W' grid constraints\. .*"
-        r"check that comparison_frequency matches the data index",
+        r"Check that comparison_frequency matches the data index.*"
+        r"each skipped fold and its reason\.$",
     ):
         result = check.run(_make_fake_bayesian_experiment(data, data.index[180]))
     assert result.table["reason"].tolist() == ["insufficient_feasible_random_folds"] * 2
