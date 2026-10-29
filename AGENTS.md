@@ -112,12 +112,11 @@ Renamed or deleted how-to pages must keep a **permanent** entry in `rediraffe_re
 ## Type Checking
 
 - **Tool**: MyPy
-- **Configuration**: Integrated as a prek hook.
+- **Configuration**: `[tool.mypy]` in `pyproject.toml`. Not a prek hook.
 - **Scope**: Checks Python files within the `causalpy/` directory.
 - **Settings**:
     - `ignore-missing-imports`: Enabled to allow for gradual adoption of type hints without requiring all third-party libraries to have stubs.
-    - `additional_dependencies`: Includes `numpy` and `pandas-stubs` to provide type information for these libraries.
-- **Execution**: Run automatically via `prek run --all-files` or on commit.
+- **Execution**: Run `uv run make typecheck` (or `$CONDA_EXE run -n CausalPy make typecheck` on the conda fallback). CI runs the same target.
 - **Style**: Use Python 3.10+ type hint syntax. Specifically: `X | None` not `Optional[X]`, lowercase `dict`, `list`, `tuple` not `Dict`, `List`, `Tuple` from `typing`, and `Literal` for constrained string parameters.
 
 ## GitHub Issue Workflows
