@@ -1359,9 +1359,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             windowed_impact = bundle.impact_post.sel(obs_ind=post_coords)
             window_coords = post_coords
         else:
-            window_args = (bundle.impact_post, self.datapost.index, window)
             windowed_impact, window_coords = _extract_window(
-                *window_args, treated_unit=treated_unit
+                bundle.impact_post,
+                self.datapost.index,
+                window,
+                treated_unit=treated_unit,
             )
 
         # Extract counterfactual for relative effects
