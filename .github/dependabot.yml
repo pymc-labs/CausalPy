@@ -28,11 +28,8 @@ updates:
     labels:
       - "devops"
       - "no releasenotes"
-    # Group in-range minor and patch version updates into one lockfile resolution (#1362). Majors stay individual so a breaking bump cannot stall the weekly batch. applies-to is omitted on purpose: groups then apply to version updates only, and security updates stay individual. Do not fold this into the Actions group via multi-ecosystem-groups, and do not set applies-to: security-updates.
+    # Group all version updates, including majors, into one lockfile resolution (#1362). Security updates remain separate.
     groups:
-      uv-minor-and-patch:
+      uv:
         patterns:
           - "*"
-        update-types:
-          - "minor"
-          - "patch"
