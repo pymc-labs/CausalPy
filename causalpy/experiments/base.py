@@ -792,7 +792,7 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
 
         Returns
         -------
-        EffectSummary
+        ~causalpy.reporting.EffectSummary
             Object with ``.table`` (DataFrame) and ``.text`` (str) attributes.
         """
         raise NotImplementedError("effect_summary method not yet implemented")

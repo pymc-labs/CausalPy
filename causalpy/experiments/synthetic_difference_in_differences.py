@@ -1023,7 +1023,7 @@ class SyntheticDifferenceInDifferences(
 
         Returns
         -------
-        EffectSummary
+        ~causalpy.reporting.EffectSummary
             Object with .table (DataFrame) and .text (str) attributes.
         """
         from causalpy.reporting import (

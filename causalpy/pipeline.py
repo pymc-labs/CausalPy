@@ -48,7 +48,7 @@ class PipelineContext:
         The configuration used to create the experiment (method class +
         keyword arguments), so that downstream steps like
         ``SensitivityAnalysis`` can derive experiment factories.
-    effect_summary : EffectSummary or None
+    effect_summary : ~causalpy.reporting.EffectSummary or None
         The effect summary from the primary experiment.
     sensitivity_results : list
         Accumulated sensitivity / diagnostic check results.
@@ -72,7 +72,7 @@ class PipelineResult:
     ----------
     experiment : BaseExperiment or None
         The fitted experiment.
-    effect_summary : EffectSummary or None
+    effect_summary : ~causalpy.reporting.EffectSummary or None
         The effect summary from the experiment.
     sensitivity_results : list
         Results of all sensitivity / diagnostic checks.

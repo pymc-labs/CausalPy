@@ -689,7 +689,7 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
 
         Returns
         -------
-        EffectSummary
+        ~causalpy.reporting.EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
         # Resolve the group's bundle once; helpers consume containers.
