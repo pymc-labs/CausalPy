@@ -1,0 +1,19 @@
+.github/dependabot.yml
+  s_19f85de254d0c3::t_fe5149f52fc22d 31,33
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "b9dcf96230e23c66ab20e17f612c6311a6d88874",
+  "prompts": {},
+  "sessions": {
+    "s_19f85de254d0c3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a189ac-ce36-7132-b5b2-127cc633f220",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
