@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from matplotlib.gridspec import GridSpec
-from patsy import ModelDesc
+from patsy import ModelDesc, NAAction
 from scipy import stats
 from sklearn.base import RegressorMixin
 
@@ -36,6 +36,32 @@ from causalpy.reporting import EffectSummary
 
 from ._results import ResultBundle
 from .base import BaseExperiment
+
+
+class _KeptRowNAAction(NAAction):
+    """Record the positional rows Patsy keeps when it drops missing values."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.kept_rows: np.ndarray | None = None
+
+    def handle_NA(self, values, is_NAs, origins):
+        if is_NAs:
+            dropped = np.zeros(is_NAs[0].shape[0], dtype=bool)
+            for is_na in is_NAs:
+                dropped |= np.asarray(is_na, dtype=bool)
+            self.kept_rows = ~dropped
+        return super().handle_NA(values, is_NAs, origins)
+
+    def rows_for(self, data: pd.DataFrame, values: np.ndarray) -> np.ndarray:
+        """Return a positional mask aligned with ``data`` for ``values``."""
+        if self.kept_rows is not None:
+            return self.kept_rows
+        if len(values) == len(data):
+            return np.ones(len(data), dtype=bool)
+        raise ValueError(
+            "Patsy dropped formula rows without reporting which rows were kept."
+        )
 
 
 class PanelRegression(BaseExperiment[ResultBundle]):
@@ -108,9 +134,11 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     **Balanced vs unbalanced panels**: A panel is *balanced* when every unit
     is observed in every time period; otherwise it is *unbalanced* (e.g. unit
     entry/exit, missing waves). When both unit and time fixed effects are
-    requested with ``fe_method="demeaned"``, the sequential demeaning
-    (first by unit, then by time) is algebraically equivalent to the standard
-    two-way demeaned transformation only for balanced panels. For unbalanced
+    requested with ``fe_method="demeaned"``, sequential demeaning of the
+    constructed formula columns (first by unit, then by time) is algebraically
+    equivalent to the standard two-way within transformation only for balanced
+    panels. The interaction ``treatment:x`` is the within transform of the
+    product, not the product of the within-transformed factors. For unbalanced
     panels, iterative alternating demeaning would be needed for exact
     convergence; the single-pass approximation used here may introduce small
     biases. Unbalanced panels are common in practice (e.g. firm or worker
@@ -302,26 +330,51 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     def _build_design_matrices(self) -> None:
         """Build design matrices from formula and data using patsy.
 
-        For ``fe_method="demeaned"`` this first applies the demeaned
-        transformation (de-meaning by unit, and optionally by time) before
-        constructing the patsy design matrices.
+        For ``fe_method="demeaned"`` the formula is evaluated on the raw
+        columns, then the outcome and each constructed regressor — except the
+        intercept — are sequentially demeaned. That is the within transform of
+        the formula. Demeaning the raw columns first would make ``treatment:x``
+        the product of demeaned factors, which is not the dummy-variable
+        within estimator of the same formula.
+
+        Patsy drops rows with a missing value in a used formula column before
+        the matrices are returned. The within transform uses those retained
+        rows and their unit and time labels. It does not reattach the full
+        frame index.
         """
         data = self._original_data.copy()
-
-        # Apply demeaned transformation if requested
         if self.fe_method == "demeaned":
-            data = self._demean_transform(data, self.unit_fe_variable)
-            if self.time_fe_variable:
-                # TODO: Use iterative alternating demeaning for unbalanced panels
-                # (single-pass is exact only for balanced; see docstring Notes).
-                data = self._demean_transform(data, self.time_fe_variable)
-
-        y, X = build_formula_matrices(self.formula, data)
+            # Patsy would otherwise treat a boolean treatment as a categorical
+            # factor. The previous demean path cast those columns to float so
+            # the formula column keeps the raw column name.
+            for column in self._numeric_columns_for_group_means():
+                if pd.api.types.is_bool_dtype(data[column]):
+                    data[column] = data[column].astype(float)
+        kept_rows = _KeptRowNAAction()
+        y, X = build_formula_matrices(self.formula, data, NA_action=kept_rows)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
-        self._y_raw, self._X_raw = np.asarray(y), np.asarray(X)
+        y_values = np.asarray(y, dtype=float)
+        x_values = np.asarray(X, dtype=float)
+        if self.fe_method == "demeaned":
+            group_vars = [self.unit_fe_variable]
+            if self.time_fe_variable:
+                # TODO: Use iterative alternating demeaning for unbalanced panels
+                # (single-pass is exact only for balanced; see docstring Notes).
+                group_vars.append(self.time_fe_variable)
+            for group_var in group_vars:
+                self._record_original_group_means(group_var)
+            retained = data.iloc[kept_rows.rows_for(data, y_values)]
+            y_values = self._sequential_within(y_values, retained, group_vars)
+            x_values = self._sequential_within(
+                x_values,
+                retained,
+                group_vars,
+                skip_columns=self._intercept_column_mask(X.design_info),
+            )
+        self._y_raw, self._X_raw = y_values, x_values
 
     def _prepare_data(self) -> None:
         """Bundle design matrices into an ``xr.Dataset``."""
@@ -343,77 +396,78 @@ class PanelRegression(BaseExperiment[ResultBundle]):
             build_coords(self.labels, X.shape[0]),
         )
 
-    def _demean_transform(self, data: pd.DataFrame, group_var: str) -> pd.DataFrame:
-        """Apply demeaned transformation (demean by group).
+    def _numeric_columns_for_group_means(self) -> list[str]:
+        """Return original numeric columns whose group means are stored.
 
-        Parameters
-        ----------
-        data : pd.DataFrame
-            Input data
-        group_var : str
-            Column name to group by (unit or time variable)
-
-        Returns
-        -------
-        pd.DataFrame
-            Demeaned data
-
-        Notes
-        -----
-        When two-way fixed effects are requested (both unit and time), the
-        sequential single-pass demeaning (first by unit, then by time) is
-        algebraically equivalent to the standard two-way demeaned transformation
-
-        .. math:: \\tilde{y}_{it} = y_{it} - \\bar{y}_{i\\cdot}
-                   - \\bar{y}_{\\cdot t} + \\bar{y}_{\\cdot\\cdot}
-
-        **only for balanced panels** (every unit observed in every period).
-        For unbalanced panels the single pass is an approximation; iterative
-        alternating demeaning would be needed for exact convergence.
-
-        Group means stored in ``_group_means`` are always computed from the
-        **original** (pre-demeaning) data so that unit and time effects can
-        be recovered post-hoc without confusion.
+        Group variables are excluded. Boolean columns are included so a
+        boolean treatment still has a recoverable group mean.
         """
-        data = data.copy()
-
-        # Identify numeric and boolean columns to demean (exclude group variables).
-        # Predicates include pandas extension dtypes such as ``BooleanDtype``.
         numeric_cols = [
             column
-            for column, dtype in data.dtypes.items()
+            for column, dtype in self._original_data.dtypes.items()
             if isinstance(column, str)
             and (
                 pd.api.types.is_numeric_dtype(dtype)
                 or pd.api.types.is_bool_dtype(dtype)
             )
         ]
-        group_vars_to_exclude = [self.unit_fe_variable]
+        excluded = {self.unit_fe_variable}
         if self.time_fe_variable:
-            group_vars_to_exclude.append(self.time_fe_variable)
+            excluded.add(self.time_fe_variable)
+        return [column for column in numeric_cols if column not in excluded]
 
-        numeric_cols = [c for c in numeric_cols if c not in group_vars_to_exclude]
+    def _record_original_group_means(self, group_var: str) -> None:
+        """Store group means from the original data, once per grouping variable."""
+        if group_var in self._group_means:
+            return
+        numeric_cols = self._numeric_columns_for_group_means()
+        self._group_means[group_var] = self._original_data.groupby(
+            group_var, observed=True
+        )[numeric_cols].mean()
 
-        # Cast boolean columns to float so that demeaning produces correct
-        # numeric results (bool - float would otherwise raise or produce
-        # unexpected dtypes).
-        for col in numeric_cols:
-            if pd.api.types.is_bool_dtype(data[col]):
-                data[col] = data[col].astype(float)
+    @staticmethod
+    def _intercept_column_mask(design_info: Any) -> np.ndarray:
+        """Mark Patsy intercept columns, which the within transform must keep."""
+        mask = np.zeros(len(design_info.column_names), dtype=bool)
+        for term, column_slice in design_info.term_slices.items():
+            if len(term.factors) == 0:
+                mask[column_slice] = True
+        return mask
 
-        # Store group means from the ORIGINAL data (before any demeaning in
-        # prior calls) so that fixed effects can be recovered post-hoc.
-        if group_var not in self._group_means:
-            self._group_means[group_var] = self._original_data.groupby(
-                group_var, observed=True
-            )[numeric_cols].mean()
+    def _sequential_within(
+        self,
+        values: np.ndarray,
+        data: pd.DataFrame,
+        group_vars: list[str],
+        skip_columns: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Demean columns by each group variable in order.
 
-        # Demean each numeric column
-        for col in numeric_cols:
-            group_mean = data.groupby(group_var, observed=True)[col].transform("mean")
-            data[col] = data[col] - group_mean
-
-        return data
+        For a balanced panel, demeaning by unit and then by time is the
+        two-way within transformation. For an unbalanced panel the same
+        single pass is only an approximation.
+        """
+        values = np.asarray(values, dtype=float)
+        squeeze = values.ndim == 1
+        values = values.reshape(-1, 1) if squeeze else np.array(values, copy=True)
+        keep = np.ones(values.shape[1], dtype=bool)
+        if skip_columns is not None:
+            keep = ~np.asarray(skip_columns, dtype=bool)
+        frame = pd.DataFrame(values, index=data.index)
+        columns = [
+            column for column, use in zip(frame.columns, keep, strict=True) if use
+        ]
+        for group_var in group_vars:
+            if not columns:
+                break
+            means = frame.groupby(data[group_var], observed=True)[columns].transform(
+                "mean"
+            )
+            frame[columns] = frame[columns] - means
+        transformed = frame.to_numpy(dtype=float)
+        if squeeze:
+            return transformed.reshape(-1)
+        return transformed
 
     def _get_non_fe_labels(self) -> list[str]:
         """Return coefficient labels with FE dummy names filtered out.

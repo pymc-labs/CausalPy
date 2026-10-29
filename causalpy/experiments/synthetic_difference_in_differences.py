@@ -88,6 +88,7 @@ class SyntheticDifferenceInDifferences(
     **Estimate extraction**
 
     The Bayesian weight model produces posterior draws of synthetic-control unit weights and pre-period time weights. For each draw, the class constructs treated-minus-synthetic gaps and evaluates the weighted double-difference analytically to obtain the scalar ``tau_posterior`` ATT; the effect is not read from a regression coefficient or obtained by population-standardized g-computation. The time-indexed ``impact_post`` consumed by ``effect_summary()`` is the post-period treated-minus-synthetic trajectory rather than this time-weighted scalar.
+    Unit weights are fit to the average of the treated units, so ``tau_posterior`` is that equal-weighted ATT. ``impact_post`` stores each treated unit's own outcome minus that shared synthetic control under the unit's name, not the cross-unit average under the first name.
 
     This implements Bayesian SDiD method. The model fits two weight modules via
     MCMC:
@@ -238,6 +239,19 @@ class SyntheticDifferenceInDifferences(
             }
         )
 
+    def _period_ordered_outcomes(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return control and treated outcomes with pre-period rows first.
+
+        Pre-period rows are those with ``index < treatment_time`` (the rows in
+        ``datapre``, in that stored order). Post-period rows follow
+        (``datapost``). Callers that slice ``[:T_pre]`` / ``[T_pre:]`` then
+        use the documented periods, not the first ``T_pre`` stored rows.
+        """
+        ordered = pd.concat([self.datapre, self.datapost])
+        Y_co = ordered[self.control_units].to_numpy().T  # (N_co, T)
+        y_tr = ordered[self.treated_units].to_numpy().mean(axis=1)  # (T,)
+        return Y_co, y_tr
+
     def _fit_inputs(
         self,
     ) -> tuple[dict[str, xr.DataArray], dict[str, xr.DataArray], dict[str, Any]]:
@@ -250,8 +264,7 @@ class SyntheticDifferenceInDifferences(
                 "implemented. Please use a PyMC model."
             )
 
-        Y_co = self.data[self.control_units].to_numpy().T  # (N_co, T)
-        y_tr = self.data[self.treated_units].to_numpy().mean(axis=1)  # (T,)
+        Y_co, y_tr = self._period_ordered_outcomes()
         T_pre = self.datapre.shape[0]
         return self._build_weight_fitter_inputs(Y_co, y_tr, T_pre)
 
@@ -268,8 +281,7 @@ class SyntheticDifferenceInDifferences(
         """
         omega, omega0, lam, n_chains, n_draws = self._extract_weight_posteriors(group)
 
-        Y_co = self.data[self.control_units].to_numpy().T  # (N_co, T)
-        y_tr = self.data[self.treated_units].to_numpy().mean(axis=1)  # (T,)
+        Y_co, y_tr = self._period_ordered_outcomes()
         T_pre = self.datapre.shape[0]
 
         sc_all, gaps = self._compute_synthetic_and_gaps(omega, omega0, Y_co, y_tr)
@@ -517,30 +529,33 @@ class SyntheticDifferenceInDifferences(
             sc_post, self.datapost.index, n_chains, n_draws
         )
 
-        y_tr_pre = self.datapre[self.treated_units].values.mean(axis=1)
-        y_tr_post = self.datapost[self.treated_units].values.mean(axis=1)
-
-        pre_impact_vals = y_tr_pre[np.newaxis, np.newaxis, :] - sc_pre
-        post_impact_vals = y_tr_post[np.newaxis, np.newaxis, :] - sc_post
+        y_tr_pre = self.datapre[self.treated_units].to_numpy()
+        y_tr_post = self.datapost[self.treated_units].to_numpy()
+        pre_impact_vals = (
+            y_tr_pre[np.newaxis, np.newaxis, :, :] - sc_pre[..., np.newaxis]
+        )
+        post_impact_vals = (
+            y_tr_post[np.newaxis, np.newaxis, :, :] - sc_post[..., np.newaxis]
+        )
 
         impact_pre = xr.DataArray(
-            pre_impact_vals[..., np.newaxis],
+            pre_impact_vals,
             dims=["chain", "draw", "obs_ind", "treated_units"],
             coords={
                 "chain": np.arange(n_chains),
                 "draw": np.arange(n_draws),
                 "obs_ind": self.datapre.index,
-                "treated_units": [self.treated_units[0]],
+                "treated_units": list(self.treated_units),
             },
         )
         impact_post = xr.DataArray(
-            post_impact_vals[..., np.newaxis],
+            post_impact_vals,
             dims=["chain", "draw", "obs_ind", "treated_units"],
             coords={
                 "chain": np.arange(n_chains),
                 "draw": np.arange(n_draws),
                 "obs_ind": self.datapost.index,
-                "treated_units": [self.treated_units[0]],
+                "treated_units": list(self.treated_units),
             },
         )
         impact_post_cumulative = impact_post.cumsum(dim="obs_ind")
@@ -563,6 +578,11 @@ class SyntheticDifferenceInDifferences(
     ) -> xr.DataArray:
         """Build a prediction DataArray with canonical dimensions.
 
+        The synthetic control is shared across treated units because unit
+        weights are fit to their average. The same trajectory is stored once
+        per treated-unit name so ``effect_summary(treated_unit=...)`` can
+        select it.
+
         Parameters
         ----------
         mu_vals : np.ndarray
@@ -579,14 +599,16 @@ class SyntheticDifferenceInDifferences(
         xr.DataArray
             Predictions with dims ``(chain, draw, obs_ind, treated_units)``.
         """
+        n_treated = len(self.treated_units)
+        values = np.repeat(mu_vals[..., np.newaxis], n_treated, axis=-1)
         return xr.DataArray(
-            mu_vals[..., np.newaxis],
+            values,
             dims=["chain", "draw", "obs_ind", "treated_units"],
             coords={
                 "chain": np.arange(n_chains),
                 "draw": np.arange(n_draws),
                 "obs_ind": index,
-                "treated_units": [self.treated_units[0]],
+                "treated_units": list(self.treated_units),
             },
         )
 
@@ -775,10 +797,12 @@ class SyntheticDifferenceInDifferences(
         handles = [(h_line, h_patch)]
         labels = ["Pre-intervention fit"]
 
-        # Observed treated outcome
+        # Observed outcome of the unit effect_summary() selects by default.
+        observed_pre = self.datapre[treated_unit].to_numpy()
+        observed_post = self.datapost[treated_unit].to_numpy()
         (h,) = ax[0].plot(
             self.datapre.index,
-            self.datapre[self.treated_units].values.mean(axis=1),
+            observed_pre,
             "k.",
             label="Observations",
         )
@@ -798,7 +822,7 @@ class SyntheticDifferenceInDifferences(
 
         ax[0].plot(
             self.datapost.index,
-            self.datapost[self.treated_units].values.mean(axis=1),
+            observed_post,
             "k.",
         )
 
@@ -806,7 +830,7 @@ class SyntheticDifferenceInDifferences(
         h = ax[0].fill_between(
             self.datapost.index,
             y1=post_pred.mean(dim=["chain", "draw"]).values,
-            y2=self.datapost[self.treated_units].values.mean(axis=1),
+            y2=observed_post,
             color="C0",
             alpha=0.25,
             label="Causal impact",
@@ -816,7 +840,10 @@ class SyntheticDifferenceInDifferences(
 
         tau_mean = float(bundle.tau_posterior.mean())
         r_to = round_to if round_to is not None else 2
-        ax[0].set(title=f"SDiD: ATT = {round(tau_mean, r_to)}")
+        title = f"SDiD: ATT = {round(tau_mean, r_to)}"
+        if len(self.treated_units) > 1:
+            title = f"SDiD: {treated_unit} (pooled ATT = {round(tau_mean, r_to)})"
+        ax[0].set(title=title)
 
         # ---- MIDDLE PLOT: Impact ----
         plot_posterior_over_x(
@@ -911,10 +938,11 @@ class SyntheticDifferenceInDifferences(
             plot_hdi_kwargs={"color": "C0"},
         )
 
-        # Observed treated outcome
+        # Observed outcome of the first treated unit. The synthetic control is
+        # shared, so the cross-unit mean would not match that trajectory.
         ax.plot(
             self.datapre.index,
-            self.datapre[self.treated_units].values.mean(axis=1),
+            self.datapre[treated_unit].to_numpy(),
             "k.",
             label="Observations",
         )
@@ -929,7 +957,7 @@ class SyntheticDifferenceInDifferences(
         )
         ax.plot(
             self.datapost.index,
-            self.datapost[self.treated_units].values.mean(axis=1),
+            self.datapost[treated_unit].to_numpy(),
             "k.",
             zorder=3,
         )

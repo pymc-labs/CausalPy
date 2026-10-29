@@ -133,7 +133,9 @@ class RegressionKink(BaseExperiment[KinkResult]):
         if self.bandwidth is not np.inf:
             fmin = self.kink_point - self.bandwidth
             fmax = self.kink_point + self.bandwidth
-            filtered_data = self.data.query(f"{fmin} <= x <= {fmax}")
+            running = self.data[self.running_variable_name]
+            inside_bandwidth = (running >= fmin) & (running <= fmax)
+            filtered_data = self.data.loc[inside_bandwidth]
             if len(filtered_data) <= 10:
                 warnings.warn(
                     f"Choice of bandwidth parameter has lead to only {len(filtered_data)} remaining datapoints. Consider increasing the bandwidth parameter.",  # noqa: E501
