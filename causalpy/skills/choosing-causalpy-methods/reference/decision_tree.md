@@ -63,7 +63,7 @@ Use when there is one outcome series, a known intervention time, and the counter
 
 ### `PiecewiseITS`
 
-Use when there is one outcome series and the estimand is an explicit level and/or slope change at one or more known interruption times, encoded through `step()` or `ramp()` formula terms. This covers graded or phased interventions, such as a dose that steps up at known dates or ramps in over a known window, when each change can be written as a `step()` or `ramp()` term. Do not use it for unknown changepoint discovery.
+Use when there is one outcome series and the estimand is an explicit level and/or slope change at one or more known interruption times, encoded through `step()` or `ramp()` formula terms. This covers graded or phased interventions, such as a dose that steps up at known dates or ramps in over a known window, when each change can be written as a `step()` or `ramp()` term. Each term gets its own coefficient, and `ramp()` is an unbounded slope change, so a ramp-in that levels off needs a second `ramp()` at the end of the window. The estimates are level and slope changes at the given dates, not an effect per unit of dose. Do not use it for unknown changepoint discovery.
 
 ### `DifferenceInDifferences`
 
