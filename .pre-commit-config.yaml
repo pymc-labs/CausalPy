@@ -139,6 +139,12 @@ repos:
         language: python
         files: \.bib$
         additional_dependencies: [pybtex]
+      - id: check-cite-keys
+        name: Cited bibtex keys exist in references.bib
+        entry: python scripts/check_cite_keys.py
+        language: python
+        pass_filenames: false
+        files: ^(docs/source/.*\.(md|rst|ipynb|bib)|docs/source/conf\.py|scripts/check_cite_keys\.py)$
       # Catch the Sphinx/Napoleon "wall of prose" rendering bug from issue #892:
       # bullet lists inside docstrings must be preceded by a blank line, otherwise
       # they are collapsed into the introductory paragraph. Neither
