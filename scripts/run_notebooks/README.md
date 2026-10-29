@@ -91,7 +91,7 @@ The notebooks listed in `skip_notebooks.yml` are incompatible with mock injectio
 
 ## CI Integration
 
-The GitHub Actions workflow (`.github/workflows/test_notebook.yml`) runs four serial matrix entries (`max-parallel: 1`). Superseded runs are canceled so only the newest commit occupies the serial queue:
+The GitHub Actions workflow (`.github/workflows/test_notebook.yml`) runs four matrix entries in parallel. Superseded runs are canceled:
 
 - Job 1: PyMC notebooks
 - Job 2: Sklearn notebooks
