@@ -1,0 +1,19 @@
+.agents/skills/pr-to-green/SKILL.md
+  s_0fb2b7388a6b67::t_decd9d05a4a136 137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "427f0cd589e251c19768089e8386fce0e7438164",
+  "prompts": {},
+  "sessions": {
+    "s_0fb2b7388a6b67": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a18c3c-bc73-7221-a4a4-260b8af11955",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
