@@ -134,7 +134,7 @@ Scope-drift report must include:
 ## CausalPy guardrails
 
 - Never use destructive git commands unless explicitly requested
-- Do not create ad hoc test scripts; use `pytest` tests in `causalpy/tests/`
+- Follow the [testing policy](../../../AGENTS.md#testing) for scratch probes and permanent regression coverage.
 - Keep PyMC-heavy tests runtime-controlled via `sample_kwargs`
 - Keep docs/notebooks in correct locations and formats
 - If checks cannot be run, report exactly what was skipped and why
