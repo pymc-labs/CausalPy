@@ -32,11 +32,9 @@ This applies to documentation-only work and implementations composed from lower-
 - Use descriptive function names starting with `test_`
 - Prefer fixtures over setup/teardown methods
 - Use assert statements directly, not self.assertEqual
-- Never create throwaway test scripts or ad hoc verification files
-- If you need to test functionality, write a proper test in the test suite
-- All tests go in the `causalpy/tests/` directory following the project structure
+- Disposable diagnostic or independent-review probes may live in untracked `.scratch/`; they must not edit production code or the test suite, and should be removed when finished.
+- Preserve confirmed product-defect coverage as regression tests in `causalpy/tests/` before publishing a fix; scratch probes do not replace permanent regression coverage.
 - Tests should be runnable with the rest of the suite (`python -m pytest`)
-- Even for quick verification, write it as a real test that provides ongoing value
 - Preference should be given to integration tests, but unit tests are acceptable for core functionality to maintain high code coverage.
 - Tests should remain quick to run. Tests involving MCMC sampling with PyMC should use custom `sample_kwargs` to minimize the computational load.
 - Tests that stay heavy even with light `sample_kwargs` get `@pytest.mark.nightly` (heavy doctests go in `NIGHTLY_DOCTESTS` in `causalpy/tests/doctest_sampling.py`). The default pytest addopts skip `nightly` and `correctness` tests; PR CI runs the `correctness` tests that are not also `nightly` in a separate step, and `.github/workflows/nightly.yml` runs everything. Run them locally with `make test-nightly` and `make test-correctness`. `slow` is descriptive only and does not change where a test runs.
