@@ -504,6 +504,14 @@ def test_audit_stops_at_nonpublic_reexport_cycle(
 
 
 _FORWARDER_EXEMPTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "causalpy.experiments.hierarchical_difference_in_differences.HierarchicalDifferenceInDifferences.plot_group_effects": (
+        "kwargs",
+        ("Other Parameters", "arviz.plot_forest", "third-party forwarder"),
+    ),
+    "causalpy.experiments.hierarchical_difference_in_differences.HierarchicalDifferenceInDifferences.plot_variance_components": (
+        "kwargs",
+        ("Other Parameters", "arviz.plot_dist", "third-party forwarder"),
+    ),
     "causalpy.steps.estimate_effect.EstimateEffect.__init__": (
         "kwargs",
         ("Other Parameters", "integrator-provided", "TypeError"),
@@ -667,6 +675,7 @@ def test_base_experiment_owns_live_lifecycle_verbs() -> None:
 
 
 _GET_PLOT_DATA_EXPERIMENTS = {
+    "HierarchicalDifferenceInDifferences",
     "InterruptedTimeSeries",
     "PanelRegression",
     "PiecewiseITS",
