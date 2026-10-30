@@ -490,6 +490,128 @@ def test_effect_summary_3period_post_ols_integer(integer_data_3period):
     assert hasattr(summary, "text")
 
 
+@pytest.mark.parametrize(
+    ("index", "treatment_time", "treatment_end_time", "post_value"),
+    [
+        (pd.RangeIndex(12), 4, 4.5, 0.0),
+        (pd.RangeIndex(12), 4, 6.25, 0.0),
+        (pd.Index([0.0, 1.0, 2.0, 3.0, 4.0, 4.5, 5.0, 6.0]), 4, 4.5, 1.0),
+    ],
+)
+def test_effect_summary_post_keeps_float_treatment_end_bound(
+    index, treatment_time, treatment_end_time, post_value
+):
+    """Post summary uses index >= treatment_end_time and does not truncate it.
+
+    The first two ends are not index labels. The third equals a label, so that
+    observation stays in the post period while earlier points do not.
+    """
+    y = np.zeros(len(index), dtype=float)
+    during = (index >= treatment_time) & (index < treatment_end_time)
+    y[during] = 8.0
+    y[index >= treatment_end_time] = post_value
+    df = pd.DataFrame({"y": y}, index=index)
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+
+    post = result.effect_summary(period="post", cumulative=True, relative=False)
+    expected_n = int((index >= treatment_end_time).sum())
+    assert float(post.table.loc["average", "mean"]) == pytest.approx(post_value)
+    assert float(post.table.loc["cumulative", "mean"]) == pytest.approx(
+        post_value * expected_n
+    )
+
+    windowed = result.effect_summary(
+        window=(treatment_end_time, index.max()),
+        cumulative=True,
+        relative=False,
+    )
+    assert float(windowed.table.loc["average", "mean"]) == pytest.approx(post_value)
+
+
+def test_effect_summary_post_float_end_on_range_index_keeps_only_last_label():
+    """A non-label end of 10.5 must not pull label 10 into the post window.
+
+    Outcome is 8 on ``[4, 10.5)`` and 0 after. Truncating 10.5 with ``int()``
+    would start the post window at 10 and report a non-zero mean.
+    """
+    index = pd.RangeIndex(12)
+    treatment_time = 4
+    treatment_end_time = 10.5
+    y = np.zeros(len(index), dtype=float)
+    y[(index >= treatment_time) & (index < treatment_end_time)] = 8.0
+    result = cp.InterruptedTimeSeries(
+        pd.DataFrame({"y": y}, index=index),
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+
+    post = result.effect_summary(period="post", cumulative=True, relative=False)
+    assert "11 to 11" in post.text
+    assert float(post.table.loc["average", "mean"]) == pytest.approx(0.0)
+    assert float(post.table.loc["cumulative", "mean"]) == pytest.approx(0.0)
+
+
+def test_effect_summary_post_integer_end_excludes_prior_label():
+    """An integer end of 6 stays inclusive: post excludes 5 and includes 6."""
+    index = pd.RangeIndex(12)
+    y = np.zeros(len(index), dtype=float)
+    y[(index >= 4) & (index < 6)] = 8.0
+    result = cp.InterruptedTimeSeries(
+        pd.DataFrame({"y": y}, index=index),
+        treatment_time=4,
+        treatment_end_time=6,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+
+    post = result.effect_summary(period="post", cumulative=True, relative=False)
+    assert "6 to 11" in post.text
+    assert "5 to" not in post.text
+    assert float(post.table.loc["average", "mean"]) == pytest.approx(0.0)
+
+
+def test_effect_summary_post_negative_end_keeps_following_label():
+    """A negative end of -0.5 keeps -0.25; ``int(-0.5)`` would drop it."""
+    index = pd.Index([-2.0, -1.0, -0.25, 0.0, 1.0])
+    y = np.array([0.0, 8.0, 0.0, 0.0, 0.0])
+    result = cp.InterruptedTimeSeries(
+        pd.DataFrame({"y": y}, index=index),
+        treatment_time=-1.0,
+        treatment_end_time=-0.5,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+
+    post = result.effect_summary(period="post", cumulative=True, relative=False)
+    assert "-0.25 to 1.0" in post.text
+    assert float(post.table.loc["average", "mean"]) == pytest.approx(0.0)
+    assert float(post.table.loc["cumulative", "mean"]) == pytest.approx(0.0)
+
+
+def test_effect_summary_post_rejects_empty_window_after_the_last_label():
+    """The post mask raises when no label is at or after the end bound."""
+    index = pd.RangeIndex(8)
+    result = cp.InterruptedTimeSeries(
+        pd.DataFrame({"y": np.zeros(len(index))}, index=index),
+        treatment_time=2,
+        treatment_end_time=4.5,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+    result.treatment_end_time = float(index.max()) + 0.5
+
+    with pytest.raises(ValueError, match="Window contains no time points"):
+        result.effect_summary(period="post")
+
+
 # ==============================================================================
 # Three-Period ITS Tests - Comparison Period
 # ==============================================================================
