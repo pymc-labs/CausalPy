@@ -17,6 +17,7 @@ Is the counterfactual meant to be forecast from the pre-intervention period, or 
 - The intervention dates are known and should appear directly in the formula through `step()` or `ramp()` terms.
 - The estimand is an explicit level change, slope change, or cumulative effect from a segmented regression fit to the full series.
 - Multiple known interruptions are part of the design.
+- The treatment is graded or phased at known times (for example, a staged dose increase or a ramp-in), and each change can be written as a `step()` or `ramp()` term.
 
 ## Choose Neither
 
