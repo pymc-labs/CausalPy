@@ -28,3 +28,8 @@ updates:
     labels:
       - "devops"
       - "no releasenotes"
+    # Group all version updates, including majors, into one lockfile resolution (#1362). Security updates remain separate.
+    groups:
+      uv:
+        patterns:
+          - "*"
