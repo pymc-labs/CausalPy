@@ -2,7 +2,7 @@ name: Test Notebooks
 
 on:
   pull_request:
-    branches: [main, pymc6_and_pymcmarketing1_migration]
+    branches: [main]
     paths:
       - "pyproject.toml"
       - "causalpy/**"
@@ -11,7 +11,7 @@ on:
       - "docs/source/notebooks/**"
       - "docs/source/knowledgebase/**"
   push:
-    branches: [main, pymc6_and_pymcmarketing1_migration]
+    branches: [main]
     paths:
       - "pyproject.toml"
       - "causalpy/**"
