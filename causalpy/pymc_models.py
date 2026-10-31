@@ -1320,9 +1320,9 @@ class SyntheticDifferenceInDifferencesWeightFitter(PyMCModel):
 
     References
     ----------
-    .. [1] Arkhangelsky, D., Athey, S., Hirshberg, D. A., Imbens, G. W., &
-       Wager, S. (2021). Synthetic Difference-in-Differences. *American
-       Economic Review*, 111(12), 4088-4118.
+    Arkhangelsky, D., Athey, S., Hirshberg, D. A., Imbens, G. W., &
+    Wager, S. (2021). Synthetic Difference-in-Differences. *American
+    Economic Review*, 111(12), 4088-4118.
     """  # noqa: W605
 
     default_priors: dict[str, Prior] = {}
