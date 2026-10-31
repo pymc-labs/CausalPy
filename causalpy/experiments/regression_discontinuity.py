@@ -561,6 +561,9 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
             + guides(color=False)
             + labs(title=title, x=xcol, y=ycol)
         ).draw()
+        # ``draw()`` closes the figure on exit, which unregisters it from
+        # pyplot; re-register it so ``plt.show()`` and Jupyter display it.
+        plt.figure(fig)
         if figsize is not None:
             fig.set_size_inches(figsize)
         ax = fig.axes[0]

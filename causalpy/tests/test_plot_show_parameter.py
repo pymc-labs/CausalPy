@@ -430,3 +430,25 @@ def test_legend_kwargs_multi_axis_its(mock_pymc_sample, its_data):
     custom_labels = [t.get_text() for t in custom_legend.get_texts()]
     assert custom_labels == baseline_labels
     plt.close("all")
+
+
+def test_rd_plot_figure_registered_with_pyplot(rd_data):
+    """
+    Test that the RD figure stays registered with pyplot after plot().
+
+    Plotnine's ``draw()`` closes the figure it builds. Without
+    re-registration, ``plt.show()`` and Jupyter's inline backend see no
+    figure and notebooks render no plot (issue #603). The draw path is the
+    same for every model type, so a scikit-learn model is enough.
+    """
+    result = cp.RegressionDiscontinuity(
+        rd_data,
+        formula="y ~ 1 + x + treated + x:treated",
+        model=LinearRegression(),
+        treatment_threshold=0.5,
+    ).fit()
+
+    plt.close("all")
+    fig, _ = result.plot(show=False)
+    assert fig.number in plt.get_fignums()
+    plt.close("all")
