@@ -84,7 +84,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
     -----
     **Estimate extraction**
 
-    Both Bayesian and OLS backends store the fitted group-by-post interaction coefficient as ``causal_impact``. The class also constructs treated-post counterfactual predictions for visualization by setting that interaction term to zero, but those predictions do not determine the reported scalar effect. In an additive identity-link model, the coefficient and the corresponding predicted contrast are algebraically identical.
+    Bayesian backends store the treated-row factual-minus-counterfactual response-scale ``mu`` contrast as ``causal_impact``. OLS stores the fitted group-by-post interaction coefficient. Under the validated additive identity-link design those two quantities match; with a non-identity link only the ``mu`` contrast is the reported effect. Counterfactual predictions are still built for visualization by setting the interaction term to zero, and they do not replace the reported effect.
 
     Lazy lifecycle: construction only validates inputs and builds design
     matrices — nothing is sampled. Call :meth:`fit` to draw posterior
@@ -242,13 +242,24 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             np.asarray(new_x), group=group
         )
 
-        # calculate causal impact
-        treatment_coefficient = next(
-            label for label in self.labels if self._is_treatment_interaction(label)
-        )
-        causal_impact = self._model_backend.coefficients(group=group).sel(
-            coeffs=treatment_coefficient
-        )
+        # The estimand is the treated-post factual-minus-counterfactual
+        # expected outcome, averaged over treated post-treatment rows.
+        # Bayesian backends evaluate that contrast on response-scale ``mu``.
+        # OLS keeps the interaction coefficient: under the validated additive
+        # identity design it equals the same contrast.
+        if self._model_backend.is_bayesian:
+            causal_impact = self._att_from_g_computation(group)
+        elif self._model_backend.is_ols:
+            treatment_coefficient = next(
+                label for label in self.labels if self._is_treatment_interaction(label)
+            )
+            causal_impact = (
+                self._model_backend.coefficients(group=group)
+                .sel(coeffs=treatment_coefficient)
+                .squeeze(drop=True)
+            )
+        else:
+            raise ValueError("Model type not recognized")
 
         bundle = CoefficientResult(
             causal_impact=causal_impact,
@@ -264,6 +275,34 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             score=None,
         )
         self._assign_bundle(group, bundle)
+
+    def _att_from_g_computation(
+        self, group: Literal["prior", "posterior"] = "posterior"
+    ) -> xr.DataArray:
+        """Response-scale ATT from treated-post factual vs counterfactual ``mu``."""
+        treated_post = (
+            self.data.query(f"{self.group_variable_name} == 1")
+            .query(f"{self.post_treatment_variable_name} == True")
+            .drop(columns=[self.outcome_variable_name])
+        )
+        if treated_post.empty:
+            raise ValueError("No treated post-treatment observations for ATT")
+
+        (x_factual,) = build_design_matrices(
+            [self._x_design_info], treated_post, return_type="dataframe"
+        )
+        x_counter = x_factual.copy()
+        for i, label in enumerate(self.labels):
+            if self._is_treatment_interaction(label):
+                x_counter.iloc[:, i] = 0
+
+        mu_factual = self._model_backend.predict(
+            np.asarray(x_factual), group=group, var_names=["mu"]
+        )
+        mu_counter = self._model_backend.predict(
+            np.asarray(x_counter), group=group, var_names=["mu"]
+        )
+        return (mu_factual - mu_counter).mean(dim="obs_ind")
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
