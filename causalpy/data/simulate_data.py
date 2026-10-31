@@ -852,6 +852,147 @@ def generate_staggered_did_data(
     return df
 
 
+def generate_ar1_series(
+    n: int,
+    phi: float = 0.9,
+    scale: float = 1.0,
+    initial: float = 0.0,
+) -> np.ndarray:
+    """Generate an AR(1) series ``x[t] = phi * x[t - 1] + eta[t]``.
+
+    Parameters
+    ----------
+    n : int
+        Length of the series.
+    phi : float, default 0.9
+        Autoregressive coefficient. Stationary series need ``phi`` in (-1, 1).
+    scale : float, default 1.0
+        Standard deviation of the innovation.
+    initial : float, default 0.0
+        First value of the series.
+
+    Returns
+    -------
+    np.ndarray
+        Series of length ``n``. Uses the global NumPy random stream.
+
+    Examples
+    --------
+    >>> np.random.seed(42)
+    >>> series = generate_ar1_series(n=10, phi=0.9, scale=0.5)
+    >>> len(series)
+    10
+    """
+    series = np.zeros(n)
+    series[0] = initial
+    innovations = np.random.normal(0, scale, n - 1)
+    for t in range(1, n):
+        series[t] = phi * series[t - 1] + innovations[t - 1]
+    return series
+
+
+def generate_event_study_data(
+    n_units: int = 20,
+    n_time: int = 20,
+    treatment_time: int = 10,
+    treated_fraction: float = 0.5,
+    event_window: tuple[int, int] = (-5, 5),
+    treatment_effects: dict[int, float] | None = None,
+    unit_fe_sigma: float = 1.0,
+    time_fe_sigma: float = 0.5,
+    noise_sigma: float = 0.2,
+    predictor_effects: dict[str, float] | None = None,
+    ar_phi: float = 0.9,
+    ar_scale: float = 1.0,
+    seed: int | None = None,
+) -> pd.DataFrame:
+    """Generate a balanced panel for a simultaneous-adoption event study.
+
+    A fraction of units share one treatment time. Outcomes are unit and time
+    fixed effects plus optional AR(1) predictors and an event-time treatment
+    effect. Never-treated units have ``NaN`` in ``treat_time``.
+
+    Parameters
+    ----------
+    n_units : int, default 20
+        Number of units.
+    n_time : int, default 20
+        Number of time periods.
+    treatment_time : int, default 10
+        Common treatment time for treated units.
+    treated_fraction : float, default 0.5
+        Fraction of units treated.
+    event_window : tuple of int, default (-5, 5)
+        Event times for which default treatment effects are defined.
+    treatment_effects : dict, optional
+        Map from event time to effect. The default is 0 before treatment and
+        ``0.5 + 0.1 * k`` at and after treatment.
+    unit_fe_sigma, time_fe_sigma, noise_sigma : float
+        Standard deviations of the unit effect, time effect, and noise.
+    predictor_effects : dict, optional
+        Map from predictor name to its coefficient. Each predictor is one AR(1)
+        series shared by all units.
+    ar_phi, ar_scale : float
+        AR(1) persistence and innovation scale for predictors.
+    seed : int, optional
+        Seed for the global NumPy random stream.
+
+    Returns
+    -------
+    pd.DataFrame
+        Columns ``unit``, ``time``, ``y``, ``treat_time``, ``treated``, plus
+        one column per predictor.
+
+    Examples
+    --------
+    >>> df = generate_event_study_data(
+    ...     n_units=20, n_time=20, treatment_time=10, seed=42
+    ... )
+    >>> df.shape
+    (400, 5)
+    >>> df.columns.tolist()
+    ['unit', 'time', 'y', 'treat_time', 'treated']
+    """
+    if seed is not None:
+        np.random.seed(seed)
+    if treatment_effects is None:
+        treatment_effects = {
+            k: 0.0 if k < 0 else 0.5 + 0.1 * k
+            for k in range(event_window[0], event_window[1] + 1)
+        }
+
+    n_treated = int(n_units * treated_fraction)
+    unit_fe = np.random.normal(0, unit_fe_sigma, n_units)
+    time_fe = np.random.normal(0, time_fe_sigma, n_time)
+    predictors = {
+        name: generate_ar1_series(n=n_time, phi=ar_phi, scale=ar_scale)
+        for name in (predictor_effects or {})
+    }
+
+    rows = []
+    for unit in range(n_units):
+        is_treated = unit < n_treated
+        for t in range(n_time):
+            y = unit_fe[unit] + time_fe[t] + np.random.normal(0, noise_sigma)
+            for name, coef in (predictor_effects or {}).items():
+                y += coef * predictors[name][t]
+            if is_treated:
+                event_time = t - treatment_time
+                if event_time in treatment_effects:
+                    y += treatment_effects[event_time]
+            row = {
+                "unit": unit,
+                "time": t,
+                "y": y,
+                "treat_time": treatment_time if is_treated else np.nan,
+                "treated": int(is_treated),
+            }
+            for name, series in predictors.items():
+                row[name] = series[t]
+            rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def generate_piecewise_its_data(
     N: int = 100,
     interruption_times: list[int] | None = None,
