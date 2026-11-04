@@ -34,6 +34,7 @@ from .experiments.diff_in_diff import DifferenceInDifferences
 from .experiments.instrumental_variable import InstrumentalVariable
 from .experiments.interrupted_time_series import InterruptedTimeSeries
 from .experiments.inverse_propensity_weighting import InversePropensityWeighting
+from .experiments.multivariate_synthetic_control import MultivariateSyntheticControl
 from .experiments.panel_regression import PanelRegression
 from .experiments.piecewise_its import PiecewiseITS
 from .experiments.prepostnegd import PrePostNEGD
@@ -72,6 +73,7 @@ __all__ = [
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
     "load_data",
+    "MultivariateSyntheticControl",
     "PiecewiseITS",
     "Pipeline",
     "PipelineContext",
