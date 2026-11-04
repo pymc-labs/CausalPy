@@ -8,7 +8,7 @@ Use this reference when the user's question is causal but none of the implemente
 | --- | --- | --- |
 | Propensity-score matching, coarsened exact matching, Mahalanobis matching, or genetic matching | CausalPy has inverse propensity weighting, not matching estimators. | `InversePropensityWeighting` only if weighting is acceptable and treatment is binary with overlap. |
 | Fuzzy regression discontinuity | `RegressionDiscontinuity` is for sharp RD where treatment assignment changes at the cutoff. | `InstrumentalVariable` may be useful only if the cutoff indicator can be defended as an instrument and the user accepts an IV framing. |
-| Continuous or dose-response treatment without a kink design | IPW requires binary treatment, and `RegressionKink` only covers a slope change at a known threshold. | External dose-response, generalized propensity score, or outcome-regression workflows. |
+| Continuous dose-response curve estimation without a kink design | IPW requires binary treatment, `RegressionKink` only covers a slope change at a known threshold, and `PiecewiseITS` models changes at known times, not an effect curve across dose levels. | External dose-response, generalized propensity score, or outcome-regression workflows. Tie-breaker: if the question is the effect at each dose level, this row applies; if it is the change in one outcome series at known dates, route it to `PiecewiseITS`. |
 | Multi-arm treatment | Implemented treatment-selection tools do not cover multi-valued treatment arms. | Possibly separate binary comparisons, but that changes the estimand and assumptions. |
 | Non-absorbing staggered treatment, treatment reversal, or repeated on/off treatment | `StaggeredDifferenceInDifferences` assumes absorbing treatment. | No direct CausalPy route. |
 | Alternative staggered DiD estimators such as Callaway-Sant'Anna, Sun-Abraham, or Gardner | CausalPy's staggered class implements a specific imputation-style workflow, not every modern staggered estimator. | `StaggeredDifferenceInDifferences` only if its assumptions and estimand are the intended target. |
@@ -20,6 +20,10 @@ Use this reference when the user's question is causal but none of the implemente
 | Cluster-robust frequentist DiD as the primary inferential output | CausalPy has OLS-compatible paths for some classes, but not a dedicated cluster-robust DiD reporting workflow. | `DifferenceInDifferences` only if the available uncertainty output is acceptable. |
 | Generic "control for confounders" regression with no assignment story | Panel or regression adjustment alone does not identify a causal effect without an exogeneity story. | `PanelRegression` for coefficient-level association, or `InversePropensityWeighting` if treatment is binary, confounders are measured, and overlap holds. |
 
+## Neighbouring Tools
+
+When the question is outside CausalPy's quasi-experimental scope but fits a structural causal model or DAG approach, such as mediation or path decomposition, point the user to [`pathmc`](https://github.com/pymc-labs/pathmc), the PyMC Labs package for Bayesian path analysis and structural causal models. Name it as the next step instead of ending at a bare "not implemented".
+
 ## Output Template
 
 Use this structure when routing here:
@@ -29,3 +33,4 @@ Use this structure when routing here:
 - Why no CausalPy experiment fits: state the missing estimator, unsupported treatment type, unsupported assignment pattern, or missing identification story.
 - Closest partial fit: name one only if it is genuinely useful, and state the caveat.
 - What would unlock CausalPy: describe the design change, data requirement, or assumption change that would make an implemented class appropriate.
+- Neighbouring tool: name a better-suited library when one exists, such as `pathmc` for structural causal model or DAG questions.

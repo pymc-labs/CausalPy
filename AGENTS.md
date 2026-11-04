@@ -2,6 +2,10 @@
 
 Agent workflow for working in this repo. For codebase design and conventions, read [ARCHITECTURE.md](ARCHITECTURE.md) before core code changes. Do **not** load [CONTRIBUTING.md](CONTRIBUTING.md) by default — it is a long human-contributor guide (setup, permissions, PR etiquette). Consult it only when the task is explicitly about contributor workflow or onboarding humans.
 
+## Choosing a method: read the user skill first
+
+Before you answer a causal-inference or method-choice question, or write an example notebook or doc that uses a CausalPy method, read [`causalpy/skills/choosing-causalpy-methods/SKILL.md`](causalpy/skills/choosing-causalpy-methods/SKILL.md). This includes plain-language impact questions ("did the campaign work?", the effect, lift, or impact of a rollout or policy) and design keywords such as pre/post, interrupted time series, DiD, synthetic control, regression discontinuity, IV, or IPW (full list in its [triggers](causalpy/skills/choosing-causalpy-methods/reference/triggers.md)). Auto-discovery does not scan `causalpy/skills/`, so open these files yourself. See [Skills Location](#skills-location).
+
 ## Existing functionality and API gaps
 
 Before implementing an analysis, diagnostic, or documentation example, inspect the existing public API and relevant examples.
@@ -129,6 +133,7 @@ Skills are split into two categories with separate homes:
 
 - **Developer skills** live in `.agents/skills/`. This is the canonical shared location for repo-maintainer workflows such as environment setup, PR workflows, issue triage, and other maintainer tasks.
 - **User skills** live in `causalpy/skills/` inside the source tree. They teach AI agents how to use CausalPy for causal inference tasks. They are **not** symlinked into the auto-discovery paths — a developer agent should not see experiment-design skills mixed in with PR review skills. User skills are distributed via [Decision AI Hub](https://hub.decision.ai).
+- The split is about distribution, not discovery. Writing examples, notebooks, or docs that choose a method is maintainer work that needs the user skills, so developer agents must read them in `causalpy/skills/`, starting with `choosing-causalpy-methods`.
 - When user-facing skills change, include a PR note or follow-up task to update the distributed Decision AI Hub copy after merge.
 
 If a developer's local tool does not yet discover `.agents/skills/`, they may create an uncommitted local compatibility symlink such as `.cursor/skills -> ../.agents/skills`, `.claude/skills -> ../.agents/skills`, or `.github/skills -> ../.agents/skills`. Do not commit those compatibility symlinks; keep `.agents/skills/` as the only tracked developer-skill home.

@@ -66,6 +66,7 @@ Return exactly one of these outcomes.
 - Why no CausalPy experiment fits: explain the mismatch with assignment, estimand, treatment type, data topology, or reporting needs.
 - Closest partial fit: mention a CausalPy class only if it is genuinely useful, and state its limitations.
 - What would unlock CausalPy: describe the data or assumption change that would make an implemented experiment appropriate.
+- Neighbouring tool: name a better-suited library when one exists, such as `pathmc` for structural causal model or DAG questions (see [Neighbouring Tools](reference/not_in_causalpy.md#neighbouring-tools)).
 
 ## References
 
