@@ -1,0 +1,19 @@
+.github/workflows/pr-issue-label-sync.yml
+  s_29a3609fc0b7da::t_6ba34c07eff723 18,22
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "26270e8c06aaf75f7087262dbb9a98695cdf015a",
+  "prompts": {},
+  "sessions": {
+    "s_29a3609fc0b7da": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a547-afc1-7dc1-941e-ceb11d79a862",
+        "model": "gpt-6.1-sol"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
