@@ -15,9 +15,10 @@ jobs:
 
     steps:
       - name: Sync labels from closing issues
-        uses: williambdean/closing-labels@bb2b635942f1a96dee500ab688438c8ee1821ab5 # v1.0.0
+        uses: williambdean/closing-labels@d4408b5fea2f8aa52a35e406d1831cf91399410f # v1.0.1
         with:
           exclude: "help wanted,good first issue"
           respect_unlabeled: true
+          fail_on_error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
