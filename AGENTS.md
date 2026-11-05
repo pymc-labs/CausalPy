@@ -126,4 +126,4 @@ Repo-level agent skills are reserved for crucial CausalPy practice that does not
 
 User-facing skills live in `causalpy/skills/`. They teach agents how to use CausalPy for causal inference tasks. They are not maintainer workflows, they are not symlinked into developer skill-discovery paths, and they are distributed via [Decision AI Hub](https://hub.decision.ai). When they change, include a PR note or follow-up task to update the Hub copy after merge.
 
-Do not commit local compatibility symlinks such as `.cursor/skills`, `.claude/skills`, or `.github/skills`.
+Do not commit local compatibility symlinks such as `.cursor/skills`, `.claude/skills`, or `.github/skills`. Do not commit `.cursor/`; editor and agent configuration stays with the developer.
