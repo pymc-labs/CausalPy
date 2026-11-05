@@ -1,0 +1,18 @@
+.gitignore
+  h_63db634213747e 20-21
+AGENTS.md
+  h_63db634213747e 134
+pyproject.toml
+  h_63db634213747e 274,282
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "62715c90243bc748100e4483fa8e1cf7e7da0ac6",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
