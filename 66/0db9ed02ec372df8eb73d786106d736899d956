@@ -1,0 +1,22 @@
+.agents/skills/README.md
+  h_63db634213747e 1-9
+AGENTS.md
+  h_63db634213747e 19,121,123,125,127,129
+ARCHITECTURE.md
+  h_63db634213747e 35
+causalpy/skills/README.md
+  h_63db634213747e 5
+causalpy/skills/__init__.py
+  h_63db634213747e 19
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "660db9ed02ec372df8eb73d786106d736899d956",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
