@@ -1,0 +1,28 @@
+.agents/skills/README.md
+  s_f666e84d6778fe::t_2ff5b03e50a453 1-9
+causalpy/skills/README.md
+  s_f666e84d6778fe::t_2ff5b03e50a453 5
+causalpy/skills/__init__.py
+  s_f666e84d6778fe::t_2ff5b03e50a453 19
+ARCHITECTURE.md
+  s_f666e84d6778fe::t_2ff5b03e50a453 35
+AGENTS.md
+  s_f666e84d6778fe::t_2ff5b03e50a453 19,121,123,125,127
+  s_f666e84d6778fe::t_67249363e64df6 129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "2505df2365411ced302808572f5a497b4e3565e0",
+  "prompts": {},
+  "sessions": {
+    "s_f666e84d6778fe": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1adb1-a764-7243-a31d-1127fc7c486e",
+        "model": "gpt-6-luna"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
