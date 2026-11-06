@@ -11,6 +11,7 @@ design_notation
 quasi_dags.ipynb
 structural_causal_models.ipynb
 custom_pymc_models.ipynb
+bayesian_workflow.ipynb
 interactive-fixed-effects
 augmented-synthetic-control
 comparing-bayesian-synthetic-control

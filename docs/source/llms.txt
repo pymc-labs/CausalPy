@@ -34,6 +34,7 @@ Typical usage: load a pandas DataFrame, choose an experiment class (e.g. `causal
 ## Concepts
 
 - [Structural causal models](https://causalpy.readthedocs.io/en/stable/knowledgebase/structural_causal_models.html): SCMs, interventions, and counterfactuals
+- [Bayesian workflow](https://causalpy.readthedocs.io/en/stable/knowledgebase/bayesian_workflow.html): why each step from construction through posterior checks exists, and what it cannot tell you
 - [Causal DAGs for quasi-experiments](https://causalpy.readthedocs.io/en/stable/knowledgebase/quasi_dags.html): directed acyclic graphs underlying each supported design
 - [Causal estimands](https://causalpy.readthedocs.io/en/stable/knowledgebase/estimands.html): ATE, ATT, LATE and what each design identifies
 - [Quasi-experimental design notation](https://causalpy.readthedocs.io/en/stable/knowledgebase/design_notation.html): compact notation for describing designs
