@@ -1,0 +1,14 @@
+codecov.yml
+  h_63db634213747e 27-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e2f6a3c70e9f326b3e10dde06ba03d60c2e6e3e5",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
