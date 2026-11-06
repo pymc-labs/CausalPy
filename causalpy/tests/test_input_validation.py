@@ -899,6 +899,55 @@ def test_regression_discontinuity_bool_treatment():
     assert pd.api.types.is_bool_dtype(result.data["treated"])
 
 
+@pytest.mark.parametrize("treated_dtype", ["float64", "float32", "Float64"])
+def test_regression_discontinuity_float_treatment(treated_dtype):
+    """A float 0/1 indicator is coerced to bool and fitted as that indicator."""
+    x = np.linspace(-1, 1, 40)
+    y = 1.0 + 2.0 * x + 5.0 * (x >= 0)
+    df = pd.DataFrame(
+        {
+            "x": x,
+            "y": y,
+            "treated": pd.Series((x >= 0).astype(float), dtype=treated_dtype),
+        }
+    )
+    original = df.copy(deep=True)
+
+    result = cp.RegressionDiscontinuity(
+        df,
+        formula="y ~ 1 + x + treated",
+        model=LinearRegression(),
+        treatment_threshold=0,
+    )
+
+    assert pd.api.types.is_bool_dtype(result.data["treated"])
+    pd.testing.assert_frame_equal(df, original)
+    fitted = result.fit()
+    # The epsilon window adds 2 * slope * epsilon to the planted jump of 5.
+    assert float(fitted.result.discontinuity_at_threshold.mean()) == pytest.approx(
+        5.004
+    )
+
+
+def test_regression_discontinuity_rejects_non_indicator_float():
+    """A float column that is not 0/1 is rejected, not coerced to bool."""
+    df = pd.DataFrame(
+        {
+            "x": [0.0, 1.0, 2.0, 3.0],
+            "treated": [0.0, 0.5, 1.0, 1.0],
+            "y": [1.0, 1.0, 2.0, 2.0],
+        }
+    )
+
+    with pytest.raises(DataException):
+        cp.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated",
+            model=LinearRegression(),
+            treatment_threshold=0.5,
+        )
+
+
 def test_rd_donut_hole_zero_same_as_default():
     """Test that donut_hole=0 reproduces current behavior (no filtering)."""
     threshold = 0.5
