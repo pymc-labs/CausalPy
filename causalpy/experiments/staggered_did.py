@@ -1871,8 +1871,6 @@ class StaggeredDifferenceInDifferences(
             if not self._is_event_time_att_identified(int(event_time)):
                 continue
             positions = self._eligible_event_positions(treated_data, event_time)
-            if positions.size == 0:
-                continue
             tau_e = tau_draws_treated[:, :, positions].mean(axis=2)
             att_draws.append(tau_e)
         if not att_draws:

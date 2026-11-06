@@ -1436,6 +1436,56 @@ def test_always_treated_cohort_is_non_identified():
         "no untreated observation of their own units" in str(item.message)
         for item in caught
     )
+    # An event time with no contributing cohort stays identified.
+    assert result._is_event_time_att_identified(10_000) is True
+    # The writer must not duplicate an ineligible event time already in the frame.
+    restored = result._append_missing_own_unit_event_rows(event_time)
+    assert list(restored["event_time"]) == list(event_time["event_time"])
+    assert len(restored) == len(event_time)
+
+
+@pytest.mark.integration
+def test_always_treated_cohort_bayesian_paths_skip_ineligible_event_times(
+    mock_pymc_sample,
+):
+    """Bayesian aggregation, plots, and summaries skip always-treated cohorts.
+
+    Event times that only the always-treated cohort contributes are omitted from
+    the draw mean and restored as non-identified rows. Event times shared with a
+    cohort that has its own untreated observation stay identified.
+    """
+    with pytest.warns(UserWarning, match="no untreated observation of their own units"):
+        result = cp.StaggeredDifferenceInDifferences(
+            _always_treated_cohort_panel(),
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            treated_variable_name="treated",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        ).fit()
+
+    event_time = result.result.att_event_time
+    only_always = event_time[event_time["event_time"].isin([2, 3])]
+    shared = event_time[event_time["event_time"].isin([0, 1])]
+    assert not only_always["identified"].any()
+    assert only_always["att"].isna().all()
+    assert shared["identified"].all()
+    assert shared["att"].notna().all()
+
+    plot_data = result.get_plot_data(hdi_prob=0.8)
+    plot_only = plot_data[plot_data["event_time"].isin([2, 3])]
+    plot_shared = plot_data[plot_data["event_time"].isin([0, 1])]
+    assert not plot_only["identified"].any()
+    assert plot_only["att"].isna().all()
+    assert plot_shared["identified"].all()
+    assert np.issubdtype(plot_data["n_obs"].dtype, np.number)
+
+    summary = result.effect_summary(alpha=0.05)
+    assert "Staggered DiD" in summary.text
+    assert set(summary.table.loc[summary.table["identified"], "event_time"]) >= {0, 1}
+    assert not summary.table.loc[
+        summary.table["event_time"].isin([2, 3]), "identified"
+    ].any()
 
 
 def test_cohort_with_one_own_untreated_observation_stays_identified():
