@@ -1751,7 +1751,7 @@ class StaggeredDifferenceInDifferences(
 
         Returns
         -------
-        EffectSummary
+        ~causalpy.reporting.EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
         # Resolve the requested group's bundle; the helper reads ATT tables

@@ -625,7 +625,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
 
         Returns
         -------
-        EffectSummary
+        ~causalpy.reporting.EffectSummary
             Object with .table (DataFrame) and .text (str) attributes
         """
         bundle = self._require_bundle(group)
