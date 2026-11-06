@@ -1508,3 +1508,22 @@ def test_dummies_without_unit_fe_keeps_between_unit_treatment():
             model=LinearRegression(),
         ).fit()
     assert _named_coefficients(result)["treatment"] == pytest.approx(7.0)
+
+
+def test_time_invariant_absorption_guards_skip_unaligned_or_nonfinite_columns():
+    """A length mismatch or a non-finite column is not treated as a constant."""
+    from causalpy.experiments.panel_regression import PanelRegression
+
+    experiment = PanelRegression.__new__(PanelRegression)
+    experiment.unit_fe_variable = "unit"
+    experiment.time_fe_variable = None
+    experiment.labels = ["treatment"]
+    experiment._get_fe_labels = lambda variable: ["C(unit)[T.u1]"]
+    design = np.array([[1.0], [1.0]])
+    retained = pd.DataFrame({"unit": ["u0"]})
+    unchanged = experiment._absorb_exact_time_invariant_covariates(design, retained)
+    np.testing.assert_array_equal(unchanged, design)
+    assert PanelRegression._column_varies_within_unit(np.array([]), np.array([]))
+    assert PanelRegression._column_varies_within_unit(
+        np.array([np.nan, np.nan]), np.array(["u0", "u0"])
+    )
