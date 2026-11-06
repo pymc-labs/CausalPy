@@ -1,0 +1,14 @@
+.github/release-drafts/1.0.0rc1.md
+  h_63db634213747e 146
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8ec4286f21a68c257077f8cb0fbeecae1c73b8ca",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
