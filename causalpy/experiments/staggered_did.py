@@ -509,7 +509,10 @@ class StaggeredDifferenceInDifferences(
             event_time_int = int(event_time)
             if event_time_int in present:
                 continue
-            row = {"event_time": event_time_int, "n_obs": int(len(group))}
+            row: dict[str, int | float] = {
+                "event_time": event_time_int,
+                "n_obs": int(len(group)),
+            }
             for column in ("att", "att_lower", "att_upper", "att_std"):
                 if column in att_df.columns:
                     row[column] = np.nan
