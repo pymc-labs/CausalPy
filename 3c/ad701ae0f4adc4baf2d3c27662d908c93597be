@@ -1,0 +1,14 @@
+docs/source/notebooks/regression-discontinuity-drinking-pymc.ipynb
+  h_63db634213747e 885-886,1271-1272
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "3cad701ae0f4adc4baf2d3c27662d908c93597be",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
