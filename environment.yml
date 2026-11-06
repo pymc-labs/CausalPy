@@ -25,6 +25,7 @@ dependencies:
   - nbconvert
   - nbformat
   - numpy
+  - packaging
   - pandas<4,>=2.3
   - papermill
   - patsy

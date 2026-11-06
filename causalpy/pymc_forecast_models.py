@@ -58,12 +58,15 @@ draw-coherent posterior subsample used for prediction; the *full* fit result
 from __future__ import annotations
 
 from contextlib import nullcontext
+from importlib import metadata
 from typing import Any
 
 import arviz as az
 import numpy as np
 import pandas as pd
 import xarray as xr
+from packaging.specifiers import SpecifierSet
+from packaging.version import InvalidVersion, Version
 
 from causalpy.constants import HDI_PROB
 from causalpy.utils import _bayesian_r2_score, round_num
@@ -72,15 +75,36 @@ __all__ = ["PyMCForecastModel"]
 
 
 def _import_pymc_forecast():
-    """Import ``pymc_forecast`` lazily, failing with install instructions."""
+    """Import a supported ``pymc_forecast`` lazily, before any fitting."""
+    supported_versions = ">=0.3,<0.4"
+    install_instructions = (
+        "Install it with `pip install causalpy[forecast]` or "
+        f"`pip install --upgrade 'pymc-forecast[extras]{supported_versions}'`."
+    )
     try:
         import pymc_forecast
-    except ImportError as err:  # pragma: no cover - exercised without extra
+    except ImportError as err:
         raise ImportError(
             "PyMCForecastModel requires the optional dependency 'pymc-forecast'. "
-            "Install it with `pip install causalpy[forecast]` or "
-            "`pip install 'pymc-forecast[extras]>=0.3,<0.4'`."
+            + install_instructions
         ) from err
+    try:
+        installed_version = metadata.version("pymc-forecast")
+        supported = SpecifierSet(supported_versions).contains(
+            Version(installed_version), prereleases=False
+        )
+    except (metadata.PackageNotFoundError, InvalidVersion) as err:
+        raise ImportError(
+            f"Cannot determine a valid pymc-forecast version: {err}. "
+            f"PyMCForecastModel requires pymc-forecast{supported_versions}. "
+            + install_instructions
+        ) from err
+    if not supported:
+        raise ImportError(
+            f"Unsupported pymc-forecast version {installed_version!r}; "
+            f"PyMCForecastModel requires pymc-forecast{supported_versions}. "
+            + install_instructions
+        )
     return pymc_forecast
 
 

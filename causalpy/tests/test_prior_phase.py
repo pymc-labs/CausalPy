@@ -24,6 +24,7 @@ that fails open cannot slip through.
 import numpy as np
 import pandas as pd
 import pytest
+from packaging.specifiers import SpecifierSet
 
 import causalpy as cp
 from causalpy.custom_exceptions import (
@@ -634,7 +635,11 @@ def test_pymc_adapter_coefficients_group_guard():
 
 
 def test_forecast_adapter_guards():
-    pytest.importorskip("pymc_forecast")
+    pymc_forecast = pytest.importorskip("pymc_forecast", minversion="0.3")
+    if not SpecifierSet(">=0.3,<0.4").contains(
+        pymc_forecast.__version__, prereleases=False
+    ):
+        pytest.skip("requires pymc-forecast>=0.3,<0.4")
     from causalpy.pymc_forecast_models import PyMCForecastModel
 
     backend = model_adapter.PyMCForecastAdapter(
