@@ -18,7 +18,7 @@ CausalPy implements 10+ quasi-experimental causal inference methods over two cor
 | `causalpy/transforms.py` | Patsy `step()` / `ramp()` transforms for piecewise ITS |
 | `causalpy/data/` | `load_data()` and synthetic dataset generators |
 | `causalpy/tests/` | pytest suite |
-| Support modules | `constants.py`, `custom_exceptions.py`, `utils.py`, `plot_utils.py`, `date_utils.py`, `variable_selection_priors.py`, `maketables_adapters.py` |
+| Support modules | `constants.py`, `custom_exceptions.py`, `utils.py`, `plot_utils.py`, `plot_styles.py`, `date_utils.py`, `variable_selection_priors.py`, `maketables_adapters.py` |
 | `docs/source/notebooks/` | How-to notebooks (`{method}_{backend}.ipynb`) |
 | `docs/source/knowledgebase/` | Educational content (glossary, reporting explainers) |
 
@@ -36,7 +36,9 @@ CausalPy assigns every supported surface to one of four tiers. Membership comes 
 
 ### Current boundary decisions
 
-`EffectSummary` is the only new Tier 1 promotion: public `effect_summary()` methods return it, and the reporting knowledgebase already names its `table` and `text` contract. Re-exporting it as `causalpy.EffectSummary` gives users a stable type path; adding `reporting` to the Sphinx API surface and its explicit `__all__` documents that type without exposing its underscored calculation helpers.
+`EffectSummary` is a Tier 1 promotion: public `effect_summary()` methods return it, and the reporting knowledgebase already names its `table` and `text` contract. Re-exporting it as `causalpy.EffectSummary` gives users a stable type path; adding `reporting` to the Sphinx API surface and its explicit `__all__` documents that type without exposing its underscored calculation helpers.
+
+`plot_style` (context manager) and `set_plot_style` (global switch) are Tier 1 exports for selecting a named plot theme; the default theme is `arviz-darkgrid`. Only those two names are promoted. The `causalpy.plot_styles` module that implements the theme registry (`PlotTheme`, `PlotColors`, `available_styles()`, `get_theme()`, `active_theme()`, `active_colors()`, and the `_render_plot` helpers) stays Tier 3, so it can be remapped onto declarative plotnine themes (#988) without a major release.
 
 The top-level Sphinx `automodule` documents every existing `causalpy.__all__` export, including established utility and transform re-exports, without adding their support modules to the autosummary list. This aligns existing Tier 1 paths with docs rather than broadly promoting `utils`, `plot_utils`, `date_utils`, `custom_exceptions`, or other ambiguous helpers. No aliases, import removals, plot signatures, or effect-summary behavior change as part of this policy.
 
@@ -82,7 +84,7 @@ Construction is lazy: `__init__` runs validation and deterministic preprocessing
 
 Draw-derived state lives in per-experiment bundles (`causalpy/experiments/_results.py`) exposed through two raising properties: `exp.result` (posterior group) and `exp.prior_result` (prior group). Nothing derived from draws is assigned to the experiment itself; `is_fitted` / `has_prior_predictive` are predicates over those two slots. Read methods take keyword-only `group: Literal["prior", "posterior"]`; the guard and group→bundle resolution live once in `_render_plot()` / `_resolve_group()`. Missing groups raise `GroupNotSampledException` naming the call to make; both exceptions are re-exported from `causalpy`. Re-sampling overwrites its own group only (`fit()` again replaces posterior and warns; prior state survives). Assigning a new model — also the documented prior-revision path instead of a `set_priors()` — resets everything, because graph identity *is* the model instance.
 
-Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls the subclass's backend-agnostic `_plot(group=..., ...)`. Uncertainty rendering keys on data properties of the canonical prediction container (`has_posterior_draws()`), not on backend identity. `plot(group="prior")` renders a reduced panel set (counterfactual vs observed only). `effect_summary(group=...)` returns `EffectSummary(table, text)` using helpers from `causalpy.reporting`; prior-group prose reads as a plausibility check, not a causal claim.
+Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls the subclass's backend-agnostic `_plot(group=..., ...)` inside the active plot theme's matplotlib style (`causalpy.plot_styles`). Non-default themes also get their `CN` cycle colours frozen to concrete RGBA and their title font applied, so a figure drawn later keeps the theme. Marks that are not on the colour cycle, such as the DiD impact arrow, read their colour from `active_colors()` rather than hard-coding it. Uncertainty rendering keys on data properties of the canonical prediction container (`has_posterior_draws()`), not on backend identity. `plot(group="prior")` renders a reduced panel set (counterfactual vs observed only). `effect_summary(group=...)` returns `EffectSummary(table, text)` using helpers from `causalpy.reporting`; prior-group prose reads as a plausibility check, not a causal claim.
 
 ## Experiment Inventory
 
