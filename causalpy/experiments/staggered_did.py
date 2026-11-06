@@ -99,7 +99,10 @@ class StaggeredDifferenceInDifferences(
     non_identified_periods_ : set
         Calendar periods with no untreated observations.
     non_identified_cohorts_ : set
-        Treatment cohorts with at least one non-identified post-treatment ATT(g, t).
+        Treatment cohorts with at least one non-identified post-treatment
+        ``ATT(g, t)``. A cohort is included when one of its post-treatment
+        calendar periods lacks untreated support, or when none of its own units
+        has an untreated observation.
 
     Notes
     -----
@@ -122,9 +125,18 @@ class StaggeredDifferenceInDifferences(
        :math:`\\gamma_t` for calendar period :math:`t` is identified only if at
        least one unit is untreated in that period. Without never-treated units,
        post-treatment effects for the last-treated cohort (and any calendar
-       periods where every unit is already treated) are not identified. CausalPy
-       warns when this condition fails and marks the affected ``ATT(g, t)`` and
-       ``ATT(e)`` cells as non-identified in the output tables.
+       periods where every unit is already treated) are not identified.
+    5. **Untreated observation of the cohort's own unit**: An ``ATT(g, t)``
+       cell also requires at least one untreated observation of a unit in
+       cohort :math:`g`. Calendar-period untreated support from other units is
+       not enough. A cohort treated in every period it is observed has no such
+       observation, so its unit effect is not in the untreated fit.
+
+    CausalPy warns when either condition fails and marks the affected
+    ``ATT(g, t)`` and ``ATT(e)`` cells as non-identified (``identified=False``,
+    ``NaN`` estimates) in both output tables. Cells of a cohort with no
+    untreated observation of its own unit are excluded from the event-time
+    average.
 
     **Panel Balance**: This implementation supports both balanced and unbalanced panel
     data. While balanced panels (where each unit is observed in every time period) are
@@ -216,7 +228,7 @@ class StaggeredDifferenceInDifferences(
         # Step 3: Identify untreated observations (training set)
         self._identify_untreated_observations()
 
-        # Step 3b: Check calendar-period identification support
+        # Step 3b: Check calendar-period and own-unit identification support
         self._check_att_identification()
 
         # Step 4: Build design matrices
@@ -365,35 +377,81 @@ class StaggeredDifferenceInDifferences(
                     break
         return non_identified_cohorts
 
+    def _get_cohorts_without_own_untreated_support(self) -> set[Any]:
+        """Return cohorts with no untreated observation of their own units."""
+        untreated_cohorts = set(self.data.loc[self.data["_is_untreated"], "G"].unique())
+        return {cohort for cohort in self.cohorts if cohort not in untreated_cohorts}
+
+    def _cohort_has_own_untreated_support(self, cohort: Any) -> bool:
+        """Return whether ``cohort`` has an untreated observation of its own unit."""
+        return cohort not in self._cohorts_without_own_untreated_
+
     def _check_att_identification(self) -> None:
         """Detect non-identified ATT cells and warn when untreated support is missing."""
         self.non_identified_periods_ = self._get_periods_without_untreated_support()
-        self.non_identified_cohorts_ = self._get_non_identified_cohorts(
+        calendar_cohorts = self._get_non_identified_cohorts(
             self.non_identified_periods_
         )
-
-        if not self.non_identified_periods_:
-            return
-
-        periods_str = ", ".join(str(p) for p in sorted(self.non_identified_periods_))
-        cohorts_str = ", ".join(str(c) for c in sorted(self.non_identified_cohorts_))
-        warnings.warn(
-            "No untreated observations in calendar period(s) "
-            f"{{{periods_str}}}; treatment effects for cohort(s) "
-            f"{{{cohorts_str}}} are not identified at the affected post-treatment "
-            "cells. Provide never-treated units or restrict the event window. "
-            "Non-identified ATT(g, t) and ATT(e) cells are marked in the output "
-            "tables (identified=False) with NaN estimates.",
-            UserWarning,
-            stacklevel=2,
+        self._cohorts_without_own_untreated_ = (
+            self._get_cohorts_without_own_untreated_support()
         )
+        self.non_identified_cohorts_ = (
+            calendar_cohorts | self._cohorts_without_own_untreated_
+        )
+
+        if self.non_identified_periods_:
+            periods_str = ", ".join(
+                str(p) for p in sorted(self.non_identified_periods_)
+            )
+            cohorts_str = ", ".join(str(c) for c in sorted(calendar_cohorts))
+            warnings.warn(
+                "No untreated observations in calendar period(s) "
+                f"{{{periods_str}}}; treatment effects for cohort(s) "
+                f"{{{cohorts_str}}} are not identified at the affected post-treatment "
+                "cells. Provide never-treated units or restrict the event window. "
+                "Non-identified ATT(g, t) and ATT(e) cells are marked in the output "
+                "tables (identified=False) with NaN estimates.",
+                UserWarning,
+                stacklevel=2,
+            )
+        if self._cohorts_without_own_untreated_:
+            cohorts_str = ", ".join(
+                str(c) for c in sorted(self._cohorts_without_own_untreated_)
+            )
+            warnings.warn(
+                "Cohort(s) "
+                f"{{{cohorts_str}}} have no untreated observation of their own units; "
+                "calendar-period untreated support from other units is not enough. "
+                "ATT(g, t) cells for those cohorts are not identified and are excluded "
+                "from the event-time average. Non-identified ATT(g, t) and ATT(e) cells "
+                "are marked in the output tables (identified=False) with NaN estimates.",
+                UserWarning,
+                stacklevel=2,
+            )
 
     def _is_calendar_period_identified(self, period: Any) -> bool:
         """Return whether calendar period ``period`` has untreated support."""
         return period not in self.non_identified_periods_
 
+    def _is_group_time_att_identified(self, cohort: Any, period: Any) -> bool:
+        """Return whether ``ATT(g, t)`` is identified."""
+        return self._cohort_has_own_untreated_support(
+            cohort
+        ) and self._is_calendar_period_identified(period)
+
     def _is_event_time_att_identified(self, event_time: int) -> bool:
-        """Return whether aggregated ATT(e) is identified."""
+        """Return whether aggregated ATT(e) is identified.
+
+        Observations from a cohort with no untreated observation of its own unit
+        drop out of the average. They do not identify the cell, and they do not
+        make it non-identified when an eligible cohort still contributes. A cell
+        whose only contributions come from such a cohort is non-identified. An
+        event time with no contributing cohort stays identified, matching the
+        previous empty-cell result.
+        """
+        has_any = False
+        has_eligible = False
+        calendar_ok = True
         for cohort in self.cohorts:
             period = cohort + event_time
             has_contributing_obs = (
@@ -401,9 +459,29 @@ class StaggeredDifferenceInDifferences(
                 & (self.data[self.time_variable_name] == period)
                 & (self.data["event_time"] == event_time)
             ).any()
-            if has_contributing_obs and not self._is_calendar_period_identified(period):
-                return False
-        return True
+            if not has_contributing_obs:
+                continue
+            has_any = True
+            if not self._cohort_has_own_untreated_support(cohort):
+                continue
+            has_eligible = True
+            if not self._is_calendar_period_identified(period):
+                calendar_ok = False
+        if not has_any:
+            return True
+        return has_eligible and calendar_ok
+
+    def _eligible_event_positions(
+        self, frame: pd.DataFrame, event_time: float
+    ) -> np.ndarray:
+        """Positions in ``frame`` that enter the ATT(e) mean.
+
+        Cohorts with no untreated observation of their own unit are excluded.
+        Calendar-period non-identification is applied after aggregation.
+        """
+        eligible = ~frame["G"].isin(self._cohorts_without_own_untreated_).to_numpy()
+        match = frame["event_time"].to_numpy() == event_time
+        return np.flatnonzero(match & eligible)
 
     def _mark_non_identified_att_rows(self, att_df: pd.DataFrame) -> pd.DataFrame:
         """Add ``identified`` column and mask non-identified point estimates."""
@@ -414,9 +492,10 @@ class StaggeredDifferenceInDifferences(
 
         att_df = att_df.copy()
         if "cohort" in att_df.columns and "time" in att_df.columns:
-            att_df["identified"] = att_df["time"].map(
-                self._is_calendar_period_identified
-            )
+            att_df["identified"] = [
+                self._is_group_time_att_identified(cohort, period)
+                for cohort, period in zip(att_df["cohort"], att_df["time"], strict=True)
+            ]
         elif "event_time" in att_df.columns:
             att_df["identified"] = att_df["event_time"].apply(
                 lambda e: self._is_event_time_att_identified(int(e))
@@ -643,10 +722,21 @@ class StaggeredDifferenceInDifferences(
             ]
 
         for e in sorted(event_times_post):
-            e_mask = event_time_treated == e
-            if e_mask.sum() == 0:
+            raw_positions = np.flatnonzero(event_time_treated == e)
+            if raw_positions.size == 0:
                 continue
-            positions_arr = np.where(e_mask)[0]
+            positions_arr = self._eligible_event_positions(treated_data, e)
+            if positions_arr.size == 0:
+                att_et_rows.append(
+                    {
+                        "event_time": int(e),
+                        "att": np.nan,
+                        "att_lower": np.nan,
+                        "att_upper": np.nan,
+                        "n_obs": int(raw_positions.size),
+                    }
+                )
+                continue
             tau_e = tau_draws_treated[:, :, positions_arr].mean(axis=2)
             att_et_rows.append(
                 {
@@ -654,7 +744,7 @@ class StaggeredDifferenceInDifferences(
                     "att": float(tau_e.mean()),
                     "att_lower": float(np.percentile(tau_e, lower_pct)),
                     "att_upper": float(np.percentile(tau_e, upper_pct)),
-                    "n_obs": int(e_mask.sum()),
+                    "n_obs": int(positions_arr.size),
                 }
             )
 
@@ -727,13 +817,40 @@ class StaggeredDifferenceInDifferences(
                 & (event_data["event_time"] <= self.event_window[1])
             ]
 
-        att_et = (
-            event_data.groupby("event_time", observed=True)["tau_hat"]
-            .agg(["mean", "std", "count"])
-            .reset_index()
-        )
-        att_et.columns = ["event_time", "att", "att_std", "n_obs"]
-        att_et["event_time"] = att_et["event_time"].astype(int)
+        eligible = ~event_data["G"].isin(self._cohorts_without_own_untreated_)
+        eligible_event = event_data.loc[eligible]
+        if len(eligible_event) == 0:
+            att_et = pd.DataFrame(columns=["event_time", "att", "att_std", "n_obs"])
+        else:
+            att_et = (
+                eligible_event.groupby("event_time", observed=True)["tau_hat"]
+                .agg(["mean", "std", "count"])
+                .reset_index()
+            )
+            att_et.columns = ["event_time", "att", "att_std", "n_obs"]
+        ineligible_event = event_data.loc[~eligible]
+        if len(ineligible_event) > 0:
+            present = set(att_et["event_time"].tolist())
+            missing_counts = ineligible_event.groupby("event_time", observed=True)[
+                "tau_hat"
+            ].count()
+            extra_rows = [
+                {
+                    "event_time": event_time,
+                    "att": np.nan,
+                    "att_std": np.nan,
+                    "n_obs": int(n_obs),
+                }
+                for event_time, n_obs in missing_counts.items()
+                if event_time not in present
+            ]
+            if extra_rows:
+                att_et = pd.concat(
+                    [att_et, pd.DataFrame(extra_rows)], ignore_index=True
+                )
+        if len(att_et) > 0:
+            att_et["event_time"] = att_et["event_time"].astype(int)
+            att_et = att_et.sort_values("event_time").reset_index(drop=True)
         att_event_time = self._mark_non_identified_att_rows(att_et)
 
         return att_group_time, att_event_time
@@ -1586,10 +1703,21 @@ class StaggeredDifferenceInDifferences(
             ]
 
         for e in sorted(event_times_post):
-            e_mask = event_time_treated == e
-            if e_mask.sum() == 0:
+            raw_positions = np.flatnonzero(event_time_treated == e)
+            if raw_positions.size == 0:
                 continue
-            positions_arr = np.where(e_mask)[0]
+            positions_arr = self._eligible_event_positions(treated_data, e)
+            if positions_arr.size == 0:
+                att_et_rows.append(
+                    {
+                        "event_time": int(e),
+                        "att": np.nan,
+                        "att_lower": np.nan,
+                        "att_upper": np.nan,
+                        "n_obs": int(raw_positions.size),
+                    }
+                )
+                continue
             tau_e = tau_draws_treated[:, :, positions_arr].mean(axis=2)
             att_et_rows.append(
                 {
@@ -1597,7 +1725,7 @@ class StaggeredDifferenceInDifferences(
                     "att": float(tau_e.mean()),
                     "att_lower": float(np.percentile(tau_e, lower_pct)),
                     "att_upper": float(np.percentile(tau_e, upper_pct)),
-                    "n_obs": int(e_mask.sum()),
+                    "n_obs": int(positions_arr.size),
                 }
             )
 
@@ -1664,8 +1792,22 @@ class StaggeredDifferenceInDifferences(
                 & (event_times_post <= self.event_window[1])
             ]
         for event_time in sorted(event_times_post):
-            event_mask = event_time_treated == event_time
-            tau_e = tau_draws_treated[:, :, np.where(event_mask)[0]].mean(axis=2)
+            raw_positions = np.flatnonzero(event_time_treated == event_time)
+            if raw_positions.size == 0:
+                continue
+            positions = self._eligible_event_positions(treated_data, event_time)
+            if positions.size == 0:
+                att_et_rows.append(
+                    {
+                        "event_time": int(event_time),
+                        "att": np.nan,
+                        "att_lower": np.nan,
+                        "att_upper": np.nan,
+                        "n_obs": int(raw_positions.size),
+                    }
+                )
+                continue
+            tau_e = tau_draws_treated[:, :, positions].mean(axis=2)
             lower, upper = hdi_bounds(tau_e, prob=hdi_prob, flatten_chains_draws=True)
             att_et_rows.append(
                 {
@@ -1673,7 +1815,7 @@ class StaggeredDifferenceInDifferences(
                     "att": float(tau_e.mean()),
                     "att_lower": lower,
                     "att_upper": upper,
-                    "n_obs": int(event_mask.sum()),
+                    "n_obs": int(positions.size),
                 }
             )
 
@@ -1714,8 +1856,10 @@ class StaggeredDifferenceInDifferences(
         for event_time in sorted(event_times_post):
             if not self._is_event_time_att_identified(int(event_time)):
                 continue
-            event_mask = event_time_treated == event_time
-            tau_e = tau_draws_treated[:, :, np.where(event_mask)[0]].mean(axis=2)
+            positions = self._eligible_event_positions(treated_data, event_time)
+            if positions.size == 0:
+                continue
+            tau_e = tau_draws_treated[:, :, positions].mean(axis=2)
             att_draws.append(tau_e)
         if not att_draws:
             return None

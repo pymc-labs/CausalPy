@@ -1371,6 +1371,108 @@ def test_staggered_did_effect_summary_excludes_non_identified_cells():
     assert isinstance(summary.table, pd.DataFrame)
 
 
+def _always_treated_cohort_panel() -> pd.DataFrame:
+    """Unit A is treated in every period; unit C is treated from time 2."""
+    rows = []
+    for unit, start in (("A", 0), ("B", None), ("C", 2)):
+        for time in range(4):
+            treated = int(start is not None and time >= start)
+            rows.append(
+                {
+                    "unit": unit,
+                    "time": time,
+                    "treated": treated,
+                    "y": 10.0 * (unit == "A") + 5.0 * treated,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_always_treated_cohort_is_non_identified():
+    """A cohort with no untreated observation of its own unit is not identified.
+
+    Calendar-period untreated support from other units is not enough. Cohort is
+    the treatment time, not the unit label. On current main this panel wrongly
+    reports cohort 0.0 as identified with ATT 15.0 and averages that cell in.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = cp.StaggeredDifferenceInDifferences(
+            _always_treated_cohort_panel(),
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            treated_variable_name="treated",
+            model=LinearRegression(),
+        ).fit()
+
+    group_time = result.result.att_group_time
+    always_treated = group_time[group_time["cohort"] == 0.0]
+    later = group_time[group_time["cohort"] == 2.0]
+    assert len(always_treated) == 4
+    assert not always_treated["identified"].any()
+    assert always_treated["att"].isna().all()
+    assert 0.0 in result.non_identified_cohorts_
+    assert later["identified"].all()
+    assert np.allclose(later["att"], 5.0)
+
+    event_time = result.result.att_event_time
+    post = event_time[event_time["event_time"] >= 0]
+    only_always = post[post["event_time"].isin([2, 3])]
+    shared = post[post["event_time"].isin([0, 1])]
+    assert not only_always["identified"].any()
+    assert only_always["att"].isna().all()
+    assert shared["identified"].all()
+    assert np.allclose(shared["att"], 5.0)
+    assert post.loc[post["identified"], "att"].mean() == 5.0
+    summary = result.effect_summary().text
+    assert "12.50" not in summary
+    assert "5.00" in summary
+    assert any(
+        "no untreated observation of their own units" in str(item.message)
+        for item in caught
+    )
+
+
+def test_cohort_with_one_own_untreated_observation_stays_identified():
+    """One untreated observation of the cohort's own unit keeps that cohort identified."""
+    rows = []
+    for unit, start, times in (
+        ("A", 0, range(0, 4)),
+        ("D", 0, range(-1, 4)),
+        ("B", None, range(-1, 4)),
+        ("C", 2, range(-1, 4)),
+    ):
+        for time in times:
+            treated = int(start is not None and time >= start)
+            rows.append(
+                {
+                    "unit": unit,
+                    "time": time,
+                    "treated": treated,
+                    "y": 10.0 * (unit == "A") + 3.0 * (unit == "D") + 5.0 * treated,
+                }
+            )
+
+    result = cp.StaggeredDifferenceInDifferences(
+        pd.DataFrame(rows),
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        model=LinearRegression(),
+    ).fit()
+
+    group_time = result.result.att_group_time
+    cohort_0 = group_time[group_time["cohort"] == 0.0]
+    cohort_2 = group_time[group_time["cohort"] == 2.0]
+    assert cohort_0["identified"].all()
+    assert np.allclose(cohort_0["att"], 9.625)
+    assert cohort_2["identified"].all()
+    assert np.allclose(cohort_2["att"], 5.0)
+    assert result.result.att_event_time["identified"].all()
+
+
 def test_staggered_did_mark_non_identified_att_rows_edge_cases():
     """Cover empty and unknown-column paths in _mark_non_identified_att_rows."""
     df = _no_never_treated_staggered_did_df()
@@ -2185,14 +2287,15 @@ def test_staggered_did_only_never_treated_as_controls():
         }
     )
 
-    result = cp.StaggeredDifferenceInDifferences(
-        df,
-        formula="y ~ 1 + C(unit) + C(time)",
-        unit_variable_name="unit",
-        time_variable_name="time",
-        treatment_time_variable_name="treatment_time",
-        model=LinearRegression(),
-    )
+    with pytest.warns(UserWarning, match="no untreated observation of their own units"):
+        result = cp.StaggeredDifferenceInDifferences(
+            df,
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            treatment_time_variable_name="treatment_time",
+            model=LinearRegression(),
+        )
 
     # Training set should only contain never-treated observations
     training_mask = result.data["_is_untreated"]
