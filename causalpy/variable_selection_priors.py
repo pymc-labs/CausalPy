@@ -523,7 +523,7 @@ class VariableSelectionPrior:
 
         Parameters
         ----------
-        idata : xarray.DataTree
+        idata : :class:`xarray.DataTree`
             Fitted model data tree
         param_name : str
             Name of the coefficient parameter (must match name in create_prior)
@@ -582,7 +582,7 @@ class VariableSelectionPrior:
 
         Parameters
         ----------
-        idata : xarray.DataTree
+        idata : :class:`xarray.DataTree`
             Fitted model data tree
         param_name : str
             Name of the coefficient parameter

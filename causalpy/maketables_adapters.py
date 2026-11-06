@@ -206,7 +206,7 @@ def coefficient_table(experiment: Any) -> pd.DataFrame:
 
     Returns
     -------
-    pd.DataFrame
+    :class:`pandas.DataFrame`
         Coefficient estimates and available uncertainty statistics.
     """
     labels = list(getattr(experiment, "labels", []))

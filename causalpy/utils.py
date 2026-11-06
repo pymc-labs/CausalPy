@@ -106,7 +106,7 @@ def has_posterior_draws(Y: xr.DataArray) -> bool:
 
     Parameters
     ----------
-    Y : xr.DataArray
+    Y : :class:`xarray.DataArray`
         A canonical prediction container with ``chain`` and ``draw``
         dimensions.
     """
@@ -129,7 +129,7 @@ def round_num(n: float | xr.DataArray, round_to: int | None) -> str:
 
     Parameters
     ----------
-    n : float or xr.DataArray
+    n : float or :class:`xarray.DataArray`
         Number to round. A zero-dimensional DataArray, as produced by
         ``.mean()`` on posterior samples, formats like the scalar it wraps.
     round_to : int, optional
@@ -169,7 +169,7 @@ def convert_to_string(x: float | xr.DataArray, round_to: int | None = 2) -> str:
 
     Parameters
     ----------
-    x : float or xr.DataArray
+    x : float or :class:`xarray.DataArray`
         The numeric value or xarray DataArray to convert.
     round_to : int, optional
         Number of significant figures to round to. Defaults to 2.
@@ -268,9 +268,9 @@ def check_convex_hull_violation(
 
     Parameters
     ----------
-    treated_series : np.ndarray or xr.DataArray
+    treated_series : :class:`numpy.ndarray` or :class:`xarray.DataArray`
         1D array of treated unit values (shape: n_timepoints)
-    control_matrix : np.ndarray or xr.DataArray
+    control_matrix : :class:`numpy.ndarray` or :class:`xarray.DataArray`
         2D array of control unit values (shape: n_timepoints x n_controls)
 
     Returns
@@ -331,7 +331,7 @@ def plot_correlations(
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : :class:`pandas.DataFrame`
         Wide-format panel data with time as the index and locations/units as columns.
     columns : list[str], optional
         Subset of columns to include. If ``None``, all numeric columns are used.
@@ -344,7 +344,7 @@ def plot_correlations(
 
     Returns
     -------
-    tuple[pd.DataFrame, matplotlib.axes.Axes]
+    tuple[:class:`pandas.DataFrame`, matplotlib.axes.Axes]
         The correlation matrix and the axes containing the heatmap.
 
     Other Parameters
@@ -431,7 +431,7 @@ def extract_lift_for_mmm(
 
     Returns
     -------
-    pd.DataFrame
+    :class:`pandas.DataFrame`
         DataFrame with one row per treated geo, containing columns:
 
         - ``channel``: The marketing channel name (from input parameter)

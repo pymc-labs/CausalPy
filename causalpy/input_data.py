@@ -72,7 +72,7 @@ def to_pandas(data: DataFrameLike, *, argument_name: str = "data") -> pd.DataFra
 
     Returns
     -------
-    pandas.DataFrame
+    :class:`pandas.DataFrame`
         A pandas dataframe that the caller owns and may modify in place.
 
     Raises
@@ -140,7 +140,7 @@ def to_pandas_with_time_index(
 
     Returns
     -------
-    pandas.DataFrame
+    :class:`pandas.DataFrame`
         A pandas dataframe indexed by the time axis.
 
     Raises
@@ -218,7 +218,7 @@ def _has_default_index(frame: pd.DataFrame) -> bool:
 
     Parameters
     ----------
-    frame : pandas.DataFrame
+    frame : :class:`pandas.DataFrame`
         The dataframe to inspect.
 
     Returns
