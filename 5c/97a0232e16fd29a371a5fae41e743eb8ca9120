@@ -1,0 +1,16 @@
+causalpy/experiments/regression_discontinuity.py
+  h_63db634213747e 326-334
+causalpy/tests/test_input_validation.py
+  h_63db634213747e 902-950
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5c97a0232e16fd29a371a5fae41e743eb8ca9120",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
