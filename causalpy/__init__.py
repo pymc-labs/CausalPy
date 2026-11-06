@@ -46,6 +46,7 @@ from .experiments.synthetic_difference_in_differences import (
 )
 from .experiments.up_down_geolift import UpDownGeoLift
 from .pipeline import Pipeline, PipelineContext, PipelineResult, Step
+from .pymc_models import GeneralizedLinearRegression, LinearRegression
 from .reporting import EffectSummary
 from .steps import (
     EstimateEffect,
@@ -67,10 +68,12 @@ __all__ = [
     "extract_lift_for_mmm",
     "FormulaException",
     "GenerateReport",
+    "GeneralizedLinearRegression",
     "GroupNotSampledException",
     "InstrumentalVariable",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
+    "LinearRegression",
     "load_data",
     "PiecewiseITS",
     "Pipeline",

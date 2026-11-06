@@ -86,7 +86,9 @@ Each quasi-experimental design connects a research question to an empirical esti
 
 See the [Difference in Differences section of quasi_dags](quasi_dags.ipynb#difference-in-differences) for the DAG representation.
 
-**Interpretation note**: A single ATT summarizes the treatment effect across treated post-treatment observations and can conceal variation across units or time.
+**Interpretation note**: A single ATT summarizes the treatment effect across treated post-treatment observations and can conceal variation across units or time. Plots show counterfactual trajectories; they do not replace the reported ATT.
+
+**Extraction**: OLS Difference-in-Differences reports the group-by-post interaction coefficient. Under the validated additive identity design that coefficient equals the treated-post prediction contrast. Bayesian Difference-in-Differences, including identity-link and non-identity :class:`~causalpy.pymc_models.GeneralizedLinearRegression`, reports the response-scale ATT: the mean treated-post factual-minus-counterfactual ``mu``. For Poisson/log models, parallel trends are a claim about untreated log-mean trajectories; the reported ATT is still that response-scale contrast, not the log coefficient. PrePostNEGD uses the same response-scale contrast on treated rows.
 
 ---
 
@@ -175,7 +177,7 @@ The descriptions above assume standard usage. Always consider what your specific
 | Synthetic Control | Time-varying unit-specific impact |
 | Regression Discontinuity | Local treatment effect at cutoff |
 
-For methods not covered in detail here, including IV, IPW, and ANCOVA, see the respective notebook documentation, {doc}`quasi_dags` for identification, and the {doc}`glossary` for estimand definitions.
+For methods not covered in detail here, including IV, IPW, and ANCOVA, see the respective notebook documentation, {doc}`quasi_dags` for identification, and the {doc}`glossary` for estimand definitions. Count and binary outcomes use :class:`~causalpy.pymc_models.GeneralizedLinearRegression`; see {doc}`prediction-contract` for the response-scale contract.
 
 ## References
 
