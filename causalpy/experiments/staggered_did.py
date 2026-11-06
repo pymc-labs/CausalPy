@@ -845,8 +845,11 @@ class StaggeredDifferenceInDifferences(
                 if event_time not in present
             ]
             if extra_rows:
-                att_et = pd.concat(
-                    [att_et, pd.DataFrame(extra_rows)], ignore_index=True
+                extra = pd.DataFrame(extra_rows)
+                att_et = (
+                    extra
+                    if len(att_et) == 0
+                    else pd.concat([att_et, extra], ignore_index=True)
                 )
         if len(att_et) > 0:
             att_et["event_time"] = att_et["event_time"].astype(int)

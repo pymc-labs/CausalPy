@@ -2295,7 +2295,7 @@ def test_staggered_did_only_never_treated_as_controls():
             time_variable_name="time",
             treatment_time_variable_name="treatment_time",
             model=LinearRegression(),
-        )
+        ).fit()
 
     # Training set should only contain never-treated observations
     training_mask = result.data["_is_untreated"]
@@ -2303,6 +2303,13 @@ def test_staggered_did_only_never_treated_as_controls():
 
     # Only units 2 and 3 should be in training set
     assert set(training_units) == {2, 3}
+    event_time = result.result.att_event_time
+    assert not event_time["identified"].any()
+    assert event_time["att"].isna().all()
+    assert np.issubdtype(event_time["n_obs"].dtype, np.number)
+    assert not pd.api.types.is_object_dtype(event_time["att"])
+    result.plot()
+    plt.close("all")
 
 
 def test_staggered_did_supports_ols_bayes_attrs():
