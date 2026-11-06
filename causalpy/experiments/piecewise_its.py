@@ -355,7 +355,8 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
         over the FULL window and ``impact_pre`` the full pointwise effect;
         ``predictions_post`` / ``impact_post`` are the counterfactual /
         effect slices over the post-intervention window (at or after the
-        first interruption), reindexed onto ``datapost``.
+        earliest interruption, not the first formula term), reindexed onto
+        ``datapost``.
         """
         X = self.design["X"]
         y = self.design["y"]
@@ -379,7 +380,7 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
 
         # Post-intervention window slices (deterministic window from config)
         post_indices = np.where(
-            np.asarray(self.data[self.time_col] >= self.interruption_times[0])
+            np.asarray(self.data[self.time_col] >= self._earliest_interruption_time())
         )[0]
         predictions_post = (
             y_counterfactual.isel(obs_ind=post_indices)
@@ -400,21 +401,26 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
         )
         self._assign_bundle(group, bundle)
 
+    def _earliest_interruption_time(self) -> int | float | pd.Timestamp:
+        """Return the earliest interruption, independent of formula order."""
+        return min(self.interruption_times)
+
     def _create_post_intervention_attributes(self) -> None:
         """Derive the post-intervention window from configuration.
 
         The "post-intervention" portion is defined as all observations at or
-        after the first interruption time. Deterministic: no draws involved.
+        after the earliest interruption time, not the first ``step()`` or
+        ``ramp()`` term in the formula. Deterministic: no draws involved.
         """
         if not self.interruption_times:
             # No interruptions - all data is "pre-intervention"
             self.datapost = self.data.iloc[0:0]  # Empty DataFrame
             return
 
-        first_interruption = self.interruption_times[0]
+        earliest_interruption = self._earliest_interruption_time()
 
-        # Post-intervention = time >= first_interruption (inclusive)
-        post_mask = self.data[self.time_col] >= first_interruption
+        # Post-intervention = time >= earliest interruption (inclusive)
+        post_mask = self.data[self.time_col] >= earliest_interruption
 
         # Create datapost - the post-intervention data
         self.datapost = self.data[post_mask].copy()

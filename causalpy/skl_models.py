@@ -49,7 +49,10 @@ class WeightedProportion(ScikitLearnAdaptor, LinearModel, RegressorMixin):
         y : np.ndarray
             Treated unit outcomes in the pre-treatment period.
         """
-        return np.sqrt(np.mean((y - np.dot(X, W.T)) ** 2))
+        weights = np.ravel(W)
+        prediction = np.ravel(np.dot(X, weights))
+        outcome = np.ravel(y)
+        return np.sqrt(np.mean((outcome - prediction) ** 2))
 
     def fit(self, X: np.ndarray, y: np.ndarray) -> "WeightedProportion":
         """Fit model on data X with predictor y.

@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Pretest/posttest nonequivalent group design."""
 
+import re
 from typing import Any, Literal
 
 import numpy as np
@@ -250,18 +251,44 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
                 """
             )
 
+    def _is_group_main_effect_factor(self, factor_name: str) -> bool:
+        """Whether a Patsy factor is the group variable itself, not a substring.
+
+        Accepts the bare name and Patsy's quoted spellings ``Q('name')`` and
+        ``Q("name")``, including as the variable argument of ``C(...)``.
+        """
+        name = self.group_variable_name
+        spellings = (name, f"Q('{name}')", f'Q("{name}")')
+        if factor_name in spellings:
+            return True
+        alternatives = "|".join(re.escape(spelling) for spelling in spellings)
+        return (
+            re.fullmatch(rf"C\(\s*(?:{alternatives})\s*(?:,.*)?\)", factor_name)
+            is not None
+        )
+
     def _get_treatment_effect_coeff(self) -> str:
         """Find the beta regression coefficient corresponding to the
         group (i.e. treatment) effect.
         For example if self.group_variable_name is 'group' and
         the labels are `['Intercept', 'C(group)[T.1]', 'pre']`
         then we want `C(group)[T.1]`.
-        """
-        for label in self.labels:
-            if (self.group_variable_name in label) & (":" not in label):
-                return label
 
-        raise NameError("Unable to find coefficient name for the treatment effect")
+        The selected label is the unique column of that group's main-effect
+        term. An earlier coefficient is not selected because its name contains
+        the group variable as a substring, and an interaction is not the
+        treatment indicator.
+        """
+        matches: list[str] = []
+        for term in self._x_design_info.terms:
+            if len(term.factors) != 1:
+                continue
+            if not self._is_group_main_effect_factor(term.factors[0].name()):
+                continue
+            matches.extend(self.labels[self._x_design_info.term_slices[term]])
+        if len(matches) != 1:
+            raise NameError("Unable to find coefficient name for the treatment effect")
+        return matches[0]
 
     def _causal_impact_summary_stat(self, round_to: int | None = 2) -> str:
         """Computes the mean and credible interval bounds for the causal impact."""

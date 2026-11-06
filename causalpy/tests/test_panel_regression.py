@@ -24,8 +24,7 @@ import pytest
 import xarray as xr
 from matplotlib.collections import PolyCollection
 from matplotlib.colors import to_rgba
-from pymc_extras.prior import Prior
-from sklearn.linear_model import Lasso, LinearRegression, Ridge
+from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
 from causalpy._arviz_compat import hdi_bound_arrays
@@ -1013,6 +1012,399 @@ def test_panel_plot_trajectories_rejects_empty_selection(small_panel_data, selec
         result.plot_trajectories(units=[])
 
 
+def _named_ols_coefs(result):
+    coefs = np.asarray(result.model.coef_, dtype=float).reshape(-1)
+    return {
+        label: float(value) for label, value in zip(result.labels, coefs, strict=True)
+    }
+
+
+def _fit_panel(data, formula, method, *, time_fe=True):
+    return cp.PanelRegression(
+        data,
+        formula=formula,
+        unit_fe_variable="unit",
+        time_fe_variable="time" if time_fe else None,
+        fe_method=method,
+        model=LinearRegression(),
+    ).fit()
+
+
+def _cited_interaction_panel():
+    """The issue's 4 by 4 balanced panel, with a planted treatment interaction."""
+    pattern = {
+        (0, 0): 0,
+        (0, 1): 1,
+        (0, 2): 0,
+        (0, 3): 2,
+        (1, 0): 1,
+        (1, 1): 0,
+        (1, 2): 2,
+        (1, 3): 0,
+        (2, 0): 0,
+        (2, 1): 2,
+        (2, 2): 1,
+        (2, 3): 3,
+        (3, 0): 2,
+        (3, 1): 0,
+        (3, 2): 3,
+        (3, 3): 1,
+    }
+    rows = []
+    for unit in range(4):
+        for time in range(4):
+            treatment = int(unit >= 2 and time >= 2)
+            x = float(pattern[(unit, time)])
+            y = (
+                10.0 * unit
+                + 1.0 * time
+                + 2.0 * treatment
+                + 3.0 * x
+                + 4.0 * treatment * x
+            )
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": treatment,
+                    "x": x,
+                    "y": y,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def _constructed_term_panel(n_units, n_periods, seed):
+    """Balanced panel whose formula terms are not raw columns.
+
+    ``post:z`` and ``I(w ** 2)`` disagree with demean-then-multiply unless the
+    within transform is applied after the formula is built.
+    """
+    rng = np.random.default_rng(seed)
+    rows = []
+    for unit in range(n_units):
+        for time in range(n_periods):
+            post = int(time >= (unit % 3) + 1)
+            z = float(rng.normal())
+            w = float(rng.integers(0, 4))
+            y = (
+                7.0 * unit
+                + 0.4 * time
+                + 5.0 * post
+                - 1.5 * z
+                + 0.7 * post * z
+                - 2.0 * w**2
+            )
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "post": post,
+                    "z": z,
+                    "w": w,
+                    "y": y,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_demeaned_balanced_panel_matches_dummy_within_transform():
+    """Demeaned FE matches dummy FE on balanced panels, including constructed terms.
+
+    An additive formula that already agreed must keep agreeing. A constructed
+    term other than the cited ``treatment:x`` on the cited 4 by 4 panel must
+    also match, on more than one panel shape.
+    """
+    cited = _cited_interaction_panel()
+    interaction = "y ~ 1 + treatment + x + treatment:x"
+    dummy_interaction = "y ~ 1 + C(unit) + C(time) + treatment + x + treatment:x"
+    demeaned = _named_ols_coefs(_fit_panel(cited, interaction, "demeaned"))
+    dummies = _named_ols_coefs(_fit_panel(cited, dummy_interaction, "dummies"))
+    expected = {"treatment": 2.0, "x": 3.0, "treatment:x": 4.0}
+    for name, value in expected.items():
+        assert demeaned[name] == pytest.approx(value)
+        assert dummies[name] == pytest.approx(value)
+
+    additive = "y ~ 1 + treatment + x"
+    dummy_additive = "y ~ 1 + C(unit) + C(time) + treatment + x"
+    demeaned_additive = _named_ols_coefs(_fit_panel(cited, additive, "demeaned"))
+    dummy_additive_coefs = _named_ols_coefs(
+        _fit_panel(cited, dummy_additive, "dummies")
+    )
+    assert demeaned_additive["treatment"] == pytest.approx(
+        dummy_additive_coefs["treatment"]
+    )
+    assert demeaned_additive["x"] == pytest.approx(dummy_additive_coefs["x"])
+    assert demeaned_additive["treatment"] == pytest.approx(9.384615384615)
+    assert demeaned_additive["x"] == pytest.approx(4.230769230769)
+
+    constructed = "y ~ 1 + post + z + post:z + I(w ** 2)"
+    dummy_constructed = "y ~ 1 + C(unit) + C(time) + post + z + post:z + I(w ** 2)"
+    planted = {"post": 5.0, "z": -1.5, "post:z": 0.7, "I(w ** 2)": -2.0}
+    for n_units, n_periods, seed in ((3, 6, 11), (5, 3, 19)):
+        panel = _constructed_term_panel(n_units, n_periods, seed)
+        demeaned = _named_ols_coefs(_fit_panel(panel, constructed, "demeaned"))
+        dummies = _named_ols_coefs(_fit_panel(panel, dummy_constructed, "dummies"))
+        for name, value in planted.items():
+            assert demeaned[name] == pytest.approx(value, abs=1e-8)
+            assert dummies[name] == pytest.approx(demeaned[name])
+
+    square_rows = []
+    for unit in range(4):
+        for time in range(5):
+            w = float((unit * 3 + time) % 4)
+            square_rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "w": w,
+                    "y": 3.0 * unit + 0.5 * time + 1.25 * w - 2.0 * w**2,
+                }
+            )
+    square_panel = pd.DataFrame(square_rows)
+    square_only = "y ~ 1 + w + I(w ** 2)"
+    dummy_square_only = "y ~ 1 + C(unit) + C(time) + w + I(w ** 2)"
+    demeaned_square = _named_ols_coefs(
+        _fit_panel(square_panel, square_only, "demeaned")
+    )
+    dummy_square = _named_ols_coefs(
+        _fit_panel(square_panel, dummy_square_only, "dummies")
+    )
+    assert demeaned_square["w"] == pytest.approx(1.25, abs=1e-8)
+    assert demeaned_square["I(w ** 2)"] == pytest.approx(-2.0, abs=1e-8)
+    assert dummy_square["w"] == pytest.approx(demeaned_square["w"])
+    assert dummy_square["I(w ** 2)"] == pytest.approx(demeaned_square["I(w ** 2)"])
+
+    one_way = "y ~ 1 + post + z + post:z + I(w ** 2)"
+    dummy_one_way = "y ~ 1 + C(unit) + post + z + post:z + I(w ** 2)"
+    one_way_panel = _constructed_term_panel(4, 5, 29)
+    demeaned_one_way = _named_ols_coefs(
+        _fit_panel(one_way_panel, one_way, "demeaned", time_fe=False)
+    )
+    dummy_one_way_coefs = _named_ols_coefs(
+        _fit_panel(one_way_panel, dummy_one_way, "dummies", time_fe=False)
+    )
+    for name in planted:
+        assert demeaned_one_way[name] == pytest.approx(dummy_one_way_coefs[name])
+
+
+def _panel_with_internal_missing_formula_values():
+    """Balanced panel with missing formula values that are not the last row."""
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            treatment = int(unit >= 2 and time >= 2)
+            x = float(unit * 5 + time)
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": treatment,
+                    "x": x,
+                    "unused": 1.0,
+                    "y": 100.0 + unit * 5 + time,
+                }
+            )
+    data = pd.DataFrame(rows)
+    # Not the last row. One missing outcome and one missing covariate.
+    data.loc[3, "y"] = np.nan
+    data.loc[7, "x"] = np.nan
+    # An unused column must not decide which rows the formula keeps.
+    data.loc[11, "unused"] = np.nan
+    return data
+
+
+def _sequential_group_demean(frame, columns, group_vars):
+    demeaned = frame.loc[:, columns].astype(float).copy()
+    for group_var in group_vars:
+        demeaned = demeaned - demeaned.groupby(
+            frame[group_var], observed=True
+        ).transform("mean")
+    return demeaned
+
+
+@pytest.mark.parametrize(
+    "formula",
+    [
+        "y ~ 1 + treatment + x",
+        "y ~ 1 + treatment + x + treatment:x",
+    ],
+)
+def test_demeaned_missing_formula_rows_match_dummy_retention(formula):
+    """Missing formula values must not crash demeaned init or change retained rows.
+
+    Patsy drops incomplete formula rows before the design matrix is built. The
+    within transform has to use those rows, not the full frame index, and must
+    not assume the dropped row is last.
+    """
+    data = _panel_with_internal_missing_formula_values()
+    assert int(data.index[-1]) not in {3, 7}
+    demeaned = cp.PanelRegression(
+        data,
+        formula=formula,
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    )
+    dummies = cp.PanelRegression(
+        data,
+        formula="y ~ 1 + C(unit) + C(time) + " + formula.split("~", 1)[1],
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="dummies",
+        model=LinearRegression(),
+    )
+
+    used = ["y", "treatment", "x"]
+    retained = data.loc[data[used].notna().all(axis=1)].copy()
+    assert len(retained) == len(data) - 2
+    assert 3 not in retained.index
+    assert 7 not in retained.index
+    assert int(data.index[-1]) in retained.index
+    assert 11 in retained.index
+
+    dummy_y = np.asarray(dummies.design["y"], dtype=float).reshape(-1)
+    np.testing.assert_allclose(dummy_y, retained["y"].to_numpy(dtype=float))
+    assert demeaned.design["y"].shape[0] == dummies.design["y"].shape[0]
+    assert demeaned.design["X"].shape[0] == retained.shape[0]
+
+    demeaned_x = np.asarray(demeaned.design["X"], dtype=float)
+    within = _sequential_group_demean(retained, ["treatment", "x"], ["unit", "time"])
+    within["treatment:x"] = retained["treatment"].to_numpy(dtype=float) * retained[
+        "x"
+    ].to_numpy(dtype=float)
+    within["treatment:x"] = _sequential_group_demean(
+        within.assign(
+            unit=retained["unit"].to_numpy(), time=retained["time"].to_numpy()
+        ),
+        ["treatment:x"],
+        ["unit", "time"],
+    )["treatment:x"]
+    for name in ("treatment", "x", "treatment:x"):
+        if name not in demeaned.labels:
+            continue
+        column = demeaned.labels.index(name)
+        np.testing.assert_allclose(
+            demeaned_x[:, column],
+            within[name].to_numpy(dtype=float),
+            atol=1e-8,
+        )
+
+
+def test_demeaned_log_interaction_matches_dummy_fe():
+    """A named interaction other than treatment:x is the within transform of the product."""
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            treated = int(unit >= 1 and time >= 2)
+            exposure = float(1 + unit + 2 * time)
+            log_exposure = np.log(exposure)
+            y = (
+                4.0 * unit
+                + 0.25 * time
+                + 1.7 * treated
+                - 0.8 * log_exposure
+                + 2.4 * treated * log_exposure
+            )
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treated": treated,
+                    "exposure": exposure,
+                    "y": y,
+                }
+            )
+    panel = pd.DataFrame(rows)
+    formula = "y ~ 1 + treated + np.log(exposure) + treated:np.log(exposure)"
+    dummy = (
+        "y ~ 1 + C(unit) + C(time) + treated + np.log(exposure) "
+        "+ treated:np.log(exposure)"
+    )
+    demeaned = _named_ols_coefs(_fit_panel(panel, formula, "demeaned"))
+    dummies = _named_ols_coefs(_fit_panel(panel, dummy, "dummies"))
+    expected = {
+        "treated": 1.7,
+        "np.log(exposure)": -0.8,
+        "treated:np.log(exposure)": 2.4,
+    }
+    for name, value in expected.items():
+        assert demeaned[name] == pytest.approx(value, abs=1e-8)
+        assert dummies[name] == pytest.approx(value, abs=1e-8)
+
+
+def test_demeaned_intercept_only_keeps_intercept_and_demeans_outcome():
+    """An intercept-only formula has no regressor columns left to demean."""
+    rows = []
+    for unit in range(3):
+        for time in range(4):
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "y": 10.0 * unit + 1.0 * time + 0.5,
+                }
+            )
+    panel = pd.DataFrame(rows)
+    result = cp.PanelRegression(
+        panel,
+        formula="y ~ 1",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    )
+    within_y = _sequential_group_demean(panel, ["y"], ["unit", "time"])
+    np.testing.assert_allclose(
+        np.asarray(result.design["y"], dtype=float).reshape(-1),
+        within_y["y"].to_numpy(dtype=float),
+    )
+    intercept = np.asarray(result.design["X"], dtype=float)
+    assert intercept.shape == (len(panel), 1)
+    np.testing.assert_allclose(intercept, np.ones((len(panel), 1)))
+    recorded = result._group_means["unit"].copy()
+    result._record_original_group_means("unit")
+    pd.testing.assert_frame_equal(result._group_means["unit"], recorded)
+
+
+def test_sequential_within_preserves_one_dimensional_outcome():
+    """A one-column outcome vector stays one-dimensional after demeaning."""
+    panel = _cited_interaction_panel()
+    result = cp.PanelRegression(
+        panel,
+        formula="y ~ 1 + treatment",
+        unit_fe_variable="unit",
+        time_fe_variable="time",
+        fe_method="demeaned",
+        model=LinearRegression(),
+    )
+    transformed = result._sequential_within(
+        panel["y"].to_numpy(dtype=float),
+        panel,
+        ["unit"],
+    )
+    assert transformed.ndim == 1
+    expected = panel["y"] - panel.groupby("unit", observed=True)["y"].transform("mean")
+    np.testing.assert_allclose(transformed, expected.to_numpy(dtype=float))
+
+
+def test_kept_row_action_reports_alignment_and_rejects_unreported_drops():
+    """Row alignment must not guess when Patsy drops rows without a mask."""
+    from causalpy.experiments.panel_regression import _KeptRowNAAction
+
+    action = _KeptRowNAAction()
+    assert action.handle_NA([], [], []) == []
+    assert action.kept_rows is None
+    data = pd.DataFrame({"y": [1.0, 2.0]})
+    np.testing.assert_array_equal(
+        action.rows_for(data, np.array([1.0, 2.0])),
+        np.ones(2, dtype=bool),
+    )
+    with pytest.raises(ValueError, match="without reporting which rows were kept"):
+        action.rows_for(data, np.array([1.0]))
+
+
 def _named_coefficients(result: cp.PanelRegression) -> dict[str, float]:
     return {
         label: float(coef)
@@ -1040,9 +1432,8 @@ def test_dummy_fe_time_invariant_treatment_matches_within_estimator():
                 }
             )
     data = pd.DataFrame(rows)
-
-    with pytest.warns(UserWarning, match="within estimate of 0"):
-        dummies = cp.PanelRegression(
+    with pytest.warns(UserWarning, match="within estimate"):
+        result = cp.PanelRegression(
             data,
             formula="y ~ 1 + C(unit) + C(time) + treatment + region",
             unit_fe_variable="unit",
@@ -1050,144 +1441,43 @@ def test_dummy_fe_time_invariant_treatment_matches_within_estimator():
             fe_method="dummies",
             model=LinearRegression(),
         ).fit()
-    demeaned = cp.PanelRegression(
-        data,
-        formula="y ~ 1 + treatment + region",
-        unit_fe_variable="unit",
-        time_fe_variable="time",
-        fe_method="demeaned",
-        model=LinearRegression(),
-    ).fit()
-
-    dummy_coefs = _named_coefficients(dummies)
-    demeaned_coefs = _named_coefficients(demeaned)
-    assert dummy_coefs["treatment"] == pytest.approx(0.0, abs=1e-8)
-    assert dummy_coefs["region"] == pytest.approx(0.0, abs=1e-8)
-    assert demeaned_coefs["treatment"] == pytest.approx(0.0, abs=1e-8)
-    assert dummy_coefs["C(unit)[T.u3]"] == pytest.approx(30.0, abs=1e-8)
+    coefs = _named_coefficients(result)
+    assert coefs["treatment"] == pytest.approx(0.0)
+    assert coefs["region"] == pytest.approx(0.0)
+    assert coefs["C(unit)[T.u3]"] == pytest.approx(30.0)
 
 
-def _time_invariant_treatment_panel(unit_column: str = "unit") -> pd.DataFrame:
+def test_dummy_fe_keeps_within_varying_treatment_beside_time_invariant():
+    """A within-varying treatment must not be zeroed with a constant covariate."""
     rows = []
     for unit in range(4):
         for time in range(5):
             rows.append(
                 {
-                    unit_column: f"u{unit}",
-                    "time": time,
-                    "treatment": float(unit == 3),
-                    "y": 10.0 * unit + 1.0 * time,
-                }
-            )
-    return pd.DataFrame(rows)
-
-
-@pytest.mark.parametrize(
-    ("unit_column", "formula", "unit_label", "time_fe"),
-    [
-        (
-            "unit",
-            'y ~ 1 + C(Q("unit")) + C(time) + treatment',
-            'C(Q("unit"))[T.u3]',
-            "time",
-        ),
-        (
-            "unit id",
-            'y ~ 1 + C(Q("unit id")) + treatment',
-            'C(Q("unit id"))[T.u3]',
-            None,
-        ),
-        (
-            "unit",
-            'y ~ 1 + C(Q("unit"), Treatment) + treatment',
-            'C(Q("unit"), Treatment)[T.u3]',
-            None,
-        ),
-    ],
-)
-def test_dummy_fe_absorbs_quoted_unit_factor(unit_column, formula, unit_label, time_fe):
-    """Q() unit factors are unit dummies, so a constant treatment stays at 0.
-
-    A bare-name matcher left these designs unabsorbed. Treatment and the
-    treated unit dummy were both 15.
-    """
-    data = _time_invariant_treatment_panel(unit_column)
-    with pytest.warns(UserWarning, match="within estimate of 0"):
-        result = cp.PanelRegression(
-            data,
-            formula=formula,
-            unit_fe_variable=unit_column,
-            time_fe_variable=time_fe,
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    coefs = _named_coefficients(result)
-    assert coefs["treatment"] == pytest.approx(0.0, abs=1e-8)
-    assert coefs[unit_label] == pytest.approx(30.0, abs=1e-8)
-
-
-def test_dummy_fe_keeps_within_varying_treatment_beside_time_invariant_covariate():
-    """Only the collinear covariate is zeroed; a switching treatment stays identified."""
-    rows = []
-    for unit in range(3):
-        for time in range(4):
-            treatment = float(time >= 2)
-            rows.append(
-                {
                     "unit": f"u{unit}",
                     "time": time,
-                    "treatment": treatment,
-                    "z": float(unit),
-                    "y": 4.0 * unit + 5.0 * treatment,
+                    "treatment": float((unit + time) % 2 == 0),
+                    "region": float(unit == 3),
+                    "y": 10.0 * unit + 1.0 * time + 4.0 * ((unit + time) % 2 == 0),
                 }
             )
     data = pd.DataFrame(rows)
-    with pytest.warns(UserWarning, match="within estimate of 0: z"):
+    with pytest.warns(UserWarning, match="within estimate"):
         result = cp.PanelRegression(
             data,
-            formula="y ~ 1 + C(unit) + treatment + z",
+            formula="y ~ 1 + C(unit) + C(time) + treatment + region",
             unit_fe_variable="unit",
+            time_fe_variable="time",
             fe_method="dummies",
             model=LinearRegression(),
         ).fit()
     coefs = _named_coefficients(result)
-    assert coefs["treatment"] == pytest.approx(5.0, abs=1e-8)
-    assert coefs["z"] == pytest.approx(0.0, abs=1e-8)
+    assert coefs["treatment"] == pytest.approx(4.0)
+    assert coefs["region"] == pytest.approx(0.0)
 
 
 def test_dummies_without_unit_fe_keeps_between_unit_treatment():
-    """Do not zero a time-invariant treatment when the formula has no unit dummies."""
-    rows = []
-    for unit in range(4):
-        for time in range(5):
-            treatment = float(unit == 3)
-            rows.append(
-                {
-                    "unit": f"u{unit}",
-                    "time": time,
-                    "treatment": treatment,
-                    "y": 10.0 * treatment + time,
-                }
-            )
-    data = pd.DataFrame(rows)
-    result = cp.PanelRegression(
-        data,
-        formula="y ~ 1 + treatment",
-        unit_fe_variable="unit",
-        fe_method="dummies",
-        model=LinearRegression(),
-    ).fit()
-    assert _named_coefficients(result)["treatment"] == pytest.approx(10.0, abs=1e-8)
-
-
-def test_dummy_fe_time_invariant_treatment_posterior_is_within_estimate(
-    real_pymc_sampling,
-):
-    """PyMC dummy FE must report 0, not a Normal(0, 50) draw, for a time-invariant treatment.
-
-    The session sample mock stores prior draws as the posterior. The unit dummy
-    absorbs the level only in a real posterior, so this test opts out of that mock.
-    """
+    """Without unit fixed effects, a between-unit treatment is not collinear."""
     rows = []
     for unit in range(4):
         for time in range(5):
@@ -1196,1132 +1486,25 @@ def test_dummy_fe_time_invariant_treatment_posterior_is_within_estimate(
                     "unit": f"u{unit}",
                     "time": time,
                     "treatment": float(unit == 3),
-                    "y": 10.0 * unit + 1.0 * time,
+                    "y": 7.0 * (unit == 3),
                 }
             )
     data = pd.DataFrame(rows)
-    with pytest.warns(UserWarning, match="within estimate of 0"):
-        result = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + treatment",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=cp.pymc_models.LinearRegression(
-                sample_kwargs={
-                    "draws": 50,
-                    "tune": 50,
-                    "chains": 1,
-                    "progressbar": False,
-                    "random_seed": 1,
-                }
-            ),
-        ).fit()
-
-    treatment = result.idata.posterior["beta"].sel(coeffs="treatment")
-    np.testing.assert_allclose(treatment.values, 0.0, atol=1e-8)
-    prior_treatment = result.idata.prior["beta"].sel(coeffs="treatment")
-    np.testing.assert_allclose(prior_treatment.values, 0.0, atol=1e-8)
-    unit_effect = result.idata.posterior["beta"].sel(coeffs="C(unit)[T.u3]")
-    assert float(unit_effect.mean()) == pytest.approx(30.0, abs=1.0)
-    assert "beta_within" in result.model.named_vars
-
-
-@pytest.mark.parametrize(
-    ("beta_prior", "kept_prior"),
-    [
-        (
-            Prior(
-                "StudentT",
-                nu=4,
-                mu=0,
-                sigma=50,
-                dims=["treated_units", "coeffs"],
-            ),
-            "StudentT",
-        ),
-        (
-            Prior(
-                "Normal",
-                mu=Prior("Normal", mu=0, sigma=10),
-                sigma=Prior("HalfNormal", sigma=5),
-                dims=["treated_units", "coeffs"],
-            ),
-            "beta_within_mu",
-        ),
-    ],
-)
-def test_dummy_fe_any_beta_prior_treatment_is_within_estimate(
-    real_pymc_sampling,
-    beta_prior,
-    kept_prior,
-):
-    """Absorbed columns are a deterministic 0 for every beta prior.
-
-    A scalar-Normal pin warned that StudentT treatment was 0 while sampling a
-    free draw, and raised NotImplementedError for a hierarchical Normal.
-    Identified columns keep the supplied prior.
-    """
-    data = _time_invariant_treatment_panel()
-    with pytest.warns(UserWarning, match="within estimate of 0"):
-        result = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + treatment",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=cp.pymc_models.LinearRegression(
-                priors={"beta": beta_prior},
-                sample_kwargs={
-                    "draws": 50,
-                    "tune": 50,
-                    "chains": 1,
-                    "progressbar": False,
-                    "random_seed": 1,
-                },
-            ),
-        ).fit()
-
-    treatment = result.idata.posterior["beta"].sel(coeffs="treatment")
-    np.testing.assert_allclose(treatment.values, 0.0, atol=1e-8)
-    prior_treatment = result.idata.prior["beta"].sel(coeffs="treatment")
-    np.testing.assert_allclose(prior_treatment.values, 0.0, atol=1e-8)
-    unit_effect = result.idata.posterior["beta"].sel(coeffs="C(unit)[T.u3]")
-    assert float(unit_effect.mean()) == pytest.approx(30.0, abs=1.0)
-    intercept = result.idata.posterior["beta"].sel(coeffs="Intercept")
-    assert not np.allclose(intercept.values, 0.0)
-    if kept_prior == "StudentT":
-        within = result.model.named_vars["beta_within"]
-        assert within.owner is not None
-        assert "StudentT" in type(within.owner.op).__name__
-    else:
-        assert kept_prior in result.model.named_vars
-
-
-def _issue_panel_with_missing_outcome() -> pd.DataFrame:
-    """Issue panel with one missing outcome that is not the last row."""
-    rows = []
-    for unit in range(4):
-        for time in range(5):
-            rows.append(
-                {
-                    "unit": f"u{unit}",
-                    "time": time,
-                    "treatment": float(unit == 3),
-                    "x": 0.25 * time,
-                    "y": 10.0 * unit + 1.0 * time,
-                }
-            )
-    data = pd.DataFrame(rows)
-    data.loc[7, "y"] = np.nan
-    return data
-
-
-def test_dummy_fe_missing_outcome_row_matches_within_estimator():
-    """A dropped non-final row must not skip absorption of a time-invariant treatment."""
-    data = _issue_panel_with_missing_outcome()
-    with pytest.warns(UserWarning, match="within estimate of 0"):
-        result = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + C(time) + treatment",
-            unit_fe_variable="unit",
-            time_fe_variable="time",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    coefs = _named_coefficients(result)
-    assert coefs["treatment"] == pytest.approx(0.0, abs=1e-8)
-    assert coefs["C(unit)[T.u3]"] == pytest.approx(30.0, abs=1e-8)
-
-    covariate_missing = data.copy()
-    covariate_missing.loc[7, "y"] = 10.0 * 1 + 2
-    covariate_missing.loc[3, "x"] = np.nan
-    with pytest.warns(UserWarning, match="within estimate of 0"):
-        covariate_result = cp.PanelRegression(
-            covariate_missing,
-            formula="y ~ 1 + C(unit) + treatment + x",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    covariate_coefs = _named_coefficients(covariate_result)
-    assert covariate_coefs["treatment"] == pytest.approx(0.0, abs=1e-8)
-    assert covariate_coefs["x"] == pytest.approx(4.0, abs=1e-8)
-
-
-def test_dummy_fe_missing_row_keeps_within_varying_treatment():
-    """A retained within-varying covariate stays identified after a row is dropped."""
-    rows = []
-    for unit in range(3):
-        for time in range(4):
-            treatment = float(time >= 2)
-            rows.append(
-                {
-                    "unit": f"u{unit}",
-                    "time": time,
-                    "treatment": treatment,
-                    "z": float(unit),
-                    "y": 4.0 * unit + 5.0 * treatment,
-                }
-            )
-    data = pd.DataFrame(rows)
-    data.loc[1, "y"] = np.nan
-    with pytest.warns(UserWarning, match="within estimate of 0: z"):
-        result = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + treatment + z",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    coefs = _named_coefficients(result)
-    assert coefs["treatment"] == pytest.approx(5.0, abs=1e-8)
-    assert coefs["z"] == pytest.approx(0.0, abs=1e-8)
-
-
-def test_dummy_fe_missing_outcome_row_pymc_treatment_is_within_estimate(
-    real_pymc_sampling,
-):
-    """PyMC dummy FE reports 0 after Patsy drops a non-final missing outcome."""
-    data = _issue_panel_with_missing_outcome()
-    with pytest.warns(UserWarning, match="within estimate of 0"):
-        result = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + treatment",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=cp.pymc_models.LinearRegression(
-                sample_kwargs={
-                    "draws": 50,
-                    "tune": 50,
-                    "chains": 1,
-                    "progressbar": False,
-                    "random_seed": 1,
-                }
-            ),
-        ).fit()
-    treatment = result.idata.posterior["beta"].sel(coeffs="treatment")
-    np.testing.assert_allclose(treatment.values, 0.0, atol=1e-8)
-    prior_treatment = result.idata.prior["beta"].sel(coeffs="treatment")
-    np.testing.assert_allclose(prior_treatment.values, 0.0, atol=1e-8)
-    unit_effect = result.idata.posterior["beta"].sel(coeffs="C(unit)[T.u3]")
-    assert float(unit_effect.mean()) == pytest.approx(30.0, abs=1.0)
-
-
-def _duplicate_index_panel(missing_outcome_at: int | None = None) -> pd.DataFrame:
-    """4 by 5 panel whose index repeats, so label lookup is not row identity."""
-    rows = []
-    for unit in range(4):
-        for time in range(5):
-            rows.append(
-                {
-                    "unit": f"u{unit}",
-                    "time": time,
-                    "treatment": float(unit == 3),
-                    "x": 0.25 * time,
-                    "y": 10.0 * unit + 1.0 * time,
-                }
-            )
-    data = pd.DataFrame(rows)
-    data.index = np.tile(np.arange(5), 4)
-    if missing_outcome_at is not None:
-        data.iloc[missing_outcome_at, data.columns.get_loc("y")] = np.nan
-    return data
-
-
-def test_dummy_fe_duplicate_index_time_invariant_treatment_matches_within_estimator():
-    """A non-unique index must not block the within estimate of a constant treatment."""
-    data = _duplicate_index_panel()
-    with pytest.warns(UserWarning, match="within estimate of 0"):
-        result = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + treatment",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    coefs = _named_coefficients(result)
-    assert coefs["treatment"] == pytest.approx(0.0, abs=1e-8)
-    assert coefs["C(unit)[T.u3]"] == pytest.approx(30.0, abs=1e-8)
-
-    missing = _duplicate_index_panel(missing_outcome_at=7)
-    with pytest.warns(UserWarning, match="within estimate of 0"):
-        missing_result = cp.PanelRegression(
-            missing,
-            formula="y ~ 1 + C(unit) + treatment",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    missing_coefs = _named_coefficients(missing_result)
-    assert missing_coefs["treatment"] == pytest.approx(0.0, abs=1e-8)
-    assert missing_coefs["C(unit)[T.u3]"] == pytest.approx(30.0, abs=1e-8)
-
-
-def test_dummy_fe_duplicate_index_keeps_within_varying_treatment():
-    """A non-unique index must not absorb a treatment that varies on retained rows."""
-    data = _duplicate_index_panel()
-    data["treatment"] = (data["time"] >= 2).astype(float)
-    data["y"] = (
-        4.0 * data["unit"].str[-1].astype(float)
-        + 5.0 * data["treatment"]
-        + 4.0 * data["x"]
-    )
-    data.iloc[1, data.columns.get_loc("y")] = np.nan
-    result = cp.PanelRegression(
-        data,
-        formula="y ~ 1 + C(unit) + treatment + x",
-        unit_fe_variable="unit",
-        fe_method="dummies",
-        model=LinearRegression(),
-    ).fit()
-    coefs = _named_coefficients(result)
-    assert coefs["treatment"] == pytest.approx(5.0, abs=1e-8)
-    assert coefs["x"] == pytest.approx(4.0, abs=1e-8)
-
-
-def test_dummy_fe_duplicate_index_pymc_treatment_is_within_estimate(
-    real_pymc_sampling,
-):
-    """PyMC dummy FE reports 0 for a time-invariant treatment on a repeated index."""
-    data = _duplicate_index_panel()
-    with pytest.warns(UserWarning, match="within estimate of 0"):
-        result = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + treatment",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=cp.pymc_models.LinearRegression(
-                sample_kwargs={
-                    "draws": 50,
-                    "tune": 50,
-                    "chains": 1,
-                    "progressbar": False,
-                    "random_seed": 1,
-                }
-            ),
-        ).fit()
-    treatment = result.idata.posterior["beta"].sel(coeffs="treatment")
-    np.testing.assert_allclose(treatment.values, 0.0, atol=1e-8)
-    prior_treatment = result.idata.prior["beta"].sel(coeffs="treatment")
-    np.testing.assert_allclose(prior_treatment.values, 0.0, atol=1e-8)
-    unit_effect = result.idata.posterior["beta"].sel(coeffs="C(unit)[T.u3]")
-    assert float(unit_effect.mean()) == pytest.approx(30.0, abs=1.0)
-
-
-def _large_magnitude_within_change_panel() -> pd.DataFrame:
-    """One row differs by 0.5 at magnitude 1e8; the within coefficient is 20."""
-    rows = []
-    for unit in range(4):
-        for time in range(5):
-            x = 1e8
-            y = 0.0
-            if unit == 3 and time == 4:
-                x = 1e8 + 0.5
-                y = 10.0
-            rows.append({"unit": f"u{unit}", "time": time, "x": x, "y": y})
-    return pd.DataFrame(rows)
-
-
-def test_within_unit_variation_ignores_only_float_noise():
-    """A few ulps are float noise. A 0.5 change at magnitude 1e8 is not."""
-    units = np.array(["u0", "u0", "u0"])
-    level = np.float64(1e8)
-    spacing = np.spacing(level)
-    varies = cp.PanelRegression._column_varies_within_unit
-    assert not varies(np.array([level, level, level]), units)
-    assert not varies(np.array([level, level, level + 2 * spacing]), units)
-    assert varies(np.array([level, level, level + 1000 * spacing]), units)
-    assert varies(np.array([level, level, level + 0.5]), units)
-
-
-def test_dummy_fe_large_magnitude_within_change_matches_within_estimator():
-    """Dummy FE must report the within coefficient when the raw column is a unit level.
-
-    A relative 1e-8 cutoff absorbs a 0.5 change at magnitude 1e8 and warns that
-    the within estimate is 0. Leaving the raw column in the design is not enough:
-    float64 least squares then drops the within direction and reports about 0.
-    """
-    data = _large_magnitude_within_change_panel()
     with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
-        dummies = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + x",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    demeaned = cp.PanelRegression(
-        data,
-        formula="y ~ 1 + x",
-        unit_fe_variable="unit",
-        fe_method="demeaned",
-        model=LinearRegression(),
-    ).fit()
-    assert _named_coefficients(dummies)["x"] == pytest.approx(20.0, abs=1e-6)
-    assert _named_coefficients(demeaned)["x"] == pytest.approx(20.0, abs=1e-6)
-    assert dummies._absorbed_covariate_labels == ()
-    stored = dummies.design["X"].sel(coeffs="x").to_numpy()
-    assert np.ptp(stored) < 1.0
-
-
-def test_dummy_fe_does_not_recenter_a_well_scaled_within_column():
-    """A well-scaled within change stays on the raw column."""
-    rows = []
-    for unit in range(4):
-        for time in range(5):
-            treatment = float(time >= 2)
-            rows.append(
-                {
-                    "unit": f"u{unit}",
-                    "time": time,
-                    "treatment": treatment,
-                    "y": 3.0 * treatment + unit,
-                }
-            )
-    result = cp.PanelRegression(
-        pd.DataFrame(rows),
-        formula="y ~ 1 + C(unit) + treatment",
-        unit_fe_variable="unit",
-        fe_method="dummies",
-        model=LinearRegression(),
-    ).fit()
-    stored = result.design["X"].sel(coeffs="treatment").to_numpy()
-    assert set(np.unique(np.round(stored, 10))) == {0.0, 1.0}
-    assert _named_coefficients(result)["treatment"] == pytest.approx(3.0, abs=1e-8)
-
-
-def test_dummy_fe_large_magnitude_within_change_keeps_supplied_prior(
-    real_pymc_sampling,
-):
-    """A within-varying column keeps its prior; the posterior is the within estimate."""
-    data = _large_magnitude_within_change_panel()
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
+        warnings.filterwarnings(
+            "ignore",
+            message="fit_intercept=True",
+            category=UserWarning,
+        )
+        warnings.filterwarnings(
+            "error", message="within estimate", category=UserWarning
+        )
         result = cp.PanelRegression(
             data,
-            formula="y ~ 1 + C(unit) + x",
+            formula="y ~ 1 + treatment",
             unit_fe_variable="unit",
-            fe_method="dummies",
-            model=cp.pymc_models.LinearRegression(
-                sample_kwargs={
-                    "draws": 50,
-                    "tune": 50,
-                    "chains": 1,
-                    "progressbar": False,
-                    "random_seed": 1,
-                }
-            ),
-        ).fit()
-    priors = result.model._user_priors or {}
-    assert type(priors.get("beta")).__name__ != "WithinBetaPrior"
-    assert "beta_within" not in result.model.named_vars
-    prior = result.idata.prior["beta"].sel(coeffs="x")
-    assert not np.allclose(prior.values, 0.0)
-    posterior = result.idata.posterior["beta"].sel(coeffs="x")
-    assert float(posterior.mean()) == pytest.approx(20.0, abs=5.0)
-    assert not np.allclose(posterior.values, 0.0)
-
-
-def _spike_within_change_panel(
-    level: float,
-    delta: float,
-    *,
-    n_units: int = 4,
-    n_times: int = 5,
-) -> pd.DataFrame:
-    """One row differs by ``delta`` at ``level``; y jumps by 10 on that row."""
-    level = np.float64(level)
-    delta = np.float64(delta)
-    rows = []
-    for unit in range(n_units):
-        for time in range(n_times):
-            x = level
-            y = 0.0
-            if unit == n_units - 1 and time == n_times - 1:
-                x = level + delta
-                y = 10.0
-            rows.append({"unit": f"u{unit}", "time": time, "x": float(x), "y": y})
-    return pd.DataFrame(rows)
-
-
-def test_dummy_fe_four_ulps_at_moderate_magnitude_stays_absorbed():
-    """Exactly four ulps at magnitude 1e8 is float noise, not a within effect.
-
-    The within deviation is invisible next to an intercept, so dummy FE must
-    still report 0 and warn. Treating every four-ulp change as variation would
-    leave this column raw.
-    """
-    level = np.float64(1e8)
-    data = _spike_within_change_panel(level, 4 * np.spacing(level))
-    with pytest.warns(UserWarning, match="within estimate of 0"):
-        result = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + x",
-            unit_fe_variable="unit",
+            time_fe_variable=None,
             fe_method="dummies",
             model=LinearRegression(),
         ).fit()
-    assert result._absorbed_covariate_labels == ("x",)
-    assert _named_coefficients(result)["x"] == pytest.approx(0.0, abs=1e-8)
-
-
-@pytest.mark.parametrize("level", [6e13, 1e14, 1e15])
-def test_dummy_fe_large_column_rank_drop_matches_within_estimator(level):
-    """A large column that hides the within change must match the within estimator.
-
-    Past about 6e13, stacking the raw column drops the design rank below the
-    unit dummies, so an equality check misses it and dummy FE reports 0. At
-    1e15 a 0.5 change is exactly four ulps, so the ulp check absorbs it and
-    warns that the within estimate is 0. The within estimator is 20.
-    """
-    data = _spike_within_change_panel(level, 0.5)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
-        dummies = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + x",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    demeaned = cp.PanelRegression(
-        data,
-        formula="y ~ 1 + x",
-        unit_fe_variable="unit",
-        fe_method="demeaned",
-        model=LinearRegression(),
-    ).fit()
-    assert _named_coefficients(dummies)["x"] == pytest.approx(20.0, abs=1e-6)
-    assert _named_coefficients(demeaned)["x"] == pytest.approx(20.0, abs=1e-6)
-    assert dummies._absorbed_covariate_labels == ()
-    stored = dummies.design["X"].sel(coeffs="x").to_numpy()
-    assert np.ptp(stored) < 1.0
-
-
-@pytest.mark.parametrize(
-    ("n_units", "n_times", "level"),
-    [
-        (4, 5, 1e3),
-        (4, 5, 1e6),
-        (4, 5, 4e6),
-        (2, 2, 1e7),
-    ],
-)
-def test_dummy_fe_solver_cutoff_gap_matches_within_estimator(n_units, n_times, level):
-    """A within change below the solver cutoff must match the within estimator.
-
-    ``matrix_rank`` keeps a direction down to about 1e-15 times the largest
-    singular value. ``LinearRegression`` drops singular values below ``tol``
-    (default 1e-6) times that value. Columns in the gap stay raw and the
-    coefficient is about 0. The within estimator is 20. Listing the cited
-    magnitudes is not the cutoff: 1e3 fails the same way as 1e6 and 4e6.
-    """
-    data = _spike_within_change_panel(level, 0.5, n_units=n_units, n_times=n_times)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
-        dummies = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + x",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    demeaned = cp.PanelRegression(
-        data,
-        formula="y ~ 1 + x",
-        unit_fe_variable="unit",
-        fe_method="demeaned",
-        model=LinearRegression(),
-    ).fit()
-    assert _named_coefficients(dummies)["x"] == pytest.approx(20.0, abs=1e-6)
-    assert _named_coefficients(demeaned)["x"] == pytest.approx(20.0, abs=1e-6)
-    assert dummies._absorbed_covariate_labels == ()
-    stored = dummies.design["X"].sel(coeffs="x").to_numpy()
-    assert np.ptp(stored) < 1.0
-
-
-def test_dummy_fe_keeps_a_well_conditioned_spike_column():
-    """A 0.5 change at magnitude 100 is visible to the solver and stays raw.
-
-    The coefficient is already the within estimate. Storing the within
-    deviation would change the design column the caller can inspect.
-    """
-    data = _spike_within_change_panel(100.0, 0.5)
-    result = cp.PanelRegression(
-        data,
-        formula="y ~ 1 + C(unit) + x",
-        unit_fe_variable="unit",
-        fe_method="dummies",
-        model=LinearRegression(),
-    ).fit()
-    assert _named_coefficients(result)["x"] == pytest.approx(20.0, abs=1e-6)
-    stored = result.design["X"].sel(coeffs="x").to_numpy()
-    assert float(stored.mean()) == pytest.approx(100.025, abs=1e-9)
-    assert float(np.ptp(stored)) == pytest.approx(0.5)
-
-
-def test_dummy_fe_solver_cutoff_follows_model_tol():
-    """A looser solver cutoff stores a column the default solver can see."""
-    data = _spike_within_change_panel(100.0, 0.5)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
-        result = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + x",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=LinearRegression(tol=1e-4),
-        ).fit()
-    assert _named_coefficients(result)["x"] == pytest.approx(20.0, abs=1e-6)
-    assert result._absorbed_covariate_labels == ()
-    stored = result.design["X"].sel(coeffs="x").to_numpy()
-    assert np.ptp(stored) < 1.0
-    assert abs(float(stored.mean())) < 1.0
-
-
-def _two_spike_panel(
-    level_a: float, level_b: float, delta: float = 0.5
-) -> pd.DataFrame:
-    """Two within-unit spikes on different units; each outcome jump is 10."""
-    rows = []
-    for unit in range(4):
-        for time in range(5):
-            a = level_a
-            b = level_b
-            y = 0.0
-            if unit == 3 and time == 4:
-                a = level_a + delta
-                y = 10.0
-            if unit == 2 and time == 3:
-                b = level_b + delta
-                y += 10.0
-            rows.append(
-                {"unit": f"u{unit}", "time": time, "a": float(a), "b": float(b), "y": y}
-            )
-    return pd.DataFrame(rows)
-
-
-@pytest.mark.parametrize("level", [250.0, 1000.0, 10000.0])
-def test_dummy_fe_joint_solver_cutoff_matches_within_estimator(level):
-    """Two spikes the solver drops together must match the within estimator.
-
-    At level 250 each column increases rank against the unit dummies, so a
-    pairwise check leaves both raw and both coefficients are about 0. The
-    within estimator is 20. Larger equal pairs are included so a rewrite that
-    changes the cutoff still matches that estimator. Rewriting one column can
-    make the other estimable, so this test does not require both stored
-    columns to be centered.
-    """
-    data = _two_spike_panel(level, level)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
-        dummies = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + a + b",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    demeaned = cp.PanelRegression(
-        data,
-        formula="y ~ 1 + a + b",
-        unit_fe_variable="unit",
-        fe_method="demeaned",
-        model=LinearRegression(),
-    ).fit()
-    assert dummies._absorbed_covariate_labels == ()
-    for label in ("a", "b"):
-        assert _named_coefficients(dummies)[label] == pytest.approx(20.0, abs=1e-6)
-        assert _named_coefficients(demeaned)[label] == pytest.approx(20.0, abs=1e-6)
-
-
-def test_dummy_fe_keeps_jointly_estimable_spike_columns():
-    """A level-220 pair stays raw because the solver already reports 20.
-
-    Rewriting either column would change a design the caller can inspect.
-    """
-    data = _two_spike_panel(220.0, 220.0)
-    result = cp.PanelRegression(
-        data,
-        formula="y ~ 1 + C(unit) + a + b",
-        unit_fe_variable="unit",
-        fe_method="dummies",
-        model=LinearRegression(),
-    ).fit()
-    assert result._absorbed_covariate_labels == ()
-    for label in ("a", "b"):
-        assert _named_coefficients(result)[label] == pytest.approx(20.0, abs=1e-6)
-        stored = result.design["X"].sel(coeffs=label).to_numpy()
-        assert float(stored.mean()) == pytest.approx(220.025, abs=1e-9)
-        assert float(np.ptp(stored)) == pytest.approx(0.5)
-
-
-@pytest.mark.parametrize(
-    ("level_a", "level_b", "raw_label", "raw_level"),
-    [
-        (10000.0, 250.0, "b", 250.0),
-        (250.0, 10000.0, "a", 250.0),
-        (100.0, 10000.0, "a", 100.0),
-    ],
-)
-def test_dummy_fe_joint_cutoff_keeps_the_estimable_column(
-    level_a, level_b, raw_label, raw_level
-):
-    """Rewriting a hidden spike must not rewrite a column the solver can see.
-
-    A one-pass rewrite of every column that is weak against the unit dummies
-    changes the smaller column. That column stays at its raw level, and both
-    coefficients match the within estimator of 20.
-    """
-    data = _two_spike_panel(level_a, level_b)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
-        result = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + a + b",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    assert result._absorbed_covariate_labels == ()
-    for label in ("a", "b"):
-        assert _named_coefficients(result)[label] == pytest.approx(20.0, abs=1e-6)
-    stored = result.design["X"].sel(coeffs=raw_label).to_numpy()
-    assert float(stored.mean()) == pytest.approx(raw_level + 0.025, abs=1e-9)
-    assert float(np.ptp(stored)) == pytest.approx(0.5)
-
-
-def test_dummy_fe_absorbs_covariate_in_time_dummy_span():
-    """A pure time pattern is collinear with the time dummies, not a within effect.
-
-    The column varies within unit, so a unit-only check leaves it raw and the
-    solver splits the time level into it. The within estimate is 0.
-    """
-    rows = []
-    for unit in range(4):
-        for time in range(5):
-            z = 1.0 if time >= 2 else 0.0
-            rows.append(
-                {
-                    "unit": f"u{unit}",
-                    "time": time,
-                    "z": z,
-                    "y": 4.0 * z + 10.0 * unit,
-                }
-            )
-    data = pd.DataFrame(rows)
-    with pytest.warns(UserWarning, match="within estimate of 0"):
-        result = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + C(time) + z",
-            unit_fe_variable="unit",
-            time_fe_variable="time",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    assert result._absorbed_covariate_labels == ("z",)
-    assert _named_coefficients(result)["z"] == pytest.approx(0.0, abs=1e-8)
-    stored = result.design["X"].sel(coeffs="z").to_numpy()
-    assert np.allclose(stored, 0.0)
-
-
-def _time_pattern_plus_spike_panel(z_fn, n_units=4, n_times=5, spike=0.5):
-    """Time pattern plus one spike; y jumps by 10 on that row."""
-    rows = []
-    for unit in range(n_units):
-        for time in range(n_times):
-            z = float(z_fn(time))
-            y = 0.0
-            if unit == n_units - 1 and time == n_times - 1:
-                z += spike
-                y = 10.0
-            rows.append({"unit": f"u{unit}", "time": time, "z": z, "y": y})
-    return pd.DataFrame(rows)
-
-
-@pytest.mark.parametrize(
-    ("n_units", "n_times", "z_fn"),
-    [
-        pytest.param(4, 5, lambda t: 320.0 if t >= 2 else 0.0, id="step-320"),
-        pytest.param(4, 5, lambda t: 200.0 * t, id="time-200"),
-        pytest.param(6, 8, lambda t: 500.0 if t >= 3 else 0.0, id="step-500-6x8"),
-    ],
-)
-def test_dummy_fe_time_pattern_plus_spike_matches_within_estimator(
-    n_units, n_times, z_fn
-):
-    """A time pattern plus an identified spike is the two-way within estimate.
-
-    Residualizing against the time dummies isolates the spike. Absorbing the
-    raw column reports 0 and warns. Leaving it raw lets least squares split the
-    time level and report about 0. The within estimator is 20.
-    """
-    data = _time_pattern_plus_spike_panel(z_fn, n_units=n_units, n_times=n_times)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
-        dummies = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + C(time) + z",
-            unit_fe_variable="unit",
-            time_fe_variable="time",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    demeaned = cp.PanelRegression(
-        data,
-        formula="y ~ 1 + z",
-        unit_fe_variable="unit",
-        time_fe_variable="time",
-        fe_method="demeaned",
-        model=LinearRegression(),
-    ).fit()
-    assert dummies._absorbed_covariate_labels == ()
-    assert _named_coefficients(dummies)["z"] == pytest.approx(20.0, abs=1e-6)
-    assert _named_coefficients(demeaned)["z"] == pytest.approx(20.0, abs=1e-6)
-
-
-def test_dummy_fe_visible_time_pattern_plus_spike_stays_raw():
-    """A time pattern the solver can already estimate is left raw.
-
-    Residualizing would change a design column the caller can inspect. The
-    coefficient is already the two-way within estimate.
-    """
-    data = _time_pattern_plus_spike_panel(lambda t: 1.0 if t >= 2 else 0.0)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
-        result = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + C(time) + z",
-            unit_fe_variable="unit",
-            time_fe_variable="time",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    assert result._absorbed_covariate_labels == ()
-    assert _named_coefficients(result)["z"] == pytest.approx(20.0, abs=1e-6)
-    stored = result.design["X"].sel(coeffs="z").to_numpy()
-    assert float(stored.mean()) == pytest.approx(0.625, abs=1e-9)
-    assert float(np.ptp(stored)) == pytest.approx(1.5)
-
-
-def _level_plus_spike_panel(level: float, *, embed_level: bool) -> pd.DataFrame:
-    """Level plus one 0.5 spike, with or without that level in the outcome.
-
-    ``embed_level`` uses ``y = 3*x + unit + 0.1*time``, so the raw solver
-    already reports about 3. Otherwise y jumps by 10 on the spike row and the
-    within estimate is 20.
-    """
-    rows = []
-    for unit in range(4):
-        for time in range(5):
-            x = float(level)
-            if unit == 3 and time == 4:
-                x += 0.5
-            if embed_level:
-                y = 3.0 * x + unit + 0.1 * time
-            else:
-                y = 10.0 if unit == 3 and time == 4 else 0.0
-            rows.append({"unit": f"u{unit}", "time": time, "x": x, "y": y})
-    return pd.DataFrame(rows)
-
-
-@pytest.mark.parametrize("level", [300.0, 350.0])
-def test_dummy_fe_level_plus_spike_keeps_a_column_the_solver_estimates(level):
-    """A level the outcome follows must stay raw when time dummies are present.
-
-    Residualizing against the time dummies alone stores a time pattern and
-    reports about 0.6 at level 300. At level 350 that residual is absorbed and
-    the warning says the within estimate is 0. The within estimate is 3, and
-    the raw solver already reports it.
-    """
-    data = _level_plus_spike_panel(level, embed_level=True)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
-        result = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + C(time) + x",
-            unit_fe_variable="unit",
-            time_fe_variable="time",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    demeaned = cp.PanelRegression(
-        data,
-        formula="y ~ 1 + x",
-        unit_fe_variable="unit",
-        time_fe_variable="time",
-        fe_method="demeaned",
-        model=LinearRegression(),
-    ).fit()
-    assert result._absorbed_covariate_labels == ()
-    assert _named_coefficients(result)["x"] == pytest.approx(3.0, abs=1e-3)
-    assert _named_coefficients(demeaned)["x"] == pytest.approx(3.0, abs=1e-6)
-    stored = result.design["X"].sel(coeffs="x").to_numpy()
-    assert float(stored.mean()) == pytest.approx(level + 0.025, abs=1e-6)
-    assert float(np.ptp(stored)) == pytest.approx(0.5)
-
-
-@pytest.mark.parametrize("level", [300.0, 350.0])
-def test_dummy_fe_level_plus_spike_jump_matches_within_estimator(level):
-    """The same level is repaired when the outcome does not follow it.
-
-    The design matches the embedded-level panel, but y jumps only on the spike
-    row. The raw solver reports about 0. The within estimate is 20.
-    """
-    data = _level_plus_spike_panel(level, embed_level=False)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
-        dummies = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + C(time) + x",
-            unit_fe_variable="unit",
-            time_fe_variable="time",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    demeaned = cp.PanelRegression(
-        data,
-        formula="y ~ 1 + x",
-        unit_fe_variable="unit",
-        time_fe_variable="time",
-        fe_method="demeaned",
-        model=LinearRegression(),
-    ).fit()
-    assert dummies._absorbed_covariate_labels == ()
-    assert _named_coefficients(dummies)["x"] == pytest.approx(20.0, abs=1e-6)
-    assert _named_coefficients(demeaned)["x"] == pytest.approx(20.0, abs=1e-6)
-
-
-@pytest.mark.parametrize("level", [250.0, 1000.0])
-def test_dummy_fe_two_spikes_with_time_effects_match_within_estimator(level):
-    """Two level spikes with time dummies must match the within estimator.
-
-    Without time dummies the unit-dummy repair reports 20. With time dummies,
-    residualizing against those columns alone stores a time pattern and both
-    coefficients are about 0. The within estimate is 20. No warning.
-    """
-    data = _two_spike_panel(level, level)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
-        dummies = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + C(time) + a + b",
-            unit_fe_variable="unit",
-            time_fe_variable="time",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    demeaned = cp.PanelRegression(
-        data,
-        formula="y ~ 1 + a + b",
-        unit_fe_variable="unit",
-        time_fe_variable="time",
-        fe_method="demeaned",
-        model=LinearRegression(),
-    ).fit()
-    assert dummies._absorbed_covariate_labels == ()
-    for label in ("a", "b"):
-        assert _named_coefficients(dummies)[label] == pytest.approx(20.0, abs=1e-6)
-        assert _named_coefficients(demeaned)[label] == pytest.approx(20.0, abs=1e-6)
-
-
-_NO_INTERCEPT_TIME_FORMULAS = (
-    "y ~ 0 + C(unit) + C(time) + x",
-    "y ~ C(unit) + C(time) + x - 1",
-)
-
-
-@pytest.mark.parametrize("formula", _NO_INTERCEPT_TIME_FORMULAS)
-@pytest.mark.parametrize("level", [280.0, 290.0, 300.0, 350.0])
-def test_dummy_fe_level_plus_spike_without_intercept_matches_within_estimator(
-    formula, level
-):
-    """A dropped intercept must not leave a level in the time residual.
-
-    ``0 +`` and ``- 1`` keep every unit dummy and omit ``Intercept``. Treatment
-    coded time dummies do not span a constant, so residualizing against those
-    columns alone stores a time pattern (about 1.5 at levels 280 and 290) or
-    absorbs the column and warns. The within estimate is 3. No warning.
-    """
-    data = _level_plus_spike_panel(level, embed_level=True)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
-        result = cp.PanelRegression(
-            data,
-            formula=formula,
-            unit_fe_variable="unit",
-            time_fe_variable="time",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    demeaned = cp.PanelRegression(
-        data,
-        formula="y ~ 1 + x",
-        unit_fe_variable="unit",
-        time_fe_variable="time",
-        fe_method="demeaned",
-        model=LinearRegression(),
-    ).fit()
-    assert "Intercept" not in result.labels
-    assert result._absorbed_covariate_labels == ()
-    assert _named_coefficients(result)["x"] == pytest.approx(
-        _named_coefficients(demeaned)["x"], abs=1e-6
-    )
-    assert _named_coefficients(result)["x"] == pytest.approx(3.0, abs=1e-6)
-
-
-@pytest.mark.parametrize("formula", _NO_INTERCEPT_TIME_FORMULAS)
-@pytest.mark.parametrize("level", [280.0, 300.0, 350.0])
-def test_dummy_fe_level_plus_spike_jump_without_intercept_matches_within_estimator(
-    formula, level
-):
-    """The same no-intercept design is repaired when the outcome does not follow it.
-
-    The parent solver reports about 1e-5. Absorbing the column warns that the
-    within estimate is 0. The within estimate is 20.
-    """
-    data = _level_plus_spike_panel(level, embed_level=False)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
-        result = cp.PanelRegression(
-            data,
-            formula=formula,
-            unit_fe_variable="unit",
-            time_fe_variable="time",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    demeaned = cp.PanelRegression(
-        data,
-        formula="y ~ 1 + x",
-        unit_fe_variable="unit",
-        time_fe_variable="time",
-        fe_method="demeaned",
-        model=LinearRegression(),
-    ).fit()
-    assert result._absorbed_covariate_labels == ()
-    assert _named_coefficients(result)["x"] == pytest.approx(20.0, abs=1e-6)
-    assert _named_coefficients(demeaned)["x"] == pytest.approx(20.0, abs=1e-6)
-
-
-@pytest.mark.parametrize("formula", _NO_INTERCEPT_TIME_FORMULAS)
-def test_dummy_fe_no_intercept_keeps_a_level_the_solver_estimates(formula):
-    """A level the cutoff can already see stays raw when the intercept is dropped.
-
-    Level 100 is above ``LinearRegression``'s cutoff, so the raw solver reports
-    the within estimate of 3. Replacing that column would change a design the
-    caller can inspect.
-    """
-    level = 100.0
-    data = _level_plus_spike_panel(level, embed_level=True)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
-        result = cp.PanelRegression(
-            data,
-            formula=formula,
-            unit_fe_variable="unit",
-            time_fe_variable="time",
-            fe_method="dummies",
-            model=LinearRegression(),
-        ).fit()
-    assert result._absorbed_covariate_labels == ()
-    assert _named_coefficients(result)["x"] == pytest.approx(3.0, abs=1e-6)
-    stored = result.design["X"].sel(coeffs="x").to_numpy()
-    assert float(stored.mean()) == pytest.approx(level + 0.025, abs=1e-6)
-    assert float(np.ptp(stored)) == pytest.approx(0.5)
-
-
-@pytest.mark.parametrize(
-    "estimator",
-    [
-        Ridge(alpha=1.0, tol=1e-4, fit_intercept=False),
-        Lasso(alpha=0.1, tol=1e-4, fit_intercept=False),
-    ],
-)
-def test_dummy_fe_penalized_tol_does_not_rewrite_estimable_column(estimator):
-    """Ridge and Lasso ``tol`` is a convergence tolerance, not an lstsq cutoff.
-
-    Reading it as an lstsq cutoff rewrites a level-100 spike the default solver
-    can already see. The parent fit on that raw column is about 0.0027 for
-    Ridge and about 0.0013 for Lasso, not the rewritten coefficients 3.33 and 10.
-    """
-    data = _spike_within_change_panel(100.0, 0.5)
-    with warnings.catch_warnings():
-        warnings.filterwarnings("error", message="within estimate of 0")
-        result = cp.PanelRegression(
-            data,
-            formula="y ~ 1 + C(unit) + x",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=estimator,
-        ).fit()
-    stored = result.design["X"].sel(coeffs="x").to_numpy()
-    assert float(stored.mean()) == pytest.approx(100.025, abs=1e-9)
-    assert float(np.ptp(stored)) == pytest.approx(0.5)
-    parent = type(estimator)(**estimator.get_params())
-    parent.fit(np.asarray(result.design["X"]), np.asarray(result.design["y"]).ravel())
-    names = list(result.design["X"].coords["coeffs"].values)
-    parent_coef = float(np.asarray(parent.coef_).reshape(-1)[names.index("x")])
-    assert _named_coefficients(result)["x"] == pytest.approx(
-        parent_coef, rel=1e-6, abs=1e-8
-    )
-    assert abs(parent_coef) < 0.01
-
-
-def test_absorbed_beta_prior_does_not_stick_to_caller_model(real_pymc_sampling):
-    """The within-estimate pin must not survive on the caller's model or its clone.
-
-    The graph built for an invariant treatment still reports 0. After that
-    build, ``_user_priors`` is the caller's original value. A clone fitted to a
-    formula that omits the absorbed name must not raise, and a clone fitted to
-    a within-varying treatment must not draw a deterministic 0.
-    """
-    model = cp.pymc_models.LinearRegression(
-        prior_sample_kwargs={"draws": 20, "random_seed": 1}
-    )
-    assert model._user_priors is None
-    with pytest.warns(UserWarning, match="within estimate of 0"):
-        result = cp.PanelRegression(
-            _time_invariant_treatment_panel(),
-            formula="y ~ 1 + C(unit) + treatment",
-            unit_fe_variable="unit",
-            fe_method="dummies",
-            model=model,
-        ).sample_prior_predictive()
-    assert result.model is model
-    assert model._user_priors is None
-    invariant_prior = result.idata.prior["beta"].sel(coeffs="treatment")
-    np.testing.assert_allclose(invariant_prior.values, 0.0, atol=1e-8)
-
-    cloned = model._clone()
-    assert cloned._user_priors is None
-    omitted = cp.PanelRegression(
-        _spike_within_change_panel(1.0, 0.5),
-        formula="y ~ 1 + C(unit) + x",
-        unit_fe_variable="unit",
-        fe_method="dummies",
-        model=cloned,
-    ).sample_prior_predictive()
-    assert "treatment" not in omitted.labels
-
-    rows = []
-    for unit in range(4):
-        for time in range(5):
-            treatment = float(time >= 2)
-            rows.append(
-                {
-                    "unit": f"u{unit}",
-                    "time": time,
-                    "treatment": treatment,
-                    "y": 4.0 * treatment + unit,
-                }
-            )
-    varied = cp.PanelRegression(
-        pd.DataFrame(rows),
-        formula="y ~ 1 + C(unit) + treatment",
-        unit_fe_variable="unit",
-        fe_method="dummies",
-        model=model._clone(),
-    ).sample_prior_predictive()
-    varying_prior = varied.idata.prior["beta"].sel(coeffs="treatment")
-    assert not np.allclose(varying_prior.values, 0.0)
+    assert _named_coefficients(result)["treatment"] == pytest.approx(7.0)
