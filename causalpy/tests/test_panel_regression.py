@@ -15,6 +15,8 @@
 Tests for Panel Regression with Fixed Effects
 """
 
+import warnings
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -276,12 +278,14 @@ def test_panel_regression_validation_errors(small_panel_data):
     [
         ("y ~ C( unit ) + treatment + x1", "unit"),
         ("y ~ C(unit, Treatment) + treatment + x1", "unit"),
+        ('y ~ C(Q("unit")) + treatment + x1', "unit"),
         ("y ~ C( time ) + treatment + x1", "time"),
         ("y ~ C(time, Sum) + treatment + x1", "time"),
+        ('y ~ C(Q("time")) + treatment + x1', "time"),
     ],
 )
 def test_demeaned_rejects_patsy_fe_variants(small_panel_data, formula, variable):
-    """Whitespace and coding options must not bypass the demeaned FE guard."""
+    """Whitespace, coding options, and Q() must not bypass the demeaned FE guard."""
     with pytest.raises(ValueError, match=rf"do not include C\({variable}\)"):
         cp.PanelRegression(
             data=small_panel_data,
@@ -1399,3 +1403,127 @@ def test_kept_row_action_reports_alignment_and_rejects_unreported_drops():
     )
     with pytest.raises(ValueError, match="without reporting which rows were kept"):
         action.rows_for(data, np.array([1.0]))
+
+
+def _named_coefficients(result: cp.PanelRegression) -> dict[str, float]:
+    return {
+        label: float(coef)
+        for label, coef in zip(result.labels, result.model.coef_, strict=True)
+    }
+
+
+def test_dummy_fe_time_invariant_treatment_matches_within_estimator():
+    """Dummy-variable FE must not split a unit level into a time-invariant treatment.
+
+    The within estimator on this design is 0. A minimum-norm solve of the
+    collinear dummy design previously reported 15 and reduced the treated
+    unit effect by the same amount.
+    """
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": float(unit == 3),
+                    "region": float(unit == 3),
+                    "y": 10.0 * unit + 1.0 * time,
+                }
+            )
+    data = pd.DataFrame(rows)
+    with pytest.warns(UserWarning, match="within estimate"):
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + C(time) + treatment + region",
+            unit_fe_variable="unit",
+            time_fe_variable="time",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    coefs = _named_coefficients(result)
+    assert coefs["treatment"] == pytest.approx(0.0)
+    assert coefs["region"] == pytest.approx(0.0)
+    assert coefs["C(unit)[T.u3]"] == pytest.approx(30.0)
+
+
+def test_dummy_fe_keeps_within_varying_treatment_beside_time_invariant():
+    """A within-varying treatment must not be zeroed with a constant covariate."""
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": float((unit + time) % 2 == 0),
+                    "region": float(unit == 3),
+                    "y": 10.0 * unit + 1.0 * time + 4.0 * ((unit + time) % 2 == 0),
+                }
+            )
+    data = pd.DataFrame(rows)
+    with pytest.warns(UserWarning, match="within estimate"):
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + C(unit) + C(time) + treatment + region",
+            unit_fe_variable="unit",
+            time_fe_variable="time",
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    coefs = _named_coefficients(result)
+    assert coefs["treatment"] == pytest.approx(4.0)
+    assert coefs["region"] == pytest.approx(0.0)
+
+
+def test_dummies_without_unit_fe_keeps_between_unit_treatment():
+    """Without unit fixed effects, a between-unit treatment is not collinear."""
+    rows = []
+    for unit in range(4):
+        for time in range(5):
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "time": time,
+                    "treatment": float(unit == 3),
+                    "y": 7.0 * (unit == 3),
+                }
+            )
+    data = pd.DataFrame(rows)
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="fit_intercept=True",
+            category=UserWarning,
+        )
+        warnings.filterwarnings(
+            "error", message="within estimate", category=UserWarning
+        )
+        result = cp.PanelRegression(
+            data,
+            formula="y ~ 1 + treatment",
+            unit_fe_variable="unit",
+            time_fe_variable=None,
+            fe_method="dummies",
+            model=LinearRegression(),
+        ).fit()
+    assert _named_coefficients(result)["treatment"] == pytest.approx(7.0)
+
+
+def test_time_invariant_absorption_guards_skip_unaligned_or_nonfinite_columns():
+    """A length mismatch or a non-finite column is not treated as a constant."""
+    from causalpy.experiments.panel_regression import PanelRegression
+
+    experiment = PanelRegression.__new__(PanelRegression)
+    experiment.unit_fe_variable = "unit"
+    experiment.time_fe_variable = None
+    experiment.labels = ["treatment"]
+    experiment._get_fe_labels = lambda variable: ["C(unit)[T.u1]"]
+    design = np.array([[1.0], [1.0]])
+    retained = pd.DataFrame({"unit": ["u0"]})
+    unchanged = experiment._absorb_exact_time_invariant_covariates(design, retained)
+    np.testing.assert_array_equal(unchanged, design)
+    assert PanelRegression._column_varies_within_unit(np.array([]), np.array([]))
+    assert PanelRegression._column_varies_within_unit(
+        np.array([np.nan, np.nan]), np.array(["u0", "u0"])
+    )

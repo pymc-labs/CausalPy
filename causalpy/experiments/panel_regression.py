@@ -14,6 +14,7 @@
 """Panel Regression with Fixed Effects."""
 
 import re
+import warnings
 from typing import Any, Literal
 
 import matplotlib.pyplot as plt
@@ -116,11 +117,14 @@ class PanelRegression(BaseExperiment[ResultBundle]):
     ``PanelRegression`` fits the formula after representing fixed effects with dummy variables or demeaning, but it does not select a treatment term or compute a single built-in causal effect. Any causal estimand is extracted from the fitted coefficient chosen by the analyst, and its interpretation depends on the formula and identification assumptions.
 
     The demeaned transformation (de-meaning by group) removes time-invariant
-    confounders but also drops time-invariant covariates from the model. For
-    the ``"dummies"`` approach (unpooled FE), individual unit effects can be
-    extracted from the coefficients. For the demeaned approach, unit effects
-    can be recovered post-hoc using the stored group means (``_group_means``),
-    which are always computed from the original (pre-demeaning) data.
+    confounders but also drops time-invariant covariates from the model. A
+    covariate with no within-unit variation is collinear with dummy-variable
+    unit fixed effects. That coefficient is reported as 0, matching the within
+    estimator, and the unit effects absorb the level. For the ``"dummies"``
+    approach (unpooled FE), individual unit effects can be extracted from the
+    coefficients. For the demeaned approach, unit effects can be recovered
+    post-hoc using the stored group means (``_group_means``), which are always
+    computed from the original (pre-demeaning) data.
 
     This class does not yet implement hierarchical/partial-pooling fixed
     effects. Those semantics are intentionally kept out of scope here so
@@ -252,7 +256,6 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         # they don't demean the data before fitting.
         self._original_data = pandas_data.copy()
 
-        # Initialize storage for group means (used in demeaned transformation)
         self._group_means: dict[str, pd.DataFrame] = {}
 
         # Pipeline (matches pattern of other experiment classes)
@@ -308,10 +311,17 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
     @staticmethod
     def _is_fe_factor(factor_name: str, variable: str) -> bool:
-        """Whether a Patsy factor categorically encodes the given variable."""
+        """Whether a Patsy factor categorically encodes the given variable.
+
+        ``C(variable)`` and ``C(Q("variable"))`` (either quote) are the same
+        factor. A spaced column name has no other Patsy form. Whitespace and a
+        coding option such as ``Treatment`` do not make it a different factor.
+        """
+        escaped = re.escape(variable)
+        quoted = r"Q\(\s*(['\"])" + escaped + r"\1\s*\)"
         return (
             re.match(
-                rf"^C\(\s*{re.escape(variable)}\s*(?:,|\))",
+                rf"^C\(\s*(?:{escaped}|{quoted})\s*(?:,|\))",
                 factor_name,
             )
             is not None
@@ -374,7 +384,60 @@ class PanelRegression(BaseExperiment[ResultBundle]):
                 group_vars,
                 skip_columns=self._intercept_column_mask(X.design_info),
             )
+        if self.fe_method == "dummies":
+            x_values = self._absorb_exact_time_invariant_covariates(
+                x_values, data.iloc[kept_rows.rows_for(data, y_values)]
+            )
         self._y_raw, self._X_raw = y_values, x_values
+
+    def _absorb_exact_time_invariant_covariates(
+        self, design: np.ndarray, retained: pd.DataFrame
+    ) -> np.ndarray:
+        """Zero exact within-unit constants on the dummy-variable path.
+
+        A column that does not change inside a unit is collinear with the unit
+        dummies. Least squares otherwise splits that unit level into the
+        covariate and reports a nonzero treatment where the within estimator is
+        0. Zeroing the column reports that estimate and warns. A column that
+        changes inside any unit is left unchanged.
+        """
+        units = np.asarray(retained[self.unit_fe_variable])
+        if len(units) != len(design):
+            return design
+        protected = set(self._get_fe_labels(self.unit_fe_variable))
+        if not protected:
+            return design
+        if self.time_fe_variable:
+            protected.update(self._get_fe_labels(self.time_fe_variable))
+        absorbed: list[str] = []
+        design = np.array(design, dtype=float, copy=True)
+        for index, label in enumerate(self.labels):
+            if label in protected or label == "Intercept":
+                continue
+            if self._column_varies_within_unit(design[:, index], units):
+                continue
+            design[:, index] = 0.0
+            absorbed.append(label)
+        if absorbed:
+            warnings.warn(
+                "Covariate(s) "
+                f"{absorbed} have no within-unit variation and are collinear "
+                "with the unit fixed effects. The coefficient is reported as 0, "
+                "matching the within estimate, and the unit effects absorb the level.",
+                UserWarning,
+                stacklevel=4,
+            )
+        return design
+
+    @staticmethod
+    def _column_varies_within_unit(column: np.ndarray, units: np.ndarray) -> bool:
+        """Whether ``column`` changes inside any unit."""
+        values = np.asarray(column, dtype=float)
+        if len(values) == 0 or not np.isfinite(values).all():
+            return True
+        grouped = pd.Series(values).groupby(np.asarray(units), observed=True)
+        within_range = grouped.transform("max") - grouped.transform("min")
+        return bool(np.any(within_range.to_numpy(dtype=float) != 0.0))
 
     def _prepare_data(self) -> None:
         """Bundle design matrices into an ``xr.Dataset``."""
