@@ -1322,6 +1322,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         )
 
         # Handle period parameter for three-period designs
+        post_coords = None
         if period is not None:
             # Validate period parameter
             valid_periods = ["intervention", "post", "comparison"]
@@ -1352,7 +1353,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                     group=group,
                 )
 
-            # For "intervention" or "post" periods, use _extract_window with tuple windows
+            # Intervention uses a label tuple. Post uses the period-split mask.
             if period == "intervention":
                 # Intervention period: treatment_time <= index < treatment_end_time
                 intervention_indices = self.datapost.index[
@@ -1362,20 +1363,29 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 window = (self.treatment_time, intervention_indices.max())
                 prefix = "During intervention"
             elif period == "post":
-                # Post-intervention period: index >= treatment_end_time (inclusive)
-                window = (self.treatment_end_time, self.datapost.index.max())
+                # Same inclusive bound as the period split. Do not pass
+                # treatment_end_time into _extract_window.
+                post_coords = self.datapost.index[
+                    self.datapost.index >= self.treatment_end_time
+                ]
                 prefix = "Post-intervention"
 
         # Resolve the group's bundle once; helpers consume containers.
         bundle = self._require_bundle(group)
 
         # Extract windowed impact data
-        windowed_impact, window_coords = _extract_window(
-            bundle.impact_post,
-            self.datapost.index,
-            window,
-            treated_unit=treated_unit,
-        )
+        if post_coords is not None:
+            if len(post_coords) == 0:
+                raise ValueError("Window contains no time points")
+            windowed_impact = bundle.impact_post.sel(obs_ind=post_coords)
+            window_coords = post_coords
+        else:
+            windowed_impact, window_coords = _extract_window(
+                bundle.impact_post,
+                self.datapost.index,
+                window,
+                treated_unit=treated_unit,
+            )
 
         # Extract counterfactual for relative effects
         counterfactual = _extract_counterfactual(

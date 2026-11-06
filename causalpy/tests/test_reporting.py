@@ -2407,6 +2407,56 @@ def test_extract_window_slice_with_step(datetime_index, window, positions):
     xr.testing.assert_equal(selected, impact.isel(obs_ind=positions))
 
 
+def test_extract_window_does_not_truncate_float_bounds():
+    """Numeric windows keep float bounds; they are not truncated with int().
+
+    Covers a float end that is not a whole number and a bound that is not an
+    index label, for both inclusive tuples and exclusive slices.
+    """
+    import xarray as xr
+
+    from causalpy.reporting import _extract_window
+
+    index = pd.Index([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    impact = xr.DataArray(
+        np.arange(len(index)), dims=["obs_ind"], coords={"obs_ind": index}
+    )
+    # 4.5 and 8.2 are not labels. int(4.5) == 4 and int(8.2) == 8 would keep 4
+    # and drop 8 from the exclusive slice.
+    _, tuple_coords = _extract_window(impact, index, (4.5, 8.2))
+    pd.testing.assert_index_equal(tuple_coords, pd.Index([5, 6, 7, 8]))
+    _, slice_coords = _extract_window(impact, index, slice(4.5, 8.2))
+    pd.testing.assert_index_equal(slice_coords, pd.Index([5, 6, 7, 8]))
+
+    float_index = pd.Index([0.0, 1.2, 2.4, 3.6, 4.8])
+    float_impact = xr.DataArray(
+        np.arange(len(float_index)),
+        dims=["obs_ind"],
+        coords={"obs_ind": float_index},
+    )
+    # int(1.9) == 1 would include 1.2; int(3.1) == 3 would still exclude 3.6.
+    _, float_coords = _extract_window(float_impact, float_index, (1.9, 3.1))
+    pd.testing.assert_index_equal(float_coords, pd.Index([2.4]))
+
+    # Integer inclusive end 6 excludes 5 and includes 6. A negative start of
+    # -0.5 keeps -0.25; int(-0.5) == 0 would drop it. Open numeric slices hit
+    # the None-bound sides of the same comparison.
+    _, integer_end = _extract_window(impact, index, (5.5, 6))
+    pd.testing.assert_index_equal(integer_end, pd.Index([6]))
+    signed_index = pd.Index([-1.0, -0.25, 0.0, 0.5])
+    signed_impact = xr.DataArray(
+        np.arange(len(signed_index)),
+        dims=["obs_ind"],
+        coords={"obs_ind": signed_index},
+    )
+    _, negative_start = _extract_window(signed_impact, signed_index, (-0.5, 0.0))
+    pd.testing.assert_index_equal(negative_start, pd.Index([-0.25, 0.0]))
+    _, open_stop = _extract_window(signed_impact, signed_index, slice(-0.5, None))
+    pd.testing.assert_index_equal(open_stop, pd.Index([-0.25, 0.0, 0.5]))
+    _, open_start = _extract_window(impact, index, slice(None, 6))
+    pd.testing.assert_index_equal(open_start, pd.Index([0, 1, 2, 3, 4, 5]))
+
+
 def test_datetime_window_rejects_mixed_positional_and_label_bounds():
     """Mixed slice semantics must not silently convert integers to timestamps."""
     import xarray as xr

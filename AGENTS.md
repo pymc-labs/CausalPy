@@ -16,7 +16,7 @@ This applies to documentation-only work and implementations composed from lower-
 
 ## Environment
 
-**uv is the default environment manager.** Use `uv run <command>` for commands that import project code, run tests, build docs, or use repo tooling — there is no environment to activate. If the project has not been synced yet in the current checkout, run `uv sync --locked --extra dev --extra docs --extra test --extra lint` first (see the [python-environment skill](.agents/skills/python-environment/SKILL.md) for full setup instructions).
+**uv is the default environment manager.** Use `uv run <command>` for commands that import project code, run tests, build docs, or use repo tooling — there is no environment to activate. If the project has not been synced yet in the current checkout, run `uv sync --locked --extra dev --extra docs --extra test --extra lint` first.
 
 **Conda fallback:** if `uv` is unavailable, fall back to `mamba`, `micromamba`, or `conda` (in that preference order) against the `CausalPy` env described by `environment.yml`. Reuse an existing `CausalPy` env whenever possible; do not create or update an env unless the task needs the project environment and the existing env is missing, stale, or broken. Use `$CONDA_EXE run -n CausalPy <command>`; never use `$CONDA_EXE activate`. For simple text/JSON inspection helpers that do not import project code, any Python on `PATH` is fine.
 
@@ -32,11 +32,9 @@ This applies to documentation-only work and implementations composed from lower-
 - Use descriptive function names starting with `test_`
 - Prefer fixtures over setup/teardown methods
 - Use assert statements directly, not self.assertEqual
-- Never create throwaway test scripts or ad hoc verification files
-- If you need to test functionality, write a proper test in the test suite
-- All tests go in the `causalpy/tests/` directory following the project structure
+- Disposable diagnostic or independent-review probes may live in untracked `.scratch/`; they must not edit production code or the test suite, and should be removed when finished.
+- Preserve confirmed product-defect coverage as regression tests in `causalpy/tests/` before publishing a fix; scratch probes do not replace permanent regression coverage.
 - Tests should be runnable with the rest of the suite (`python -m pytest`)
-- Even for quick verification, write it as a real test that provides ongoing value
 - Preference should be given to integration tests, but unit tests are acceptable for core functionality to maintain high code coverage.
 - Tests should remain quick to run. Tests involving MCMC sampling with PyMC should use custom `sample_kwargs` to minimize the computational load.
 - Tests that stay heavy even with light `sample_kwargs` get `@pytest.mark.nightly` (heavy doctests go in `NIGHTLY_DOCTESTS` in `causalpy/tests/doctest_sampling.py`). The default pytest addopts skip `nightly` and `correctness` tests; PR CI runs the `correctness` tests that are not also `nightly` in a separate step, and `.github/workflows/nightly.yml` runs everything. Run them locally with `make test-nightly` and `make test-correctness`. `slow` is descriptive only and does not change where a test runs.
@@ -120,17 +118,12 @@ Renamed or deleted how-to pages must keep a **permanent** entry in `rediraffe_re
 - **Execution**: Run automatically via `prek run --all-files` or on commit.
 - **Style**: Use Python 3.10+ type hint syntax. Specifically: `X | None` not `Optional[X]`, lowercase `dict`, `list`, `tuple` not `Dict`, `List`, `Tuple` from `typing`, and `Literal` for constrained string parameters.
 
-## GitHub Issue Workflows
+## Skills
 
-Use the `github-issues` Skill in `.agents/skills/github-issues/` for issue
-creation, bug reports, and issue evaluation workflows.
+Repo-level agent skills are reserved for crucial CausalPy practice that does not belong in this file or in `ARCHITECTURE.md`. Generic maintainer workflows — issue triage, pull-request review, planning, environment setup, CI greening — are not repo skills. Developers run those with their own user-level agent skills.
 
-## Skills Location
+`.agents/skills/` is the only tracked home for a future repo-level skill. Do not add one unless the practice is specific to this repository, changes an agent's decisions, and is a poor fit for `AGENTS.md` or `ARCHITECTURE.md`. There are currently no repo-level skills. See `.agents/skills/README.md`.
 
-Skills are split into two categories with separate homes:
+User-facing skills live in `causalpy/skills/`. They teach agents how to use CausalPy for causal inference tasks. They are not maintainer workflows, they are not symlinked into developer skill-discovery paths, and they are distributed via [Decision AI Hub](https://hub.decision.ai). When they change, include a PR note or follow-up task to update the Hub copy after merge.
 
-- **Developer skills** live in `.agents/skills/`. This is the canonical shared location for repo-maintainer workflows such as environment setup, PR workflows, issue triage, and other maintainer tasks.
-- **User skills** live in `causalpy/skills/` inside the source tree. They teach AI agents how to use CausalPy for causal inference tasks. They are **not** symlinked into the auto-discovery paths — a developer agent should not see experiment-design skills mixed in with PR review skills. User skills are distributed via [Decision AI Hub](https://hub.decision.ai).
-- When user-facing skills change, include a PR note or follow-up task to update the distributed Decision AI Hub copy after merge.
-
-If a developer's local tool does not yet discover `.agents/skills/`, they may create an uncommitted local compatibility symlink such as `.cursor/skills -> ../.agents/skills`, `.claude/skills -> ../.agents/skills`, or `.github/skills -> ../.agents/skills`. Do not commit those compatibility symlinks; keep `.agents/skills/` as the only tracked developer-skill home.
+Do not commit local compatibility symlinks such as `.cursor/skills`, `.claude/skills`, or `.github/skills`. Do not commit `.cursor/`; editor and agent configuration stays with the developer.
