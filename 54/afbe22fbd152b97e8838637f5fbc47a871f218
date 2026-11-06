@@ -1,0 +1,21 @@
+causalpy/tests/test_staggered_did.py
+  s_2e99a63630c231::t_70c82855e74afd 1374-1475,2290-2298
+docs/source/notebooks/staggered-difference-in-differences-pymc.ipynb
+  s_2e99a63630c231::t_da5d20d32fd402 54,60,66,68
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "54afbe22fbd152b97e8838637f5fbc47a871f218",
+  "prompts": {},
+  "sessions": {
+    "s_2e99a63630c231": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ad9d-ee8f-7e91-95e2-669b20f80520",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
