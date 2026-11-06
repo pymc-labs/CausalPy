@@ -1,0 +1,14 @@
+causalpy/data/simulate_data.py
+  h_63db634213747e 568-577
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "dc1ddff59ca57a8da078e8678e85b0fcb1a7b518",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
