@@ -1,0 +1,19 @@
+uv.lock
+  s_2e99a63630c231::t_0dd478089d04ee 4309,4318-4336
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "a64b0d5aa9870402e2667980c3408d7f22f64741",
+  "prompts": {},
+  "sessions": {
+    "s_2e99a63630c231": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1ad9d-ee8f-7e91-95e2-669b20f80520",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
