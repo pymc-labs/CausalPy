@@ -1,0 +1,14 @@
+docs/source/_static/custom.css
+  h_63db634213747e 168-172
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "156703c09e0ea8b3068b1137f658d732956eb4d5",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
