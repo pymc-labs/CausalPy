@@ -1,0 +1,14 @@
+docs/source/knowledgebase/bayesian_workflow.ipynb
+  h_63db634213747e 280,292,573,839,893
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "79c175a0a2b750ab9ad77958a97d3e137aee9b2a",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
