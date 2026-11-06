@@ -1,0 +1,14 @@
+docs/source/knowledgebase/bayesian_workflow.ipynb
+  h_63db634213747e 625
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "40dc3e34c427b01726b572ae0cb85227f9a2a783",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
