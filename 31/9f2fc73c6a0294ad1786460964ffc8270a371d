@@ -1,0 +1,14 @@
+causalpy/experiments/staggered_did.py
+  h_63db634213747e 512-515
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "319f2fc73c6a0294ad1786460964ffc8270a371d",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
