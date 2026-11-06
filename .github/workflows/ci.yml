@@ -2,9 +2,9 @@ name: ci
 
 on:
   pull_request:
-    branches: [main, pymc6_and_pymcmarketing1_migration]
+    branches: [main]
   push:
-    branches: [main, pymc6_and_pymcmarketing1_migration]
+    branches: [main]
 
 permissions: {}
 

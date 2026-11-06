@@ -2,21 +2,19 @@ name: nightly
 
 # Heavy tests kept off the PR critical path: `nightly`-marked tests (including the doctests listed in causalpy/tests/doctest_sampling.py NIGHTLY_DOCTESTS). ci.yml deselects them via the default pytest addopts. This workflow also reruns every `correctness` test with a cold compiledir, including the `nightly` ones that ci.yml skips.
 #
-# GitHub only runs `schedule` from the default branch, so the cron fires on main. Until the PyMC 6 migration branch merges into main, pushes to that branch run this workflow instead so its heavy tests still run after every merge. Drop the `push` trigger once the branch has merged.
+# GitHub only runs `schedule` from the default branch, so the cron fires on main.
 
 on:
   schedule:
     - cron: "0 3 * * *"
   workflow_dispatch:
-  push:
-    branches: [pymc6_and_pymcmarketing1_migration]
 
 permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  # Bursts of merges only need the newest push tested, but a manual dispatch must not cancel an in-flight scheduled run.
-  cancel-in-progress: ${{ github.event_name == 'push' }}
+  # A manual dispatch must not cancel an in-flight scheduled run.
+  cancel-in-progress: false
 
 jobs:
   heavy-tests:
