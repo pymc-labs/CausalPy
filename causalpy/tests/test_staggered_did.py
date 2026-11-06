@@ -1420,10 +1420,14 @@ def test_always_treated_cohort_is_non_identified():
     post = event_time[event_time["event_time"] >= 0]
     only_always = post[post["event_time"].isin([2, 3])]
     shared = post[post["event_time"].isin([0, 1])]
+    assert len(only_always) == 2
     assert not only_always["identified"].any()
     assert only_always["att"].isna().all()
+    assert np.issubdtype(only_always["n_obs"].dtype, np.number)
+    assert list(only_always["n_obs"]) == [1, 1]
     assert shared["identified"].all()
     assert np.allclose(shared["att"], 5.0)
+    assert list(shared["n_obs"]) == [1, 1]
     assert post.loc[post["identified"], "att"].mean() == 5.0
     summary = result.effect_summary().text
     assert "12.50" not in summary
@@ -2304,8 +2308,10 @@ def test_staggered_did_only_never_treated_as_controls():
     # Only units 2 and 3 should be in training set
     assert set(training_units) == {2, 3}
     event_time = result.result.att_event_time
+    assert len(event_time) == 3
     assert not event_time["identified"].any()
     assert event_time["att"].isna().all()
+    assert list(event_time["n_obs"]) == [2, 2, 2]
     assert np.issubdtype(event_time["n_obs"].dtype, np.number)
     assert not pd.api.types.is_object_dtype(event_time["att"])
     result.plot()

@@ -471,35 +471,93 @@ class StaggeredDifferenceInDifferences(
             return True
         return has_eligible and calendar_ok
 
-    def _eligible_event_positions(
-        self, frame: pd.DataFrame, event_time: float
-    ) -> np.ndarray:
-        """Positions in ``frame`` that enter the ATT(e) mean.
+    def _event_time_mean_mask(self, frame: pd.DataFrame) -> pd.Series:
+        """Rows that enter an event-time mean.
 
         Cohorts with no untreated observation of their own unit are excluded.
         Calendar-period non-identification is applied after aggregation.
         """
-        eligible = ~frame["G"].isin(self._cohorts_without_own_untreated_).to_numpy()
+        return ~frame["G"].isin(self._cohorts_without_own_untreated_)
+
+    def _eligible_event_positions(
+        self, frame: pd.DataFrame, event_time: float
+    ) -> np.ndarray:
+        """Positions in ``frame`` that enter the ATT(e) mean."""
+        eligible = self._event_time_mean_mask(frame).to_numpy()
         match = frame["event_time"].to_numpy() == event_time
         return np.flatnonzero(match & eligible)
 
-    def _mark_non_identified_att_rows(self, att_df: pd.DataFrame) -> pd.DataFrame:
-        """Add ``identified`` column and mask non-identified point estimates."""
+    def _append_missing_own_unit_event_rows(self, att_df: pd.DataFrame) -> pd.DataFrame:
+        """Restore event times whose only contributions were excluded from the mean.
+
+        Aggregators omit those rows. This writer puts them back with an explicit
+        numeric dtype so a later plot cannot see an object ``n_obs``.
+        """
+        treated = self.data.loc[~self.data["_is_untreated"]]
+        if self.event_window is not None:
+            treated = treated.loc[
+                (treated["event_time"] >= self.event_window[0])
+                & (treated["event_time"] <= self.event_window[1])
+            ]
+        if len(treated) == 0:
+            return att_df
+        present = {int(event_time) for event_time in att_df["event_time"].tolist()}
+        rows = []
+        for event_time, group in treated.groupby("event_time", observed=True):
+            if self._eligible_event_positions(treated, event_time).size > 0:
+                continue
+            event_time_int = int(event_time)
+            if event_time_int in present:
+                continue
+            row = {"event_time": event_time_int, "n_obs": int(len(group))}
+            for column in ("att", "att_lower", "att_upper", "att_std"):
+                if column in att_df.columns:
+                    row[column] = np.nan
+            rows.append(row)
+        if not rows:
+            return att_df
+        extra = pd.DataFrame(rows)
+        extra["event_time"] = extra["event_time"].astype(int)
+        extra["n_obs"] = extra["n_obs"].astype(int)
+        for column in ("att", "att_lower", "att_upper", "att_std"):
+            if column in extra.columns:
+                extra[column] = extra[column].astype(float)
         if len(att_df) == 0:
+            combined = extra.reindex(columns=list(att_df.columns))
+        else:
+            combined = pd.concat([att_df, extra], ignore_index=True)
+        return combined.sort_values("event_time").reset_index(drop=True)
+
+    def _mark_non_identified_att_rows(self, att_df: pd.DataFrame) -> pd.DataFrame:
+        """Add ``identified`` and mask non-identified estimates.
+
+        An event-time frame also gains any in-window event time that has treated
+        rows, is absent from the frame, and has no row entering the mean.
+        """
+        is_event_time = (
+            "event_time" in att_df.columns and "cohort" not in att_df.columns
+        )
+        if len(att_df) == 0 and not is_event_time:
             att_df = att_df.copy()
             att_df["identified"] = pd.Series(dtype=bool)
             return att_df
 
         att_df = att_df.copy()
+        if is_event_time:
+            att_df = self._append_missing_own_unit_event_rows(att_df)
+
         if "cohort" in att_df.columns and "time" in att_df.columns:
             att_df["identified"] = [
                 self._is_group_time_att_identified(cohort, period)
                 for cohort, period in zip(att_df["cohort"], att_df["time"], strict=True)
             ]
         elif "event_time" in att_df.columns:
-            att_df["identified"] = att_df["event_time"].apply(
-                lambda e: self._is_event_time_att_identified(int(e))
-            )
+            if len(att_df) == 0:
+                att_df["identified"] = pd.Series(dtype=bool)
+            else:
+                att_df["identified"] = att_df["event_time"].apply(
+                    lambda e: self._is_event_time_att_identified(int(e))
+                )
         else:
             att_df["identified"] = True
 
@@ -722,20 +780,8 @@ class StaggeredDifferenceInDifferences(
             ]
 
         for e in sorted(event_times_post):
-            raw_positions = np.flatnonzero(event_time_treated == e)
-            if raw_positions.size == 0:
-                continue
             positions_arr = self._eligible_event_positions(treated_data, e)
             if positions_arr.size == 0:
-                att_et_rows.append(
-                    {
-                        "event_time": int(e),
-                        "att": np.nan,
-                        "att_lower": np.nan,
-                        "att_upper": np.nan,
-                        "n_obs": int(raw_positions.size),
-                    }
-                )
                 continue
             tau_e = tau_draws_treated[:, :, positions_arr].mean(axis=2)
             att_et_rows.append(
@@ -817,10 +863,16 @@ class StaggeredDifferenceInDifferences(
                 & (event_data["event_time"] <= self.event_window[1])
             ]
 
-        eligible = ~event_data["G"].isin(self._cohorts_without_own_untreated_)
-        eligible_event = event_data.loc[eligible]
+        eligible_event = event_data.loc[self._event_time_mean_mask(event_data)]
         if len(eligible_event) == 0:
-            att_et = pd.DataFrame(columns=["event_time", "att", "att_std", "n_obs"])
+            att_et = pd.DataFrame(
+                {
+                    "event_time": pd.Series(dtype="int64"),
+                    "att": pd.Series(dtype="float64"),
+                    "att_std": pd.Series(dtype="float64"),
+                    "n_obs": pd.Series(dtype="int64"),
+                }
+            )
         else:
             att_et = (
                 eligible_event.groupby("event_time", observed=True)["tau_hat"]
@@ -828,32 +880,7 @@ class StaggeredDifferenceInDifferences(
                 .reset_index()
             )
             att_et.columns = ["event_time", "att", "att_std", "n_obs"]
-        ineligible_event = event_data.loc[~eligible]
-        if len(ineligible_event) > 0:
-            present = set(att_et["event_time"].tolist())
-            missing_counts = ineligible_event.groupby("event_time", observed=True)[
-                "tau_hat"
-            ].count()
-            extra_rows = [
-                {
-                    "event_time": event_time,
-                    "att": np.nan,
-                    "att_std": np.nan,
-                    "n_obs": int(n_obs),
-                }
-                for event_time, n_obs in missing_counts.items()
-                if event_time not in present
-            ]
-            if extra_rows:
-                extra = pd.DataFrame(extra_rows)
-                att_et = (
-                    extra
-                    if len(att_et) == 0
-                    else pd.concat([att_et, extra], ignore_index=True)
-                )
-        if len(att_et) > 0:
             att_et["event_time"] = att_et["event_time"].astype(int)
-            att_et = att_et.sort_values("event_time").reset_index(drop=True)
         att_event_time = self._mark_non_identified_att_rows(att_et)
 
         return att_group_time, att_event_time
@@ -1706,20 +1733,8 @@ class StaggeredDifferenceInDifferences(
             ]
 
         for e in sorted(event_times_post):
-            raw_positions = np.flatnonzero(event_time_treated == e)
-            if raw_positions.size == 0:
-                continue
             positions_arr = self._eligible_event_positions(treated_data, e)
             if positions_arr.size == 0:
-                att_et_rows.append(
-                    {
-                        "event_time": int(e),
-                        "att": np.nan,
-                        "att_lower": np.nan,
-                        "att_upper": np.nan,
-                        "n_obs": int(raw_positions.size),
-                    }
-                )
                 continue
             tau_e = tau_draws_treated[:, :, positions_arr].mean(axis=2)
             att_et_rows.append(
@@ -1732,7 +1747,12 @@ class StaggeredDifferenceInDifferences(
                 }
             )
 
-        return self._mark_non_identified_att_rows(pd.DataFrame(att_et_rows))
+        return self._mark_non_identified_att_rows(
+            pd.DataFrame(
+                att_et_rows,
+                columns=["event_time", "att", "att_lower", "att_upper", "n_obs"],
+            )
+        )
 
     def _event_time_summary_frame(
         self,
@@ -1795,20 +1815,8 @@ class StaggeredDifferenceInDifferences(
                 & (event_times_post <= self.event_window[1])
             ]
         for event_time in sorted(event_times_post):
-            raw_positions = np.flatnonzero(event_time_treated == event_time)
-            if raw_positions.size == 0:
-                continue
             positions = self._eligible_event_positions(treated_data, event_time)
             if positions.size == 0:
-                att_et_rows.append(
-                    {
-                        "event_time": int(event_time),
-                        "att": np.nan,
-                        "att_lower": np.nan,
-                        "att_upper": np.nan,
-                        "n_obs": int(raw_positions.size),
-                    }
-                )
                 continue
             tau_e = tau_draws_treated[:, :, positions].mean(axis=2)
             lower, upper = hdi_bounds(tau_e, prob=hdi_prob, flatten_chains_draws=True)
