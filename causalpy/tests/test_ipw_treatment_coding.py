@@ -88,6 +88,7 @@ def test_boolean_treatment_matches_the_integer_treatment(trt, lhs):
         pytest.param(TRT.map({0: "False", 1: "True"}), "trt", id="text-true-false"),
         pytest.param(TRT.astype("category"), "trt", id="category"),
         pytest.param(TRT.astype(bool), "C(trt, Sum)", id="sum-contrast"),
+        pytest.param(TRT, "trt + race", id="two-terms"),
     ],
 )
 def test_multi_column_treatment_is_rejected(trt, lhs):
