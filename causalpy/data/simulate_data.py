@@ -565,11 +565,16 @@ def generate_geolift_data(seed: int | None = None) -> pd.DataFrame:
 def generate_multicell_geolift_data(
     seed: int | None = None,
 ) -> pd.DataFrame:
-    """Generate synthetic data for a geolift example. This will consists of 6 untreated
-    countries. The treated unit `Denmark` is a weighted combination of the untreated
-    units. We additionally specify a treatment effect which takes effect after the
-    `treatment_time`. The timeseries data is observed at weekly resolution and has
-    annual seasonality, with this seasonality being a drawn from a Gaussian Process with
+    """Generate synthetic multi-cell geolift data.
+
+    The returned frame has 12 untreated columns `u1` through `u12` and 4
+    treated columns `t1` through `t4`. There is no `Denmark` column.
+
+    Each treated column is a Dirichlet-weighted combination of the untreated
+    units, plus a treatment effect after 2022-01-01. Observation noise with
+    `scale=0.1` is added to every geo after that weighted sum, so a pre-period
+    fit of a treated column on the untreated columns is not exact. The series
+    are weekly and have annual seasonality drawn from a Gaussian process with
     a periodic kernel.
 
     :param seed:
