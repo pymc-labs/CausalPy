@@ -47,7 +47,7 @@ def extract_r2_score(
 
     Parameters
     ----------
-    score : pd.Series
+    score : :class:`pandas.Series`
         Canonical score container, i.e. the ``score`` field of an
         experiment's result bundle.
     unit_index : int, optional
@@ -75,7 +75,7 @@ def format_r2_score(
 
     Parameters
     ----------
-    score : pd.Series or None
+    score : :class:`pandas.Series` or None
         Canonical score container. ``None`` (unscored bundles, e.g. the prior
         group) renders an empty title.
     unit_index : int, default 0
@@ -124,10 +124,10 @@ def plot_posterior_over_x(
 
     Parameters
     ----------
-    x : pd.DatetimeIndex, np.ndarray, pd.Index, pd.Series, or ExtensionArray
+    x : :class:`pandas.DatetimeIndex`, :class:`numpy.ndarray`, :class:`pandas.Index`, :class:`pandas.Series`, or ExtensionArray
         Values for the x-axis (e.g. time, a running variable, or a prediction
         grid). Need not be temporal.
-    Y : xr.DataArray
+    Y : :class:`xarray.DataArray`
         Posterior samples with ``chain`` and ``draw`` dimensions and one
         dimension aligned with ``x``.
     ax : plt.Axes
@@ -340,7 +340,7 @@ def plot_scalar_posterior(
 
     Parameters
     ----------
-    draws : xr.DataArray
+    draws : :class:`xarray.DataArray`
         Scalar posterior draws with ``chain`` and ``draw`` dimensions. Singleton
         non-sample dimensions are squeezed before plotting.
     ax : plt.Axes
@@ -587,7 +587,7 @@ def get_hdi_to_df(
 
     Parameters
     ----------
-    x : xr.DataArray
+    x : :class:`xarray.DataArray`
         Xarray data array.
     hdi_prob : float, optional
         The size of the HDI. Defaults to
@@ -595,7 +595,7 @@ def get_hdi_to_df(
 
     Returns
     -------
-    pd.DataFrame
+    :class:`pandas.DataFrame`
         DataFrame containing the HDI intervals with 'lower' and 'higher'
         columns.
     """

@@ -114,7 +114,7 @@ def build_design_matrices(
     ----------
     design_infos : list[Any]
         Patsy design information fitted on the training data.
-    data : pd.DataFrame
+    data : :class:`pandas.DataFrame`
         New data used to construct matrices with the fitted design information.
     **kwargs : Any
         Keyword arguments forwarded to :func:`patsy.build_design_matrices`.
@@ -158,7 +158,7 @@ def datetime_continuous_formula(formula: str, data: pd.DataFrame) -> ModelDesc:
     ----------
     formula : str
         Patsy formula to rewrite.
-    data : pd.DataFrame
+    data : :class:`pandas.DataFrame`
         Data used to identify datetime columns.
     """
     model_desc = ModelDesc.from_formula(formula)
@@ -181,7 +181,7 @@ def build_formula_matrices(
     ----------
     formula : str
         Patsy formula to evaluate.
-    data : pd.DataFrame
+    data : :class:`pandas.DataFrame`
         Data used to build the design matrices.
     **kwargs : Any
         Keyword arguments forwarded to :func:`patsy.dmatrices`.

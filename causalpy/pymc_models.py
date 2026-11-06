@@ -188,10 +188,10 @@ class PyMCModel(pm.Model):
 
         Parameters
         ----------
-        X : xarray.DataArray
+        X : :class:`xarray.DataArray`
             Input features/covariates with dimensions ["obs_ind", "coeffs"].
             Used to understand the scale and structure of predictors.
-        y : xarray.DataArray
+        y : :class:`xarray.DataArray`
             Target variable with dimensions ["obs_ind", "treated_units"].
             Used to understand the scale and structure of the outcome.
 
@@ -326,9 +326,9 @@ class PyMCModel(pm.Model):
 
         Parameters
         ----------
-        X : xarray.DataArray or dict of str to xarray.DataArray
+        X : :class:`xarray.DataArray` or dict of str to :class:`xarray.DataArray`
             Input features, or component inputs for specialized mapping models.
-        y : xarray.DataArray or dict of str to xarray.DataArray
+        y : :class:`xarray.DataArray` or dict of str to :class:`xarray.DataArray`
             Target values, or component targets for specialized mapping models.
         coords : dict or None
             Mapping of named dimensions to coordinate labels for the
@@ -396,10 +396,10 @@ class PyMCModel(pm.Model):
 
         Parameters
         ----------
-        X : xarray.DataArray or dict of str to xarray.DataArray
+        X : :class:`xarray.DataArray` or dict of str to :class:`xarray.DataArray`
             Input features as a labeled array, or mapping inputs for models
             that accept them.
-        y : xarray.DataArray or dict of str to xarray.DataArray
+        y : :class:`xarray.DataArray` or dict of str to :class:`xarray.DataArray`
             Target values as a labeled array, or mapping inputs for models
             that accept them.
         coords : dict, optional
@@ -583,9 +583,9 @@ class PyMCModel(pm.Model):
 
         Parameters
         ----------
-        X : xarray.DataArray or dict of str to xarray.DataArray
+        X : :class:`xarray.DataArray` or dict of str to :class:`xarray.DataArray`
             Input features as a labeled array, or mapping inputs.
-        y : xarray.DataArray or dict of str to xarray.DataArray
+        y : :class:`xarray.DataArray` or dict of str to :class:`xarray.DataArray`
             Target values as a labeled array, or mapping inputs.
         coords : dict, optional
             Dictionary with coordinate names for named dimensions.
@@ -593,7 +593,7 @@ class PyMCModel(pm.Model):
 
         Returns
         -------
-        xr.DataTree
+        :class:`xarray.DataTree`
             DataTree containing the samples.
         """
         self.build(X=X, y=y, coords=coords)
@@ -615,9 +615,9 @@ class PyMCModel(pm.Model):
 
         Parameters
         ----------
-        X : dict of str to xarray.DataArray
+        X : dict of str to :class:`xarray.DataArray`
             Labeled predictor arrays for specialized model components.
-        y : dict of str to xarray.DataArray
+        y : dict of str to :class:`xarray.DataArray`
             Labeled target arrays for specialized model components.
         coords : dict, optional
             Coordinate metadata for the model.
@@ -634,9 +634,9 @@ class PyMCModel(pm.Model):
 
         Parameters
         ----------
-        X : dict of str to xarray.DataArray
+        X : dict of str to :class:`xarray.DataArray`
             Labeled predictor arrays for specialized model components.
-        y : dict of str to xarray.DataArray
+        y : dict of str to :class:`xarray.DataArray`
             Labeled target arrays for specialized model components.
         coords : dict, optional
             Coordinate metadata for the model.
@@ -653,7 +653,7 @@ class PyMCModel(pm.Model):
 
         Returns
         -------
-        xr.Dataset
+        :class:`xarray.Dataset`
             The conditioning draws for *group*.
         """
         if group not in ("prior", "posterior"):
@@ -682,7 +682,7 @@ class PyMCModel(pm.Model):
 
         Parameters
         ----------
-        X : xr.DataArray
+        X : :class:`xarray.DataArray`
             Input features for which predictions are required.
         coords : dict, optional
             Coordinate names for named dimensions. Forwarded to subclass
@@ -698,7 +698,7 @@ class PyMCModel(pm.Model):
 
         Returns
         -------
-        xr.DataTree
+        :class:`xarray.DataTree`
             Forward samples in the ``posterior_predictive`` group (PyMC's
             canonical output location regardless of conditioning group) on
             dims ``("chain", "draw", "obs_ind", "treated_units")``.
@@ -740,9 +740,9 @@ class PyMCModel(pm.Model):
 
         Parameters
         ----------
-        X : xr.DataArray
+        X : :class:`xarray.DataArray`
             Input features.
-        y : xr.DataArray
+        y : :class:`xarray.DataArray`
             Observed targets to score against the posterior predictive mean.
         coords : dict, optional
             Coordinate names for named dimensions. Forwarded to
@@ -820,9 +820,9 @@ class LinearRegression(PyMCModel):
 
         Parameters
         ----------
-        X : xr.DataArray
+        X : :class:`xarray.DataArray`
             Design matrix with dims ``("obs_ind", "coeffs")``.
-        y : xr.DataArray
+        y : :class:`xarray.DataArray`
             Outcome with dims ``("obs_ind", "treated_units")``.
         coords : dict or None
             Coordinate names for the model's named dimensions.
@@ -1020,9 +1020,9 @@ class WeightedSumFitter(PyMCModel):
 
         Parameters
         ----------
-        X : xarray.DataArray
+        X : :class:`xarray.DataArray`
             Control unit data with shape (n_obs, n_control_units).
-        y : xarray.DataArray
+        y : :class:`xarray.DataArray`
             Treated unit outcome data.
 
         Returns
@@ -1050,9 +1050,9 @@ class WeightedSumFitter(PyMCModel):
 
         Parameters
         ----------
-        X : xr.DataArray
+        X : :class:`xarray.DataArray`
             Design matrix with dims ``("obs_ind", "coeffs")``.
-        y : xr.DataArray
+        y : :class:`xarray.DataArray`
             Outcome with dims ``("obs_ind", "treated_units")``.
         coords : dict or None
             Coordinate names for the model's named dimensions.
@@ -1210,9 +1210,9 @@ class SoftmaxWeightedSumFitter(PyMCModel):
 
         Parameters
         ----------
-        X : xarray.DataArray
+        X : :class:`xarray.DataArray`
             Control unit data with shape (n_obs, n_control_units).
-        y : xarray.DataArray
+        y : :class:`xarray.DataArray`
             Treated unit outcome data.
 
         Returns
@@ -1243,9 +1243,9 @@ class SoftmaxWeightedSumFitter(PyMCModel):
 
         Parameters
         ----------
-        X : xr.DataArray
+        X : :class:`xarray.DataArray`
             Design matrix with dims ``("obs_ind", "coeffs")``.
-        y : xr.DataArray
+        y : :class:`xarray.DataArray`
             Outcome with dims ``("obs_ind", "treated_units")``.
         coords : dict or None
             Coordinate names for the model's named dimensions.
@@ -1337,9 +1337,9 @@ class SyntheticDifferenceInDifferencesWeightFitter(PyMCModel):
 
         Parameters
         ----------
-        X : xarray.DataArray or dict of str to xarray.DataArray
+        X : :class:`xarray.DataArray` or dict of str to :class:`xarray.DataArray`
             Predictor data for an ordinary fit or the SDID weight modules.
-        y : xarray.DataArray or dict of str to xarray.DataArray
+        y : :class:`xarray.DataArray` or dict of str to :class:`xarray.DataArray`
             Target data for an ordinary fit or the SDID weight modules.
         coords : dict, optional
             Coordinate metadata for the model.
@@ -1360,9 +1360,9 @@ class SyntheticDifferenceInDifferencesWeightFitter(PyMCModel):
 
         Parameters
         ----------
-        X : dict of str to xarray.DataArray
+        X : dict of str to :class:`xarray.DataArray`
             Unit- and time-weight design matrices.
-        y : dict of str to xarray.DataArray
+        y : dict of str to :class:`xarray.DataArray`
             Unit- and time-weight target arrays.
         coords : dict, optional
             Coordinate metadata shared by the two modules.
@@ -1394,9 +1394,9 @@ class SyntheticDifferenceInDifferencesWeightFitter(PyMCModel):
 
         Parameters
         ----------
-        X : dict of str to xarray.DataArray
+        X : dict of str to :class:`xarray.DataArray`
             Unit- and time-weight design matrices.
-        y : dict of str to xarray.DataArray
+        y : dict of str to :class:`xarray.DataArray`
             Unit- and time-weight target arrays.
         coords : dict, optional
             Coordinate metadata shared by the two modules.
@@ -1412,9 +1412,9 @@ class SyntheticDifferenceInDifferencesWeightFitter(PyMCModel):
         Parameters
         ----------
         X : dict
-            Dict with keys ``"unit"`` and ``"time"``, each an xarray.DataArray.
+            Dict with keys ``"unit"`` and ``"time"``, each an :class:`xarray.DataArray`.
         y : dict
-            Dict with keys ``"unit"`` and ``"time"``, each an xarray.DataArray.
+            Dict with keys ``"unit"`` and ``"time"``, each an :class:`xarray.DataArray`.
 
         Returns
         -------
@@ -1591,13 +1591,13 @@ class InstrumentalVariableRegression(PyMCModel):
 
         Parameters
         ----------
-        X : np.ndarray
+        X : :class:`numpy.ndarray`
             Array used to predict our outcome y.
-        Z : np.ndarray
+        Z : :class:`numpy.ndarray`
             Array used to predict our treatment variable t.
-        y : np.ndarray
+        y : :class:`numpy.ndarray`
             Array of values representing our focal outcome y.
-        t : np.ndarray
+        t : :class:`numpy.ndarray`
             Array representing the treatment t of which we're interested
             in estimating the causal impact.
         coords : dict
@@ -1830,13 +1830,13 @@ class InstrumentalVariableRegression(PyMCModel):
 
         Parameters
         ----------
-        X : np.ndarray
+        X : :class:`numpy.ndarray`
             Array used to predict the outcome ``y``.
-        Z : np.ndarray
+        Z : :class:`numpy.ndarray`
             Array used to predict the treatment variable ``t``.
-        y : np.ndarray
+        y : :class:`numpy.ndarray`
             Focal outcome.
-        t : np.ndarray
+        t : :class:`numpy.ndarray`
             Treatment whose causal impact is being estimated.
         coords : dict
             Coordinate names for the instruments and covariates.
@@ -1938,13 +1938,13 @@ class InstrumentalVariableRegression(PyMCModel):
 
         Parameters
         ----------
-        X : np.ndarray
+        X : :class:`numpy.ndarray`
             Array used to predict the outcome ``y``.
-        Z : np.ndarray
+        Z : :class:`numpy.ndarray`
             Array used to predict the treatment variable ``t``.
-        y : np.ndarray
+        y : :class:`numpy.ndarray`
             Focal outcome.
-        t : np.ndarray
+        t : :class:`numpy.ndarray`
             Treatment whose causal impact is being estimated.
         coords : dict
             Coordinate names for the instruments and covariates.
@@ -2023,9 +2023,9 @@ class PropensityScore(PyMCModel):
 
         Parameters
         ----------
-        X : np.ndarray
+        X : :class:`numpy.ndarray`
             Covariate matrix used to predict the treatment.
-        t : np.ndarray
+        t : :class:`numpy.ndarray`
             Observed treatment indicator (0/1).
         coords : dict
             Coordinate names for named dimensions of the model.
@@ -2057,9 +2057,9 @@ class PropensityScore(PyMCModel):
 
         Parameters
         ----------
-        X : np.ndarray
+        X : :class:`numpy.ndarray`
             Covariate matrix used to predict the treatment.
-        y : np.ndarray
+        y : :class:`numpy.ndarray`
             Observed treatment indicator (0/1); named ``t`` elsewhere.
         coords : dict, optional
             Coordinate names for named dimensions of the model.
@@ -2108,9 +2108,9 @@ class PropensityScore(PyMCModel):
 
         Parameters
         ----------
-        X : np.ndarray
+        X : :class:`numpy.ndarray`
             Covariate matrix used to predict the treatment.
-        t : np.ndarray
+        t : :class:`numpy.ndarray`
             Observed treatment indicator (0/1).
         coords : dict
             Coordinate names for named dimensions of the model.
@@ -2180,7 +2180,7 @@ class PropensityScore(PyMCModel):
 
         Returns
         -------
-        idata_outcome : xr.DataTree
+        idata_outcome : :class:`xarray.DataTree`
             The posterior and prior predictive samples from the outcome model.
 
         model_outcome : pm.Model
@@ -2412,9 +2412,9 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
         Parameters
         ----------
-        X : xarray.DataArray
+        X : :class:`xarray.DataArray`
             Fitted design with datetime ``obs_ind`` and ``coeffs`` dimensions.
-        y : xarray.DataArray
+        y : :class:`xarray.DataArray`
             Fitted single-outcome observations.
 
         Returns
@@ -2579,7 +2579,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
         Parameters
         ----------
-        X : xr.DataArray or None
+        X : :class:`xarray.DataArray` or None
             Input features with dims ["obs_ind", "coeffs"]. The obs_ind coordinate
             must contain datetime values. Can be None or have 0 columns if no
             exogenous variables.
@@ -2678,10 +2678,10 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
         Parameters
         ----------
-        X : xr.DataArray
+        X : :class:`xarray.DataArray`
             Input features with dims ["obs_ind", "coeffs"]; obs_ind must be
             datetimes.
-        y : xr.DataArray
+        y : :class:`xarray.DataArray`
             Target variable with dims ["obs_ind", "treated_units"].
         coords : dict, optional
             Coordinates dictionary; must contain "datetime_index".
@@ -2725,10 +2725,10 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
         Parameters
         ----------
-        X : xr.DataArray
+        X : :class:`xarray.DataArray`
             Input features with dims ["obs_ind", "coeffs"]. Can have 0 columns if
             no exogenous variables. The obs_ind coordinate must contain datetime values.
-        y : xr.DataArray
+        y : :class:`xarray.DataArray`
             Target variable with dims ["obs_ind", "treated_units"].
         coords : dict, optional
             Coordinates dictionary. Can contain "datetime_index" for backwards compatibility,
@@ -2835,7 +2835,7 @@ class BayesianBasisExpansionTimeSeries(PyMCModel):
 
         Parameters
         ----------
-        X : xr.DataArray
+        X : :class:`xarray.DataArray`
             Input features with dims ["obs_ind", "coeffs"]. Must have datetime
             coordinates on obs_ind.
         """
@@ -3184,11 +3184,11 @@ class StateSpaceTimeSeries(PyMCModel):
 
         Parameters
         ----------
-        X : xr.DataArray, optional
+        X : :class:`xarray.DataArray`, optional
             Input features with dims ["obs_ind", "coeffs"]. Columns other than
             the patsy "Intercept" become exogenous regressors. If None or
             empty, the model has trend and seasonality only.
-        y : xr.DataArray
+        y : :class:`xarray.DataArray`
             Target variable with dims ["obs_ind", "treated_units"]. Must have datetime
             coordinates on obs_ind.
         coords : dict, optional
@@ -3355,10 +3355,10 @@ class StateSpaceTimeSeries(PyMCModel):
 
         Parameters
         ----------
-        X : xr.DataArray, optional
+        X : :class:`xarray.DataArray`, optional
             Input features with dims ["obs_ind", "coeffs"]. Columns other than
             the patsy "Intercept" become exogenous regressors.
-        y : xr.DataArray
+        y : :class:`xarray.DataArray`
             Target variable with dims ["obs_ind", "treated_units"]. Must have
             datetime coordinates on obs_ind.
         coords : dict, optional
@@ -3451,10 +3451,10 @@ class StateSpaceTimeSeries(PyMCModel):
 
         Parameters
         ----------
-        X : xr.DataArray, optional
+        X : :class:`xarray.DataArray`, optional
             Input features with dims ["obs_ind", "coeffs"]. Columns other than
             the patsy "Intercept" become exogenous regressors.
-        y : xr.DataArray
+        y : :class:`xarray.DataArray`
             Target variable with dims ["obs_ind", "treated_units"]. Must have datetime
             coordinates on obs_ind.
         coords : dict, optional
@@ -3462,7 +3462,7 @@ class StateSpaceTimeSeries(PyMCModel):
 
         Returns
         -------
-        xr.DataTree
+        :class:`xarray.DataTree`
             DataTree with parameter draws.
         """
         self.build(X=X, y=y, coords=coords)
@@ -3560,7 +3560,7 @@ class StateSpaceTimeSeries(PyMCModel):
 
         Returns
         -------
-        pd.DataFrame
+        :class:`pandas.DataFrame`
             One row per regressor, indexed by regressor name, with columns
             "prob" (inclusion probability), "selected" (probability above
             0.5), and "gamma_mean" (mean of the selection indicator).
@@ -3583,7 +3583,7 @@ class StateSpaceTimeSeries(PyMCModel):
 
         Returns
         -------
-        pd.DataFrame
+        :class:`pandas.DataFrame`
             One row per regressor, indexed by regressor name, with the
             effective shrinkage applied to its coefficient.
         """
@@ -3626,7 +3626,7 @@ class StateSpaceTimeSeries(PyMCModel):
 
         Parameters
         ----------
-        X : xr.DataArray, optional
+        X : :class:`xarray.DataArray`, optional
             Input features with dims ["obs_ind", "coeffs"]. Must have datetime
             coordinates on obs_ind for out-of-sample predictions, and must
             contain the covariate columns used at fit time when the model was
@@ -3643,7 +3643,7 @@ class StateSpaceTimeSeries(PyMCModel):
 
         Returns
         -------
-        xr.DataTree
+        :class:`xarray.DataTree`
             Posterior predictive samples with y_hat and mu.
         """
         if group != "posterior":
@@ -3726,17 +3726,17 @@ class StateSpaceTimeSeries(PyMCModel):
 
         Parameters
         ----------
-        X : xr.DataArray, optional
+        X : :class:`xarray.DataArray`, optional
             Input features. In-sample predictions come from the Kalman
             smoother, so X is not used here.
-        y : xr.DataArray
+        y : :class:`xarray.DataArray`
             Target variable with dims ["obs_ind", "treated_units"].
         coords : dict, optional
             Not used, kept for API compatibility.
 
         Returns
         -------
-        pd.Series
+        :class:`pandas.Series`
             R² score and standard deviation for each treated unit.
         """
         # Use base class implementation - X is accepted but not used by predict()
