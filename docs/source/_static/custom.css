@@ -165,3 +165,8 @@
     display: none;
   }
 }
+
+/* Article images only. Sphinx basic.css sets img { max-width: 100% } and does not set height: auto, so a width/height pair keeps the attribute height while the column shrinks the width (https://github.com/sphinx-doc/sphinx/issues/14799, still open). This does not match the navbar logo, which keeps height: 100%. */
+.bd-article img {
+  height: auto;
+}
