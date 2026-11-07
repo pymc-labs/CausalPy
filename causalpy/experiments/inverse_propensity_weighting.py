@@ -143,6 +143,15 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.t, self.X = np.asarray(t), np.asarray(X)
+        if self.t.ndim != 1 and self.t.shape[1] != 1:
+            raise DataException(
+                "The treatment side of the formula must produce a single 0-1 "
+                f"column, got {self.t.shape[1]} columns. A bool or multi-level "
+                "treatment is expanded by patsy into one dummy column per "
+                "level; recode the treatment to a single 0/1 column (for "
+                "example ``df['trt'].astype(int)``) or write the indicator "
+                "directly, e.g. ``I(trt == 1)``."
+            )
         kept_rows = np.asarray(X.index)
         self.y = np.asarray(self.data[self.outcome_variable])[kept_rows]
 
