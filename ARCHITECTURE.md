@@ -91,6 +91,7 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 | `InterruptedTimeSeries` | ITS | OLS + Bayes | 3-period design via `treatment_end_time` |
 | `PiecewiseITS` | Segmented ITS | OLS + Bayes | Fits full series; `step()`/`ramp()` transforms |
 | `DifferenceInDifferences` | DiD | OLS + Bayes | Effect from interaction coefficient |
+| `EventStudy` | Event Study | OLS + Bayes | Simultaneous treatment only |
 | `StaggeredDifferenceInDifferences` | Staggered DiD | OLS + Bayes | Fits untreated obs only |
 | `SyntheticControl` | SC | OLS + Bayes | Multi-unit; control/treated unit lists, no formula |
 | `UpDownGeoLift` | Three-arm geo lift | Bayes only | Extends synthetic control with up/down/control assignment and joint draw summaries |

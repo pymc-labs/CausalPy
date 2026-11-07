@@ -24,7 +24,7 @@ https://causalpy.readthedocs.io/en/latest/knowledgebase/reporting_statistics.htm
 """
 
 from dataclasses import dataclass
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 import numpy as np
 import pandas as pd
@@ -37,6 +37,7 @@ from causalpy.experiments._results import (
     CausalResult,
     CoefficientResult,
     DiscontinuityResult,
+    EventStudyResult,
     KinkResult,
     StaggeredDifferenceInDifferencesResult,
 )
@@ -454,6 +455,8 @@ def _detect_experiment_type(result):
         return "rkink"  # Regression Kink
     elif isinstance(bundle, StaggeredDifferenceInDifferencesResult):
         return "staggered_did"  # Staggered Difference-in-Differences
+    elif isinstance(bundle, EventStudyResult):
+        return "event_study"
     elif isinstance(bundle, CoefficientResult):
         return "did"  # Difference-in-Differences or ANCOVA/PrePostNEGD
     elif isinstance(bundle, CausalResult):
@@ -462,6 +465,7 @@ def _detect_experiment_type(result):
         raise ValueError(
             "Unknown experiment type. Result must have 'discontinuity_at_threshold' (RD), "
             "'gradient_change' (Regression Kink), 'att_event_time' (Staggered DiD), "
+            "'event_time_effects' (Event Study), "
             "'causal_impact' (DiD/ANCOVA), or 'impact_post' (ITS/Synthetic Control) attribute."
         )
 
@@ -471,6 +475,175 @@ def _apply_prior_grouping(text: str, group: Literal["prior", "posterior"]) -> st
     if group == "prior":
         return f"Prior predictive check (not a causal estimate): {text}"
     return text
+
+
+def _interval_excludes_zero(stats: _ScalarBayesianStats) -> bool:
+    """Return whether a scalar HDI lies entirely above or below zero."""
+    return stats["hdi_upper"] < 0 or stats["hdi_lower"] > 0
+
+
+def _effect_summary_event_study(
+    bundle: EventStudyResult,
+    *,
+    event_window: tuple[int, int],
+    reference_event_time: int,
+    direction: Literal["increase", "decrease", "two-sided"] = "increase",
+    alpha: float = 0.05,
+    min_effect: float | None = None,
+    include_pretrend_check: bool = True,
+    group: Literal["prior", "posterior"] = "posterior",
+) -> EffectSummary:
+    """Summarize simultaneous-adoption event-study coefficients.
+
+    Posterior draws use the same HDI, tail, and optional ROPE decision as
+    other scalar effects. Point-estimate fits report means only.
+    """
+    effects = bundle.event_time_effects
+    event_times = [int(k) for k in effects.coords["event_time"].values]
+    if has_posterior_draws(effects):
+        rows: list[dict[str, Any]] = []
+        decisions: list[tuple[int, _ScalarBayesianStats]] = []
+        hdi_prob = 1 - alpha
+        saw_p_gt_0 = False
+        saw_p_lt_0 = False
+        saw_p_two_sided = False
+        saw_prob_of_effect = False
+        saw_p_rope = False
+        for event_time in event_times:
+            if event_time == reference_event_time:
+                continue
+            stats = _compute_statistics_scalar(
+                effects.sel(event_time=event_time),
+                hdi_prob=hdi_prob,
+                direction=direction,
+                min_effect=min_effect,
+            )
+            row: dict[str, Any] = {
+                "event_time": event_time,
+                "mean": stats["mean"],
+                "median": stats["median"],
+                "hdi_lower": stats["hdi_lower"],
+                "hdi_upper": stats["hdi_upper"],
+                "is_reference": False,
+            }
+            if "p_gt_0" in stats:
+                row["p_gt_0"] = stats["p_gt_0"]
+                saw_p_gt_0 = True
+            if "p_lt_0" in stats:
+                row["p_lt_0"] = stats["p_lt_0"]
+                saw_p_lt_0 = True
+            if "p_two_sided" in stats:
+                row["p_two_sided"] = stats["p_two_sided"]
+                saw_p_two_sided = True
+            if "prob_of_effect" in stats:
+                row["prob_of_effect"] = stats["prob_of_effect"]
+                saw_prob_of_effect = True
+            if "p_rope" in stats:
+                row["p_rope"] = stats["p_rope"]
+                saw_p_rope = True
+            rows.append(row)
+            decisions.append((event_time, stats))
+        reference_row: dict[str, Any] = {
+            "event_time": reference_event_time,
+            "mean": 0.0,
+            "median": 0.0,
+            "hdi_lower": np.nan,
+            "hdi_upper": np.nan,
+            "is_reference": True,
+        }
+        if saw_p_gt_0:
+            reference_row["p_gt_0"] = np.nan
+        if saw_p_lt_0:
+            reference_row["p_lt_0"] = np.nan
+        if saw_p_two_sided:
+            reference_row["p_two_sided"] = np.nan
+        if saw_prob_of_effect:
+            reference_row["prob_of_effect"] = np.nan
+        if saw_p_rope:
+            reference_row["p_rope"] = np.nan
+        rows.append(reference_row)
+        rows.sort(key=lambda row: row["event_time"])
+        text = _event_study_draw_prose(
+            decisions,
+            event_window=event_window,
+            reference_event_time=reference_event_time,
+            alpha=alpha,
+            direction=direction,
+            include_pretrend_check=include_pretrend_check,
+            group=group,
+        )
+        return EffectSummary(table=pd.DataFrame(rows), text=text)
+
+    rows = [
+        {
+            "event_time": event_time,
+            "mean": _as_scalar(effects.sel(event_time=event_time)),
+            "is_reference": event_time == reference_event_time,
+        }
+        for event_time in event_times
+    ]
+    text = (
+        f"Dynamic treatment effects are relative to event time {reference_event_time} "
+        f"in window {event_window}. These are point estimates. This fit has no "
+        "posterior draws, so credible intervals and a pre-trend check are not "
+        "available. Use a PyMC model when uncertainty is required."
+    )
+    return EffectSummary(
+        table=pd.DataFrame(rows), text=_apply_prior_grouping(text, group)
+    )
+
+
+def _event_study_draw_prose(
+    decisions: list[tuple[int, _ScalarBayesianStats]],
+    *,
+    event_window: tuple[int, int],
+    reference_event_time: int,
+    alpha: float,
+    direction: Literal["increase", "decrease", "two-sided"],
+    include_pretrend_check: bool,
+    group: Literal["prior", "posterior"],
+) -> str:
+    """Build event-study prose from per-period scalar decisions."""
+    parts = [
+        "Dynamic treatment effects are relative to event time "
+        f"{reference_event_time} (window {event_window}). The reference "
+        "coefficient is normalized to zero. This is a simultaneous-adoption "
+        "event study, not a staggered-adoption estimator."
+    ]
+    if include_pretrend_check:
+        flagged = [
+            event_time
+            for event_time, stats in decisions
+            if event_time < 0
+            and event_time != reference_event_time
+            and _interval_excludes_zero(stats)
+        ]
+        if flagged:
+            listed = ", ".join(str(event_time) for event_time in flagged)
+            parts.append(
+                "Pre-treatment coefficients whose interval excludes zero: "
+                f"{listed}. That is evidence against parallel pre-trends."
+            )
+        else:
+            parts.append(
+                "No pre-treatment coefficient's interval excludes zero. "
+                "That does not prove parallel trends; it only means this check "
+                "did not flag them."
+            )
+    post = [
+        _generate_prose_scalar(
+            stats,
+            f"event-time {event_time} effect",
+            alpha=alpha,
+            direction=direction,
+            group=group,
+        )
+        for event_time, stats in decisions
+        if event_time >= 0 and event_time != reference_event_time
+    ]
+    if post:
+        parts.append(" ".join(post))
+    return _apply_prior_grouping(" ".join(parts), group)
 
 
 def _effect_summary_did(
