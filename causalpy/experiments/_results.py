@@ -37,6 +37,7 @@ __all__ = [
     "CoefficientResult",
     "DiscontinuityResult",
     "GroupComparisonScenario",
+    "HierarchicalDifferenceInDifferencesResult",
     "KinkResult",
     "ResultBundle",
     "StaggeredDifferenceInDifferencesResult",
@@ -104,6 +105,16 @@ class CoefficientResult:
 
 
 @dataclass(frozen=True)
+class HierarchicalDifferenceInDifferencesResult:
+    """Population effect, group deviations and diagnostics for hierarchical DiD."""
+
+    causal_impact: xr.DataArray
+    group_effects: xr.DataArray
+    y_pred_counterfactual: xr.DataArray | None
+    icc: xr.DataArray | None
+
+
+@dataclass(frozen=True)
 class DiscontinuityResult:
     """Result bundle for :class:`~causalpy.experiments.regression_discontinuity.RegressionDiscontinuity`."""
 
@@ -143,6 +154,7 @@ class StaggeredDifferenceInDifferencesResult:
 ResultBundle = (
     CausalResult
     | CoefficientResult
+    | HierarchicalDifferenceInDifferencesResult
     | DiscontinuityResult
     | KinkResult
     | StaggeredDifferenceInDifferencesResult
