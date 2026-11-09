@@ -159,6 +159,11 @@ rediraffe_redirects = {
     "notebooks/sc_skl": "notebooks/synthetic-control-sklearn",
     "notebooks/sdid_pymc": "notebooks/synthetic-difference-in-differences-pymc",
     "notebooks/staggered_did_pymc": "notebooks/staggered-difference-in-differences-pymc",
+    # Deleted knowledge-base model notes. Keys stay so the old RTD URLs redirect.
+    "knowledgebase/augmented-synthetic-control": "notebooks/augmented-synthetic-control-pymc",
+    "knowledgebase/bayesian_synthetic_control_known_truth_report": "notebooks/comparing-bayesian-synthetic-control-pymc",
+    "knowledgebase/comparing-bayesian-synthetic-control": "notebooks/comparing-bayesian-synthetic-control-pymc",
+    "knowledgebase/interactive-fixed-effects": "notebooks/interactive-fixed-effects-pymc",
 }
 rediraffe_branch = "main"
 rediraffe_auto_redirect_perc = 0
