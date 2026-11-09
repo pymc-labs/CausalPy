@@ -218,7 +218,7 @@ def _has_default_index(frame: pd.DataFrame) -> bool:
 
     Parameters
     ----------
-    frame : :class:`pandas.DataFrame`
+    frame : pandas.DataFrame
         The dataframe to inspect.
 
     Returns

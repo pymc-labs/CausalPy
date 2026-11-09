@@ -138,7 +138,7 @@ def hdi(
 
     Parameters
     ----------
-    data : :class:`xarray.DataArray` or :class:`numpy.ndarray`
+    data : xarray.DataArray or numpy.ndarray
         Posterior draws.
     prob : float, default=HDI_PROB
         Probability mass of the HDI.
@@ -175,7 +175,7 @@ def hdi_bounds(
 
     Parameters
     ----------
-    data : :class:`xarray.DataArray` or :class:`numpy.ndarray`
+    data : xarray.DataArray or numpy.ndarray
         Posterior draws.
     prob : float, default=HDI_PROB
         Probability mass of the HDI.
@@ -220,7 +220,7 @@ def hdi_bound_arrays(
 
     Parameters
     ----------
-    data : :class:`xarray.DataArray` or :class:`numpy.ndarray`
+    data : xarray.DataArray or numpy.ndarray
         Posterior draws.
     prob : float, default=HDI_PROB
         Probability mass of the HDI.

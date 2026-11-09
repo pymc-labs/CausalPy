@@ -50,7 +50,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         Any eager dataframe Narwhals supports. For a pandas dataframe the index
         carries the time axis. Dataframes from other libraries have no index,
         so those callers must pass ``time_column``.
-    treatment_time : int, float, or pd.Timestamp
+    treatment_time : int, float, or pandas.Timestamp
         The time when treatment occurred, in reference to the data index.
     control_units : list of str
         A list of control units to be used in the experiment.
@@ -388,9 +388,9 @@ class SyntheticControl(BaseExperiment[CausalResult]):
 
         Parameters
         ----------
-        data : pd.DataFrame
+        data : pandas.DataFrame
             The experiment data.
-        treatment_time : int, float, or pd.Timestamp
+        treatment_time : int, float, or pandas.Timestamp
             The treatment time, expected to be compatible with ``data.index``.
         """
         validate_treatment_time_against_index(data.index, treatment_time)
@@ -628,7 +628,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
 
         Returns
         -------
-        pd.DataFrame
+        :class:`pandas.DataFrame`
             Observed data with ``prediction`` and ``impact`` columns plus HDI
             bounds when draws are available. Not cached on the experiment.
             Observation columns follow a later write to ``self.data``.

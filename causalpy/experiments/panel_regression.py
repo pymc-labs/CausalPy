@@ -757,7 +757,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        pd.DataFrame
+        :class:`pandas.DataFrame`
             DataFrame with fitted values (and credible intervals when the
             model carries draws).
 

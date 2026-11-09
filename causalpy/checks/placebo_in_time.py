@@ -157,13 +157,13 @@ class PlaceboFoldResult:
         The shifted treatment time for this fold.
     experiment : BaseExperiment
         The fitted experiment for this fold.
-    cumulative_impact_samples : xr.DataArray
+    cumulative_impact_samples : xarray.DataArray
         Posterior samples of the cumulative (summed) impact for this fold.
     fold_mean : float
         Posterior mean of the cumulative impact.
     fold_sd : float
         Posterior standard deviation of the cumulative impact.
-    average_impact_samples : xr.DataArray or None, default None
+    average_impact_samples : xarray.DataArray or None, default None
         Posterior samples of the average impact across comparison observations, populated for descriptive runs. Cumulative fields retain their summed-impact meaning.
     """
 
@@ -370,7 +370,7 @@ class PlaceboInTime:
         sampling. It also seeds the hierarchical ``pm.sample`` call unless
         ``sample_kwargs["random_seed"]`` is explicitly supplied, which takes
         precedence for that call only.
-    intervention_length : int, float, ``pd.Timedelta`` or ``pd.DateOffset``, optional
+    intervention_length : int, float, ``pandas.Timedelta`` or ``pandas.DateOffset``, optional
         Length of each placebo intervention window, in index units.  When
         ``None`` (default) the length is derived from the experiment:
         ``treatment_end_time - treatment_time`` when the experiment defines
@@ -758,7 +758,7 @@ class PlaceboInTime:
 
         Parameters
         ----------
-        data : pd.DataFrame
+        data : pandas.DataFrame
             Full dataset (must have a sorted index).
         treatment_time : Any
             The actual treatment time.

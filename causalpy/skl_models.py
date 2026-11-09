@@ -42,11 +42,11 @@ class WeightedProportion(ScikitLearnAdaptor, LinearModel, RegressorMixin):
 
         Parameters
         ----------
-        W : :class:`numpy.ndarray`
+        W : numpy.ndarray
             Convex combination weights.
-        X : :class:`numpy.ndarray`
+        X : numpy.ndarray
             Donor matrix.
-        y : :class:`numpy.ndarray`
+        y : numpy.ndarray
             Treated unit outcomes in the pre-treatment period.
         """
         weights = np.ravel(W)
@@ -59,9 +59,9 @@ class WeightedProportion(ScikitLearnAdaptor, LinearModel, RegressorMixin):
 
         Parameters
         ----------
-        X : :class:`numpy.ndarray`
+        X : numpy.ndarray
             Donor matrix.
-        y : :class:`numpy.ndarray`
+        y : numpy.ndarray
             Treated unit outcomes in the pre-treatment period.
         """
         w_start = [1 / X.shape[1]] * X.shape[1]
@@ -81,7 +81,7 @@ class WeightedProportion(ScikitLearnAdaptor, LinearModel, RegressorMixin):
 
         Parameters
         ----------
-        X : :class:`numpy.ndarray`
+        X : numpy.ndarray
             Donor matrix to predict from.
         """
         return np.dot(X, self.coef_.T)

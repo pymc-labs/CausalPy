@@ -106,7 +106,7 @@ def has_posterior_draws(Y: xr.DataArray) -> bool:
 
     Parameters
     ----------
-    Y : :class:`xarray.DataArray`
+    Y : xarray.DataArray
         A canonical prediction container with ``chain`` and ``draw``
         dimensions.
     """
@@ -129,7 +129,7 @@ def round_num(n: float | xr.DataArray, round_to: int | None) -> str:
 
     Parameters
     ----------
-    n : float or :class:`xarray.DataArray`
+    n : float or xarray.DataArray
         Number to round. A zero-dimensional DataArray, as produced by
         ``.mean()`` on posterior samples, formats like the scalar it wraps.
     round_to : int, optional
@@ -169,7 +169,7 @@ def convert_to_string(x: float | xr.DataArray, round_to: int | None = 2) -> str:
 
     Parameters
     ----------
-    x : float or :class:`xarray.DataArray`
+    x : float or xarray.DataArray
         The numeric value or xarray DataArray to convert.
     round_to : int, optional
         Number of significant figures to round to. Defaults to 2.
@@ -268,9 +268,9 @@ def check_convex_hull_violation(
 
     Parameters
     ----------
-    treated_series : :class:`numpy.ndarray` or :class:`xarray.DataArray`
+    treated_series : numpy.ndarray or xarray.DataArray
         1D array of treated unit values (shape: n_timepoints)
-    control_matrix : :class:`numpy.ndarray` or :class:`xarray.DataArray`
+    control_matrix : numpy.ndarray or xarray.DataArray
         2D array of control unit values (shape: n_timepoints x n_controls)
 
     Returns
@@ -331,7 +331,7 @@ def plot_correlations(
 
     Parameters
     ----------
-    data : :class:`pandas.DataFrame`
+    data : pandas.DataFrame
         Wide-format panel data with time as the index and locations/units as columns.
     columns : list[str], optional
         Subset of columns to include. If ``None``, all numeric columns are used.

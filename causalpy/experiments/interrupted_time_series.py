@@ -87,9 +87,9 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         DatetimeIndex or numeric (integer/float), with unique values in
         monotonically increasing order. Dataframes from other libraries have no
         index, so those callers must pass ``time_column``.
-    treatment_time : Union[int, float, pd.Timestamp]
+    treatment_time : Union[int, float, pandas.Timestamp]
         The time when treatment occurred, should be in reference to the data index.
-        Must match the index type (DatetimeIndex requires pd.Timestamp).
+        Must match the index type (DatetimeIndex requires :class:`pandas.Timestamp`).
         **INCLUSIVE**: Observations at exactly ``treatment_time`` are included in the
         post-intervention period (uses ``>=`` comparison).
     formula : str
@@ -101,7 +101,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         ``pymc_forecast`` forecasting model can serve as the counterfactual
         backend (requires the optional ``pymc-forecast`` dependency); see
         :mod:`causalpy.pymc_forecast_models` for when to prefer it.
-    treatment_end_time : Union[int, float, pd.Timestamp], optional
+    treatment_end_time : Union[int, float, pandas.Timestamp], optional
         The time when treatment ended, enabling three-period analysis. Must be
         greater than ``treatment_time`` and within the data range. If None (default),
         the analysis assumes a permanent intervention (two-period design).
@@ -341,11 +341,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
         Parameters
         ----------
-        data : pd.DataFrame
+        data : pandas.DataFrame
             The experiment data.
-        treatment_time : int, float, or pd.Timestamp
+        treatment_time : int, float, or pandas.Timestamp
             Start of the treatment period.
-        treatment_end_time : int, float, pd.Timestamp, or None, default None
+        treatment_end_time : int, float, pandas.Timestamp, or None, default None
             Optional end of the treatment period for three-period designs.
         """
         if not data.index.is_unique or not data.index.is_monotonic_increasing:
@@ -1029,7 +1029,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
         Returns
         -------
-        pd.DataFrame
+        :class:`pandas.DataFrame`
             Observed data with ``prediction`` and ``impact`` columns plus HDI
             bounds when draws are available. Not cached on the experiment.
         """

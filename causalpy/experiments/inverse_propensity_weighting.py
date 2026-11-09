@@ -249,7 +249,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[pd.Series, pd.Series, int, int]
+        tuple[:class:`pandas.Series`, :class:`pandas.Series`, int, int]
             A tuple of ``(weighted_outcome0, weighted_outcome1, n_ntrt, n_trt)``
             where the weighted outcomes are the IPW-adjusted outcome values for the
             control and treated groups, and ``n_ntrt`` / ``n_trt`` are the
@@ -289,7 +289,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[pd.Series, pd.Series, int, int]
+        tuple[:class:`pandas.Series`, :class:`pandas.Series`, int, int]
             A tuple of ``(weighted_outcome0, weighted_outcome1, n_ntrt, n_trt)``
             where the weighted outcomes are the IPW-adjusted outcome values for the
             control and treated groups.  ``n_ntrt`` and ``n_trt`` are both equal
@@ -330,7 +330,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[pd.Series, pd.Series, pd.Series, pd.Series]
+        tuple[:class:`pandas.Series`, :class:`pandas.Series`, :class:`pandas.Series`, :class:`pandas.Series`]
             A tuple of ``(weighted_outcome0, weighted_outcome1, n_ntrt, n_trt)``
             where the weighted outcomes and normalisation terms are all
             ``pd.Series`` (unlike the raw/robust schemes which return integer
@@ -373,7 +373,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[pd.Series, pd.Series, None, None]
+        tuple[:class:`pandas.Series`, :class:`pandas.Series`, None, None]
             A tuple of ``(weighted_outcome0, weighted_outcome1, None, None)``.
             The two ``None`` values are returned for interface consistency with
             the other adjustment methods; no explicit group sizes are needed
@@ -529,7 +529,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         ----------
         i : int
             Index of the posterior sample to process.
-        idata : xr.DataTree
+        idata : xarray.DataTree
             DataTree containing the posterior samples.
         method : str, optional
             Weighting scheme to use. One of 'robust', 'raw', 'overlap',
@@ -628,7 +628,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
 
         Parameters
         ----------
-        idata : xr.DataTree | None, optional
+        idata : xarray.DataTree | None, optional
             DataTree with posterior propensity-score samples. If ``None``,
             uses the fitted model backend's DataTree.
         method : str | None, optional
@@ -848,7 +848,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         covariate : str
             Name of the covariate column (must be one of the model's design
             matrix labels) to check for balance.
-        idata : xr.DataTree | None, optional
+        idata : xarray.DataTree | None, optional
             DataTree with posterior propensity-score samples. If ``None``,
             uses the fitted model backend's DataTree.
         weighting_scheme : str | None, optional

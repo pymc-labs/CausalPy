@@ -119,7 +119,7 @@ class SpikeAndSlabPrior:
 
         Returns
         -------
-        pm.Deterministic
+        :class:`pymc.Deterministic`
             Coefficient vector with spike-and-slab prior
         """
         # Selection probability using Prior class
@@ -199,7 +199,7 @@ class HorseshoePrior:
 
         Returns
         -------
-        pm.Deterministic
+        :class:`pymc.Deterministic`
             Coefficient vector with horseshoe prior
         """
         # Global shrinkage using Prior class
@@ -523,7 +523,7 @@ class VariableSelectionPrior:
 
         Parameters
         ----------
-        idata : :class:`xarray.DataTree`
+        idata : xarray.DataTree
             Fitted model data tree
         param_name : str
             Name of the coefficient parameter (must match name in create_prior)
@@ -582,7 +582,7 @@ class VariableSelectionPrior:
 
         Parameters
         ----------
-        idata : :class:`xarray.DataTree`
+        idata : xarray.DataTree
             Fitted model data tree
         param_name : str
             Name of the coefficient parameter

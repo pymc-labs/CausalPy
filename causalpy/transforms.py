@@ -117,7 +117,7 @@ class StepTransform:
         ----------
         x : array-like
             Time values (numeric or datetime).
-        threshold : int, float, str, or :class:`pandas.Timestamp`
+        threshold : int, float, str, or pandas.Timestamp
             The intervention time. For datetime ``x`` it may be a string
             like ``'2020-01-01'`` or a :class:`pd.Timestamp`.
         """
@@ -145,7 +145,7 @@ class StepTransform:
         ----------
         x : array-like
             Time values (numeric or datetime).
-        threshold : int, float, str, or :class:`pandas.Timestamp`
+        threshold : int, float, str, or pandas.Timestamp
             The intervention time, in the same domain as ``x``.
 
         Returns
@@ -234,7 +234,7 @@ class RampTransform:
         ----------
         x : array-like
             Time values (numeric or datetime).
-        threshold : int, float, str, or :class:`pandas.Timestamp`
+        threshold : int, float, str, or pandas.Timestamp
             The intervention time. For datetime ``x`` it may be a string
             like ``'2020-01-01'`` or a :class:`pd.Timestamp`.
         """
@@ -261,7 +261,7 @@ class RampTransform:
         ----------
         x : array-like
             Time values (numeric or datetime).
-        threshold : int, float, str, or :class:`pandas.Timestamp`
+        threshold : int, float, str, or pandas.Timestamp
             The intervention time, in the same domain as ``x``.
 
         Returns

@@ -116,7 +116,7 @@ def load_data(dataset: str) -> pd.DataFrame:
 
     Returns
     -------
-    pd.DataFrame
+    :class:`pandas.DataFrame`
         The requested dataset as a pandas DataFrame.
 
     Raises

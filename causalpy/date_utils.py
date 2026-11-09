@@ -39,9 +39,9 @@ def validate_treatment_time_against_index(
 
     Parameters
     ----------
-    index : :class:`pandas.Index`
+    index : pandas.Index
         The index the boundary will be compared against.
-    treatment_time : int, float, or :class:`pandas.Timestamp`
+    treatment_time : int, float, or pandas.Timestamp
         The treatment boundary to validate.
     name : str, default "treatment_time"
         Name used in error messages, e.g. ``"treatment_end_time"``.
@@ -78,9 +78,9 @@ def _combine_datetime_indices(
 
     Parameters
     ----------
-    index1 : :class:`pandas.DatetimeIndex`
+    index1 : pandas.DatetimeIndex
         First datetime index
-    index2 : :class:`pandas.DatetimeIndex`
+    index2 : pandas.DatetimeIndex
         Second datetime index
 
     Returns
@@ -103,7 +103,7 @@ def format_date_axis(
     ----------
     ax : plt.Axes
         Matplotlib axes object to format
-    date_index : :class:`pandas.DatetimeIndex`
+    date_index : pandas.DatetimeIndex
         The datetime index being plotted on the x-axis
     maxticks : int
         Maximum number of ticks to display (default 8)
@@ -131,7 +131,7 @@ def format_date_axes(axes: list[plt.Axes], date_index: pd.DatetimeIndex) -> None
     ----------
     axes : list of plt.Axes
         List of matplotlib axes objects to format
-    date_index : :class:`pandas.DatetimeIndex`
+    date_index : pandas.DatetimeIndex
         The datetime index being plotted on the x-axis
     """
     if len(axes) == 0:

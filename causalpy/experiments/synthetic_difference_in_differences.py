@@ -315,9 +315,9 @@ class SyntheticDifferenceInDifferences(
 
         Returns
         -------
-        X : dict of str to xr.DataArray
+        X : dict of str to xarray.DataArray
             ``{"unit": X_unit, "time": X_time}`` design matrices.
-        y : dict of str to xr.DataArray
+        y : dict of str to xarray.DataArray
             ``{"unit": y_unit, "time": y_time}`` response arrays.
         coords : dict
             Coordinates passed to PyMC during model construction.
@@ -460,7 +460,7 @@ class SyntheticDifferenceInDifferences(
 
         Returns
         -------
-        xr.DataArray
+        :class:`xarray.DataArray`
             Posterior samples of tau with dims ``(chain, draw)``.
         """
         gaps_post_mean = gaps[..., T_pre:].mean(axis=-1)
@@ -511,7 +511,7 @@ class SyntheticDifferenceInDifferences(
             Number of MCMC chains.
         n_draws : int
             Number of draws per chain.
-        tau_posterior : xr.DataArray
+        tau_posterior : xarray.DataArray
             Analytic double-difference ATT draws with dims ``(chain, draw)``.
 
         Returns
@@ -587,7 +587,7 @@ class SyntheticDifferenceInDifferences(
         ----------
         mu_vals : np.ndarray
             Array of shape (chain, draw, T) with the mean predictions.
-        index : pd.Index
+        index : pandas.Index
             Time index for the obs_ind coordinate.
         n_chains : int
             Number of MCMC chains.
@@ -596,7 +596,7 @@ class SyntheticDifferenceInDifferences(
 
         Returns
         -------
-        xr.DataArray
+        :class:`xarray.DataArray`
             Predictions with dims ``(chain, draw, obs_ind, treated_units)``.
         """
         n_treated = len(self.treated_units)
