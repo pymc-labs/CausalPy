@@ -1,7 +1,7 @@
 # Source of truth for docs/source/notebooks/index.md.
 # Regenerate with: python scripts/generate_gallery.py
 
-title: How-to
+title: Example gallery
 description: >-
   Example gallery of causal inference methods in Python: synthetic control,
   difference-in-differences, interrupted time series, regression discontinuity,
