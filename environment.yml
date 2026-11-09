@@ -29,7 +29,7 @@ dependencies:
   - pandas<4,>=2.3
   - papermill
   - patsy
-  - plotnine>=0.15.7
+  - plotnine>=0.15.9
   - polars
   - prek
   - pyarrow
