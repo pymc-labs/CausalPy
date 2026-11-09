@@ -1,0 +1,28 @@
+causalpy/tests/known_truth_report.py
+  h_63db634213747e 14,16,35-36,61-65,117,120,122
+causalpy/tests/test_bayesian_sc_comparison_note.py
+  h_63db634213747e 14,26,31-39,51-57,61
+causalpy/tests/test_known_truth_report.py
+  h_63db634213747e 14,16-17
+docs/source/conf.py
+  h_63db634213747e 162-166
+docs/source/knowledgebase/estimands.md
+  h_63db634213747e 134-135
+docs/source/notebooks/augmented-synthetic-control-pymc.ipynb
+  h_63db634213747e 10
+docs/source/notebooks/comparing-bayesian-synthetic-control-pymc.ipynb
+  h_63db634213747e 12,115,117,308-318,363,365
+docs/source/notebooks/interactive-fixed-effects-pymc.ipynb
+  h_63db634213747e 10,12-14,16-18
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4109b52ab2c6cc0b51a06caadbf22953ff484bb0",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
