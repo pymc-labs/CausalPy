@@ -1,0 +1,18 @@
+.github/dependabot.yml
+  h_63db634213747e 31-35
+pyproject.toml
+  h_63db634213747e 157
+uv.lock
+  h_63db634213747e 474-475,523-524,601,604,681,1435-1436,2514-2515,2800-2801,3358-3416,3421-3434,3436-3438,3688-3689,3711-3712,4219-4220,4431-4439,4898-4899,5265-5266,5785-5786
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "fcfdfdc6c708b594002c2588d8e8eb47c17de799",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
