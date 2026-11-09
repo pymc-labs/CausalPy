@@ -52,7 +52,7 @@ dependencies = [
     "packaging",
     "pandas<4,>=2.3",
     "patsy",
-    "plotnine>=0.15.7",
+    "plotnine>=0.15.9",
     "polars",
     # Keep these public major-version ranges broad. PyMC metadata supplies compatible PyTensor patch-level ranges, so base installs may select newer PyMC/PyTensor minors.
     # The docs-only PyMC-Marketing pin in docs/requirements.txt has its own narrower resolver constraints; it does not restrict normal runtime installs.
