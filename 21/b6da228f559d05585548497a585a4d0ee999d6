@@ -1,0 +1,22 @@
+causalpy/tests/test_integration_its_new_timeseries.py
+  h_63db634213747e 297
+causalpy/tests/test_migration_baseline_harness.py
+  h_63db634213747e 1155-1156
+causalpy/tests/test_pymc_forecast_adapter.py
+  h_63db634213747e 44-47
+causalpy/tests/test_timeseries_model_coverage.py
+  h_63db634213747e 86,162,164-167,190,192-195
+causalpy/tests/test_up_down_geolift.py
+  h_63db634213747e 105,165,188-198,200,233-234,247,353-356,378-379,394-395
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "21b6da228f559d05585548497a585a4d0ee999d6",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
