@@ -1,0 +1,14 @@
+causalpy/tests/test_integration_pymc_examples.py
+  h_63db634213747e 1326-1345
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d115070380171ecdef7e907a701fbcf8d73b5c16",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
