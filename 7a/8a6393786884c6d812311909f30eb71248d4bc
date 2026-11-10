@@ -1,0 +1,21 @@
+causalpy/tests/test_generate_report.py
+  s_1a0d1c4039c693::t_3f9c069cd9bc7d 35,225-251,260,293
+causalpy/tests/test_reporting.py
+  s_1a0d1c4039c693::t_cfdf465a6f6821 136-137,139-152,157,169-170,173,178,183-185,203-211,213-216,266-268,339,382,423,451-453,460-466,468-481,483-491,493,495-498,501-503,505,507-511,515-519,521-522,526-529,1605-1607,1648,1668-1670,1927,1954-1956
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "7a8a6393786884c6d812311909f30eb71248d4bc",
+  "prompts": {},
+  "sessions": {
+    "s_1a0d1c4039c693": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a239-dfbb-7822-be87-808d475a4476",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
