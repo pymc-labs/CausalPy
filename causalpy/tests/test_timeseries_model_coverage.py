@@ -359,8 +359,11 @@ class TestStateSpaceTimeSeriesCoverage:
                 sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
             )
 
-    def test_backwards_compatibility_coords_datetime_index(self, sample_data):
+    def test_backwards_compatibility_coords_datetime_index(
+        self, sample_data, mock_pymc_sample
+    ):
         """Test backwards compatibility with coords['datetime_index']."""
+        # Not a recovery: mock_pymc_sample keeps this fit off the PR NUTS path.
         y_da = sample_data
         dates = pd.DatetimeIndex(y_da.coords["obs_ind"].values)
 
@@ -384,8 +387,11 @@ class TestStateSpaceTimeSeriesCoverage:
         idata = model.fit(y=y_old_api, coords=coords)
         assert idata is not None
 
-    def test_coords_datetime_index_not_datetimeindex(self, sample_data):
+    def test_coords_datetime_index_not_datetimeindex(
+        self, sample_data, mock_pymc_sample
+    ):
         """Test error when coords['datetime_index'] is not a DatetimeIndex."""
+        # Not a recovery: mock_pymc_sample keeps this fit off the PR NUTS path.
         y_da = sample_data
         n_obs = len(y_da)
 
@@ -533,8 +539,9 @@ class TestStateSpaceTimeSeriesCoverage:
         ].values.tolist() == [0]
         assert "unit_0_r2" in score
 
-    def test_fit_y_none(self):
+    def test_fit_y_none(self, mock_pymc_sample):
         """Test error when y is None in fit."""
+        # Not a recovery: mock_pymc_sample keeps this fit off the PR NUTS path.
         model = cp.pymc_models.StateSpaceTimeSeries(
             sample_kwargs={"draws": 10, "tune": 10, "progressbar": False}
         )
@@ -701,8 +708,9 @@ class TestStateSpaceTimeSeriesCoverage:
         with pytest.warns(UserWarning, match="Dropping the 'Intercept' column"):
             assert model._extract_exog_names(make_X(["Intercept", "x1"])) == ["x1"]
 
-    def test_predict_missing_exog_columns(self, sample_data):
+    def test_predict_missing_exog_columns(self, sample_data, mock_pymc_sample):
         """Predicting out of sample without the fit-time covariates raises."""
+        # Not a recovery: mock_pymc_sample keeps this fit off the PR NUTS path.
         y_da = sample_data
         n = len(y_da)
         X = xr.DataArray(
@@ -1014,8 +1022,9 @@ class TestStateSpaceTimeSeriesCoverage:
         with pytest.raises(RuntimeError, match="already built"):
             model.build_model(y=sample_data)
 
-    def test_predict_out_of_sample_x_none(self, sample_data):
+    def test_predict_out_of_sample_x_none(self, sample_data, mock_pymc_sample):
         """Test error when X is None for out-of-sample predictions."""
+        # Not a recovery: mock_pymc_sample keeps this fit off the PR NUTS path.
         y_da = sample_data
 
         model = cp.pymc_models.StateSpaceTimeSeries(
@@ -1039,8 +1048,9 @@ class TestStateSpaceTimeSeriesCoverage:
         ):
             model.predict(X=None, out_of_sample=True)
 
-    def test_predict_out_of_sample_x_no_coords(self, sample_data):
+    def test_predict_out_of_sample_x_no_coords(self, sample_data, mock_pymc_sample):
         """Test error when X lacks coords for out-of-sample predictions."""
+        # Not a recovery: mock_pymc_sample keeps this fit off the PR NUTS path.
         y_da = sample_data
 
         model = cp.pymc_models.StateSpaceTimeSeries(
@@ -1067,8 +1077,9 @@ class TestStateSpaceTimeSeriesCoverage:
         ):
             model.predict(X=X_no_coords, out_of_sample=True)
 
-    def test_score_y_none(self, sample_data):
+    def test_score_y_none(self, sample_data, mock_pymc_sample):
         """Test error when y is None in score."""
+        # Not a recovery: mock_pymc_sample keeps this fit off the PR NUTS path.
         y_da = sample_data
 
         model = cp.pymc_models.StateSpaceTimeSeries(
@@ -1242,7 +1253,7 @@ class TestTimeSeriesModelCloneIsUnfitted:
         assert cloned is not original
         assert cloned.idata is None
 
-    def test_clone_after_fit_does_not_inherit_idata(self):
+    def test_clone_after_fit_does_not_inherit_idata(self, mock_pymc_sample):
         """Cloning a fitted model still produces a fresh, unfitted instance.
 
         Uses ``LinearRegression`` (the cheapest fittable PyMC model) to
@@ -1250,6 +1261,7 @@ class TestTimeSeriesModelCloneIsUnfitted:
         asserts the cloned model has no posterior and that the original's
         ``idata`` is untouched after the clone.
         """
+        # Not a recovery: mock_pymc_sample keeps this fit off the PR NUTS path.
         rng = np.random.default_rng(0)
         n = 30
         X = xr.DataArray(
