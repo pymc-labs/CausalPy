@@ -66,7 +66,14 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
 
     **Estimate extraction**
 
-    Fitting produces posterior propensity-score draws. ``get_ate()`` post-processes one draw at a time: ``"raw"`` and ``"robust"`` contrast inverse-probability-weighted mean outcomes for the treated and control potential outcomes, ``"overlap"`` contrasts overlap-weighted means for the overlap population, and ``"doubly_robust"`` augments inverse-probability weighting with separate OLS outcome regressions before averaging over all observations.
+    Fitting produces posterior propensity-score draws. ``get_ate()``
+    post-processes one draw at a time: ``"raw"`` and ``"robust"`` contrast
+    inverse-probability-weighted mean outcomes for the treated and control
+    potential outcomes, ``"overlap"`` contrasts overlap-weighted means for
+    the overlap population, and ``"doubly_robust"`` augments
+    inverse-probability weighting with separate OLS outcome regressions
+    before averaging over all observations. An unrecognized ``method`` raises
+    ``ValueError`` instead of silently returning the doubly-robust contrast.
 
     Examples
     --------
@@ -533,7 +540,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
             DataTree containing the posterior samples.
         method : str, optional
             Weighting scheme to use. One of 'robust', 'raw', 'overlap',
-            or 'doubly_robust'. Defaults to 'doubly_robust'.
+            or 'doubly_robust'. Defaults to 'doubly_robust'. An unknown value raises ``ValueError``.
 
         Returns
         -------
@@ -544,6 +551,11 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
             - trt: Weighted mean outcome for treated group
             - ntrt: Weighted mean outcome for non-treated group
         """
+        if method not in ("robust", "raw", "overlap", "doubly_robust"):
+            raise ValueError(
+                "method must be one of 'robust', 'raw', 'overlap', or "
+                f"'doubly_robust', got {method!r}."
+            )
         # IPW estimand is computed per-draw from propensity draws;
         # posterior-only helpers.
         self._resolve_group("posterior")
@@ -556,8 +568,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
             "doubly_robust": self._compute_ate_doubly_robust,
         }
 
-        compute_fn = ate_methods.get(method, self._compute_ate_doubly_robust)
-        ate, trt, ntrt = compute_fn(ps)
+        ate, trt, ntrt = ate_methods[method](ps)
 
         return [ate, trt, ntrt]
 
