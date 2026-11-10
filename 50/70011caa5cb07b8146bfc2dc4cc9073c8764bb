@@ -1,0 +1,19 @@
+causalpy/tests/test_regression_kink_gradient.py
+  s_1a0d1c4039c693::t_a00ba5aea991ef 1-140
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "5070011caa5cb07b8146bfc2dc4cc9073c8764bb",
+  "prompts": {},
+  "sessions": {
+    "s_1a0d1c4039c693": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a239-dfbb-7822-be87-808d475a4476",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
