@@ -282,12 +282,10 @@ def test_run_handles_failed_formula(mock_pymc_sample, its_context):
     missing column, e.g. ``"missing_col ~ 1 + t"``) would be preferable
     here, but under Python 3.13 it exposes a patsy traceback/pytest
     interaction bug (``INTERNALERROR`` from ``KeyError`` in
-    ``patsy.eval``).  See also the skipped tests in
-    ``test_piecewise_its.py`` (``test_transforms_with_patsy_dmatrix``
-    and ``test_transforms_with_patsy_datetime``) that hit the same
-    upstream bug.  Upstream fix is partially in patsy 1.0.1+; once the
-    remaining 3.13 issues land, swap this test to use a
-    missing-column formula which is the commoner real-world mistake.
+    ``patsy.eval``). This test therefore uses a syntax error instead.
+    Upstream fix is partially in patsy 1.0.1+; once the remaining 3.13
+    issues land, swap this test to use a missing-column formula, which
+    is the commoner real-world mistake.
     """
     _, experiment, context = its_context
 
