@@ -244,9 +244,12 @@ def test_ols_html_report_contains_known_relative_effect(mock_pymc_sample):
     ctx.experiment = cited
     ctx.effect_summary = stats
     rendered = GenerateReport(include_plots=False).run(ctx)
-    # Independently formatted prose, not the post-index label "20 to 29" or "200.00%".
+    # Prose formats only the average relative change as ``20.00%``. The
+    # cumulative cell is the table token ``<td>20.0</td>``; summing per-period
+    # percentages emits ``<td>200.0</td>``, which ``20.00%`` does not reject.
     assert "20.00%" in rendered.report
-    assert "200.00%" not in rendered.report
+    assert "<td>20.0</td>" in rendered.report
+    assert "<td>200.0</td>" not in rendered.report
 
 
 # ---------------------------------------------------------------------------
