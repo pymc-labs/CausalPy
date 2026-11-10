@@ -610,24 +610,17 @@ def test_summary_ols_dummies_correct_coefficients(small_panel_data, capsys):
     result.summary()
     captured = capsys.readouterr().out
 
-    # The treatment coefficient from the OLS fit should be ~2.0 (true DGP value)
-    treatment_idx = result.labels.index("treatment")
-    true_coef = result.model.get_coeffs()[treatment_idx]
-
-    # The printed output should contain a value close to the true coefficient,
-    # not the value of some FE dummy.  Values are rounded to 2 significant
-    # figures by default so we allow tolerance for that.
-    assert "treatment" in captured
-    # Parse the treatment line and check the value is correct
+    # small_panel_data plants ``2.0 * treatment``. The printed treatment
+    # coefficient must match that DGP. A missing line must fail; do not
+    # compare ``get_coeffs()`` to the same print.
+    planted_treatment = 2.0
     for line in captured.splitlines():
         if "treatment" in line and "C(" not in line:
-            # Extract the numeric value from the line
-            parts = line.split()
-            value = float(parts[-1])
-            assert abs(value - true_coef) < 0.1, (
-                f"Printed value {value} does not match true coefficient {true_coef}"
-            )
+            printed = float(line.split()[-1])
+            assert printed == pytest.approx(planted_treatment, abs=0.1)
             break
+    else:
+        raise AssertionError("summary() did not print a treatment coefficient line")
 
 
 def test_effect_summary_raises(small_panel_data):

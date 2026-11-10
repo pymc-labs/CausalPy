@@ -177,25 +177,15 @@ def test_maketables_depvar_fallback_for_ipw():
 
 @pytest.mark.integration
 def test_maketables_hdi_prob_user_control_smoke(mock_pymc_sample):
-    """Live DiD smoke: HDI option is accepted; numeric oracle lives in the unit test.
-
-    Full PyMC DiD construction may raise DataTree errors until #1042 lands; those
-    failures are external to the maketables HDI port and are isolated here.
-    """
+    """Live DiD smoke: HDI option is accepted; numeric oracle lives in the unit test."""
     df = cp.load_data("did")
-    try:
-        result = cp.DifferenceInDifferences(
-            df,
-            formula="y ~ 1 + group * post_treatment",
-            time_variable_name="t",
-            group_variable_name="group",
-            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-        ).fit()
-    except (AttributeError, TypeError) as exc:
-        message = str(exc)
-        if "DataTree" in message or "extend" in message:
-            pytest.xfail(f"Blocked by DataTree migration (#1042): {exc}")
-        raise
+    result = cp.DifferenceInDifferences(
+        df,
+        formula="y ~ 1 + group * post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+    ).fit()
 
     result.set_maketables_options(hdi_prob=0.8)
     table = result.__maketables_coef_table__
