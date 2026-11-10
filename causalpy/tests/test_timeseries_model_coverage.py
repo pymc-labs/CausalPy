@@ -42,14 +42,6 @@ class MockComponentNoApply:
 class TestBayesianBasisExpansionTimeSeriesCoverage:
     """Test uncovered branches in BayesianBasisExpansionTimeSeries."""
 
-    @pytest.fixture(autouse=True)
-    def _skip_if_no_pymc_marketing(self):
-        """Skip entire class when pymc-marketing not installed (needed for default BSTS components)."""
-        pytest.importorskip(
-            "pymc_marketing",
-            reason="pymc-marketing optional for default BSTS components",
-        )
-
     @pytest.fixture
     def sample_data(self):
         """Create sample time series data."""
@@ -91,7 +83,7 @@ class TestBayesianBasisExpansionTimeSeriesCoverage:
                 sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
             )
 
-    def test_custom_components_with_apply_method(self, sample_data):
+    def test_custom_components_with_apply_method(self, sample_data, mock_pymc_sample):
         """Test that custom components with apply method work."""
         X_da, y_da = sample_data
 
@@ -167,11 +159,14 @@ class TestBayesianBasisExpansionTimeSeriesCoverage:
         ):
             model._prepare_time_and_exog_features(X_bad)
 
-    def test_data_setter_error_x_mismatch(self, sample_data):
+    def test_data_setter_error_x_mismatch(self, sample_data, mock_pymc_sample):
         """Test error when X exog var names don't match between fit and predict."""
+        pytest.importorskip(
+            "pymc_marketing",
+            reason="pymc-marketing optional for default BSTS components",
+        )
         X_da, y_da = sample_data
 
-        # Fit model without exogenous variables (empty X)
         model = cp.pymc_models.BayesianBasisExpansionTimeSeries(
             sample_kwargs={"draws": 10, "tune": 10, "chains": 1, "progressbar": False}
         )
@@ -192,8 +187,12 @@ class TestBayesianBasisExpansionTimeSeriesCoverage:
         ):
             model.predict(X_with_exog)
 
-    def test_data_setter_error_missing_exog_vars(self, sample_data):
+    def test_data_setter_error_missing_exog_vars(self, sample_data, mock_pymc_sample):
         """Test error when model expects exog vars but prediction X doesn't provide them."""
+        pytest.importorskip(
+            "pymc_marketing",
+            reason="pymc-marketing optional for default BSTS components",
+        )
         X_da, y_da = sample_data
         dates = X_da.coords["obs_ind"].values
 

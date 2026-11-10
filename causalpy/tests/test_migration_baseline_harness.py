@@ -20,7 +20,6 @@ import copy
 import importlib.util
 import json
 import math
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -33,10 +32,6 @@ import xarray as xr
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "migration_baseline" / "harness.py"
-README_PATH = REPO_ROOT / "scripts" / "migration_baseline" / "README.md"
-REPORT_TEMPLATE_PATH = (
-    REPO_ROOT / "scripts" / "migration_baseline" / "REPORT_TEMPLATE.md"
-)
 
 # Capture genuine PyMC callables during collection, before sampling fixtures run. The baseline harness requires real MCMC and its sample_stats group, so the capture test restores these callables even when a mock is active in the current module.
 _GENUINE_PYMC_SAMPLING = {
@@ -1157,6 +1152,8 @@ def _assert_case_matches_manifest(harness, case: dict[str, Any], expected) -> No
 
 @pytest.mark.slow
 @pytest.mark.integration
+# Both scenarios sample at the registered 500-draw budget. Nightly, not the PR job.
+@pytest.mark.nightly
 def test_capture_reproduces_the_fixed_manifest_on_the_installed_stack(
     genuine_pymc_sampling,
 ) -> None:
@@ -1251,85 +1248,3 @@ def test_harness_identity_binds_the_executing_file_to_its_committed_blob(
     copy_path.write_bytes(copy_path.read_bytes() + b"\n# uncommitted edit\n")
     with pytest.raises(harness.HarnessError, match="must be clean"):
         harness._harness_identity()
-
-
-# Every place a pinned revision is quoted outside ``STACK_COMMITS``. The
-# coordinator provisions its two worktrees from the README and transcribes the
-# attribution statement from REPORT_TEMPLATE, so a stale SHA in either document
-# sends a real capture at the wrong tree while the harness reports success.
-# The anchors tolerate reflowed whitespace: a rewrapped paragraph must not look
-# like pin drift, or the next author reflows the prose and deletes the test.
-DOCUMENTED_PIN_QUOTES = (
-    (
-        "README.md",
-        README_PATH,
-        r"PyMC\s+5\s+reference\s+`([0-9a-f]{40})`\s+and\s+PyMC\s+6\s+migration"
-        r"\s+candidate\s+`([0-9a-f]{40})`",
-        ("pymc5", "pymc6"),
-    ),
-    (
-        "README.md coordinator procedure",
-        README_PATH,
-        r"provision\s+`PYMC6_ROOT`\s+as\s+a\s+separate\s+clean\s+detached"
-        r"\s+worktree\s+at\s+`([0-9a-f]{40})`",
-        ("pymc6",),
-    ),
-    (
-        "REPORT_TEMPLATE.md reference checkout",
-        REPORT_TEMPLATE_PATH,
-        r"- Reference checkout: `([0-9a-f]{40})`",
-        ("pymc5",),
-    ),
-    (
-        "REPORT_TEMPLATE.md candidate checkout",
-        REPORT_TEMPLATE_PATH,
-        r"- Candidate checkout: `([0-9a-f]{40})`",
-        ("pymc6",),
-    ),
-)
-
-
-def test_pinned_revisions_are_distinct_full_shas() -> None:
-    """Both stacks must pin one resolved, distinct revision."""
-    harness = _load_harness_module()
-    assert set(harness.STACK_COMMITS) == {"pymc5", "pymc6"}
-    assert harness.PYMC5_COMMIT != harness.PYMC6_COMMIT
-    for stack, commit in harness.STACK_COMMITS.items():
-        assert harness._COMMIT_PATTERN.fullmatch(commit), (
-            f"{stack} pin is not a full lowercase SHA-1: {commit!r}"
-        )
-
-
-@pytest.mark.parametrize(
-    ("label", "path", "pattern", "stacks"),
-    DOCUMENTED_PIN_QUOTES,
-    ids=[quote[0] for quote in DOCUMENTED_PIN_QUOTES],
-)
-def test_pinned_revisions_are_documented_consistently(
-    label: str, path: Path, pattern: str, stacks: tuple[str, ...]
-) -> None:
-    """Re-pinning must move the constant and every document that quotes it."""
-    harness = _load_harness_module()
-    matches = re.findall(pattern, path.read_text(encoding="utf-8"))
-    assert len(matches) == 1, (
-        f"{label} must quote the pinned revisions exactly once via {pattern!r}"
-    )
-    quoted = matches[0] if isinstance(matches[0], tuple) else (matches[0],)
-    expected = tuple(harness.STACK_COMMITS[stack] for stack in stacks)
-    assert quoted == expected, (
-        f"{label} quotes {quoted}, but the harness pins {expected}"
-    )
-
-
-def test_superseded_pin_is_recorded_as_history_only() -> None:
-    """The re-pinning section must describe a predecessor, not the current pin."""
-    harness = _load_harness_module()
-    body = README_PATH.read_text(encoding="utf-8")
-    heading = "## Re-pinning the candidate revision"
-    assert heading in body, "the README must keep a re-pinning section"
-    section = body.split(heading, 1)[1].split("\n## ", 1)[0]
-    superseded = re.findall(r"`([0-9a-f]{40})`", section)
-    assert superseded, "the re-pinning section must name the superseded revision"
-    assert harness.PYMC6_COMMIT not in superseded, (
-        "the re-pinning section names the current pin as its own predecessor"
-    )

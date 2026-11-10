@@ -41,6 +41,10 @@ if not SpecifierSet(">=0.3,<0.4").contains(
 ):
     pytest.skip("requires pymc-forecast>=0.3,<0.4", allow_module_level=True)
 
+# Genuine pm.sample is autouse for this module, including the fast path.
+# Marking one recovery would leave the other fits on the PR job.
+pytestmark = pytest.mark.correctness
+
 
 @pytest.fixture(scope="module", autouse=True)
 def real_pymc_sampling():

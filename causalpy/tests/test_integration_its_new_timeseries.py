@@ -294,6 +294,7 @@ def test_its_with_state_space_covariates(mock_pymc_sample):
 
 
 @pytest.mark.integration
+@pytest.mark.nightly
 def test_its_with_state_space_variable_selection(mock_pymc_sample):
     """ITS + StateSpaceTimeSeries with spike-and-slab covariate selection.
 

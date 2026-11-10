@@ -102,6 +102,7 @@ def test_up_down_simulator_rejects_invalid_design(settings, message):
 
 
 @pytest.mark.integration
+@pytest.mark.correctness
 def test_up_down_no_effect_recovers_near_zero(real_pymc_sampling):
     simulated = generate_up_down_geolift_data(
         seed=615,
@@ -161,8 +162,7 @@ def test_up_down_revenue_panel_requires_complete_unique_periods():
         cp.UpDownGeoLift(missing, simulated.treatment_time, simulated.arms)
 
 
-@pytest.fixture(scope="module")
-def fitted_up_down(real_pymc_sampling):
+def _fit_signed_up_down():
     simulated = generate_up_down_geolift_data(
         seed=415, n_pre=32, n_post=8, n_control=5, n_up=2, n_down=2
     )
@@ -185,7 +185,19 @@ def fitted_up_down(real_pymc_sampling):
     return simulated, result
 
 
+@pytest.fixture(scope="module")
+def fitted_up_down(real_pymc_sampling):
+    return _fit_signed_up_down()
+
+
+@pytest.fixture(scope="module")
+def fitted_up_down_mock(mock_pymc_sample):
+    """Label and rejection checks must not keep the signed recovery's NUTS fit on the PR path."""
+    return _fit_signed_up_down()
+
+
 @pytest.mark.integration
+@pytest.mark.correctness
 def test_up_down_recovers_signed_geo_effects_and_joint_arm_draws(fitted_up_down):
     simulated, result = fitted_up_down
     impact = result.impact_draws
@@ -218,8 +230,8 @@ def test_up_down_recovers_signed_geo_effects_and_joint_arm_draws(fitted_up_down)
 
 
 @pytest.mark.integration
-def test_up_down_plot_labels_geo_and_revenue_units(fitted_up_down):
-    simulated, result = fitted_up_down
+def test_up_down_plot_labels_geo_and_revenue_units(fitted_up_down_mock):
+    simulated, result = fitted_up_down_mock
     for arm in ("up", "down"):
         geo = simulated.arms[arm][0]
         fig, axes = result.plot(treated_unit=geo, show=False)
@@ -232,6 +244,7 @@ def test_up_down_plot_labels_geo_and_revenue_units(fitted_up_down):
 
 
 @pytest.mark.integration
+@pytest.mark.correctness
 def test_up_down_mmm_export_matches_window_and_validates_spend(fitted_up_down):
     simulated, result = fitted_up_down
     start = simulated.revenue.index[-5]
@@ -337,8 +350,10 @@ def test_up_down_mmm_export_matches_window_and_validates_spend(fitted_up_down):
 
 @pytest.mark.integration
 @pytest.mark.parametrize("frame_name", ["spend_baseline", "spend_realized"])
-def test_up_down_mmm_export_rejects_duplicate_spend_columns(fitted_up_down, frame_name):
-    simulated, result = fitted_up_down
+def test_up_down_mmm_export_rejects_duplicate_spend_columns(
+    fitted_up_down_mock, frame_name
+):
+    simulated, result = fitted_up_down_mock
     baseline = simulated.spend_baseline.copy()
     realized = simulated.spend_realized.copy()
     frame = baseline if frame_name == "spend_baseline" else realized
@@ -360,8 +375,8 @@ def test_up_down_mmm_export_rejects_duplicate_spend_columns(fitted_up_down, fram
 
 
 @pytest.mark.integration
-def test_up_down_mmm_export_rejects_zero_spend_change(fitted_up_down):
-    simulated, result = fitted_up_down
+def test_up_down_mmm_export_rejects_zero_spend_change(fitted_up_down_mock):
+    simulated, result = fitted_up_down_mock
     realized = simulated.spend_realized.copy()
     geo = simulated.arms["up"][0]
     realized[(geo, "search")] = simulated.spend_baseline[(geo, "search")]
@@ -376,8 +391,8 @@ def test_up_down_mmm_export_rejects_zero_spend_change(fitted_up_down):
 
 
 @pytest.mark.integration
-def test_up_down_mmm_export_rejects_zero_lift(fitted_up_down, monkeypatch):
-    simulated, result = fitted_up_down
+def test_up_down_mmm_export_rejects_zero_lift(fitted_up_down_mock, monkeypatch):
+    simulated, result = fitted_up_down_mock
     zero_draws = result.aggregate_draws()
     zero_draws["geo"] = xr.zeros_like(zero_draws["geo"])
     monkeypatch.setattr(result, "aggregate_draws", lambda **_: zero_draws)
