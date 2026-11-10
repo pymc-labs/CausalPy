@@ -1324,6 +1324,26 @@ class TestSyntheticControlMultiUnit:
         assert sc.post_design["control"].shape == (20, len(control_units))
 
     @pytest.mark.integration
+    def test_multi_unit_scoring(self, mock_pymc_sample, multi_unit_sc_data):
+        """Per-unit score keys survive a multi-unit SyntheticControl fit."""
+        df, treatment_time, control_units, treated_units = multi_unit_sc_data
+
+        model = cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs)
+
+        sc = cp.SyntheticControl(
+            data=df,
+            treatment_time=treatment_time,
+            control_units=control_units,
+            treated_units=treated_units,
+            model=model,
+        ).fit()
+
+        assert isinstance(sc.result.score, pd.Series)
+        for i, _unit in enumerate(treated_units):
+            assert f"unit_{i}_r2" in sc.result.score.index
+            assert f"unit_{i}_r2_std" in sc.result.score.index
+
+    @pytest.mark.integration
     def test_multi_unit_summary(self, mock_pymc_sample, multi_unit_sc_data, capsys):
         """Test that summary works with multiple treated units."""
         df, treatment_time, control_units, treated_units = multi_unit_sc_data
