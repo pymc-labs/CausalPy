@@ -1,0 +1,27 @@
+causalpy/experiments/instrumental_variable.py
+  s_1a0d1c4039c693::t_16f77b935e7270 78-82,302-311
+causalpy/experiments/inverse_propensity_weighting.py
+  s_1a0d1c4039c693::t_4c477209db3846 69-76,543,554-558,571
+causalpy/tests/test_ipw_get_ate.py
+  s_1a0d1c4039c693::t_bd054c5d2f6b30 23,256-266
+causalpy/tests/test_ipw_planted_fit.py
+  s_1a0d1c4039c693::t_a6937eeeb9742f 1-115
+causalpy/tests/test_iv_planted_2sls.py
+  s_1a0d1c4039c693::t_bb808d8e391eb7 1-84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ab551ebc6ed60eddaed33d859b932818c1d25976",
+  "prompts": {},
+  "sessions": {
+    "s_1a0d1c4039c693": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a1a239-dfbb-7822-be87-808d475a4476",
+        "model": "gpt-6-astra"
+      },
+      "human_author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
