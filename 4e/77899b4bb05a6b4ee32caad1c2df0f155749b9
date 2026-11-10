@@ -1,0 +1,14 @@
+causalpy/tests/test_outcome_falsification.py
+  h_63db634213747e 285-288
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "4e77899b4bb05a6b4ee32caad1c2df0f155749b9",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
