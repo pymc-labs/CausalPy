@@ -1,0 +1,16 @@
+causalpy/tests/test_integration_its_new_timeseries.py
+  h_63db634213747e 24,26,84,89,152,154
+causalpy/tests/test_timeseries_model_coverage.py
+  h_63db634213747e 362-364,366,390-392,394,542,544,711,713,1025,1027,1051,1053,1080,1082,1256,1264
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "e46373c4a2f13c06e1c1ab3b6cdfe1b839f6808f",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
