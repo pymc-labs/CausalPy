@@ -1,0 +1,16 @@
+scripts/migration_baseline/README.md
+  h_63db634213747e 121
+scripts/migration_baseline/harness.py
+  h_63db634213747e 44-46
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "d7b3df648d4bbf5698ceb4f493b7a1453b698973",
+  "prompts": {},
+  "humans": {
+    "h_63db634213747e": {
+      "author": "Benjamin T. Vincent <inferencelab@gmail.com>"
+    }
+  }
+}
