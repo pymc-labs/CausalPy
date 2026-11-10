@@ -41,8 +41,9 @@ SCENARIO_VERSION = 2
 #
 # Re-pinning the candidate is a deliberate, reviewed source change to this line
 # plus `scripts/migration_baseline/README.md` and
-# `scripts/migration_baseline/REPORT_TEMPLATE.md`, which
-# `test_pinned_revisions_are_documented_consistently` keeps in agreement. Move it
+# `scripts/migration_baseline/REPORT_TEMPLATE.md`. No test checks that those
+# documents quote `PYMC6_COMMIT`. `capture` rejects a checkout at another
+# revision, and `compare` rejects an artifact recorded at another revision. Move it
 # only when further behavioral change merges into the integration branch before a
 # capture is run, and then discard evidence captured at the superseded pin rather
 # than mixing the two batches.
