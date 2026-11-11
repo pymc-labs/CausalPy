@@ -64,6 +64,13 @@ def run(
 def git_env(*, strip_tokens: bool = False) -> dict[str, str]:
     env = os.environ.copy()
     env["GIT_TERMINAL_PROMPT"] = "0"
+    # Parsed git output must not contain color codes, even when the admin's
+    # config sets color.ui or color.diff to always.
+    env["GIT_CONFIG_COUNT"] = "2"
+    env["GIT_CONFIG_KEY_0"] = "color.ui"
+    env["GIT_CONFIG_VALUE_0"] = "false"
+    env["GIT_CONFIG_KEY_1"] = "color.diff"
+    env["GIT_CONFIG_VALUE_1"] = "false"
     if strip_tokens:
         for key in TOKEN_ENV:
             env.pop(key, None)
@@ -478,7 +485,7 @@ def cmd_bump(root: Path, part: str) -> None:
             "Do not push main."
         )
     try:
-        git(root, ["push", "-u", "origin", branch])
+        git(root, ["push", "--no-follow-tags", "-u", "origin", branch])
     except CommandError as exc:
         raise ReleaseError(
             f"Refusing to continue: pushing branch {branch} failed.\n"
@@ -506,7 +513,10 @@ def is_merged_bump(root: Path, version: str) -> bool:
     parent = git(root, ["rev-parse", "--verify", "HEAD^"], check=False)
     if parent.returncode != 0:
         return False
-    diff = git(root, ["diff", "HEAD^", "HEAD", "--", "causalpy/version.py"]).stdout
+    diff = git(
+        root,
+        ["diff", "--no-color", "HEAD^", "HEAD", "--", "causalpy/version.py"],
+    ).stdout
     removed, added = version_lines(diff)
     if len(removed) != 1 or len(added) != 1:
         return False
@@ -575,7 +585,11 @@ def cmd_publish(root: Path) -> None:
             f"commit.\n{exc}"
         ) from exc
     try:
-        git(root, ["push", "origin", f"refs/tags/{tag}"], strip_tokens=True)
+        git(
+            root,
+            ["push", "--no-follow-tags", "origin", f"refs/tags/{tag}"],
+            strip_tokens=True,
+        )
     except CommandError as exc:
         git(root, ["tag", "-d", tag], check=False)
         raise ReleaseError(

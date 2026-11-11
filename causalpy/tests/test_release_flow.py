@@ -210,7 +210,7 @@ def test_bump_opens_pr_without_pushing_main_or_tagging(
     assert _git(repo, "tag", "--list").stdout == ""
     assert _git(repo, "ls-remote", "--tags", "origin").stdout == ""
     pushes = push_log.read_text(encoding="utf-8")
-    assert f"push -u origin release-{new}" in pushes
+    assert f"push --no-follow-tags -u origin release-{new}" in pushes
     assert "refs/tags" not in pushes
     assert "origin main" not in pushes
     body = gh_log.read_text(encoding="utf-8")
@@ -492,3 +492,39 @@ def test_stale_remote_tracking_ref_does_not_hide_a_moved_main(tmp_path: Path) ->
     assert "does not match" in bumped.stderr
     assert "release-1.2.5" not in _git(repo, "branch", "--list").stdout
     assert _git(repo, "status", "--porcelain").stdout == ""
+
+
+def test_bump_does_not_push_other_annotated_tags(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path, "1.2.3")
+    _git(repo, "config", "push.followTags", "true")
+    _git(repo, "tag", "-a", "0.9.0", "-m", "old")
+    env, push_log, _gh_log = _fake_env(tmp_path)
+
+    result = _release(repo, env, "bump", "patch")
+
+    assert result.returncode == 0, result.stderr
+    remote = _git(repo, "ls-remote", "--tags", "origin").stdout
+    assert "refs/tags/0.9.0" not in remote
+    assert "refs/tags" not in push_log.read_text(encoding="utf-8")
+
+
+def test_publish_ignores_color_and_does_not_follow_tags(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path, "1.2.3")
+    _set_version_and_commit(repo, "1.2.4")
+    _git(repo, "config", "push.followTags", "true")
+    _git(repo, "config", "color.ui", "always")
+    _git(repo, "config", "color.diff", "always")
+    _git(repo, "tag", "-a", "0.9.0", "-m", "old")
+    env, push_log, gh_log = _fake_env(tmp_path, gh=False)
+
+    result = _release(repo, env, "publish")
+
+    assert result.returncode == 0, result.stderr
+    remote = _git(repo, "ls-remote", "--tags", "origin").stdout
+    assert "refs/tags/1.2.4" in remote
+    assert "refs/tags/0.9.0" not in remote
+    pushes = push_log.read_text(encoding="utf-8")
+    assert "refs/tags/1.2.4" in pushes
+    assert "refs/tags/0.9.0" not in pushes
+    assert "GITHUB_TOKEN=<unset>" in pushes
+    assert not gh_log.exists()
