@@ -13,6 +13,7 @@ CausalPy welcomes contributions from interested individuals or groups. These gui
 - [Pull request checklist](#pull-request-checklist)
 - [Building the documentation locally](#building-the-documentation-locally)
 - [Overview of code structure](#overview-of-code-structure)
+- [Releasing](#releasing)
 - [Contributor pathways and permissions](#contributor-pathways-and-permissions)
   - [Current maintainers](#current-maintainers)
   - [Principles](#principles)
@@ -355,6 +356,34 @@ uv run make uml
 
 ---
 
+## Releasing
+
+Releases are cut by a repo admin. The version lives in one place: `causalpy/version.py` (`__version__`). setuptools reads it dynamically (`attr = "causalpy.version.__version__"`), so `pyproject.toml` has no static version. Do not add one. The `causalpy` entry in `uv.lock` has no version field. Do not hand-add one.
+
+The bump targets refuse a pre-release or any version that is not `MAJOR.MINOR.PATCH`, including the current `1.0.0rc1`. Fix: set a release version in `causalpy/version.py` first. Do not guess a bump off a pre-release. Choosing that first release version is a separate change. These targets do not do it.
+
+From a clean `main` that matches `origin/main`:
+
+```bash
+make release-patch   # 1.2.3 -> 1.2.4
+make release-minor   # 1.2.3 -> 1.3.0
+make release-major   # 1.2.3 -> 2.0.0
+```
+
+Each target computes the next version, creates a branch, and commits the bump there. It does not commit on `main`, push `main`, or create a tag. It runs `uv lock` and includes `uv.lock` in the commit only when that command changes the lock. It then pushes the branch and opens a pull request against `main`. The pull request names the old and new version. It also says what to do after merge. The command leaves you on the bump branch.
+
+After that pull request merges, check out the merged bump commit so local `main` matches `origin/main`, and run:
+
+```bash
+make release-publish
+```
+
+That tags only the merged bump with the bare version (`1.2.3`, not `v1.2.3`) and pushes only that tag with your git credentials, not `GITHUB_TOKEN`. It does not commit. It refuses if `main` is not the merged bump, if the tag already exists, or if the tag would not equal the package version. The refusal names the fix.
+
+The tag push creates the GitHub Release with generated notes and starts the PyPI jobs in `.github/workflows/release.yml`. Those jobs listen for the tag push itself. A release created with `GITHUB_TOKEN` cannot trigger another workflow, and Actions "Run workflow" does not publish. Existing pull request and `main` push build checks stay. Test PyPI runs, then the real upload waits for approval in the `release` environment. Tag protection and that environment review stay. Non-admins cannot publish.
+
+---
+
 ## Contributor pathways and permissions
 
 Contributions are welcome from the community. This section describes how contributors can grow their responsibilities in the CausalPy project and the GitHub permissions that come with each level.
@@ -494,7 +523,7 @@ Contributions are welcome from the community. This section describes how contrib
 
 - Merge PRs.
 - Manage labels and milestones.
-- Coordinate releases and ensure release notes are accurate.
+- Coordinate releases and ensure release notes are accurate. See [Releasing](#releasing).
 - Manage project boards (if used).
 
 **Expectations**

@@ -8,7 +8,7 @@ PACKAGE_DIR = causalpy
 # COMMANDS                                                                      #
 #################################################################################
 
-.PHONY: init setup setup-conda lint check_lint typecheck check-exports check-architecture test test-nightly test-correctness test-patch-cov uml gallery html cleandocs doctest run_notebooks_full help
+.PHONY: init setup setup-conda lint check_lint typecheck check-exports check-architecture test test-nightly test-correctness test-patch-cov uml gallery html cleandocs doctest run_notebooks_full help release-patch release-minor release-major release-publish
 
 # Patch coverage must be measured against the branch the PR actually targets.
 # While the 1.0 transition branch exists, work branched from it targets it, not
@@ -104,6 +104,20 @@ cleandocs: ## Clean the documentation build directories
 	rm -rf docs/_build
 	rm -rf docs/source/api/generated
 
+
+# Admin only. See CONTRIBUTING.md > Releasing. These targets do not push main
+# and do not tag until the bump pull request has merged.
+release-patch: ## Open a patch version-bump pull request
+	python scripts/release.py bump patch
+
+release-minor: ## Open a minor version-bump pull request
+	python scripts/release.py bump minor
+
+release-major: ## Open a major version-bump pull request
+	python scripts/release.py bump major
+
+release-publish: ## Tag the merged version bump and push that tag
+	python scripts/release.py publish
 
 #################################################################################
 # Self Documenting Commands                                                     #

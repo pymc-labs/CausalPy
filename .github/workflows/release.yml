@@ -1,19 +1,25 @@
 name: PyPI release
 
+# Pull requests and pushes to main only build. A version tag push
+# (1.2.3, not v1.2.3) creates the GitHub Release and publishes.
+# Publish listens for that tag push itself: a release created with
+# GITHUB_TOKEN cannot trigger another workflow, and workflow_dispatch
+# is not a publish path. The real upload still waits on the release
+# environment. Tag protection is unchanged.
 on:
   workflow_dispatch:
   pull_request:
     branches: [main]
   push:
     branches: [main]
-  release:
-    types: [published]
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
 
 permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  # Only supersede pull request builds. A push to main or a published release
+  # Only supersede pull request builds. A push to main or a tag push
   # must never be cancelled part way through.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
@@ -71,7 +77,7 @@ jobs:
       id-token: write
     needs: [build]
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' && github.event.action == 'published'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
@@ -103,10 +109,27 @@ jobs:
     name: Upload release to PyPI
     needs: [build, test]
     runs-on: ubuntu-latest
-    if: github.event_name == 'release' && github.event.action == 'published'
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: artifact
           path: dist
       - uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
+
+  create-release:
+    name: Create GitHub Release
+    needs: [build]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes --title "$GITHUB_REF_NAME"
