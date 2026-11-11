@@ -100,14 +100,16 @@ def _fake_env(
             'for arg in "$@"; do\n'
             '  if [ "$prev" = "--body-file" ]; then\n'
             f"    printf '\\n--- body ---\\n' >> {_quote(gh_log)}\n"
-            f'    cat "$arg" >> {_quote(gh_log)}\n'
+            f'    /bin/cat "$arg" >> {_quote(gh_log)}\n'
             "  fi\n"
             "  prev=$arg\n"
             "done\n"
             "printf 'https://example.test/pull/1\\n'\n",
         )
     env = os.environ.copy()
-    env["PATH"] = f"{bin_dir}:/usr/bin:/bin"
+    # Only the fake bin. /usr/bin on GitHub runners contains gh, which would
+    # skip the missing-tool refusal and call the real CLI.
+    env["PATH"] = str(bin_dir)
     env["GITHUB_TOKEN"] = "should-not-push-tags"
     env["GH_TOKEN"] = "should-not-push-tags"
     env["GIT_TERMINAL_PROMPT"] = "0"
