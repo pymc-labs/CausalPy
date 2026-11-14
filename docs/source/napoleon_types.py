@@ -9,7 +9,10 @@ already links. Aliases name the object Sphinx documents; a token with no such
 object stays a literal so preprocessing does not emit a missing reference.
 Preprocessing stays off for inherited third-party docstrings. Their Raises
 blocks are not NumPy fields, and Napoleon would turn the prose into missing
-class roles. The checked-in docstrings stay in the typing style the code uses.
+class roles. Napoleon also writes those role strings into
+``autodoc_type_aliases`` while looking up an untyped field. The config view
+hands it a copy, so a later ``get_type_hints`` call does not evaluate a role
+as an annotation. The checked-in docstrings stay in the typing style the code uses.
 """
 
 from __future__ import annotations
@@ -404,15 +407,29 @@ def _defining_module(obj: object) -> str:
     return module if isinstance(module, str) else ""
 
 
-class _PreprocessOff:
-    """Napoleon config view that leaves type tokens as text."""
+class _NapoleonConfig:
+    """Config view Napoleon can mutate without poisoning autodoc.
 
-    def __init__(self, config: object) -> None:
+    ``_lookup_annotation`` updates ``autodoc_type_aliases`` in place with
+    ``napoleon_type_aliases``. Those values are docstring roles, not
+    annotations. The copy keeps that update off the dict autodoc later passes
+    to ``get_type_hints``.
+    """
+
+    def __init__(self, config: object, *, preprocess_types: bool | None = None) -> None:
         self._config = config
+        self._preprocess_types = preprocess_types
 
     @property
     def napoleon_preprocess_types(self) -> bool:
-        return False
+        if self._preprocess_types is False:
+            return False
+        return bool(getattr(self._config, "napoleon_preprocess_types", False))
+
+    @property
+    def autodoc_type_aliases(self) -> dict[str, str]:
+        raw = getattr(self._config, "autodoc_type_aliases", {}) or {}
+        return dict(raw)
 
     def __getattr__(self, name: str) -> object:
         return getattr(self._config, name)
@@ -429,9 +446,10 @@ def process_owned_docstring(
     """Run Napoleon, but do not preprocess types outside ``causalpy``."""
     from sphinx.ext.napoleon.docstring import GoogleDocstring, NumpyDocstring
 
-    config = app.config
-    if not preprocess_types_for(obj):
-        config = _PreprocessOff(config)
+    config = _NapoleonConfig(
+        app.config,
+        preprocess_types=False if not preprocess_types_for(obj) else None,
+    )
     result = lines
     if config.napoleon_numpy_docstring:
         result = NumpyDocstring(result, config, app, what, name, obj, options).lines()

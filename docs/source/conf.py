@@ -206,7 +206,10 @@ bibtex_reference_style = "author_year"
 # ``napoleon_types.normalize_docstring_lines`` rewrites those fields on the lines
 # Napoleon is about to parse. The processor gate leaves preprocessing off for
 # objects defined outside ``causalpy``, so inherited PyMC Raises prose is not
-# promoted into class roles. Source docstrings stay unchanged.
+# promoted into class roles. It also gives Napoleon a copy of
+# ``autodoc_type_aliases``: an untyped field would otherwise write role strings
+# into the dict a later ``get_type_hints`` call evaluates. Source docstrings
+# stay unchanged.
 _napoleon_types = importlib.import_module("napoleon_types")
 napoleon_preprocess_types = True
 napoleon_type_aliases = {

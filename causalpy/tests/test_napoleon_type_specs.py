@@ -535,3 +535,38 @@ def test_install_replaces_the_napoleon_processor_in_place() -> None:
         7, _napoleon_types.process_owned_docstring, 500
     )
     assert listeners[1].handler is later_peer
+
+
+def test_annotation_lookup_does_not_poison_autodoc_aliases() -> None:
+    pytest.importorskip("sphinx")
+    from sphinx.ext.napoleon import Config
+    from sphinx.util.typing import get_type_hints
+
+    from causalpy.checks.base import CheckResult
+    from causalpy.steps.estimate_effect import EstimateEffect
+    from causalpy.steps.sensitivity import SensitivitySummary
+
+    aliases: dict[str, str] = {}
+    app = type(
+        "App",
+        (),
+        {
+            "config": Config(
+                napoleon_preprocess_types=True,
+                napoleon_type_aliases=TYPE_ALIASES,
+                autodoc_type_aliases=aliases,
+            )
+        },
+    )()
+    lines = inspect.cleandoc(EstimateEffect.__doc__).splitlines()
+    _napoleon_types.process_owned_docstring(
+        app,
+        "class",
+        "causalpy.steps.estimate_effect.EstimateEffect",
+        EstimateEffect,
+        None,
+        lines,
+    )
+    assert aliases == {}
+    hints = get_type_hints(SensitivitySummary, None, aliases)
+    assert hints["results"] == list[CheckResult]
