@@ -792,6 +792,12 @@ class SyntheticControlPlanner:
             absolute_lifts=absolute,
             decision=self.decision,
         )
+        fitted = experiment.model
+        if not isinstance(fitted, WeightedSumFitter):
+            raise TypeError(
+                "Synthetic control planning requires the fitted model to remain "
+                "a WeightedSumFitter."
+            )
         return HorizonEvaluation(
             duration=window.duration,
             treatment_time=window.treatment_time,
@@ -804,9 +810,9 @@ class SyntheticControlPlanner:
             baseline_impact=baseline_impact,
             observed_holdout=observed,
             applied_relative_floor=floor,
-            observation_noise_rate=_observation_noise_rate(experiment.model),
-            y_hat_distribution=str(experiment.model.priors["y_hat"].distribution),
-            user_priors=dict(experiment.model._user_priors or {}),
+            observation_noise_rate=_observation_noise_rate(fitted),
+            y_hat_distribution=str(fitted.priors["y_hat"].distribution),
+            user_priors=dict(fitted._user_priors or {}),
             scores=scores,
         )
 
