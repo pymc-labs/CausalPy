@@ -16,6 +16,7 @@ CausalPy implements 10+ quasi-experimental causal inference methods over two cor
 | `causalpy/steps/` | `EstimateEffect`, `SensitivityAnalysis`, `GenerateReport` |
 | `causalpy/checks/` | Diagnostic checks (`PlaceboInTime`, `LeaveOneOut`, `ConvexHullCheck`, etc.) |
 | `causalpy/design.py` | Fixed-target `SyntheticControlPlanner`; construction does not sample |
+| `causalpy/historical_validation.py` | Historical schedule validation and zero-lift replay for that planner; reports bias, does not correct it |
 | `causalpy/transforms.py` | Patsy `step()` / `ramp()` transforms for piecewise ITS |
 | `causalpy/data/` | `load_data()` and synthetic dataset generators |
 | `causalpy/tests/` | pytest suite |
@@ -44,6 +45,8 @@ The top-level Sphinx `automodule` documents every existing `causalpy.__all__` ex
 `causalpy.experiments.model_adapter` and its `ModelAdapter` / concrete adapter import paths are Tier 3 backend plumbing: experiments retain adapters only on private `_model_backend`, and supported user access is the underlying `BaseExperiment.model`. The adapters are therefore deliberately absent from the API manifest and package exports.
 
 `causalpy.design.SyntheticControlPlanner` is a Tier 2 entry, not a top-level `causalpy` export. Construction and `screen()` do not sample. `evaluate()` fits Bayesian simplex synthetic control (`WeightedSumFitter`) once per requested horizon and translates that fit across absolute and relative lifts. It is not a power curve and not `PlaceboInTime`. `power_analysis` is not a compatibility promise and is not implemented. `DressRehearsalCheck`, `causalpy.experiments.sc_results`, and the tests for the noise-injection curve, the `CheckResult` wrapper, posterior-weight donor quality, and `from_pre_period` were dropped rather than adapted. Draft design-only methods on `SyntheticControl` are not public API. Prefix reuse across horizons is not enabled; each duration is fitted separately.
+
+`causalpy.historical_validation` is the Tier 2 schedule and calibration seam for that planner. `validate_schedule` checks requested origins, horizons, exclusions, cadence, and the pre-origin-only training policy without fitting. `replay_history` fits each requested horizon separately on its own analysis window and scores the observed-minus-counterfactual cumulative impact. It does not sample a power curve, construct a `CheckResult`, or reopen `SyntheticControlPlanner`. Held-out treated outcomes are scoring inputs; donor outcomes inside the window may inform the counterfactual; data outside the window is not passed to the estimator. Overlapping windows and shared training rows are dependence, not independent experiments. `CalibrationRecord` feeds the existing operating-characteristics kernel through `operating_characteristics_from_calibration` only when a learned-null model is identified and sampling diagnostics are available. That curve stays conditional on the learned-null model (`curve_validated` remains false). The same names are re-exported from `causalpy.design` so downstream issues import the schedule and replay beside the planner. The schedule was not extracted from `PlaceboInTime`: placebo folds are a calibration mode with their own selection, overlap, and random-seed contract, while historical validation must name origins, horizons, audit windows, and cadence explicitly.
 
 ## Backend Model
 

@@ -27,6 +27,11 @@ compatibility promise. ``DressRehearsalCheck``, ``causalpy.experiments.sc_result
 and the tests for the noise-injection curve, the ``CheckResult`` wrapper,
 posterior-weight donor quality, and ``from_pre_period`` were dropped rather
 than adapted.
+
+Historical schedule validation and replay live in
+:mod:`causalpy.historical_validation` and are re-exported here. Replay reports
+bias. It does not correct it, and it does not change planner construction or
+sampling.
 """
 
 from collections.abc import Sequence
@@ -41,17 +46,41 @@ import xarray as xr
 from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB
 from causalpy.experiments.synthetic_control import SyntheticControl
+from causalpy.historical_validation import (
+    HISTORICAL_REPLAY_ASSUMPTIONS,
+    CalibrationRecord,
+    EvidenceLevel,
+    HistoricalReplay,
+    HistoricalSchedule,
+    ScheduleCounts,
+    ScheduleRequest,
+    WindowPlan,
+    WindowReplay,
+    replay_history,
+    validate_schedule,
+)
 from causalpy.input_data import to_pandas_with_time_index
 from causalpy.pymc_models import WeightedSumFitter
 from causalpy.utils import check_convex_hull_violation
 
 __all__ = [
+    "CalibrationRecord",
     "DecisionRule",
+    "EvidenceLevel",
+    "HISTORICAL_REPLAY_ASSUMPTIONS",
+    "HistoricalReplay",
+    "HistoricalSchedule",
     "HorizonEvaluation",
     "LiftScore",
     "PlannerResult",
+    "ScheduleCounts",
+    "ScheduleRequest",
     "ScreenResult",
     "SyntheticControlPlanner",
+    "WindowPlan",
+    "WindowReplay",
+    "replay_history",
+    "validate_schedule",
 ]
 
 HORIZON_POLICY = "separate-fits"
