@@ -10,9 +10,19 @@ Gaussian models with an identity link make the linear predictor, conditional exp
 | --- | --- | --- | --- | --- |
 | Linear predictor / latent state | model-specific (e.g. ``eta``) | Link scale | No | No |
 | Conditional expected outcome | ``mu`` | Outcome / response scale | No | **Yes** |
-| Posterior predictive draw | ``y_hat`` | Outcome scale | Yes | No (by default) |
+| Posterior predictive draw | ``y_hat`` | Outcome scale | Yes | No. Stored impact stays ``y - mu``. Plot and summary callers can opt into ``y_hat`` with ``response_type="prediction"``. |
 
-**Impact** uses the middle row: draw-level contrasts ``y - mu`` are computed in outcome units, then summarized. **Plots and effect summaries** inherit this convention unless a method documents a different estimand (for example link-scale regression coefficients).
+**Impact** uses the middle row: draw-level contrasts ``y - mu`` are computed in outcome units, then summarized. **Plots and effect summaries** use the same contrast unless the caller passes ``response_type="prediction"`` or the method documents a different estimand (for example link-scale regression coefficients).
+
+## Optional observation-noise bands
+
+Stored results stay on ``mu``. The default of ``plot``, ``get_plot_data``, ``effect_summary``, and ``analyze_persistence`` does too. Pass ``response_type="prediction"`` to rebuild the drawn or summarized contrast from posterior predictive ``y_hat``. Where that series includes observation noise, the intervals are wider and are not the default causal impact. The stored result is left unchanged.
+
+Coefficient experiments (difference-in-differences, pretest/posttest, regression discontinuity, and regression kink) switch only the outcome bands. The reported coefficient or threshold contrast stays the stored conditional-expectation estimate.
+
+Point-estimate backends have no observation-noise draws and raise ``ValueError``. State-space models store the same series as ``mu`` and ``y_hat``, so ``response_type="prediction"`` raises there too rather than labeling the conditional expectation as observation noise. Bayesian ribbon plots name the quantity and the interval by default, including the credible-interval kind (HDI or ETI) and its probability. Histogram and spaghetti plots stay unlabeled unless ``show_response_annotation=True``. Pass ``show_response_annotation=False`` to omit the ribbon note.
+
+The first Bayesian plot or summary call in a process logs the same distinction once. A later call site does not log again.
 
 Posterior transformations for nonlinear models must be applied **draw by draw** before contrasts or averages. In general, ``inverse_link(mean(eta))`` differs from ``mean(inverse_link(eta))``; g-computation averages unit-level potential outcomes on the response scale. See {doc}`estimands` for how this relates to empirical estimands. A worked tutorial notebook is tracked in `CausalPy#1017 <https://github.com/pymc-labs/CausalPy/issues/1017>`_.
 
@@ -23,7 +33,7 @@ Every Bayesian backend that participates in impact calculation must expose outco
 | Backend | ``mu`` semantics today | Notes |
 | --- | --- | --- |
 | Native :class:`~causalpy.pymc_models.PyMCModel` subclasses (e.g. ``LinearRegression``) | ``Deterministic`` named ``mu`` in the PyMC graph | Identity-link Gaussian models satisfy the contract by construction. Custom subclasses must inverse-link before naming the node ``mu``. See {doc}`custom_pymc_models`. |
-| :class:`~causalpy.pymc_models.StateSpaceTimeSeries` | ``mu`` aliases the smoothed expected observation | Gaussian observation model; ``mu`` and ``y_hat`` coincide up to naming. |
+| :class:`~causalpy.pymc_models.StateSpaceTimeSeries` | ``mu`` aliases the smoothed expected observation | Gaussian observation model; ``mu`` and ``y_hat`` coincide up to naming, so ``response_type="prediction"`` is rejected rather than labeled as observation noise. |
 | :class:`~causalpy.pymc_forecast_models.PyMCForecastModel` | Explicit upstream ``expected_observation`` / ``expected_observation_future`` when present; otherwise ``mu`` / ``mu_future`` | With pymc-forecast 0.3, pass the response-scale expectation to ``predict(..., expected_observation=...)``. The fallback latent must already be an outcome-scale expectation; CausalPy does not infer inverse links. ``StatespaceForecaster`` is rejected because upstream does not yet expose a separate noise-free expectation (`pymc-forecast#50 <https://github.com/pymc-labs/pymc-forecast/issues/50>`_). |
 | scikit-learn adapters | Point predictions on the outcome scale | OLS backends return fitted values in ``y`` units; no separate ``mu`` draw dimension. |
 

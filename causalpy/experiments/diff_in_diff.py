@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Difference in differences."""
 
+from dataclasses import replace
 from typing import Any, Literal
 
 import numpy as np
@@ -26,6 +27,11 @@ from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
+)
+from causalpy.experiments._response_type import (
+    check_response_type,
+    finish_response_plot,
+    quantity_for,
 )
 from causalpy.experiments._results import CoefficientResult, GroupComparisonScenario
 from causalpy.experiments.model_adapter import build_coords
@@ -369,6 +375,58 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         """Computes the mean and credible interval bounds for the causal impact."""
         return f"Causal impact = {convert_to_string(self.result.causal_impact, round_to=round_to)}"
 
+    def _bundle_for_response(
+        self,
+        bundle: CoefficientResult,
+        *,
+        response_type: str,
+        group: Literal["prior", "posterior"],
+    ) -> CoefficientResult:
+        """Return ``bundle`` or a copy whose scenario bands use ``y_hat``.
+
+        ``causal_impact`` stays the stored treatment coefficient. The stored
+        result is not mutated.
+        """
+        if check_response_type(response_type) == "expectation":
+            return bundle
+        quantity = quantity_for(response_type)
+
+        def _predict(frame: Any, *, zero_interaction: bool) -> Any:
+            (design,) = build_design_matrices(
+                [self._x_design_info],
+                frame,
+                return_type="dataframe" if zero_interaction else "matrix",
+            )
+            if zero_interaction:
+                for i, label in enumerate(self.labels):
+                    if self._is_treatment_interaction(label):
+                        design.iloc[:, i] = 0
+            return self._model_backend.predict_response(
+                X=np.asarray(design), quantity=quantity, group=group
+            )
+
+        return replace(
+            bundle,
+            scenario_control=replace(
+                bundle.scenario_control,
+                prediction=_predict(
+                    bundle.scenario_control.inputs, zero_interaction=False
+                ),
+            ),
+            scenario_treated=replace(
+                bundle.scenario_treated,
+                prediction=_predict(
+                    bundle.scenario_treated.inputs, zero_interaction=False
+                ),
+            ),
+            scenario_counterfactual=replace(
+                bundle.scenario_counterfactual,
+                prediction=_predict(
+                    bundle.scenario_counterfactual.inputs, zero_interaction=True
+                ),
+            ),
+        )
+
     def plot(
         self,
         *,
@@ -378,6 +436,8 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        response_type: Literal["expectation", "prediction"] = "expectation",
+        show_response_annotation: bool | None = None,
         figsize: tuple[float, float] | None = None,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -417,6 +477,18 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         num_samples : int, optional
             Number of posterior draws when ``kind="spaghetti"``. Defaults
             to 50. Ignored for other kinds.
+        response_type : {"expectation", "prediction"}, default "expectation"
+            Which quantity the uncertainty bands represent.
+            ``"expectation"`` uses the conditional mean ``mu`` and excludes
+            observation noise. ``"prediction"`` uses posterior predictive
+            ``y_hat`` and includes observation noise. The reported causal
+            impact stays the stored treatment coefficient. Point-estimate
+            backends reject ``"prediction"``.
+        show_response_annotation : bool, optional
+            Whether to add a small figure note naming the quantity and, for
+            ribbon plots, the interval. ``None`` (default) annotates Bayesian
+            ribbon plots and leaves histogram, spaghetti, and point-estimate
+            figures unlabeled. ``True`` always annotates; ``False`` never does.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``None`` (use
@@ -448,6 +520,8 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             kind=kind,
             ci_kind=ci_kind,
             num_samples=num_samples,
+            response_type=response_type,
+            show_response_annotation=show_response_annotation,
             figsize=figsize,
         )
 
@@ -460,6 +534,8 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        response_type: Literal["expectation", "prediction"] = "expectation",
+        show_response_annotation: bool | None = None,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
@@ -490,7 +566,11 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
-        bundle = self._require_bundle(group)
+        bundle = self._bundle_for_response(
+            self._require_bundle(group),
+            response_type=response_type,
+            group=group,
+        )
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
@@ -498,7 +578,19 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             "num_samples": num_samples,
         }
         if group == "prior":
-            return self._plot_prior_checks(bundle=bundle, style=style, figsize=figsize)
+            fig, ax = self._plot_prior_checks(
+                bundle=bundle, style=style, figsize=figsize
+            )
+            return finish_response_plot(
+                fig,
+                ax,
+                response_type=response_type,
+                ci_prob=ci_prob,
+                ci_kind=ci_kind,
+                kind=kind,
+                show_response_annotation=show_response_annotation,
+                has_draws=has_posterior_draws(bundle.scenario_control.prediction),
+            )
 
         y_pred_control = bundle.scenario_control.prediction
         y_pred_treatment = bundle.scenario_treated.prediction
@@ -681,7 +773,16 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
                 title=f"Causal impact = {round_num(causal_impact_value, round_to)}",
             )
             ax.legend(fontsize=LEGEND_FONT_SIZE)
-        return fig, ax
+        return finish_response_plot(
+            fig,
+            ax,
+            response_type=response_type,
+            ci_prob=ci_prob,
+            ci_kind=ci_kind,
+            kind=kind,
+            show_response_annotation=show_response_annotation,
+            has_draws=has_posterior_draws(bundle.scenario_control.prediction),
+        )
 
     def _plot_prior_checks(
         self,

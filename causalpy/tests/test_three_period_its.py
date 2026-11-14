@@ -1107,6 +1107,9 @@ def test_get_plot_data_uses_hdi_for_skewed_impacts():
         datapost=pd.DataFrame({"y": [0.0, 0.0]}, index=post_index),
         _require_bundle=lambda group: bundle,
     )
+    result._bundle_for_response = InterruptedTimeSeries._bundle_for_response.__get__(
+        result
+    )
 
     plot_data = InterruptedTimeSeries.get_plot_data(result)
     expected = get_hdi_to_df(pre_impact).reindex(pre_index)
@@ -1277,6 +1280,7 @@ def test_plot_forwards_ci_prob_to_all_singleton_hdi_markers(monkeypatch):
         return ax.plot([], [])[0]
 
     stub._require_bundle = lambda group: bundle
+    stub._bundle_for_response = InterruptedTimeSeries._bundle_for_response.__get__(stub)
     stub._draw_singleton_hdi_marker = fake_singleton_marker
 
     monkeypatch.setattr(its_module, "plot_posterior_over_x", fake_plot_posterior)
@@ -1322,6 +1326,7 @@ def test_analyze_persistence_forwards_custom_hdi_probability(monkeypatch, capsys
         datapost=pd.DataFrame(index=np.arange(4)),
         result=bundle,
     )
+    stub._bundle_for_response = InterruptedTimeSeries._bundle_for_response.__get__(stub)
     stub._period_slices = lambda bundle: InterruptedTimeSeries._period_slices(
         stub, bundle
     )
