@@ -400,15 +400,16 @@ class DurationComparison:
                 "No scored windows to plot. A failed or refused comparison "
                 "is not a detection curve and not a recommendation."
             )
-        created = axes is None
-        if created:
+        if axes is None:
             fig, axis_pair = plt.subplots(1, 2, figsize=figsize)
             bias_axis, detection_axis = axis_pair
+            created = True
         else:
             if len(axes) != 2:
                 raise ValueError("axes must be a pair of matplotlib Axes.")
             bias_axis, detection_axis = axes
             fig = bias_axis.figure
+            created = False
         for window in scored:
             bias_axis.scatter(
                 window.duration,
@@ -511,8 +512,8 @@ class AnalysisSpecification:
     treated_unit: str
     control_units: tuple[str, ...]
     estimator: str
-    decision_direction: str
-    decision_estimand: str
+    decision_direction: Literal["positive", "negative"]
+    decision_estimand: Literal["cumulative", "average"]
     decision_threshold: float
     decision_probability: float
     relative_floor: float | None
