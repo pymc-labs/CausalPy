@@ -34,6 +34,8 @@ groups:
             notebook: synthetic-control-pymc
           - title: Plan a synthetic-control test
             notebook: synthetic-control-design-pymc
+          - title: Compare synthetic-control durations
+            notebook: synthetic-control-duration-pymc
           - title: The effects of Brexit
             notebook: synthetic-control-brexit-pymc
           - title: Synthetic Difference-in-Differences with `pymc` models

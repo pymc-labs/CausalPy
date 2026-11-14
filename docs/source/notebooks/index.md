@@ -67,6 +67,13 @@ The synthetic control method is a statistical method used to evaluate the effect
 :link-type: doc
 :::
 
+:::{grid-item-card} Compare synthetic-control durations
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/synthetic-control-duration-pymc.png
+:link: synthetic-control-duration-pymc
+:link-type: doc
+:::
+
 :::{grid-item-card} The effects of Brexit
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/synthetic-control-brexit-pymc.png
@@ -458,6 +465,7 @@ panel-fixed-effects.ipynb
 
 synthetic-control-pymc.ipynb
 synthetic-control-design-pymc.ipynb
+synthetic-control-duration-pymc.ipynb
 synthetic-control-brexit-pymc.ipynb
 synthetic-difference-in-differences-pymc.ipynb
 interactive-fixed-effects-pymc.ipynb

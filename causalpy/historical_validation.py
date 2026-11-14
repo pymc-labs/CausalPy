@@ -38,7 +38,7 @@ bias. It does not correct it, and those papers are not acceptance thresholds.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
@@ -1725,8 +1725,14 @@ def _replay_window(
     donor_correlation: float,
     auto_scale_sigma: bool,
     fit_audit: bool,
+    on_scored: Callable[[SyntheticControl, WindowPlan], None] | None = None,
 ) -> tuple[WindowReplay, int]:
-    """Fit one window, or record why it was not fitted."""
+    """Fit one window, or record why it was not fitted.
+
+    ``on_scored`` runs only after a successful fit, before the experiment is
+    dropped. It is the duration workflow's translation hook. Callers must copy
+    the scalars they need and must not retain the experiment or its draws.
+    """
     if window.status != "usable":
         return (
             WindowReplay(
@@ -1805,7 +1811,10 @@ def _replay_window(
             ),
             1,
         )
-    return _score_window(experiment, window, decision), 1
+    replay = _score_window(experiment, window, decision)
+    if on_scored is not None:
+        on_scored(experiment, window)
+    return replay, 1
 
 
 def _require_window_boundaries(
