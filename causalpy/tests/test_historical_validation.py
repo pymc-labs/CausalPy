@@ -42,6 +42,8 @@ from causalpy.experiments.synthetic_control import SyntheticControl
 from causalpy.historical_validation import (
     CalibrationRecord,
     ScheduleRequest,
+    WindowReplay,
+    _score_window,
 )
 from causalpy.pymc_models import WeightedSumFitter
 
@@ -213,6 +215,183 @@ def test_datetime_cadence_records_gaps_instead_of_imputing():
     assert gapped_window.status == "incomplete"
     assert "missing label" in (gapped_window.reason or "")
     assert index[4] not in gapped_window.analysis_index
+
+
+def test_anchored_cadence_that_misses_the_origin_is_incomplete():
+    index = pd.date_range("2020-01-01", periods=40, freq="D")
+    frame = pd.DataFrame(
+        {name: np.arange(40, dtype=float) for name in ("y", *DONORS)},
+        index=index,
+    )
+    origin = pd.Timestamp("2020-01-08")
+    snapped = validate_schedule(
+        frame,
+        "y",
+        DONORS,
+        ScheduleRequest(selection_origins=(origin,), horizons=(4,), cadence="W"),
+    )
+    window = snapped.windows[0]
+    assert window.status == "incomplete"
+    assert "does not start at the origin" in (window.reason or "")
+    assert origin not in window.holdout_index
+    assert pd.Timestamp("2020-01-12") not in window.holdout_index
+    sunday = pd.Timestamp("2020-01-05")
+    aligned = validate_schedule(
+        frame,
+        "y",
+        DONORS,
+        ScheduleRequest(selection_origins=(sunday,), horizons=(2,), cadence="W"),
+    )
+    assert aligned.windows[0].status == "usable"
+    assert aligned.windows[0].holdout_index[0] == sunday
+    wednesday = validate_schedule(
+        frame,
+        "y",
+        DONORS,
+        ScheduleRequest(selection_origins=(origin,), horizons=(2,), cadence="W-WED"),
+    )
+    assert wednesday.windows[0].status == "usable"
+    assert wednesday.windows[0].holdout_index[0] == origin
+    month_end = validate_schedule(
+        frame,
+        "y",
+        DONORS,
+        ScheduleRequest(selection_origins=(origin,), horizons=(2,), cadence="ME"),
+    )
+    assert month_end.windows[0].status == "incomplete"
+    assert "does not start at the origin" in (month_end.windows[0].reason or "")
+
+
+def test_timezone_aware_schedule_reaches_the_fit(monkeypatch):
+    index = pd.date_range("2020-01-05", periods=8, freq="W", tz="UTC")
+    frame = pd.DataFrame(
+        {name: np.arange(8, dtype=float) for name in ("y", *DONORS)},
+        index=index,
+    )
+    schedule = validate_schedule(
+        frame,
+        "y",
+        DONORS,
+        ScheduleRequest(selection_origins=(index[3],), horizons=(2,), cadence="W"),
+    )
+    assert schedule.windows[0].status == "usable"
+    fitted: list[object] = []
+
+    def fit(self):
+        fitted.append(self.treatment_time)
+        raise RuntimeError("sentinel fit")
+
+    monkeypatch.setattr(SyntheticControl, "fit", fit)
+    replay = replay_history(
+        frame,
+        "y",
+        DONORS,
+        schedule,
+        RULE,
+        model=_wide_template(),
+        random_seed=1,
+    )
+    assert fitted == [index[3]]
+    assert replay.windows[0].status == "fit-failed"
+    assert "outside the window" not in (replay.windows[0].reason or "")
+
+
+def test_partial_nonfinite_impact_draws_are_not_scored():
+    import xarray as xr
+
+    frame = _integer_frame()
+    window = validate_schedule(frame, "y", DONORS, _request(4)).windows[0]
+    impact = xr.DataArray(
+        np.array([[[[1.0, 1.0], [2.0, np.nan], [3.0, 3.0]]]]),
+        dims=("treated_units", "chain", "draw", "obs_ind"),
+        coords={"treated_units": ["y"]},
+    )
+
+    class _Result:
+        impact_post = impact
+
+    class _Experiment:
+        treated_units = ["y"]
+        result = _Result()
+
+    scored = _score_window(_Experiment(), window, RULE)  # type: ignore[arg-type]
+    assert scored.status == "fit-failed"
+    assert scored.bias_cumulative is None
+    assert "non-finite impact" in (scored.reason or "")
+    assert scored.n_inference_fits == 1
+
+
+def _scored_replay_window(*args, **kwargs):
+    window = args[3]
+    return (
+        WindowReplay(
+            plan=window,
+            status="scored",
+            reason=None,
+            cumulative_sd=0.2,
+            bias_cumulative=float(window.origin),
+            bias_average=0.05,
+            diagnostics_status="available",
+            n_inference_fits=1,
+        ),
+        1,
+    )
+
+
+def test_nonfinite_learned_null_samples_retain_scored_windows(monkeypatch):
+    frame = _integer_frame()
+    schedule = validate_schedule(frame, "y", DONORS, _request(4, 6))
+    monkeypatch.setattr(
+        "causalpy.historical_validation._replay_window", _scored_replay_window
+    )
+    monkeypatch.setattr(
+        "causalpy.historical_validation._fit_learned_null",
+        lambda *args, **kwargs: (None, np.array([np.nan, 1.0])),
+    )
+    replay = replay_history(
+        frame,
+        "y",
+        DONORS,
+        schedule,
+        RULE,
+        model=_wide_template(),
+        random_seed=1,
+    )
+    assert [window.status for window in replay.windows] == ["scored", "scored"]
+    assert replay.calibration.applicable is False
+    assert replay.calibration.null_samples is None
+    assert replay.calibration.evidence_level == "inconclusive"
+    assert "finite one-dimensional" in " ".join(replay.calibration.reasons)
+
+
+def test_zero_dimensional_learned_null_sample_feeds_the_existing_kernel(monkeypatch):
+    frame = _integer_frame()
+    schedule = validate_schedule(frame, "y", DONORS, _request(4, 6))
+    monkeypatch.setattr(
+        "causalpy.historical_validation._replay_window", _scored_replay_window
+    )
+    monkeypatch.setattr(
+        "causalpy.historical_validation._fit_learned_null",
+        lambda *args, **kwargs: (None, np.array(0.25)),
+    )
+    replay = replay_history(
+        frame,
+        "y",
+        DONORS,
+        schedule,
+        RULE,
+        model=_wide_template(),
+        random_seed=1,
+    )
+    samples = replay.calibration.null_samples
+    assert replay.calibration.applicable is True
+    assert samples is not None
+    assert samples.shape == (1,)
+    assert np.isfinite(samples).all()
+    curve = operating_characteristics_from_calibration(
+        replay.calibration, effect_sizes=[0.0, 0.5]
+    )
+    assert np.isfinite(curve.p_detect).all()
 
 
 def test_caller_label_aliases_resolve_to_stored_index_labels():

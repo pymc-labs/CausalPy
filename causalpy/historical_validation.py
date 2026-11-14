@@ -881,10 +881,28 @@ def _expected_holdout(
     return present, None
 
 
+def _cadence_starts_at_origin(label: Any, origin: Any) -> bool:
+    """Return whether a generated cadence label is the requested origin."""
+    try:
+        if label == origin:
+            return True
+    except (TypeError, ValueError):
+        pass
+    try:
+        return bool(pd.Timestamp(label) == pd.Timestamp(origin))
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 def _cadence_labels(
     index: pd.Index, origin: Any, horizon: int, cadence: Any
 ) -> tuple[pd.Index, str | None]:
-    """Build the labels a declared cadence requires, without imputing gaps."""
+    """Build the labels a declared cadence requires, without imputing gaps.
+
+    Anchored offsets such as ``"W"`` or ``"ME"`` are refused when their first
+    generated label is not the origin. Integer and ``Timedelta`` cadences
+    already include the origin and are unchanged.
+    """
     if isinstance(cadence, int):
         try:
             values = [origin + i * cadence for i in range(horizon)]
@@ -901,6 +919,10 @@ def _cadence_labels(
     except (TypeError, ValueError) as exc:
         return _empty_index_like(index), (
             f"cannot build a holdout from cadence {cadence!r}: {exc}."
+        )
+    if len(expected) == 0 or not _cadence_starts_at_origin(expected[0], origin):
+        return _empty_index_like(index), (
+            f"cadence {cadence!r} does not start at the origin {origin!r}."
         )
     return expected, None
 
@@ -1767,8 +1789,8 @@ def _require_window_boundaries(
         raise RuntimeError(
             f"Forbidden label(s) {leaked!r} are inside the estimator frame."
         )
-    pre_obs = pd.Index(experiment.pre_design["treated"].coords["obs_ind"].values)
-    post_obs = pd.Index(experiment.post_design["control"].coords["obs_ind"].values)
+    pre_obs = experiment.pre_design["treated"].coords["obs_ind"].to_index()
+    post_obs = experiment.post_design["control"].coords["obs_ind"].to_index()
     if not _same_labels(pre_obs, window.training_index):
         raise RuntimeError(
             "pre-period design rows do not match the training index. Priors "
@@ -1800,9 +1822,9 @@ def _score_window(
     )
     cumulative = impact.sum("obs_ind", skipna=False)
     average = impact.mean("obs_ind", skipna=False)
-    cumulative_mean = float(cumulative.mean().item())
-    average_mean = float(average.mean().item())
-    if not np.isfinite(cumulative_mean) or not np.isfinite(average_mean):
+    cumulative_draws = np.asarray(cumulative.values, dtype=float)
+    average_draws = np.asarray(average.values, dtype=float)
+    if not np.isfinite(cumulative_draws).all() or not np.isfinite(average_draws).all():
         return WindowReplay(
             plan=window,
             status="fit-failed",
@@ -1811,6 +1833,8 @@ def _score_window(
             ),
             n_inference_fits=1,
         )
+    cumulative_mean = float(cumulative_draws.mean())
+    average_mean = float(average_draws.mean())
     cumulative_sd = float(cumulative.std().item())
     average_sd = float(average.std().item())
     cumulative_lower, cumulative_upper = hdi_bounds(
@@ -2043,6 +2067,32 @@ def _calibration_from_windows(
             scored,
             base,
         ), 1
+    try:
+        samples = np.ravel(np.asarray(theta, dtype=float))
+    except (TypeError, ValueError) as exc:
+        return _inapplicable(
+            "inconclusive",
+            (
+                "Learned-null samples are not a finite one-dimensional vector "
+                f"({type(exc).__name__}: {exc}). Scored windows were retained, "
+                "and the conditional engine was not fed.",
+                dependence,
+            ),
+            scored,
+            base,
+        ), 1
+    if samples.size == 0 or not np.isfinite(samples).all():
+        return _inapplicable(
+            "inconclusive",
+            (
+                "Learned-null samples are not a finite one-dimensional vector. "
+                "Scored windows were retained, and the conditional engine was "
+                "not fed.",
+                dependence,
+            ),
+            scored,
+            base,
+        ), 1
     reasons = (
         "The learned-null Normal model was identified from the scored "
         "selection windows. The curve is conditional on those inputs, not "
@@ -2056,7 +2106,7 @@ def _calibration_from_windows(
         reasons=reasons,
         applicable=True,
         curve_validated=False,
-        null_samples=np.asarray(theta, dtype=float),
+        null_samples=samples,
         fold_sds=fold_sds,
         fold_means=means,
         model="learned-null-normal",
