@@ -39,8 +39,10 @@ from causalpy.tests.qualification_policy import (
 )
 from causalpy.tests.qualification_protocol import (
     DONORS,
+    MISFIT_SCENARIO,
     PROTOCOL,
-    SCENARIOS,
+    REFERENCE_SCENARIO,
+    SERIAL_SCENARIO,
     TREATED,
     WEIGHTS,
 )
@@ -57,7 +59,7 @@ _FORBIDDEN = (
 def _input(**overrides: object) -> EligibilityInput:
     payload = {
         "kind": "operating-summary",
-        "scenario": SCENARIOS[0],
+        "scenario": REFERENCE_SCENARIO,
         "estimator": PROTOCOL.estimator,
         "n_requested": PROTOCOL.n_panels,
         "n_failed": 0,
@@ -70,7 +72,6 @@ def _input(**overrides: object) -> EligibilityInput:
         "numeric_match_is_validation": False,
         "depends_on_translation": False,
         "translation_identity_ok": True,
-        "correctly_specified": True,
         "calibration_applicable": False,
         "detection_target_applies": False,
         "bias_interval_covers_zero": True,
@@ -118,7 +119,7 @@ def test_misfit_mean_is_outside_the_donor_simplex() -> None:
 
 def test_treatment_is_injected_once_onto_the_untreated_path() -> None:
     """A second call must not add another residual draw."""
-    panel = generate_untreated(SCENARIOS[0], 0)
+    panel = generate_untreated(REFERENCE_SCENARIO, 0)
     assert np.allclose(
         panel.untreated.to_numpy(), (panel.mean + panel.residual).to_numpy()
     )
@@ -132,10 +133,10 @@ def test_treatment_is_injected_once_onto_the_untreated_path() -> None:
 
 def test_panel_streams_do_not_share_a_residual() -> None:
     """Repeating a seed on the same panel is the same dataset, not a new one."""
-    first = generate_untreated(SCENARIOS[0], 0)
-    repeat = generate_untreated(SCENARIOS[0], 0)
-    other = generate_untreated(SCENARIOS[0], 1)
-    serial = generate_untreated(SCENARIOS[2], 0)
+    first = generate_untreated(REFERENCE_SCENARIO, 0)
+    repeat = generate_untreated(REFERENCE_SCENARIO, 0)
+    other = generate_untreated(REFERENCE_SCENARIO, 1)
+    serial = generate_untreated(SERIAL_SCENARIO, 0)
     assert np.allclose(first.untreated.to_numpy(), repeat.untreated.to_numpy())
     assert not np.allclose(first.residual.to_numpy(), other.residual.to_numpy())
     assert not np.allclose(first.residual.to_numpy(), serial.residual.to_numpy())
@@ -225,8 +226,7 @@ def test_misfit_recovery_cannot_be_called_unbiased() -> None:
     decision = decide(
         _input(
             kind="recovery-summary",
-            scenario=SCENARIOS[1],
-            correctly_specified=False,
+            scenario=MISFIT_SCENARIO,
             bias_interval_covers_zero=True,
         )
     )
@@ -238,8 +238,7 @@ def test_misfit_operating_count_is_descriptive() -> None:
     """A structurally biased scenario does not receive a supported count claim."""
     decision = decide(
         _input(
-            scenario=SCENARIOS[1],
-            correctly_specified=False,
+            scenario=MISFIT_SCENARIO,
         )
     )
     assert decision.status == "descriptive"
@@ -255,8 +254,7 @@ def test_serial_recovery_is_not_labeled_as_the_level_trend_misfit() -> None:
     decision = decide(
         _input(
             kind="recovery-summary",
-            scenario=SCENARIOS[2],
-            correctly_specified=False,
+            scenario=SERIAL_SCENARIO,
             bias_interval_covers_zero=True,
         )
     )
@@ -306,6 +304,20 @@ def test_inapplicable_curve_does_not_invent_a_substitute() -> None:
     assert decision.permitted_claim is None
 
 
+def test_unnamed_assumptions_are_not_a_conditional_comparison() -> None:
+    """A model-conditional claim must name the assumptions it depends on."""
+    decision = decide(
+        _input(
+            kind="model-conditional-operating-comparison",
+            calibration_applicable=True,
+            assumptions_named=(),
+        )
+    )
+    assert decision.status == "inconclusive"
+    assert decision.permitted_claim is None
+    assert "assumptions-not-named" in decision.withheld
+
+
 def test_short_study_cannot_be_written_as_evidence(tmp_path) -> None:
     """A smoke run must not replace the 100-panel report."""
     with pytest.raises(ValueError, match="short study"):
@@ -345,7 +357,7 @@ def test_committed_report_matches_the_policy_and_the_panel_counts() -> None:
             assert lift["plug_in_standard_error_is_qualified_precision"] is (
                 lift["plug_in_standard_error"] >= PROTOCOL.max_claimed_detection_se
             )
-            if scenario["scenario"] == SCENARIOS[1]:
+            if scenario["scenario"] == MISFIT_SCENARIO:
                 assert lift["eligibility"]["status"] == "descriptive"
                 assert "misfit-operating-descriptive" in lift["eligibility"]["withheld"]
             decision = decide(operating_input_from_summary(lift))
@@ -380,7 +392,7 @@ def test_repeated_data_study_obeys_the_protocol() -> None:
             assert lift["plug_in_standard_error_is_qualified_precision"] is (
                 lift["plug_in_standard_error"] >= PROTOCOL.max_claimed_detection_se
             )
-            if scenario["scenario"] == SCENARIOS[1]:
+            if scenario["scenario"] == MISFIT_SCENARIO:
                 assert lift["eligibility"]["status"] == "descriptive"
             decision = decide(operating_input_from_summary(lift))
             assert decision.status == lift["eligibility"]["status"]

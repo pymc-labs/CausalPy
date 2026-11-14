@@ -32,9 +32,12 @@ from causalpy.tests.qualification_protocol import (
     HISTORICAL_CODE,
     MASTER_SEED,
     MISFIT_LEVEL,
+    MISFIT_SCENARIO,
     MISFIT_TREND,
     PROTOCOL,
+    REFERENCE_SCENARIO,
     SCENARIO_CODES,
+    SERIAL_SCENARIO,
     TREATED,
     WEIGHTS,
 )
@@ -140,8 +143,8 @@ def mean_frame(n_time: int, *, misfit: bool) -> pd.DataFrame:
 def _untreated_frame(
     scenario: str, code: int, index: int, n_time: int
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    misfit = scenario == "persistent_level_trend_misfit"
-    serial = scenario == "serially_correlated_errors"
+    misfit = scenario == MISFIT_SCENARIO
+    serial = scenario == SERIAL_SCENARIO
     mean = mean_frame(n_time, misfit=misfit)
     residual = residual_frame(data_generator(code, index), n_time, serial=serial)
     return mean + residual, mean, residual
@@ -187,7 +190,7 @@ def historical_replay_frame() -> pd.DataFrame:
     cannot collide with a panel stream.
     """
     untreated, _mean, _residual = _untreated_frame(
-        "correctly_specified_noisy",
+        REFERENCE_SCENARIO,
         HISTORICAL_CODE,
         0,
         PROTOCOL.historical_length,

@@ -29,8 +29,10 @@ from scipy.stats import binomtest
 
 from causalpy.tests.qualification_protocol import (
     ESTIMATOR,
+    MISFIT_SCENARIO,
     NULL_TOLERANCE_REASON,
     PROTOCOL,
+    REFERENCE_SCENARIO,
     SCENARIOS,
 )
 
@@ -56,6 +58,7 @@ NUMERIC_MATCH_NOT_VALIDATION = "numeric-match-not-validation"
 ESTIMATOR_MISMATCH = "estimator-mismatch"
 UNKNOWN_SCENARIO = "unknown-scenario"
 HISTORICAL_NOT_BINOMIAL = "historical-windows-not-binomial"
+ASSUMPTIONS_NOT_NAMED = "assumptions-not-named"
 
 
 @dataclass(frozen=True)
@@ -90,7 +93,6 @@ class EligibilityInput:
     numeric_match_is_validation: bool
     depends_on_translation: bool
     translation_identity_ok: bool
-    correctly_specified: bool
     calibration_applicable: bool
     detection_target_applies: bool
     bias_interval_covers_zero: bool
@@ -196,7 +198,7 @@ def _operating_blockers(item: EligibilityInput) -> list[str]:
         and item.claimed_detection_se < PROTOCOL.max_claimed_detection_se
     ):
         blockers.append(DETECTION_SE_TIGHTER_THAN_PROTOCOL)
-    if item.scenario == SCENARIOS[1]:
+    if item.scenario == MISFIT_SCENARIO:
         blockers.append(MISFIT_OPERATING_DESCRIPTIVE)
     return blockers
 
@@ -211,7 +213,7 @@ def _operating_claim(item: EligibilityInput) -> str:
         f"panels. This is not a launch recommendation, and it is not a claim "
         f"that the detection target of {PROTOCOL.detection_target} was achieved."
     )
-    if item.scenario == SCENARIOS[1]:
+    if item.scenario == MISFIT_SCENARIO:
         claim += (
             " This scenario is the persistent level and trend misfit. The count "
             "describes that biased process. It is not evidence that the "
@@ -222,9 +224,9 @@ def _operating_claim(item: EligibilityInput) -> str:
 
 def _recovery_blockers(item: EligibilityInput) -> list[str]:
     blockers: list[str] = []
-    if item.scenario == SCENARIOS[1]:
+    if item.scenario == MISFIT_SCENARIO:
         blockers.append(UNBIASEDNESS_WITHHELD_MISFIT)
-    elif not item.correctly_specified:
+    elif item.scenario != REFERENCE_SCENARIO:
         blockers.append(UNBIASEDNESS_WITHHELD_NOT_REFERENCE)
     if item.n_failed != 0:
         blockers.append(UNBIASEDNESS_WITHHELD_FAILURES)
@@ -246,7 +248,7 @@ def _comparison_blockers(item: EligibilityInput) -> list[str]:
     if item.numeric_match_is_validation:
         blockers.append(NUMERIC_MATCH_NOT_VALIDATION)
     if not item.assumptions_named:
-        blockers.append("assumptions-not-named")
+        blockers.append(ASSUMPTIONS_NOT_NAMED)
     return blockers
 
 
@@ -316,15 +318,28 @@ def decide(item: EligibilityInput) -> EligibilityDecision:
         )
     if item.kind == "model-conditional-operating-comparison":
         blockers = _comparison_blockers(item)
-        if CURVE_INAPPLICABLE in blockers:
+        refused = [
+            code
+            for code in (CURVE_INAPPLICABLE, ASSUMPTIONS_NOT_NAMED)
+            if code in blockers
+        ]
+        if refused:
+            reasons = []
+            if CURVE_INAPPLICABLE in refused:
+                reasons.append(
+                    "The calibration record is inapplicable. No substitute "
+                    "curve is invented."
+                )
+            if ASSUMPTIONS_NOT_NAMED in refused:
+                reasons.append(
+                    "A model-conditional comparison must name its assumptions. "
+                    "None were named."
+                )
             return EligibilityDecision(
                 status="inconclusive",
                 permitted_claim=None,
-                withheld=withheld,
-                reasons=(
-                    "The calibration record is inapplicable. No substitute "
-                    "curve is invented.",
-                ),
+                withheld=tuple(dict.fromkeys([*withheld, *refused])),
+                reasons=tuple(reasons),
             )
         named = ", ".join(item.assumptions_named)
         return EligibilityDecision(
@@ -423,7 +438,6 @@ def operating_input_from_summary(summary: Mapping[str, object]) -> EligibilityIn
         numeric_match_is_validation=bool(summary["numeric_match_is_validation"]),
         depends_on_translation=bool(summary["depends_on_translation"]),
         translation_identity_ok=bool(summary["translation_identity_ok"]),
-        correctly_specified=bool(summary["correctly_specified"]),
         calibration_applicable=bool(summary["calibration_applicable"]),
         detection_target_applies=bool(summary["detection_target_applies"]),
         bias_interval_covers_zero=bool(summary["bias_interval_covers_zero"]),

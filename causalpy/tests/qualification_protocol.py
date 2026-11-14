@@ -94,15 +94,14 @@ SAMPLE_KWARGS = {
     "progressbar": False,
 }
 
-SCENARIOS = (
-    "correctly_specified_noisy",
-    "persistent_level_trend_misfit",
-    "serially_correlated_errors",
-)
+REFERENCE_SCENARIO = "correctly_specified_noisy"
+MISFIT_SCENARIO = "persistent_level_trend_misfit"
+SERIAL_SCENARIO = "serially_correlated_errors"
+SCENARIOS = (REFERENCE_SCENARIO, MISFIT_SCENARIO, SERIAL_SCENARIO)
 SCENARIO_CODES = {
-    "correctly_specified_noisy": 1,
-    "persistent_level_trend_misfit": 2,
-    "serially_correlated_errors": 3,
+    REFERENCE_SCENARIO: 1,
+    MISFIT_SCENARIO: 2,
+    SERIAL_SCENARIO: 3,
 }
 HISTORICAL_CODE = 4
 
