@@ -18,6 +18,7 @@ import causalpy.pymc_forecast_models as pymc_forecast_models
 import causalpy.pymc_models as pymc_models
 import causalpy.skl_models as skl_models
 import causalpy.variable_selection_priors as variable_selection_priors
+from causalpy.plot_styles import plot_style, set_plot_style
 from causalpy.skl_models import create_causalpy_compatible_class
 from causalpy.transforms import ramp, step
 from causalpy.version import __version__
@@ -78,6 +79,7 @@ __all__ = [
     "PipelineResult",
     "PanelRegression",
     "plot_correlations",
+    "plot_style",
     "PrePostNEGD",
     "PriorPredictiveNotSupportedException",
     "pymc_forecast_models",
@@ -87,6 +89,7 @@ __all__ = [
     "RegressionKink",
     "SensitivityAnalysis",
     "SensitivitySummary",
+    "set_plot_style",
     "skl_models",
     "StaggeredDifferenceInDifferences",
     "step",
