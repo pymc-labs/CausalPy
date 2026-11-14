@@ -142,7 +142,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         self._t_design_info = t.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
-        self.t, self.X = np.asarray(t), np.asarray(X)
+        self.t, self.X = self._treatment_column(t), np.asarray(X)
         kept_rows = np.asarray(X.index)
         self.y = np.asarray(self.data[self.outcome_variable])[kept_rows]
 
@@ -151,6 +151,37 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         self.X_outcome = pd.DataFrame(self.X, columns=self.labels)
         self.X_outcome["trt"] = self.t
         self.coords["outcome_coeffs"] = self.X_outcome.columns
+
+    @staticmethod
+    def _treatment_column(t: pd.DataFrame) -> np.ndarray:
+        """Return the formula's treatment as a single column.
+
+        Patsy codes a boolean treatment, such as a bool column or
+        ``I(trt == 1)``, as two dummy columns named ``[False]`` and ``[True]``.
+        The ``[True]`` column is that treatment as 0/1. Any other treatment
+        that spans several columns, such as a text or categorical column, is
+        rejected.
+        """
+        names = t.design_info.column_names
+        if len(names) == 1:
+            return np.asarray(t)
+        factors = list(t.design_info.factor_infos.values())
+        if len(t.design_info.terms) == 1 and len(factors) == 1:
+            term = t.design_info.terms[0].name()
+            factor = factors[0]
+            is_bool_factor = factor.type == "categorical" and all(
+                isinstance(level, bool | np.bool_) for level in factor.categories
+            )
+            # Exact names rule out other contrasts and text "True"/"False".
+            if is_bool_factor and sorted(names) == [f"{term}[False]", f"{term}[True]"]:
+                return np.asarray(t)[:, [names.index(f"{term}[True]")]]
+        raise DataException(
+            "The treatment produced by the formula must be one 0/1 or boolean "
+            f"column, but it produced {len(names)} columns: {names}. A text or "
+            "categorical treatment gets one column per level. Recode it as 0/1 "
+            'or boolean, for example with I(group == "treated") as the '
+            "left-hand side."
+        )
 
     def _fit_inputs(self) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
         """Return ``(X, y, coords)`` for the backend build step.
