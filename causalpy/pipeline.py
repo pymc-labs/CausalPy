@@ -40,7 +40,7 @@ class PipelineContext:
 
     Attributes
     ----------
-    data : pd.DataFrame
+    data : pandas.DataFrame
         The input dataset.
     experiment : BaseExperiment or None
         The fitted experiment object, populated by ``EstimateEffect``.
@@ -155,7 +155,7 @@ class Pipeline:
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pandas.DataFrame
         The dataset to analyse.
     steps : list of Step
         Ordered sequence of pipeline steps.

@@ -44,9 +44,9 @@ class UpDownGeoLift(SyntheticControl):
 
     Parameters
     ----------
-    data : pd.DataFrame
+    data : pandas.DataFrame
         Wide revenue panel with a unique, sorted time index and geo columns.
-    treatment_time : int, float, or pd.Timestamp
+    treatment_time : int, float, or pandas.Timestamp
         First intervention period, shared by all up and down geos.
     arms : mapping of str to sequence of str
         Nonempty and disjoint ``up``, ``down``, and ``control`` geo groups.
@@ -212,16 +212,16 @@ class UpDownGeoLift(SyntheticControl):
 
         Parameters
         ----------
-        start : int, float, or pd.Timestamp, optional
+        start : int, float, or pandas.Timestamp, optional
             First included post-intervention period. Defaults to the first post period.
-        end : int, float, or pd.Timestamp, optional
+        end : int, float, or pandas.Timestamp, optional
             Last included post-intervention period. Defaults to the last post period.
         aggregate : {"mean", "sum"}, default "mean"
             Draw-wise time aggregation over the inclusive window.
 
         Returns
         -------
-        xr.Dataset
+        :class:`xarray.Dataset`
             Joint geo and arm effect draws with window metadata.
         """
         if aggregate not in ("mean", "sum"):
@@ -253,16 +253,16 @@ class UpDownGeoLift(SyntheticControl):
 
         Parameters
         ----------
-        start : int, float, or pd.Timestamp, optional
+        start : int, float, or pandas.Timestamp, optional
             First included post-intervention period.
-        end : int, float, or pd.Timestamp, optional
+        end : int, float, or pandas.Timestamp, optional
             Last included post-intervention period.
         aggregate : {"mean", "sum"}, default "mean"
             Draw-wise time aggregation over the inclusive window.
 
         Returns
         -------
-        pd.DataFrame
+        :class:`pandas.DataFrame`
             One row per treated geo and one row per intervention arm, with
             posterior mean, standard deviation, interval, and window metadata.
         """
@@ -317,10 +317,10 @@ class UpDownGeoLift(SyntheticControl):
 
         Parameters
         ----------
-        spend_baseline : pd.DataFrame
+        spend_baseline : pandas.DataFrame
             Business-as-usual spend panel with ``(geo, channel)`` columns and
             ``attrs['unit']`` matching ``spend_unit``.
-        spend_realized : pd.DataFrame
+        spend_realized : pandas.DataFrame
             Delivered spend panel on the same period grid and in the same units.
         channel : str
             Tested channel name used in the MMM.
@@ -328,14 +328,14 @@ class UpDownGeoLift(SyntheticControl):
             Spend unit per outcome period, matching both spend frame attributes.
         outcome_unit : str
             Revenue unit per outcome period, matching the fitted revenue attribute.
-        start : int, float, or pd.Timestamp, optional
+        start : int, float, or pandas.Timestamp, optional
             First included post-intervention period.
-        end : int, float, or pd.Timestamp, optional
+        end : int, float, or pandas.Timestamp, optional
             Last included post-intervention period.
 
         Returns
         -------
-        pd.DataFrame
+        :class:`pandas.DataFrame`
             One scalar lift row per treated geo with signed effect and spend
             change, posterior standard deviation, and unit and window metadata.
         """

@@ -49,7 +49,7 @@ class EffectSummary:
 
     Attributes
     ----------
-    table : pd.DataFrame
+    table : pandas.DataFrame
         DataFrame containing summary statistics (mean, median, HDI, tail probabilities)
     text : str
         Detailed multi-paragraph narrative report with
@@ -124,7 +124,7 @@ def _compute_tail_probabilities(
 
     Parameters
     ----------
-    effect : xr.DataArray
+    effect : xarray.DataArray
         Effect posterior draws
     direction : {"increase", "decrease", "two-sided"}
         Direction for tail probability
@@ -154,7 +154,7 @@ def _compute_rope_probability(
 
     Parameters
     ----------
-    effect : xr.DataArray
+    effect : xarray.DataArray
         Effect posterior draws
     min_effect : float
         Minimum effect size threshold
@@ -353,7 +353,7 @@ def _compute_statistics_scalar(
 
     Parameters
     ----------
-    effect : xr.DataArray
+    effect : xarray.DataArray
         Scalar effect with posterior draws (must have chain, draw dimensions)
     hdi_prob : float
         Probability for HDI interval
@@ -765,14 +765,14 @@ def _select_treated_unit(data: xr.DataArray, treated_unit: str | None) -> xr.Dat
 
     Parameters
     ----------
-    data : xr.DataArray
+    data : xarray.DataArray
         Data with treated_units dimension
     treated_unit : str or None
         Name of treated unit to select. If None, selects first unit.
 
     Returns
     -------
-    xr.DataArray
+    :class:`xarray.DataArray`
         Data for the selected treated unit
     """
     # Validate coordinate/dimension size match
@@ -799,10 +799,10 @@ def _extract_window(
 
     Parameters
     ----------
-    post_impact : xr.DataArray
+    post_impact : xarray.DataArray
         The group bundle's ``impact_post`` container with canonical
         prediction dimensions (singleton ``chain``/``draw`` for OLS backends).
-    post_index : pd.Index
+    post_index : pandas.Index
         Index of the post-treatment period (e.g. ``experiment.datapost.index``).
     window : str, tuple, or slice
         Window specification: "post", inclusive (start, end) tuple, or
@@ -902,17 +902,17 @@ def _extract_counterfactual(
 
     Parameters
     ----------
-    post_pred : xr.DataArray
+    post_pred : xarray.DataArray
         The group bundle's ``predictions_post`` container with canonical
         prediction dimensions (singleton ``chain``/``draw`` for OLS backends).
-    window_coords : pd.Index
+    window_coords : pandas.Index
         Window coordinates from :func:`_extract_window`
     treated_unit : str, optional
         For multi-unit experiments, specify which treated unit to analyze
 
     Returns
     -------
-    xr.DataArray
+    :class:`xarray.DataArray`
         Counterfactual predictions for the window
     """
     pred = post_pred
@@ -946,13 +946,13 @@ def _effect_summary_timeseries(
 
     Parameters
     ----------
-    windowed_impact : xr.DataArray
+    windowed_impact : xarray.DataArray
         Causal impact in the analysis window with canonical prediction
         dimensions.
-    counterfactual : xr.DataArray
+    counterfactual : xarray.DataArray
         Counterfactual predictions in the analysis window with canonical
         prediction dimensions.
-    window_coords : pd.Index
+    window_coords : pandas.Index
         Window coordinates from :func:`_extract_window`.
     direction : {"increase", "decrease", "two-sided"}, default "increase"
         Selects the Bayesian tail probability reported in prose and the
@@ -1268,7 +1268,7 @@ def _generate_prose_detailed(
     ----------
     stats : dict
         Statistics dictionary from _compute_statistics()
-    window_coords : pd.Index
+    window_coords : pandas.Index
         Window coordinates for the analysis period
     alpha : float, default=0.05
         Significance level for HDI interval
@@ -1471,7 +1471,7 @@ def _generate_prose_detailed_ols(
     ----------
     stats : dict
         Statistics dictionary from _compute_statistics_ols()
-    window_coords : pd.Index
+    window_coords : pandas.Index
         Window coordinates for the analysis period
     alpha : float, default=0.05
         Significance level for CI interval
@@ -1623,9 +1623,9 @@ def _compute_statistics_ols(
 
     Parameters
     ----------
-    impact : np.ndarray
+    impact : numpy.ndarray
         Impact values (y_true - y_pred) as 1D numpy array
-    counterfactual : np.ndarray
+    counterfactual : numpy.ndarray
         Counterfactual predictions as 1D numpy array
     alpha : float
         Significance level

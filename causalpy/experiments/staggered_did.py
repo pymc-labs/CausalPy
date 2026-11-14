@@ -682,11 +682,11 @@ class StaggeredDifferenceInDifferences(
 
         Parameters
         ----------
-        y_pred : xr.DataArray
+        y_pred : xarray.DataArray
             Counterfactual draws for every observation.
-        treated_data : pd.DataFrame
+        treated_data : pandas.DataFrame
             DataFrame containing only treated observations (event_time >= 0)
-        pretreatment_data : pd.DataFrame
+        pretreatment_data : pandas.DataFrame
             DataFrame containing pre-treatment observations from eventually-treated
             units (event_time < 0) for placebo check
         hdi_prob : float, optional
@@ -695,7 +695,7 @@ class StaggeredDifferenceInDifferences(
 
         Returns
         -------
-        tuple[pd.DataFrame, pd.DataFrame, float]
+        tuple[:class:`pandas.DataFrame`, :class:`pandas.DataFrame`, float]
             The group-time ATT table, the event-time ATT table, and the HDI
             probability used for the interval bounds.
         """
@@ -819,18 +819,18 @@ class StaggeredDifferenceInDifferences(
 
         Parameters
         ----------
-        y_pred : xr.DataArray
+        y_pred : xarray.DataArray
             Point counterfactual predictions for every observation (with
             singleton ``chain``/``draw`` dimensions).
-        treated_data : pd.DataFrame
+        treated_data : pandas.DataFrame
             DataFrame containing only treated observations (event_time >= 0)
-        pretreatment_data : pd.DataFrame
+        pretreatment_data : pandas.DataFrame
             DataFrame containing pre-treatment observations from eventually-treated
             units (event_time < 0) for placebo check
 
         Returns
         -------
-        tuple[pd.DataFrame, pd.DataFrame]
+        tuple[:class:`pandas.DataFrame`, :class:`pandas.DataFrame`]
             The group-time ATT table and the event-time ATT table.
         """
         # Point counterfactual predictions per observation; treatment
@@ -1655,7 +1655,7 @@ class StaggeredDifferenceInDifferences(
 
         Returns
         -------
-        pd.DataFrame
+        :class:`pandas.DataFrame`
             DataFrame with ``event_time`` and ``att`` columns plus
             ``att_lower`` / ``att_upper`` HDI bounds (draw-carrying models)
             or ``att_std`` / ``n_obs`` dispersion columns (point estimates).

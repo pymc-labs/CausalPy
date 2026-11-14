@@ -70,7 +70,7 @@ class StepTransform:
 
     Works with both numeric and datetime time columns. For datetime,
     the threshold can be specified as a string ('2020-01-01') or
-    pd.Timestamp. A string threshold is a wall time in the time column's
+    :class:`pandas.Timestamp`. A string threshold is a wall time in the time column's
     timezone.
 
     The transform is "stateful" because it remembers the datetime origin
@@ -117,7 +117,7 @@ class StepTransform:
         ----------
         x : array-like
             Time values (numeric or datetime).
-        threshold : int, float, str, or pd.Timestamp
+        threshold : int, float, str, or pandas.Timestamp
             The intervention time. For datetime ``x`` it may be a string
             like ``'2020-01-01'`` or a :class:`pd.Timestamp`.
         """
@@ -145,12 +145,12 @@ class StepTransform:
         ----------
         x : array-like
             Time values (numeric or datetime).
-        threshold : int, float, str, or pd.Timestamp
+        threshold : int, float, str, or pandas.Timestamp
             The intervention time, in the same domain as ``x``.
 
         Returns
         -------
-        np.ndarray
+        :class:`numpy.ndarray`
             Binary indicator with 1 where ``x >= threshold`` and 0 elsewhere.
         """
         if self._is_datetime and self._origin is not None:
@@ -191,7 +191,7 @@ class RampTransform:
 
     Works with both numeric and datetime time columns. For datetime,
     the threshold can be specified as a string ('2020-01-01') or
-    pd.Timestamp. A string threshold is a wall time in the time column's
+    :class:`pandas.Timestamp`. A string threshold is a wall time in the time column's
     timezone.
 
     Notes
@@ -234,7 +234,7 @@ class RampTransform:
         ----------
         x : array-like
             Time values (numeric or datetime).
-        threshold : int, float, str, or pd.Timestamp
+        threshold : int, float, str, or pandas.Timestamp
             The intervention time. For datetime ``x`` it may be a string
             like ``'2020-01-01'`` or a :class:`pd.Timestamp`.
         """
@@ -261,12 +261,12 @@ class RampTransform:
         ----------
         x : array-like
             Time values (numeric or datetime).
-        threshold : int, float, str, or pd.Timestamp
+        threshold : int, float, str, or pandas.Timestamp
             The intervention time, in the same domain as ``x``.
 
         Returns
         -------
-        np.ndarray
+        :class:`numpy.ndarray`
             Ramp values ``max(0, x - threshold)``. For datetime inputs, the
             difference is expressed in days.
         """

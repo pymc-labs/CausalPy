@@ -104,7 +104,7 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
 
     The `step` and `ramp` transforms are patsy stateful transforms that handle
     both numeric and datetime time columns. For datetime, thresholds can be
-    specified as strings (e.g., '2020-06-01') or pd.Timestamp objects.
+    specified as strings (e.g., '2020-06-01') or :class:`pandas.Timestamp` objects.
 
     Bare datetime predictors are represented as continuous elapsed days. Use
     ``C(date)`` when date fixed effects are intended instead.
@@ -789,7 +789,7 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
 
         Returns
         -------
-        pd.DataFrame
+        :class:`pandas.DataFrame`
             DataFrame containing observed data, predictions, and effects.
             Not cached on the experiment.
         """

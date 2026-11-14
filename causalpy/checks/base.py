@@ -65,7 +65,7 @@ class CheckResult:
     passed : bool or None
         ``True`` if the check passed, ``False`` if it failed, or ``None``
         if the check is purely informational (no pass/fail criterion).
-    table : pd.DataFrame or None
+    table : pandas.DataFrame or None
         Optional diagnostic statistics table.
     text : str
         Prose summary of the check result.

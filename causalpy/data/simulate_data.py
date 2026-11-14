@@ -748,7 +748,7 @@ def generate_staggered_did_data(
 
     Returns
     -------
-    pd.DataFrame
+    :class:`pandas.DataFrame`
         Panel data with columns:
 
         - unit: Unit identifier
@@ -903,7 +903,7 @@ def generate_piecewise_its_data(
 
     Returns
     -------
-    df : pd.DataFrame
+    df : pandas.DataFrame
         DataFrame with columns:
 
         - 't': time index (0 to N-1)

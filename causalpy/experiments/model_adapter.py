@@ -380,7 +380,7 @@ class ModelAdapter(ABC):
 
         Returns
         -------
-        xr.DataArray
+        :class:`xarray.DataArray`
             Expected outcomes with dimensions ``("chain", "draw", "obs_ind",
             "treated_units")``.
         """
@@ -482,7 +482,7 @@ class ModelAdapter(ABC):
 
         Returns
         -------
-        pd.Series
+        :class:`pandas.Series`
             Per-treated-unit :math:`R^2` values and optional posterior
             standard deviations.
         """
@@ -674,7 +674,7 @@ class PyMCModelAdapter(ModelAdapter):
 
         Returns
         -------
-        xr.DataArray
+        :class:`xarray.DataArray`
             Forward draws of ``mu`` with canonical prediction dimensions.
 
         Notes
@@ -893,7 +893,7 @@ class SklearnModelAdapter(ModelAdapter):
 
         Returns
         -------
-        xr.DataArray
+        :class:`xarray.DataArray`
             Point predictions with canonical prediction dimensions and
             singleton ``chain``/``draw`` dimensions.
         """
@@ -971,7 +971,7 @@ class SklearnModelAdapter(ModelAdapter):
 
         Returns
         -------
-        pd.Series
+        :class:`pandas.Series`
             One ``unit_{i}_r2`` entry per output. Point estimates carry no
             dispersion entries.
         """
@@ -1245,7 +1245,7 @@ class PyMCForecastAdapter(ModelAdapter):
 
         Returns
         -------
-        xr.DataArray
+        :class:`xarray.DataArray`
             Posterior draws of ``mu`` with canonical prediction dimensions.
         """
         if group != "posterior":

@@ -149,7 +149,7 @@ def hdi(
 
     Returns
     -------
-    xarray.DataArray
+    :class:`xarray.DataArray`
         HDI bounds with normalized ``hdi=['lower', 'higher']`` labels.
     """
     probability = _validate_prob(prob)
@@ -231,7 +231,7 @@ def hdi_bound_arrays(
 
     Returns
     -------
-    tuple of numpy.ndarray
+    tuple of :class:`numpy.ndarray`
         Lower and upper HDI bounds.
     """
     result = hdi(

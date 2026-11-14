@@ -260,13 +260,13 @@ class PyMCForecastModel:
 
         Parameters
         ----------
-        X : xr.DataArray
+        X : xarray.DataArray
             Design matrix with dims ``["obs_ind", "coeffs"]`` whose
             ``obs_ind`` coordinate carries the real (datetime or numeric)
             index. Columns are passed to ``pymc_forecast`` as covariates; a
             zero-column design (formula ``"y ~ 0"``) fits a covariate-free
             model.
-        y : xr.DataArray
+        y : xarray.DataArray
             Outcome with dims ``["obs_ind", "treated_units"]``. Must contain
             exactly one treated unit.
         coords : dict, optional
@@ -316,7 +316,7 @@ class PyMCForecastModel:
 
         Parameters
         ----------
-        X : xr.DataArray
+        X : xarray.DataArray
             Design matrix with dims ``["obs_ind", "coeffs"]``. In-sample
             prediction replays the training window (``X`` supplies only the
             output coordinates); out-of-sample prediction conditions the
@@ -329,7 +329,7 @@ class PyMCForecastModel:
 
         Returns
         -------
-        xr.DataTree
+        :class:`xarray.DataTree`
             With a ``posterior_predictive`` group holding draw-level ``mu`` (the outcome-scale expectation, preferring the explicit upstream expected observation) and ``y_hat`` (the posterior predictive of the observed variable) with dims ``(chain, draw, obs_ind, treated_units)``.
         """
         if self._posterior is None:
@@ -398,9 +398,9 @@ class PyMCForecastModel:
 
         Parameters
         ----------
-        X : xr.DataArray
+        X : xarray.DataArray
             Design matrix with dims ``["obs_ind", "coeffs"]``.
-        y : xr.DataArray
+        y : xarray.DataArray
             Observed outcomes with dims ``["obs_ind", "treated_units"]``.
         coords : dict, optional
             Not used, kept for API compatibility.
