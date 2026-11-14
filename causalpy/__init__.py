@@ -31,6 +31,9 @@ from .custom_exceptions import (
 )
 from .data import load_data
 from .experiments.diff_in_diff import DifferenceInDifferences
+from .experiments.hierarchical_interrupted_time_series import (
+    HierarchicalInterruptedTimeSeries,
+)
 from .experiments.instrumental_variable import InstrumentalVariable
 from .experiments.interrupted_time_series import InterruptedTimeSeries
 from .experiments.inverse_propensity_weighting import InversePropensityWeighting
@@ -68,6 +71,7 @@ __all__ = [
     "FormulaException",
     "GenerateReport",
     "GroupNotSampledException",
+    "HierarchicalInterruptedTimeSeries",
     "InstrumentalVariable",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",

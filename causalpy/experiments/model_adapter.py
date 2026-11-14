@@ -192,16 +192,29 @@ def _sklearn_y(y: Any) -> np.ndarray:
     return arr
 
 
-def _canonical_pymc_coefficients(posterior: xr.DataTree) -> xr.DataArray:
-    """Normalize supported PyMC coefficient variables to the canonical contract."""
+def _canonical_pymc_coefficients(
+    posterior: xr.DataTree, coefficient_names: tuple[str, ...] | None = None
+) -> xr.DataArray:
+    """Normalize supported PyMC coefficient variables to the canonical contract.
+
+    ``coefficient_names`` overrides the default lookup for models whose
+    design-matrix coefficients live under a different variable name.
+    """
     variables = posterior if isinstance(posterior, xr.Dataset) else posterior.dataset
-    coefficient_names = ("beta", "b", "beta_z")
+    if coefficient_names is None:
+        coefficient_names = ("beta", "b", "beta_z")
     coefficient_name = next(
         (name for name in coefficient_names if name in variables), None
     )
     if coefficient_name is None:
+        quoted = [f"'{name}'" for name in coefficient_names]
+        expected = (
+            quoted[0]
+            if len(quoted) == 1
+            else ", ".join(quoted[:-1]) + ", or " + quoted[-1]
+        )
         raise ValueError(
-            "PyMC posterior must expose one of 'beta', 'b', or 'beta_z' "
+            f"PyMC posterior must expose one of {expected} "
             "as design-matrix coefficients."
         )
 
@@ -722,7 +735,10 @@ class PyMCModelAdapter(ModelAdapter):
                 f"No {group!r} draws are available on this model. Call {call} first.",
                 group=group,
             )
-        return _canonical_pymc_coefficients(idata.children[group])
+        return _canonical_pymc_coefficients(
+            idata.children[group],
+            getattr(self._model, "coefficient_var_names", None),
+        )
 
 
 class SklearnModelAdapter(ModelAdapter):
