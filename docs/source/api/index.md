@@ -24,7 +24,7 @@
   skl_models
   pymc_forecast_models
   experiments
-  experiments.sc_results
+  design
   pipeline
   reporting
   steps

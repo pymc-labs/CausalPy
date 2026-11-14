@@ -60,7 +60,7 @@ The synthetic control method is a statistical method used to evaluate the effect
 :link-type: doc
 :::
 
-:::{grid-item-card} Design a synthetic control before it runs
+:::{grid-item-card} Plan a synthetic-control test
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/synthetic-control-design-pymc.png
 :link: synthetic-control-design-pymc

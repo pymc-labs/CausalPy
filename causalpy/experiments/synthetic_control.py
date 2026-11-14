@@ -13,9 +13,8 @@
 #   limitations under the License.
 """Synthetic Control Experiment."""
 
-import logging
 import warnings
-from typing import Any, Literal, Self
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -23,17 +22,11 @@ import xarray as xr
 from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
-from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB
 from causalpy.date_utils import validate_treatment_time_against_index
 from causalpy.experiments._panel_counterfactual import WidePanel, resolve_treated_unit
 from causalpy.experiments._results import CausalResult
 from causalpy.experiments.model_adapter import PyMCModelAdapter, build_coords
-from causalpy.experiments.sc_results import (
-    DonorPoolQualityResult,
-    DressRehearsalResult,
-    PowerCurveResult,
-)
 from causalpy.input_data import DataFrameLike, to_pandas_with_time_index
 from causalpy.plot_utils import _PosteriorPlotStyle, format_r2_score
 from causalpy.pymc_models import (
@@ -46,70 +39,6 @@ from causalpy.reporting import EffectSummary
 from causalpy.utils import check_convex_hull_violation, has_posterior_draws
 
 from .base import BaseExperiment
-
-logger = logging.getLogger(__name__)
-
-
-def _align_prior_draws(model: PyMCModel) -> None:
-    """Keep a design refit's prior phase on the posterior draw count.
-
-    ``sample_prior_predictive`` rejects posterior-only keys such as ``tune``
-    and ``chains``, so only ``draws`` and ``random_seed`` are copied.
-    """
-    prior = dict(model.prior_sample_kwargs)
-    if "draws" in model.sample_kwargs:
-        prior["draws"] = model.sample_kwargs["draws"]
-    if "random_seed" in model.sample_kwargs:
-        prior["random_seed"] = model.sample_kwargs["random_seed"]
-    model.prior_sample_kwargs = prior
-
-
-def _require_synthetic_control_design(experiment: object) -> None:
-    """Reject design-method calls on a SyntheticControl subclass.
-
-    Duck-typed shells used by unit tests are not instances, so they pass.
-    A real subclass such as UpDownGeoLift does not.
-    """
-    if (
-        isinstance(experiment, SyntheticControl)
-        and type(experiment) is not SyntheticControl
-    ):
-        raise TypeError(
-            "Design methods are SyntheticControl-only. "
-            f"{type(experiment).__name__} cannot use from_pre_period, "
-            "donor_pool_quality, validate_design, or power_analysis. "
-            "UpDownGeoLift takes arms, not control_units and treated_units, "
-            "so the inherited factory cannot construct it and a power loop "
-            "would drop the arms. Use SyntheticControl for a pre-period "
-            "design check."
-        )
-
-
-def _require_synthetic_control_design_class(cls: type) -> None:
-    """Reject ``from_pre_period`` on a subclass."""
-    if cls is SyntheticControl:
-        return
-    raise TypeError(
-        "Design methods are SyntheticControl-only. "
-        f"{cls.__name__} cannot use from_pre_period, donor_pool_quality, "
-        "validate_design, or power_analysis. UpDownGeoLift takes arms, "
-        "not control_units and treated_units, so the inherited factory "
-        "cannot construct it and a power loop would drop the arms. "
-        "Use SyntheticControl for a pre-period design check."
-    )
-
-
-def _pseudo_treatment_time(index: pd.Index) -> pd.Timestamp | float | int:
-    """Place a treatment time one step after the last observation."""
-    if isinstance(index, pd.DatetimeIndex):
-        return index.max() + pd.Timedelta(days=1)
-    if pd.api.types.is_numeric_dtype(index):
-        return index.max() + 1
-    raise TypeError(
-        "from_pre_period requires a DatetimeIndex or a numeric index "
-        "so a pseudo treatment time can be placed after the last "
-        "observation."
-    )
 
 
 class SyntheticControl(BaseExperiment[CausalResult]):
@@ -162,18 +91,6 @@ class SyntheticControl(BaseExperiment[CausalResult]):
     prior predictive checks (``plot(group="prior")``,
     ``effect_summary(group="prior")``). Results live on ``exp.result`` /
     ``exp.prior_result``.
-
-    **Design before a post-period exists**
-
-    :meth:`from_pre_period` fits the supplied rows as pre-period only.
-    :meth:`donor_pool_quality`, :meth:`validate_design`, and
-    :meth:`power_analysis` then ask whether that donor pool can recover an
-    effect you inject. They are ``SyntheticControl``-only and require a
-    PyMC model. An imperfect pre-period fit can shift the recovered
-    impact, including at a true effect of zero, so coverage of a planted
-    effect is not a calibration. ``power_analysis`` adds iid Gaussian
-    noise. It is a provisional sketch, not a sampling distribution of the
-    treatment effect and not a sample-size calculator.
 
     **Estimate extraction**
 
@@ -442,17 +359,9 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         treated_pre = self.pre_design["treated"]
 
         predictions_pre = self._model_backend.predict(X=control_pre, group=group)
-        if len(self._panel.post) == 0:
-            # A design-only fit has no post window. Predicting on an empty
-            # design matrix breaks the PyMC graph, so build a zero-length
-            # post prediction with the pre-prediction dimensions instead.
-            predictions_post = predictions_pre.isel(obs_ind=slice(0, 0)).assign_coords(
-                obs_ind=self._panel.post.index
-            )
-        else:
-            predictions_post = self._model_backend.predict(
-                X=self.post_design["control"], group=group
-            )
+        predictions_post = self._model_backend.predict(
+            X=self.post_design["control"], group=group
+        )
         impact_pre, impact_post, impact_post_cumulative = self._panel.impacts(
             predictions_pre, predictions_post
         )
@@ -608,17 +517,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             Posterior axes are the ndarray from ``plt.subplots`` (top:
             predictions, middle: causal impact, bottom: cumulative impact).
             Prior axes are a one-element list.
-
-        Raises
-        ------
-        ValueError
-            If the experiment has no post-period observations. Design-only
-            instances from :meth:`from_pre_period` support
-            :meth:`donor_pool_quality`, :meth:`validate_design`, and
-            :meth:`power_analysis` instead.
-
         """
-        self._require_post_period("plot")
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
@@ -735,14 +634,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             Observation columns follow a later write to ``self.data``.
             ``prediction``, ``impact``, and HDI columns stay computed even
             when the input frame already uses those names.
-
-        Raises
-        ------
-        ValueError
-            If the experiment has no post-period observations.
-
         """
-        self._require_post_period("get_plot_data")
         bundle = self._require_bundle(group)
         frame = self._panel.plot_data(
             bundle,
@@ -832,14 +724,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes.
             The .text attribute contains a detailed multi-paragraph narrative report.
-
-        Raises
-        ------
-        ValueError
-            If the experiment has no post-period observations.
-
         """
-        self._require_post_period("effect_summary")
         if period is not None:
             warnings.warn(
                 f"period='{period}' is ignored for SyntheticControl (two-period design only). "
@@ -861,520 +746,4 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             treated_unit=treated_unit,
             prefix=prefix,
             experiment_type="sc",
-        )
-
-    def _require_post_period(self, method: str) -> None:
-        """Raise if a post-period method is called on a design-only fit."""
-        if len(self.datapost) == 0:
-            raise ValueError(
-                f"{method} is not available for a design-only synthetic control "
-                "with no post-period observations. Use donor_pool_quality(), "
-                "validate_design(), or power_analysis() to assess the design."
-            )
-
-    def _design_sample_kwargs(
-        self, sample_kwargs: dict[str, Any] | None
-    ) -> dict[str, Any]:
-        """Merge a design refit's sampling overrides onto the parent model."""
-        model = self.model
-        if not isinstance(model, PyMCModel):
-            raise TypeError(
-                f"Design refits require a PyMC model. Got {type(model).__name__}."
-            )
-        refit_kwargs = dict(model.sample_kwargs)
-        if sample_kwargs is not None:
-            refit_kwargs.update(sample_kwargs)
-        refit_kwargs.setdefault("progressbar", False)
-        return refit_kwargs
-
-    def _clone_for_design(self, sample_kwargs: dict[str, Any] | None) -> PyMCModel:
-        """Return an unfitted clone whose both phases use the design sample size."""
-        from causalpy.checks.base import clone_model
-
-        cloned = clone_model(self.model)
-        cloned.sample_kwargs = self._design_sample_kwargs(sample_kwargs)
-        _align_prior_draws(cloned)
-        return cloned
-
-    @classmethod
-    def from_pre_period(
-        cls,
-        data: DataFrameLike,
-        control_units: list[str],
-        treated_units: list[str],
-        model: PyMCModel | RegressorMixin | None = None,
-        *,
-        min_donor_correlation: float = 0.0,
-        auto_scale_sigma: bool = True,
-        time_column: str | None = None,
-    ) -> Self:
-        """Create a design-phase synthetic control fitted only on pre-period data.
-
-        Use this before an experiment is run. Every supplied row is treated as
-        pre-period. The returned instance is fitted, so
-        :meth:`donor_pool_quality`, :meth:`validate_design`, and
-        :meth:`power_analysis` are ready to call. :meth:`plot`,
-        :meth:`get_plot_data`, and :meth:`effect_summary` raise because there
-        is no post-period window.
-
-        Parameters
-        ----------
-        data : DataFrameLike
-            Historical panel. All rows are used for fitting.
-        control_units : list of str
-            Donor columns.
-        treated_units : list of str
-            Treated columns.
-        model : PyMCModel or RegressorMixin, optional
-            Model to fit. Defaults to ``WeightedSumFitter``.
-        min_donor_correlation : float, default 0.0
-            Minimum acceptable donor correlation. See the constructor.
-        auto_scale_sigma : bool, default True
-            Forwarded to the constructor.
-        time_column : str, optional
-            Column to use as the time index when ``data`` is not already indexed.
-
-        Returns
-        -------
-        SyntheticControl
-            A fitted design-only instance.
-
-        Raises
-        ------
-        TypeError
-            If called on a subclass, or if the index is neither a
-            ``DatetimeIndex`` nor numeric, so a pseudo treatment time cannot
-            be placed after the last observation.
-        """
-        _require_synthetic_control_design_class(cls)
-        frame = to_pandas_with_time_index(data, time_column)
-        treatment_time = _pseudo_treatment_time(frame.index)
-        experiment = cls(
-            frame,
-            treatment_time,
-            control_units,
-            treated_units,
-            model=model,
-            min_donor_correlation=min_donor_correlation,
-            auto_scale_sigma=auto_scale_sigma,
-        )
-        if isinstance(experiment.model, PyMCModel):
-            _align_prior_draws(experiment.model)
-        return experiment.fit()
-
-    def validate_design(
-        self,
-        injected_effect: float,
-        *,
-        holdout_periods: int | None = None,
-        effect_type: Literal["relative", "absolute"] = "relative",
-        sample_kwargs: dict[str, Any] | None = None,
-        include_null: bool = True,
-    ) -> DressRehearsalResult:
-        """Inject a known effect into a holdout window and check recovery.
-
-        The last ``holdout_periods`` pre-period rows become a pseudo-post
-        window. A fresh model is fit on the remaining pre-period. The reported
-        recovery is the first treated unit's cumulative impact. The injected
-        truth is that same unit's cumulative injection, so a one-unit design
-        matches the historical comparison. The effect is still applied to
-        every treated column.
-
-        An imperfect pre-period fit can shift that recovery, including at a
-        true effect of zero (Ferman and Pinto, 2021). Coverage of the planted
-        effect is not a calibration. By default the same holdout is also
-        rehearsed at effect zero and attached as ``null_rehearsal``. See
-        CausalPy issue 913.
-
-        Parameters
-        ----------
-        injected_effect : float
-            Effect to inject. ``"relative"`` multiplies treated values by
-            ``1 + injected_effect``. ``"absolute"`` adds ``injected_effect``.
-        holdout_periods : int, optional
-            Pseudo-post length. ``None`` uses about 25% of the pre-period,
-            at least 1.
-        effect_type : {"relative", "absolute"}, default "relative"
-            How ``injected_effect`` is applied.
-        sample_kwargs : dict, optional
-            MCMC overrides for the refit. Merged onto the parent model's
-            ``sample_kwargs``. The prior phase uses the same draw count.
-        include_null : bool, default True
-            When the injected effect is not already zero, also rehearse a
-            zero effect on the same holdout. A power loop should pass
-            ``False`` so it does not fit twice per simulation.
-
-        Returns
-        -------
-        DressRehearsalResult
-            Recovery of the injected effect for the first treated unit.
-            ``null_rehearsal`` is set when the zero-effect comparison ran.
-
-        Raises
-        ------
-        TypeError
-            If called on a subclass, or the model is not a ``PyMCModel``.
-        ValueError
-            If the holdout would leave fewer than 10 pre-period rows, or
-            ``effect_type`` is unknown.
-
-        References
-        ----------
-        Ferman, B., & Pinto, C. (2021). Synthetic controls with imperfect
-        pretreatment fit. *Quantitative Economics*, 12(4), 1197-1221.
-        https://doi.org/10.3982/QE1596
-        """
-        _require_synthetic_control_design(self)
-        if not isinstance(self.model, PyMCModel):
-            raise TypeError(
-                "validate_design() requires a PyMC model. "
-                f"Got {type(self.model).__name__}."
-            )
-        if effect_type not in {"relative", "absolute"}:
-            raise ValueError(
-                f"effect_type must be 'relative' or 'absolute', got {effect_type!r}."
-            )
-        result = self._rehearse(
-            injected_effect,
-            holdout_periods=holdout_periods,
-            effect_type=effect_type,
-            sample_kwargs=sample_kwargs,
-        )
-        if include_null and injected_effect != 0:
-            result.null_rehearsal = self._rehearse(
-                0.0,
-                holdout_periods=holdout_periods,
-                effect_type=effect_type,
-                sample_kwargs=sample_kwargs,
-            )
-        return result
-
-    def _rehearse(
-        self,
-        injected_effect: float,
-        *,
-        holdout_periods: int | None,
-        effect_type: Literal["relative", "absolute"],
-        sample_kwargs: dict[str, Any] | None,
-    ) -> DressRehearsalResult:
-        """Fit one holdout injection and return its recovery.
-
-        Does not attach a zero-effect companion. Callers that want that
-        comparison run this twice.
-        """
-        pre = self.datapre
-        n_pre = len(pre)
-        if holdout_periods is None:
-            holdout_periods = max(1, n_pre // 4)
-        remaining = n_pre - holdout_periods
-        if remaining < 10:
-            raise ValueError(
-                f"Holdout of {holdout_periods} periods leaves only {remaining} "
-                "pre-period rows (need >= 10)."
-            )
-
-        pseudo_treatment_time = pre.index[remaining]
-        pseudo_pre = pre.iloc[:remaining].copy()
-        pseudo_post = pre.iloc[remaining:].copy()
-        scored_unit = self.treated_units[0]
-        if effect_type == "relative":
-            injected_truth = float(pseudo_post[scored_unit].sum() * injected_effect)
-            for column in self.treated_units:
-                pseudo_post[column] = pseudo_post[column] * (1 + injected_effect)
-        else:
-            injected_truth = float(injected_effect * len(pseudo_post))
-            for column in self.treated_units:
-                pseudo_post[column] = pseudo_post[column] + injected_effect
-
-        refitted = SyntheticControl(
-            pd.concat([pseudo_pre, pseudo_post]),
-            pseudo_treatment_time,
-            list(self.control_units),
-            list(self.treated_units),
-            model=self._clone_for_design(sample_kwargs),
-            min_donor_correlation=self.min_donor_correlation,
-            auto_scale_sigma=self.auto_scale_sigma,
-        ).fit()
-
-        cum_impact = refitted.result.impact_post_cumulative
-        if "treated_units" in cum_impact.dims:
-            cum_impact = cum_impact.isel(treated_units=0)
-        samples = cum_impact.isel(obs_ind=-1).stack(sample=("chain", "draw"))
-        recovered_mean = float(samples.mean().item())
-        recovered_hdi = hdi_bounds(np.asarray(samples.values), prob=HDI_PROB)
-        lower, upper = recovered_hdi
-        return DressRehearsalResult(
-            injected_effect=injected_effect,
-            effect_type=effect_type,
-            recovered_effect_mean=recovered_mean,
-            recovered_effect_hdi=recovered_hdi,
-            hdi_covers_truth=lower <= injected_truth <= upper,
-            posterior_samples=samples,
-            injected_truth=injected_truth,
-        )
-
-    def power_analysis(
-        self,
-        effect_sizes: list[float],
-        *,
-        n_simulations: int,
-        criterion: Literal[
-            "hdi_excludes_zero", "prob_gt_zero", "recovery_accuracy"
-        ] = "hdi_excludes_zero",
-        effect_type: Literal["relative", "absolute"] = "relative",
-        holdout_periods: int | None = None,
-        sample_kwargs: dict[str, Any] | None = None,
-        random_seed: int | None = None,
-    ) -> PowerCurveResult:
-        """Estimate a provisional power curve by repeating a dress rehearsal.
-
-        For each candidate effect size, the treated pre-period is perturbed
-        with iid Gaussian noise and :meth:`validate_design` is run. The noise
-        scale is the pre-period residual standard deviation of the first
-        treated unit. Every treated unit receives that same residual draw.
-        This is not a sampling distribution of the treatment effect, and it
-        does not model autocorrelation, seasonality, or heteroscedasticity
-        (CausalPy issue 914). Those limitations are why an iid Gaussian curve
-        can overstate power for a time-series donor pool.
-
-        The method is a sketch, not a stable sample-size result. The
-        detection criterion and the noise model may change. It is not the
-        post-experiment power analysis that needs a finished experiment.
-        The default criterion, ``hdi_excludes_zero``, counts a biased null
-        as a detection (Ferman and Pinto, 2021; CausalPy issue 913). Include
-        ``0`` in ``effect_sizes`` to see that false-detection rate.
-
-        Parameters
-        ----------
-        effect_sizes : list of float
-            Candidate effects passed to :meth:`validate_design`.
-        n_simulations : int
-            Simulations per effect size. Required. There is no default,
-            because each simulation refits the model.
-        criterion : {"hdi_excludes_zero", "prob_gt_zero", "recovery_accuracy"}
-            Detection rule. ``hdi_excludes_zero`` asks whether the cumulative
-            impact HDI excludes 0. A biased null can meet that rule.
-            ``prob_gt_zero`` asks whether
-            ``P(impact > 0) > 0.95``. ``recovery_accuracy`` asks whether the
-            posterior mean is within 20% of the injected truth.
-        effect_type : {"relative", "absolute"}, default "relative"
-            Passed to :meth:`validate_design`.
-        holdout_periods : int, optional
-            Passed to :meth:`validate_design`.
-        sample_kwargs : dict, optional
-            MCMC overrides for every refit.
-        random_seed : int, optional
-            Seed for the residual draws. MCMC reproducibility also requires
-            ``random_seed`` inside ``sample_kwargs``.
-
-        Returns
-        -------
-        PowerCurveResult
-            Detection rate and recovery statistics at each requested effect size.
-
-        Raises
-        ------
-        TypeError
-            If called on a subclass, or the model is not a ``PyMCModel``.
-        ValueError
-            If ``n_simulations`` is less than 1, ``criterion`` is unknown,
-            or ``effect_type`` is unknown.
-        """
-        _require_synthetic_control_design(self)
-        if not isinstance(self.model, PyMCModel):
-            raise TypeError(
-                "power_analysis() requires a PyMC model. "
-                f"Got {type(self.model).__name__}."
-            )
-        if n_simulations < 1:
-            raise ValueError(f"n_simulations must be >= 1, got {n_simulations}.")
-        if criterion not in {
-            "hdi_excludes_zero",
-            "prob_gt_zero",
-            "recovery_accuracy",
-        }:
-            raise ValueError(f"Unknown criterion: {criterion!r}.")
-        if effect_type not in {"relative", "absolute"}:
-            raise ValueError(
-                f"effect_type must be 'relative' or 'absolute', got {effect_type!r}."
-            )
-
-        residuals = self.result.impact_pre
-        if "treated_units" in residuals.dims:
-            residuals = residuals.isel(treated_units=0)
-        residual_std = float(
-            residuals.mean(dim=["chain", "draw"]).std(dim="obs_ind").item()
-        )
-        rng = np.random.default_rng(random_seed)
-        pre = self.datapre
-        all_results: list[list[DressRehearsalResult]] = []
-        detection_rates: list[float] = []
-        total = len(effect_sizes) * n_simulations
-        completed = 0
-
-        for effect_size in effect_sizes:
-            sim_results: list[DressRehearsalResult] = []
-            detections = 0
-            for _ in range(n_simulations):
-                noisy = self._build_noisy_experiment(
-                    pre, residual_std, rng, sample_kwargs
-                )
-                result = noisy.validate_design(
-                    effect_size,
-                    holdout_periods=holdout_periods,
-                    effect_type=effect_type,
-                    sample_kwargs=sample_kwargs,
-                    include_null=False,
-                )
-                sim_results.append(result)
-                if self._criterion_met(result, criterion):
-                    detections += 1
-                completed += 1
-                if completed % 5 == 0 or completed == total:
-                    logger.info(
-                        "Power analysis progress: %d/%d simulations complete",
-                        completed,
-                        total,
-                    )
-            all_results.append(sim_results)
-            detection_rates.append(detections / n_simulations)
-
-        return PowerCurveResult(
-            effect_sizes=list(effect_sizes),
-            detection_rates=detection_rates,
-            criterion=criterion,
-            raw_results=all_results,
-        )
-
-    def _build_noisy_experiment(
-        self,
-        pre: pd.DataFrame,
-        residual_std: float,
-        rng: np.random.Generator,
-        sample_kwargs: dict[str, Any] | None,
-    ) -> "SyntheticControl":
-        """Return an unfitted SyntheticControl on a noisy copy of the pre-period.
-
-        The caller refits through :meth:`validate_design`. Fitting here would
-        sample a posterior that the rehearsal never reads. Always returns
-        this class, not a subclass.
-        """
-        noisy = pre.copy()
-        noise = rng.normal(0, residual_std, size=len(pre))
-        for column in self.treated_units:
-            noisy[column] = noisy[column] + noise
-        return SyntheticControl(
-            noisy,
-            _pseudo_treatment_time(noisy.index),
-            list(self.control_units),
-            list(self.treated_units),
-            model=self._clone_for_design(sample_kwargs),
-            min_donor_correlation=self.min_donor_correlation,
-            auto_scale_sigma=self.auto_scale_sigma,
-        )
-
-    @staticmethod
-    def _criterion_met(result: DressRehearsalResult, criterion: str) -> bool:
-        """Return whether one dress rehearsal meets the detection rule."""
-        samples = np.asarray(result.posterior_samples.values, dtype=float).ravel()
-        if criterion == "hdi_excludes_zero":
-            lower, upper = hdi_bounds(samples, prob=HDI_PROB)
-            return bool(lower > 0 or upper < 0)
-        if criterion == "prob_gt_zero":
-            return bool(float((samples > 0).mean()) > 0.95)
-        if criterion == "recovery_accuracy":
-            if result.injected_truth == 0:
-                return abs(result.recovered_effect_mean) < 1e-6
-            relative_error = abs(
-                (result.recovered_effect_mean - result.injected_truth)
-                / result.injected_truth
-            )
-            return relative_error < 0.2
-        raise ValueError(f"Unknown criterion: {criterion!r}.")
-
-    def donor_pool_quality(self) -> DonorPoolQualityResult:
-        """Score donor correlation, convex-hull coverage, and weight concentration.
-
-        Weight concentration uses the posterior mean of ``beta``. When that
-        posterior has a treated-unit dimension, the first treated unit is
-        reported. An undefined donor correlation, such as a constant donor,
-        is omitted from the composite correlation score and kept in
-        ``per_donor_details``. The experiment must already be fitted.
-        SyntheticControl subclasses are rejected.
-
-        Returns
-        -------
-        DonorPoolQualityResult
-            Composite donor-pool scores and the per-donor table.
-
-        Raises
-        ------
-        TypeError
-            If called on a subclass, or the model is not a ``PyMCModel``.
-        RuntimeError
-            If the model has no posterior draws.
-        """
-        _require_synthetic_control_design(self)
-        if not isinstance(self.model, PyMCModel):
-            raise TypeError(
-                "donor_pool_quality() requires a PyMC model. "
-                f"Got {type(self.model).__name__}."
-            )
-        idata = self.model.idata
-        if idata is None or "posterior" not in idata.children:
-            raise RuntimeError(
-                "donor_pool_quality() requires a fitted PyMC model. Call fit() first."
-            )
-
-        pre = self.datapre
-        correlations: dict[str, float] = {}
-        for control in self.control_units:
-            unit_corrs = [
-                pre[treated].corr(pre[control]) for treated in self.treated_units
-            ]
-            correlations[control] = float(
-                np.nanmean(np.asarray(unit_corrs, dtype=float))
-            )
-
-        defined = [value for value in correlations.values() if np.isfinite(value)]
-        correlation_score = float(np.mean(defined)) if defined else float("nan")
-
-        treated = self.pre_design["treated"]
-        control_design = self.pre_design["control"]
-        n_violations = 0
-        n_points = 0
-        n_pre = int(treated.sizes["obs_ind"])
-        for unit_index in range(len(self.treated_units)):
-            hull = check_convex_hull_violation(
-                treated.isel(treated_units=unit_index).values,
-                control_design.values,
-            )
-            n_violations += hull["n_violations"]
-            n_points += n_pre
-        coverage = 1.0 - (n_violations / n_points) if n_points else 0.0
-
-        beta = idata.posterior["beta"].mean(dim=["chain", "draw"])
-        if "treated_units" in beta.dims:
-            beta = beta.isel(treated_units=0)
-        weights = np.abs(np.asarray(beta.values, dtype=float).ravel())
-        weight_sum = float(weights.sum())
-        if weight_sum > 0:
-            normalized = weights / weight_sum
-        else:
-            normalized = np.ones_like(weights) / len(weights)
-        herfindahl = float(np.sum(normalized**2))
-        effective_donors = 1.0 / herfindahl if herfindahl > 0 else float(len(weights))
-        details = pd.DataFrame(
-            {
-                "donor": list(self.control_units),
-                "mean_correlation": [correlations[name] for name in self.control_units],
-                "mean_weight": weights,
-                "normalized_weight": normalized,
-            }
-        )
-        return DonorPoolQualityResult(
-            correlation_score=correlation_score,
-            convex_hull_coverage=coverage,
-            weight_concentration=effective_donors,
-            per_donor_details=details,
         )

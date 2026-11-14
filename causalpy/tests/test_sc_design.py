@@ -11,27 +11,33 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Tests for SyntheticControl design-phase methods."""
+"""Contract tests for the fixed-target synthetic-control planner.
 
-import logging
+The deterministic oracle below is independent of the planner's private
+translation. A same-seed analysis fit is the Monte Carlo comparison. Post-period
+treated values are not fit inputs, so that comparison should agree up to
+graph-compilation noise; the tolerance is not a second sampler's slack.
+"""
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
-from sklearn.linear_model import LinearRegression
+from pymc_extras.prior import Prior
 
 import causalpy as cp
-from causalpy.checks import DressRehearsalCheck
-from causalpy.experiments.sc_results import (
-    DonorPoolQualityResult,
-    DressRehearsalResult,
-    PowerCurveResult,
+from causalpy._arviz_compat import hdi_bounds
+from causalpy.constants import HDI_PROB
+from causalpy.design import (
+    DecisionRule,
+    SyntheticControlPlanner,
+    _score_translated_lifts,
 )
+from causalpy.experiments.synthetic_control import SyntheticControl
+from causalpy.pymc_models import WeightedSumFitter
+from causalpy.tests.known_truth_panels import exact_convex_hull
 
-CONTROL_UNITS = ["a", "b", "c", "d", "e", "f", "g"]
-TREATED_UNITS = ["actual"]
 SAMPLE_KWARGS = {
     "tune": 20,
     "draws": 20,
@@ -40,555 +46,413 @@ SAMPLE_KWARGS = {
     "progressbar": False,
     "random_seed": 42,
 }
+# Same split, seed, and priors. Widen only if a same-seed rerun exceeds this.
+INDEPENDENT_FIT_ATOL = 1e-5
+INDEPENDENT_FIT_RTOL = 1e-5
+UNIT = exact_convex_hull.treated_units[0]
+CONTROLS = list(exact_convex_hull.control_units)
+DECISION = DecisionRule("positive", "cumulative", 0.0, 0.95)
 
 
-def _tiny_panel(n: int = 16) -> pd.DataFrame:
-    index = pd.date_range("2020-01-01", periods=n, freq="D")
-    rng = np.random.default_rng(0)
-    donors = rng.normal(size=(n, 3))
-    treated = donors @ np.array([0.5, 0.3, 0.2])
-    return pd.DataFrame(
-        np.column_stack([treated, donors]),
-        index=index,
-        columns=["y", "a", "b", "c"],
+def _history() -> pd.DataFrame:
+    return exact_convex_hull.untreated.copy()
+
+
+def _planner(frame: pd.DataFrame, **kwargs) -> SyntheticControlPlanner:
+    model = kwargs.pop("model", None)
+    if model is None:
+        model = WeightedSumFitter(sample_kwargs=dict(SAMPLE_KWARGS))
+    return SyntheticControlPlanner(
+        frame,
+        UNIT,
+        CONTROLS,
+        kwargs.pop("decision", DECISION),
+        model=model,
+        **kwargs,
     )
+
+
+def _direct_fit(frame: pd.DataFrame, duration: int) -> SyntheticControl:
+    return SyntheticControl(
+        frame,
+        frame.index[-duration],
+        control_units=CONTROLS,
+        treated_units=[UNIT],
+        model=WeightedSumFitter(sample_kwargs=dict(SAMPLE_KWARGS)),
+    ).fit()
+
+
+def _oracle_effect(baseline_impact, observed, lift, scale, estimand):
+    """Independent translation. The denominator is the observed holdout."""
+    observed_values = np.asarray(observed.values, dtype=float)
+    if scale == "relative":
+        delta = observed_values * lift
+    elif scale == "absolute":
+        delta = np.full_like(observed_values, lift, dtype=float)
+    else:
+        raise AssertionError(scale)
+    pointwise = np.asarray(baseline_impact.values, dtype=float) + delta
+    if estimand == "cumulative":
+        reduced = pointwise.sum(axis=-1)
+        truth = float(delta.sum())
+    elif estimand == "average":
+        reduced = pointwise.mean(axis=-1)
+        truth = float(delta.mean())
+    else:
+        raise AssertionError(estimand)
+    return reduced.reshape(-1), truth
+
+
+def _covers(draws: np.ndarray, truth: float) -> bool:
+    array = xr.DataArray(draws.reshape(1, -1), dims=("chain", "draw"))
+    lower, upper = hdi_bounds(array, prob=HDI_PROB, dim=("chain", "draw"))
+    return bool(lower <= truth <= upper)
 
 
 @pytest.fixture(scope="module")
-def design_sc():
-    """A fitted design-only PyMC synthetic control on the first 40 sc rows."""
-    frame = cp.load_data("sc")
-    frame.index = pd.date_range("2020-01-01", periods=len(frame), freq="D")
-    return cp.SyntheticControl.from_pre_period(
-        frame.iloc[:40],
-        CONTROL_UNITS,
-        TREATED_UNITS,
-        model=cp.pymc_models.WeightedSumFitter(sample_kwargs=SAMPLE_KWARGS),
+def fitted_rehearsal():
+    planner = _planner(_history())
+    result = planner.evaluate(
+        durations=[4],
+        relative_lifts=[0.1],
+        absolute_lifts=[1.0],
     )
+    return planner, result
 
 
-def test_from_pre_period_fits_ols_without_a_post_window():
-    design = cp.SyntheticControl.from_pre_period(
-        _tiny_panel(),
-        ["a", "b", "c"],
-        ["y"],
-        model=LinearRegression(),
-    )
+def test_construction_and_screen_do_not_sample(monkeypatch):
+    def reject_fit(*args, **kwargs):
+        raise AssertionError("construction or screen sampled")
 
-    assert len(design.datapost) == 0
-    assert design.result.impact_pre.sizes["obs_ind"] == 16
-    assert design.result.impact_post.sizes["obs_ind"] == 0
-    assert design.treatment_time > design.datapre.index.max()
-    design.summary()
-    with pytest.raises(ValueError, match="design-only"):
-        design.plot()
-    with pytest.raises(ValueError, match="design-only"):
-        design.effect_summary()
-    with pytest.raises(ValueError, match="design-only"):
-        design.get_plot_data()
+    monkeypatch.setattr(SyntheticControl, "fit", reject_fit)
+    monkeypatch.setattr(WeightedSumFitter, "fit", reject_fit)
+    planner = _planner(_history())
+    assert planner.model.idata is None
+    screen = planner.screen()
+    assert planner.model.idata is None
+    assert set(screen.correlation) == set(CONTROLS)
+    assert screen.convex_hull_passes
+    assert "correlation" in screen.summary().columns
+    assert "weight" not in screen.summary().columns
 
 
-def test_from_pre_period_accepts_a_numeric_index_and_time_column():
-    frame = _tiny_panel().reset_index(names="date")
-    frame.index = np.arange(len(frame))
-    design = cp.SyntheticControl.from_pre_period(
-        frame.drop(columns="date"),
-        ["a", "b", "c"],
-        ["y"],
-        model=LinearRegression(),
-    )
-    assert design.treatment_time == len(frame)
+def test_groups_two_sided_and_unsupported_estimators_fail_before_fitting(monkeypatch):
+    def reject_fit(*args, **kwargs):
+        raise AssertionError("invalid input reached a fit")
 
-    dated = cp.SyntheticControl.from_pre_period(
-        frame.reset_index(drop=True),
-        ["a", "b", "c"],
-        ["y"],
-        model=LinearRegression(),
-        time_column="date",
-    )
-    assert isinstance(dated.datapre.index, pd.DatetimeIndex)
-
-
-def test_from_pre_period_rejects_an_index_with_no_pseudo_time():
-    frame = _tiny_panel()
-    frame.index = [f"row-{i}" for i in range(len(frame))]
-    with pytest.raises(TypeError, match="DatetimeIndex or a numeric index"):
-        cp.SyntheticControl.from_pre_period(
-            frame,
-            ["a", "b", "c"],
-            ["y"],
-            model=LinearRegression(),
+    monkeypatch.setattr(SyntheticControl, "fit", reject_fit)
+    history = _history()
+    with pytest.raises(TypeError, match="Groups are not supported"):
+        SyntheticControlPlanner(history, [UNIT], CONTROLS, DECISION)
+    with pytest.raises(ValueError, match="Two-sided decisions are not supported"):
+        DecisionRule("two-sided", "cumulative", 0.0, 0.95)
+    with pytest.raises(ValueError, match="Unsupported estimator"):
+        SyntheticControlPlanner(
+            history,
+            UNIT,
+            CONTROLS,
+            DECISION,
+            estimator="augmented_synthetic_control",
+        )
+    with pytest.raises(TypeError, match="Unsupported estimator model"):
+        SyntheticControlPlanner(
+            history,
+            UNIT,
+            CONTROLS,
+            DECISION,
+            model=cp.pymc_models.SoftmaxWeightedSumFitter(),
         )
 
 
-@pytest.mark.parametrize(
-    "method", ["validate_design", "power_analysis", "donor_pool_quality"]
-)
-def test_design_methods_reject_an_ols_model(method):
-    design = cp.SyntheticControl.from_pre_period(
-        _tiny_panel(),
-        ["a", "b", "c"],
-        ["y"],
-        model=LinearRegression(),
+def test_undefined_relative_baselines_are_rejected_before_fitting(monkeypatch):
+    calls = []
+
+    def reject_fit(*args, **kwargs):
+        calls.append("fit")
+        raise AssertionError("undefined relative baseline reached a fit")
+
+    monkeypatch.setattr(SyntheticControl, "fit", reject_fit)
+    signed = _history()
+    signed.loc[signed.index[-4:], UNIT] = -1.0
+    with pytest.raises(ValueError, match="Relative effects are undefined"):
+        _planner(signed).evaluate(durations=[4], relative_lifts=[0.1])
+    near_zero = _history()
+    near_zero.loc[near_zero.index[-4:], UNIT] = 1e-12
+    with pytest.raises(ValueError, match="Relative effects are undefined"):
+        _planner(near_zero).evaluate(durations=[4], relative_lifts=[0.1])
+    assert calls == []
+
+
+def test_declared_relative_floor_replaces_the_scale_rule(monkeypatch):
+    calls = []
+
+    def stop_after_gate(self, **kwargs):
+        calls.append(self.treatment_time)
+        raise RuntimeError("stop after the relative gate")
+
+    monkeypatch.setattr(SyntheticControl, "fit", stop_after_gate)
+    near_zero = _history()
+    near_zero.loc[near_zero.index[-4:], UNIT] = 1e-12
+    result = _planner(near_zero, relative_floor=0.0).evaluate(
+        durations=[4],
+        relative_lifts=[0.1],
     )
-    with pytest.raises(TypeError, match="PyMC model"):
-        if method == "validate_design":
-            design.validate_design(0.1)
-        elif method == "power_analysis":
-            design.power_analysis([0.1], n_simulations=1)
-        else:
-            design.donor_pool_quality()
+    assert calls == [near_zero.index[-4]]
+    assert result.status == "fit-failed"
+    assert result.horizons[0].scores == ()
+    assert result.summary()["detected"].isna().all()
 
 
-def test_design_sample_kwargs_merges_parent_settings_and_rejects_non_pymc():
-    panel = _tiny_panel()
-    treatment_time = panel.index.max() + pd.Timedelta(days=1)
-    design = cp.SyntheticControl(
-        panel,
-        treatment_time,
-        ["a", "b", "c"],
-        ["y"],
-        model=cp.pymc_models.WeightedSumFitter(
-            sample_kwargs={"draws": 11, "progressbar": True}
-        ),
+def test_failed_fit_does_not_report_a_detection(monkeypatch):
+    def fail(self, **kwargs):
+        raise RuntimeError("sampling failed")
+
+    monkeypatch.setattr(SyntheticControl, "fit", fail)
+    result = _planner(_history()).evaluate(durations=[4], absolute_lifts=[1.0])
+    assert result.status == "fit-failed"
+    assert result.n_inference_fits == 1
+    assert result.fit_error is not None
+    assert "sampling failed" in result.fit_error
+    assert result.horizons[0].scores == ()
+    assert "No detection is reported" in result.recommendation()
+    assert result.summary()["detected"].isna().all()
+    with pytest.raises(ValueError, match="failed fit"):
+        result.plot()
+
+
+def test_translation_coverage_is_not_a_detection_curve():
+    baseline = xr.DataArray(
+        np.array([[[0.0, 0.0], [1.0, 1.0], [-1.0, -1.0], [0.2, 0.2]]]),
+        dims=("chain", "draw", "obs_ind"),
+        coords={"obs_ind": [0, 1]},
     )
-    merged = design._design_sample_kwargs({"tune": 3})
-    assert merged["draws"] == 11
-    assert merged["tune"] == 3
-    assert merged["progressbar"] is True
-
-    bare = cp.SyntheticControl(
-        panel,
-        treatment_time,
-        ["a", "b", "c"],
-        ["y"],
-        model=cp.pymc_models.WeightedSumFitter(sample_kwargs={"draws": 11}),
+    observed = xr.DataArray(
+        [10.0, 30.0],
+        dims="obs_ind",
+        coords={"obs_ind": [0, 1]},
     )
-    assert bare._design_sample_kwargs(None)["progressbar"] is False
-
-    ols = cp.SyntheticControl.from_pre_period(
-        panel,
-        ["a", "b", "c"],
-        ["y"],
-        model=LinearRegression(),
+    counterfactual = xr.zeros_like(baseline)
+    decision = DecisionRule("positive", "cumulative", 0.0, 0.75)
+    scores = _score_translated_lifts(
+        baseline_impact=baseline,
+        observed=observed,
+        counterfactual=counterfactual,
+        relative_lifts=(0.0, 0.5),
+        absolute_lifts=(0.0, 5.0),
+        decision=decision,
     )
-    with pytest.raises(TypeError, match="PyMC model"):
-        ols._design_sample_kwargs(None)
+    coverages = set()
+    detections = set()
+    for score in scores:
+        expected, truth = _oracle_effect(
+            baseline, observed, score.lift, score.effect_scale, score.estimand
+        )
+        np.testing.assert_allclose(score.effect, expected)
+        assert score.truth == pytest.approx(truth)
+        if score.effect_scale == "relative" and score.estimand == "cumulative":
+            assert score.truth == pytest.approx(score.lift * float(observed.sum()))
+        baseline_effect, _ = _oracle_effect(
+            baseline, observed, 0.0, score.effect_scale, score.estimand
+        )
+        assert score.truth_covers is _covers(baseline_effect, 0.0)
+        assert score.counterfactual is counterfactual
+        coverages.add(score.truth_covers)
+        detections.add(score.detected)
+    assert len(coverages) == 1
+    assert detections == {False, True}
 
 
-def test_validate_design_rejects_a_holdout_that_leaves_too_little_pre_period(design_sc):
-    with pytest.raises(ValueError, match="need >= 10"):
-        design_sc.validate_design(0.1, holdout_periods=35)
-
-
-def test_validate_design_recovers_a_relative_effect(design_sc):
-    result = design_sc.validate_design(
-        0.15, sample_kwargs=SAMPLE_KWARGS, include_null=False
+def test_rehearsal_matches_the_analysis_fit_and_the_oracle(fitted_rehearsal):
+    planner, result = fitted_rehearsal
+    assert planner.model.idata is None
+    assert result.status == "historical-descriptive"
+    assert result.horizon_policy == "separate-fits"
+    assert result.n_inference_fits == 1
+    assert result.relative_baseline_convention == "observed-holdout"
+    horizon = result.horizons[0]
+    assert horizon.holdout_index.tolist() == _history().index[-4:].tolist()
+    assert horizon.training_index.tolist() == _history().index[:-4].tolist()
+    scales = {score.effect_scale for score in horizon.scores}
+    estimands = {score.estimand for score in horizon.scores}
+    assert scales == {"absolute", "relative"}
+    assert estimands == {"cumulative", "average"}
+    assert any(score.lift == 0.0 for score in horizon.scores)
+    for score in horizon.scores:
+        assert score.counterfactual is horizon.counterfactual
+        expected, truth = _oracle_effect(
+            horizon.baseline_impact,
+            horizon.observed_holdout,
+            score.lift,
+            score.effect_scale,
+            score.estimand,
+        )
+        np.testing.assert_allclose(score.effect, expected)
+        assert score.truth == pytest.approx(truth)
+        baseline_effect, _ = _oracle_effect(
+            horizon.baseline_impact,
+            horizon.observed_holdout,
+            0.0,
+            score.effect_scale,
+            score.estimand,
+        )
+        assert score.truth_covers is _covers(baseline_effect, 0.0)
+    direct = _direct_fit(_history(), 4)
+    np.testing.assert_allclose(
+        horizon.counterfactual.values,
+        direct.result.predictions_post.sel(treated_units=UNIT).values,
+        atol=INDEPENDENT_FIT_ATOL,
+        rtol=INDEPENDENT_FIT_RTOL,
     )
-
-    assert isinstance(result, DressRehearsalResult)
-    assert result.effect_type == "relative"
-    assert result.injected_effect == 0.15
-    assert np.isfinite(result.recovered_effect_mean)
-    assert len(result.recovered_effect_hdi) == 2
-    assert isinstance(result.hdi_covers_truth, bool)
-    assert result.null_rehearsal is None
-    assert result.posterior_samples.sizes["sample"] == 20
-
-
-def test_validate_design_scores_an_absolute_effect(design_sc):
-    result = design_sc.validate_design(
-        5.0,
-        effect_type="absolute",
-        sample_kwargs=SAMPLE_KWARGS,
-        include_null=False,
+    injected = _history()
+    injected.loc[injected.index[-4:], UNIT] *= 1.1
+    injected_fit = _direct_fit(injected, 4)
+    relative = next(
+        score
+        for score in horizon.scores
+        if score.effect_scale == "relative"
+        and score.lift == pytest.approx(0.1)
+        and score.estimand == "cumulative"
     )
-
-    assert result.effect_type == "absolute"
-    assert result.injected_truth == pytest.approx(5.0 * (40 // 4))
-
-
-def test_donor_pool_quality_reports_the_pre_period_pool(design_sc):
-    result = design_sc.donor_pool_quality()
-
-    assert isinstance(result, DonorPoolQualityResult)
-    assert 0 <= result.convex_hull_coverage <= 1
-    assert result.weight_concentration >= 1
-    assert list(result.per_donor_details["donor"]) == CONTROL_UNITS
-    assert "Overall quality" in set(result.summary()["metric"])
-
-
-def test_power_analysis_returns_a_rate_for_each_effect(design_sc):
-    result = design_sc.power_analysis(
-        [0.1],
-        n_simulations=2,
-        sample_kwargs=SAMPLE_KWARGS,
-        random_seed=1,
+    np.testing.assert_allclose(
+        relative.effect,
+        injected_fit.result.impact_post.sel(treated_units=UNIT)
+        .sum("obs_ind")
+        .values.reshape(-1),
+        atol=INDEPENDENT_FIT_ATOL,
+        rtol=INDEPENDENT_FIT_RTOL,
     )
-
-    assert isinstance(result, PowerCurveResult)
-    assert result.effect_sizes == [0.1]
-    assert len(result.detection_rates) == 1
-    assert 0 <= result.detection_rates[0] <= 1
-    assert len(result.raw_results[0]) == 2
-
-
-def test_power_analysis_is_reproducible_for_a_fixed_seed(design_sc):
-    kwargs = {"sample_kwargs": SAMPLE_KWARGS, "random_seed": 7, "n_simulations": 1}
-    first = design_sc.power_analysis([0.2], **kwargs)
-    second = design_sc.power_analysis([0.2], **kwargs)
-
-    assert first.detection_rates == second.detection_rates
-    assert first.raw_results[0][0].recovered_effect_mean == pytest.approx(
-        second.raw_results[0][0].recovered_effect_mean
+    shifted = _history()
+    shifted.loc[shifted.index[-4:], UNIT] += 1.0
+    shifted_fit = _direct_fit(shifted, 4)
+    absolute = next(
+        score
+        for score in horizon.scores
+        if score.effect_scale == "absolute"
+        and score.lift == pytest.approx(1.0)
+        and score.estimand == "cumulative"
     )
-
-
-def test_power_analysis_rejects_an_unknown_criterion_before_fitting(design_sc):
-    with pytest.raises(ValueError, match="Unknown criterion"):
-        design_sc.power_analysis([0.1], n_simulations=1, criterion="not-a-rule")
-
-
-def test_dress_rehearsal_check_returns_a_check_result(design_sc):
-    check = DressRehearsalCheck(injected_effect=0.1, sample_kwargs=SAMPLE_KWARGS)
-    result = check.run(design_sc, context=None)
-
-    assert result.check_name == "DressRehearsal"
-    assert result.passed is not None
-    assert "effect" in result.text
-    assert "dress_rehearsal_result" in result.metadata
-
-
-def test_plot_raises_on_a_design_only_pymc_fit(design_sc):
-    with pytest.raises(ValueError, match="design-only"):
-        design_sc.plot()
-
-
-def _rehearsal(
-    samples: list[float],
-    *,
-    recovered: float,
-    truth: float,
-) -> DressRehearsalResult:
-    return DressRehearsalResult(
-        injected_effect=0.1,
-        effect_type="relative",
-        recovered_effect_mean=recovered,
-        recovered_effect_hdi=(min(samples), max(samples)),
-        hdi_covers_truth=min(samples) <= truth <= max(samples),
-        posterior_samples=xr.DataArray(samples, dims="sample"),
-        injected_truth=truth,
+    np.testing.assert_allclose(
+        absolute.effect,
+        shifted_fit.result.impact_post.sel(treated_units=UNIT)
+        .sum("obs_ind")
+        .values.reshape(-1),
+        atol=INDEPENDENT_FIT_ATOL,
+        rtol=INDEPENDENT_FIT_RTOL,
     )
-
-
-def _quality(
-    correlation: float, coverage: float, weight: float
-) -> DonorPoolQualityResult:
-    return DonorPoolQualityResult(
-        correlation_score=correlation,
-        convex_hull_coverage=coverage,
-        weight_concentration=weight,
-        per_donor_details=pd.DataFrame({"donor": ["a"]}),
-    )
-
-
-def _overall(result: DonorPoolQualityResult) -> str:
     table = result.summary()
-    return table.loc[table["metric"] == "Overall quality", "assessment"].item()
-
-
-def test_power_curve_plot_and_summary_report_each_effect():
-    curve = PowerCurveResult(
-        effect_sizes=[0.1, 0.2],
-        detection_rates=[0.0, 1.0],
-        criterion="hdi_excludes_zero",
-        raw_results=[
-            [_rehearsal([-1.0, 0.5], recovered=-0.25, truth=1.0)],
-            [_rehearsal([1.0, 2.0], recovered=1.5, truth=1.0)],
-        ],
-    )
-    empty = PowerCurveResult(
-        effect_sizes=[],
-        detection_rates=[],
-        criterion="hdi_excludes_zero",
-        raw_results=[],
-    )
-
-    fig, ax = curve.plot()
-    empty_fig, empty_ax = empty.plot()
-    summary = curve.summary()
+    assert {"truth_covers", "detected", "estimand", "status"} <= set(table.columns)
+    assert set(table["status"]) == {"historical-descriptive"}
+    fig, _ = result.plot()
+    assert "not a detection curve" in fig.axes[0].get_title()
     plt.close(fig)
-    plt.close(empty_fig)
-
-    assert "n=1" in ax.get_title()
-    assert "n=0" in empty_ax.get_title()
-    assert list(summary["effect_size"]) == [0.1, 0.2]
-    assert list(summary["detection_rate"]) == [0.0, 1.0]
-    assert summary["mean_recovery"].tolist() == pytest.approx([-0.25, 1.5])
-    assert summary["median_recovery"].tolist() == pytest.approx([-0.25, 1.5])
-    assert summary["n_simulations"].tolist() == [1, 1]
-    assert empty.summary().empty
 
 
-def test_donor_pool_quality_labels_span_the_three_bands():
-    assert _overall(_quality(0.1, 1.0, 5.0)) == "poor"
-    assert _overall(_quality(0.9, 1.0, 4.0)) == "good"
-    assert _overall(_quality(0.7, 0.9, 2.0)) == "acceptable"
+def test_lift_grid_does_not_add_fits_and_horizons_are_separate(monkeypatch):
+    calls = []
+    real_fit = SyntheticControl.fit
 
+    def counting_fit(self, **kwargs):
+        calls.append(self.treatment_time)
+        return real_fit(self, **kwargs)
 
-def test_dress_rehearsal_validate_rejects_the_wrong_experiment_and_model():
-    check = DressRehearsalCheck()
-    with pytest.raises(TypeError, match="SyntheticControl-only"):
-        check.validate(object())
-
-    design = cp.SyntheticControl.from_pre_period(
-        _tiny_panel(),
-        ["a", "b", "c"],
-        ["y"],
-        model=LinearRegression(),
+    monkeypatch.setattr(SyntheticControl, "fit", counting_fit)
+    planner = _planner(_history())
+    small = planner.evaluate(durations=[4], relative_lifts=[0.05])
+    large = planner.evaluate(
+        durations=[3, 4],
+        relative_lifts=[0.05, 0.1, 0.2],
+        absolute_lifts=[1.0, 2.0],
     )
-    with pytest.raises(TypeError, match="PyMC model"):
-        check.validate(design)
-
-
-def test_design_methods_reject_bad_controls_before_sampling(design_sc):
-    with pytest.raises(ValueError, match="effect_type"):
-        design_sc.validate_design(0.1, effect_type="nope")
-    with pytest.raises(ValueError, match="n_simulations"):
-        design_sc.power_analysis([0.1], n_simulations=0)
-    with pytest.raises(ValueError, match="effect_type"):
-        design_sc.power_analysis([0.1], n_simulations=1, effect_type="nope")
-
-
-def test_criterion_met_applies_each_detection_rule():
-    positive = _rehearsal([1.0, 2.0, 3.0], recovered=2.0, truth=2.0)
-    mixed = _rehearsal([-1.0, 1.0], recovered=0.0, truth=2.0)
-    exact_zero = _rehearsal([0.0, 0.0], recovered=0.0, truth=0.0)
-    nonzero_at_zero_truth = _rehearsal([1.0], recovered=1.0, truth=0.0)
-    far = _rehearsal([1.0, 1.0], recovered=1.0, truth=2.0)
-
-    assert cp.SyntheticControl._criterion_met(positive, "prob_gt_zero")
-    assert not cp.SyntheticControl._criterion_met(mixed, "prob_gt_zero")
-    assert cp.SyntheticControl._criterion_met(exact_zero, "recovery_accuracy")
-    assert not cp.SyntheticControl._criterion_met(
-        nonzero_at_zero_truth, "recovery_accuracy"
-    )
-    assert cp.SyntheticControl._criterion_met(positive, "recovery_accuracy")
-    assert not cp.SyntheticControl._criterion_met(far, "recovery_accuracy")
-    with pytest.raises(ValueError, match="Unknown criterion"):
-        cp.SyntheticControl._criterion_met(positive, "not-a-rule")
-
-
-def test_donor_pool_quality_requires_a_fitted_model():
-    model = cp.pymc_models.WeightedSumFitter(sample_kwargs=SAMPLE_KWARGS)
-    experiment = cp.SyntheticControl.__new__(cp.SyntheticControl)
-    experiment.model = model
-
-    with pytest.raises(RuntimeError, match="Call fit"):
-        experiment.donor_pool_quality()
-
-
-def _quality_with_beta(design_sc, beta: xr.DataArray) -> DonorPoolQualityResult:
-    idata = design_sc.model.idata.copy()
-    posterior = idata.posterior.copy()
-    posterior["beta"] = beta
-    idata.posterior = posterior
-    model = cp.pymc_models.WeightedSumFitter(sample_kwargs=SAMPLE_KWARGS)
-    model.idata = idata
-    shell = type("Shell", (), {})()
-    shell.model = model
-    shell.datapre = design_sc.datapre
-    shell.control_units = list(design_sc.control_units)
-    shell.treated_units = list(design_sc.treated_units)
-    shell.pre_design = design_sc.pre_design
-    return cp.SyntheticControl.donor_pool_quality(shell)
-
-
-def test_donor_pool_quality_handles_zero_and_flat_weights(design_sc):
-    beta = design_sc.model.idata.posterior["beta"]
-    zeroed = _quality_with_beta(design_sc, xr.zeros_like(beta))
-    flat_beta = beta.isel(treated_units=0) if "treated_units" in beta.dims else beta
-    flat = _quality_with_beta(design_sc, flat_beta)
-
-    n_donors = len(design_sc.control_units)
-    assert zeroed.per_donor_details["normalized_weight"].tolist() == pytest.approx(
-        [1 / n_donors] * n_donors
-    )
-    reduced = flat_beta.mean(dim=["chain", "draw"])
-    expected = np.abs(np.asarray(reduced.values, dtype=float).ravel())
-    expected = expected / expected.sum()
-    assert flat.per_donor_details["normalized_weight"].to_numpy() == pytest.approx(
-        expected
-    )
-
-
-def test_validate_design_scores_impact_without_a_treated_unit_dimension(
-    design_sc, monkeypatch
-):
-    values = np.zeros((1, 8, 4))
-    values[..., 0] = -1.0
-    values[..., -1] = 3.0
-    impact = xr.DataArray(values, dims=("chain", "draw", "obs_ind"))
-
-    def fake_fit(self, *args, **kwargs):
-        self._result = type("Result", (), {"impact_post_cumulative": impact})()
-        return self
-
-    monkeypatch.setattr(cp.SyntheticControl, "fit", fake_fit)
-    result = design_sc.validate_design(
-        0.1,
-        holdout_periods=10,
-        sample_kwargs=SAMPLE_KWARGS,
-        include_null=False,
-    )
-
-    assert result.recovered_effect_mean == pytest.approx(3.0)
-    assert result.effect_type == "relative"
-
-
-def test_power_analysis_counts_a_miss_without_a_residual_unit_dimension(
-    design_sc, monkeypatch
-):
-    residuals = design_sc.result.impact_pre
-    if "treated_units" in residuals.dims:
-        residuals = residuals.isel(treated_units=0)
-    original = design_sc._result
-    design_sc._result = type("Result", (), {"impact_pre": residuals})()
-    rehearsal = _rehearsal([-1.0, 1.0], recovered=0.0, truth=2.0)
-    monkeypatch.setattr(
-        cp.SyntheticControl,
-        "_build_noisy_experiment",
-        lambda self, *args, **kwargs: design_sc,
-    )
-    monkeypatch.setattr(
-        cp.SyntheticControl,
-        "validate_design",
-        lambda self, *args, **kwargs: rehearsal,
-    )
-
-    try:
-        result = design_sc.power_analysis(
-            [0.1], n_simulations=1, sample_kwargs=SAMPLE_KWARGS
+    assert calls == [
+        _history().index[-4],
+        _history().index[-3],
+        _history().index[-4],
+    ]
+    assert small.n_inference_fits == 1
+    assert large.n_inference_fits == 2
+    short, long = large.horizons
+    assert short.duration == 3
+    assert long.duration == 4
+    assert short.holdout_index.tolist() != long.holdout_index[:3].tolist()
+    assert set(long.holdout_index).intersection(short.training_index)
+    for horizon in large.horizons:
+        assert all(
+            score.counterfactual is horizon.counterfactual for score in horizon.scores
         )
-    finally:
-        design_sc._result = original
-
-    assert result.detection_rates == [0.0]
-
-
-def test_dress_rehearsal_check_text_names_a_hit_and_a_miss():
-    hit = _rehearsal([1.0, 2.0], recovered=1.5, truth=1.5)
-    miss = _rehearsal([1.0, 2.0], recovered=1.5, truth=9.0)
-    hit_check = hit.to_check_result()
-    miss_check = miss.to_check_result()
-    plt.close(hit_check.figures[0])
-    plt.close(miss_check.figures[0])
-
-    assert hit_check.passed is True
-    assert "HDI covers" in hit_check.text
-    assert miss_check.passed is False
-    assert "HDI misses" in miss_check.text
-
-
-def test_power_analysis_logs_every_fifth_simulation(design_sc, monkeypatch, caplog):
-    rehearsal = _rehearsal([1.0, 2.0], recovered=1.5, truth=1.0)
-    monkeypatch.setattr(
-        cp.SyntheticControl,
-        "_build_noisy_experiment",
-        lambda self, *args, **kwargs: design_sc,
-    )
-    monkeypatch.setattr(
-        cp.SyntheticControl,
-        "validate_design",
-        lambda self, *args, **kwargs: rehearsal,
-    )
-
-    with caplog.at_level(logging.INFO, logger="causalpy.experiments.synthetic_control"):
-        result = design_sc.power_analysis(
-            [0.1, 0.2], n_simulations=5, sample_kwargs=SAMPLE_KWARGS
+        zero = next(
+            score
+            for score in horizon.scores
+            if score.lift == 0.0 and score.estimand == "cumulative"
+        )
+        np.testing.assert_allclose(
+            zero.effect,
+            horizon.baseline_impact.sum("obs_ind").values.reshape(-1),
         )
 
-    assert "5/10 simulations complete" in caplog.text
-    assert "10/10 simulations complete" in caplog.text
-    assert "1/10 simulations complete" not in caplog.text
-    assert result.detection_rates == [1.0, 1.0]
+
+def test_duplicate_durations_are_fitted_once(monkeypatch):
+    calls = []
+
+    def stop(self, **kwargs):
+        calls.append(self.treatment_time)
+        raise RuntimeError("counted")
+
+    monkeypatch.setattr(SyntheticControl, "fit", stop)
+    result = _planner(_history()).evaluate(
+        durations=[4, 4, 3],
+        absolute_lifts=[1.0],
+    )
+    assert calls == [_history().index[-4], _history().index[-3]]
+    assert [horizon.duration for horizon in result.horizons] == [4, 3]
+    assert result.n_inference_fits == 2
+    assert result.status == "fit-failed"
 
 
-def test_donor_pool_quality_rejects_idata_without_a_posterior():
-    model = cp.pymc_models.WeightedSumFitter(sample_kwargs=SAMPLE_KWARGS)
-    model.idata = xr.DataTree()
-    shell = type("Shell", (), {"model": model})()
-
-    with pytest.raises(RuntimeError, match="Call fit"):
-        cp.SyntheticControl.donor_pool_quality(shell)
-
-
-def test_donor_pool_quality_omits_undefined_correlations_from_the_score(design_sc):
-    frame = design_sc.datapre.copy()
-    for unit in design_sc.control_units:
-        frame[unit] = 1.0
-    beta = design_sc.model.idata.posterior["beta"]
-    idata = design_sc.model.idata.copy()
-    posterior = idata.posterior.copy()
-    posterior["beta"] = beta
-    idata.posterior = posterior
-    model = cp.pymc_models.WeightedSumFitter(sample_kwargs=SAMPLE_KWARGS)
-    model.idata = idata
-    shell = type("Shell", (), {})()
-    shell.model = model
-    shell.datapre = frame
-    shell.control_units = list(design_sc.control_units)
-    shell.treated_units = list(design_sc.treated_units)
-    shell.pre_design = design_sc.pre_design
-
-    result = cp.SyntheticControl.donor_pool_quality(shell)
-
-    assert np.isnan(result.correlation_score)
-    assert result.per_donor_details["mean_correlation"].isna().all()
-    assert list(result.per_donor_details["donor"]) == list(design_sc.control_units)
-
-
-def test_validate_design_attaches_a_zero_lift_rehearsal(design_sc):
-    result = design_sc.validate_design(0.15, sample_kwargs=SAMPLE_KWARGS)
-
-    assert result.null_rehearsal is not None
-    assert result.null_rehearsal.injected_effect == 0
-    assert result.null_rehearsal.injected_truth == 0
-    assert result.null_rehearsal.null_rehearsal is None
-    assert list(result.summary()["injected_effect"]) == [0.15, 0.0]
-    assert "not a calibration" in result.to_check_result().text
-    plt.close("all")
-
-
-def test_design_methods_reject_up_down_geolift():
-    frame = _tiny_panel().rename(columns={"y": "up", "a": "down", "b": "control"})
-    panel = frame[["up", "down", "control"]]
-    geo = cp.UpDownGeoLift(
-        panel,
-        panel.index[8],
-        {"up": ["up"], "down": ["down"], "control": ["control"]},
-        model=cp.pymc_models.WeightedSumFitter(sample_kwargs=SAMPLE_KWARGS),
+def test_held_out_treated_values_do_not_change_the_fit():
+    base = _history()
+    perturbed = _history()
+    perturbed.loc[perturbed.index[-4:], UNIT] += 50.0
+    base_result = _planner(base).evaluate(durations=[4], absolute_lifts=[1.0])
+    perturbed_result = _planner(perturbed).evaluate(durations=[4], absolute_lifts=[1.0])
+    np.testing.assert_allclose(
+        base_result.horizons[0].counterfactual.values,
+        perturbed_result.horizons[0].counterfactual.values,
+        atol=INDEPENDENT_FIT_ATOL,
+        rtol=INDEPENDENT_FIT_RTOL,
+    )
+    np.testing.assert_allclose(
+        base_result.horizons[0].observation_noise_rate,
+        perturbed_result.horizons[0].observation_noise_rate,
+    )
+    assert not np.allclose(
+        base_result.horizons[0].observed_holdout.values,
+        perturbed_result.horizons[0].observed_holdout.values,
     )
 
-    with pytest.raises(TypeError, match="SyntheticControl-only"):
-        cp.UpDownGeoLift.from_pre_period(panel, ["control"], ["up"])
-    with pytest.raises(TypeError, match="SyntheticControl-only"):
-        geo.donor_pool_quality()
-    with pytest.raises(TypeError, match="SyntheticControl-only"):
-        geo.validate_design(0.1)
-    with pytest.raises(TypeError, match="SyntheticControl-only"):
-        geo.power_analysis([0.1], n_simulations=1)
 
-
-def test_noisy_pre_period_is_not_fitted(design_sc):
-    noisy = design_sc._build_noisy_experiment(
-        design_sc.datapre,
-        1.0,
-        np.random.default_rng(0),
-        SAMPLE_KWARGS,
+def test_custom_priors_survive_copying_and_refits():
+    custom = Prior(
+        "Normal",
+        sigma=Prior("HalfNormal", sigma=3.0, dims=["treated_units"]),
+        dims=["obs_ind", "treated_units"],
     )
-
-    assert isinstance(noisy, cp.SyntheticControl)
-    assert type(noisy) is cp.SyntheticControl
-    assert noisy.model.idata is None
-    assert len(noisy.datapost) == 0
+    template = WeightedSumFitter(
+        priors={"y_hat": custom},
+        sample_kwargs=dict(SAMPLE_KWARGS),
+    )
+    planner = _planner(_history(), model=template)
+    first = planner.evaluate(durations=[4], absolute_lifts=[1.0])
+    second = planner.evaluate(durations=[4], absolute_lifts=[1.0, 4.0])
+    assert first.status == "historical-descriptive"
+    assert second.status == "historical-descriptive"
+    assert template.idata is None
+    assert template._user_priors["y_hat"] is custom
+    for result in (first, second):
+        horizon = result.horizons[0]
+        assert horizon.y_hat_distribution == "Normal"
+        assert horizon.user_priors["y_hat"] is custom
+        assert horizon.observation_noise_rate is None
+        assert horizon.user_priors["y_hat"].parameters["sigma"].distribution == (
+            "HalfNormal"
+        )
+    assert second.n_inference_fits == 1

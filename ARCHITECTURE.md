@@ -14,7 +14,8 @@ CausalPy implements 10+ quasi-experimental causal inference methods over two cor
 | `causalpy/reporting.py` | `EffectSummary`, statistics and prose for both backends |
 | `causalpy/pipeline.py` | `Pipeline`, `PipelineContext`, `PipelineResult`, `Step` protocol |
 | `causalpy/steps/` | `EstimateEffect`, `SensitivityAnalysis`, `GenerateReport` |
-| `causalpy/checks/` | Diagnostic checks (`PlaceboInTime`, `LeaveOneOut`, `ConvexHullCheck`, `DressRehearsalCheck`, etc.) |
+| `causalpy/checks/` | Diagnostic checks (`PlaceboInTime`, `LeaveOneOut`, `ConvexHullCheck`, etc.) |
+| `causalpy/design.py` | Fixed-target `SyntheticControlPlanner`; construction does not sample |
 | `causalpy/transforms.py` | Patsy `step()` / `ramp()` transforms for piecewise ITS |
 | `causalpy/data/` | `load_data()` and synthetic dataset generators |
 | `causalpy/tests/` | pytest suite |
@@ -41,6 +42,8 @@ CausalPy assigns every supported surface to one of four tiers. Membership comes 
 The top-level Sphinx `automodule` documents every existing `causalpy.__all__` export, including established utility and transform re-exports, without adding their support modules to the autosummary list. This aligns existing Tier 1 paths with docs rather than broadly promoting `utils`, `plot_utils`, `date_utils`, `custom_exceptions`, or other ambiguous helpers. No aliases, import removals, plot signatures, or effect-summary behavior change as part of this policy.
 
 `causalpy.experiments.model_adapter` and its `ModelAdapter` / concrete adapter import paths are Tier 3 backend plumbing: experiments retain adapters only on private `_model_backend`, and supported user access is the underlying `BaseExperiment.model`. The adapters are therefore deliberately absent from the API manifest and package exports.
+
+`causalpy.design.SyntheticControlPlanner` is a Tier 2 entry, not a top-level `causalpy` export. Construction and `screen()` do not sample. `evaluate()` fits Bayesian simplex synthetic control (`WeightedSumFitter`) once per requested horizon and translates that fit across absolute and relative lifts. It is not a power curve and not `PlaceboInTime`. `power_analysis` is not a compatibility promise and is not implemented. Draft design-only methods on `SyntheticControl` are not public API. Prefix reuse across horizons is not enabled; each duration is fitted separately.
 
 ## Backend Model
 
