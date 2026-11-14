@@ -21,7 +21,12 @@ from issue 901.
 from __future__ import annotations
 
 import ast
+import builtins
+import importlib
 import importlib.util
+import inspect
+import re
+import typing
 from pathlib import Path
 
 import pytest
@@ -36,6 +41,12 @@ _SPEC.loader.exec_module(_napoleon_types)
 rewrite_type_spec = _napoleon_types.rewrite_type_spec
 normalize_docstring_lines = _napoleon_types.normalize_docstring_lines
 TYPE_ALIASES = _napoleon_types.TYPE_ALIASES
+_NAPOLEON_SECTIONS = _napoleon_types._NAPOLEON_SECTIONS
+_TYPE_SECTIONS = _napoleon_types._TYPE_SECTIONS
+_BARE_SECTIONS = frozenset(
+    {"return", "returns", "yield", "yields", "raise", "raises", "warn", "warns"}
+)
+_SCANNED_SECTIONS = _TYPE_SECTIONS | {"raise", "raises"}
 
 
 def _type_of(line: str) -> str:
@@ -110,6 +121,21 @@ def test_examples_section_is_left_alone() -> None:
     original = list(lines)
     normalize_docstring_lines(None, "method", "probe", None, None, lines)
     assert lines == original
+
+
+def test_returns_section_does_not_spill_into_examples() -> None:
+    lines = [
+        "Returns",
+        "-------",
+        "list[int]",
+        "",
+        "Examples",
+        "--------",
+        "list[matplotlib.axes.Axes]",
+    ]
+    normalize_docstring_lines(None, "method", "probe", None, None, lines)
+    assert lines[2] == "list of int"
+    assert lines[-1] == "list[matplotlib.axes.Axes]"
 
 
 def test_interrupted_time_series_plot_returns_are_linkable() -> None:
@@ -237,3 +263,179 @@ def test_napoleon_links_the_plot_return_types() -> None:
     assert ":class:`~matplotlib.axes.Axes`" in rendered
     assert "list[matplotlib.axes.Axes]" not in rendered
     assert ":py:class:`list[matplotlib.axes.Axes]`" not in rendered
+
+
+_ROLE = re.compile(r":(?:py:)?(?:class|obj|data|func|meth|type|exc):`~?([^`]+)`")
+# Names checked against the live intersphinx inventories. A new external alias
+# has to be added here only after that inventory actually contains it.
+_INVENTORY_TARGETS = frozenset(
+    {
+        "True",
+        "False",
+        "arviz.InferenceData",
+        "callable",
+        "collections.abc.Mapping",
+        "collections.abc.Sequence",
+        "matplotlib.axes.Axes",
+        "matplotlib.figure.Figure",
+        "numpy.inf",
+        "numpy.ndarray",
+        "pandas.DataFrame",
+        "pandas.DatetimeIndex",
+        "pandas.Index",
+        "pandas.Series",
+        "pandas.Timestamp",
+        "pandas.api.extensions.ExtensionArray",
+        "pathlib.Path",
+        "pymc.model.core.Deterministic",
+        "pymc.model.core.Model",
+        "pymc_extras.prior.Prior",
+        "pytensor.tensor.TensorVariable",
+        "sklearn.base.RegressorMixin",
+        "typing.Any",
+        "typing.Self",
+        "xarray.DataArray",
+        "xarray.DataTree",
+        "xarray.Dataset",
+    }
+)
+
+
+def _alias_targets() -> set[str]:
+    return {
+        match.group(1)
+        for value in TYPE_ALIASES.values()
+        if (match := _ROLE.search(value)) is not None
+    }
+
+
+def _public_type_specs() -> list[str]:
+    specs: list[str] = []
+    for path in (_ROOT / "causalpy").rglob("*.py"):
+        parts = path.relative_to(_ROOT).parts
+        if any(part in {"tests", "data"} or part.startswith("_") for part in parts):
+            continue
+        if path.name.startswith("_"):
+            continue
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(
+                node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+            ):
+                continue
+            docstring = ast.get_docstring(node)
+            if not docstring:
+                continue
+            lines = docstring.splitlines()
+            normalize_docstring_lines(
+                None, "member", getattr(node, "name", ""), None, None, lines
+            )
+            specs.extend(_field_specs(lines))
+    return specs
+
+
+def _field_specs(lines: list[str]) -> list[str]:
+    specs: list[str] = []
+    in_section = False
+    bare_type = False
+    field_indent: int | None = None
+    for index, raw in enumerate(lines):
+        if _is_section_header(lines, index):
+            header = raw.strip().lower().strip(":")
+            in_section = header in _SCANNED_SECTIONS
+            bare_type = header in _BARE_SECTIONS
+            field_indent = None
+            continue
+        if not in_section or not raw.strip() or _is_underline(raw):
+            if (
+                in_section
+                and not raw.strip()
+                and index + 1 < len(lines)
+                and not lines[index + 1].strip()
+            ):
+                in_section = False
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        if field_indent is None:
+            field_indent = indent
+        if indent < field_indent:
+            in_section = False
+            continue
+        if indent != field_indent or raw.strip().startswith(":"):
+            continue
+        text = raw.strip()
+        spec = text.split(":", 1)[1].strip() if ":" in text else text
+        if not spec or (":" not in text and not bare_type):
+            continue
+        if any(role in spec for role in (":class:", ":func:", ":obj:", ":data:")):
+            continue
+        specs.append(spec)
+    return specs
+
+
+def _is_section_header(lines: list[str], index: int) -> bool:
+    if index + 1 >= len(lines):
+        return False
+    name = lines[index].strip().lower().strip(":")
+    underline = lines[index + 1].strip()
+    return (
+        name in _NAPOLEON_SECTIONS
+        and bool(underline)
+        and len(set(underline)) == 1
+        and underline[0] in "-="
+        and len(underline) >= len(lines[index].strip())
+    )
+
+
+def _is_underline(raw: str) -> bool:
+    rule = raw.strip()
+    return bool(rule) and len(set(rule)) == 1 and rule[0] in "-="
+
+
+def test_internal_alias_targets_are_public() -> None:
+    for target in sorted(_alias_targets()):
+        if not target.startswith("causalpy."):
+            continue
+        module_name, attr = target.rsplit(".", 1)
+        assert not any(part.startswith("_") for part in module_name.split("."))
+        assert not attr.startswith("_")
+        module = importlib.import_module(module_name)
+        assert hasattr(module, attr), target
+
+
+def test_external_alias_targets_are_in_known_inventories() -> None:
+    external = {
+        target for target in _alias_targets() if not target.startswith("causalpy.")
+    }
+    assert external <= _INVENTORY_TARGETS
+
+
+def test_promoted_type_tokens_are_aliased_or_builtin() -> None:
+    pytest.importorskip("sphinx")
+    from sphinx.ext.napoleon import Config
+    from sphinx.ext.napoleon.docstring import NumpyDocstring
+
+    allowed = _alias_targets()
+    allowed.update(
+        name for name in dir(builtins) if inspect.isclass(getattr(builtins, name))
+    )
+    allowed.update(typing.__all__)
+    allowed.add("None")
+    config = Config(
+        napoleon_preprocess_types=True,
+        napoleon_type_aliases=TYPE_ALIASES,
+        napoleon_use_rtype=True,
+    )
+    unresolved: dict[str, str] = {}
+    for spec in dict.fromkeys(_public_type_specs()):
+        rendered = "\n".join(
+            NumpyDocstring(
+                ["Parameters", "----------", f"x : {spec}", "    unused"],
+                config,
+            ).lines()
+        )
+        for match in _ROLE.finditer(rendered):
+            target = match.group(1)
+            if target not in allowed:
+                unresolved.setdefault(target, spec)
+    assert unresolved == {}

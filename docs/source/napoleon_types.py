@@ -5,7 +5,9 @@ parentheses, before it looks the token up in ``napoleon_type_aliases``. A field
 such as ``list[matplotlib.axes.Axes]`` is therefore one missing class, not a
 ``list`` of ``Axes``. This module rewrites those fields, on the lines Napoleon
 is about to parse, into the ``list of ...`` / ``A or B`` forms the tokenizer
-already links. The checked-in docstrings stay in the typing style the code uses.
+already links. Aliases name the object Sphinx documents; a token with no such
+object stays a literal so preprocessing does not emit a missing reference.
+The checked-in docstrings stay in the typing style the code uses.
 """
 
 from __future__ import annotations
@@ -29,6 +31,31 @@ _TYPE_SECTIONS = frozenset(
         "warns",
         "yield",
         "yields",
+    }
+)
+# Napoleon ends a field section at any of these headers, not only type
+# sections. Without this, a Returns block rewrites the following Examples.
+_NAPOLEON_SECTIONS = _TYPE_SECTIONS | frozenset(
+    {
+        "attention",
+        "caution",
+        "danger",
+        "error",
+        "example",
+        "examples",
+        "hint",
+        "important",
+        "methods",
+        "note",
+        "notes",
+        "raise",
+        "raises",
+        "references",
+        "see also",
+        "tip",
+        "todo",
+        "warning",
+        "warnings",
     }
 )
 _BARE_TYPE_SECTIONS = frozenset({"return", "returns", "yield", "yields"})
@@ -82,6 +109,10 @@ def _class(target: str) -> str:
 
 def _data(target: str) -> str:
     return f":data:`~{target}`"
+
+
+def _func(target: str) -> str:
+    return f":func:`~{target}`"
 
 
 def _literal(text: str) -> str:
@@ -155,17 +186,23 @@ TYPE_ALIASES: dict[str, str] = {
         "az.InferenceData",
         target=_class("arviz.InferenceData"),
     ),
-    **_alias("pymc.Model", "Model", "pm.Model", target=_class("pymc.Model")),
+    **_alias(
+        "pymc.Model",
+        "Model",
+        "pm.Model",
+        target=_class("pymc.model.core.Model"),
+    ),
     **_alias(
         "pytensor.tensor.TensorVariable",
         "TensorVariable",
         "pt.TensorVariable",
         target=_class("pytensor.tensor.TensorVariable"),
     ),
+    # Not in the pytensor inventory. A class role would be a new missing target.
     **_alias(
         "pytensor.tensor.random.RandomVariable",
         "RandomVariable",
-        target=_class("pytensor.tensor.random.RandomVariable"),
+        target=_literal("pytensor.tensor.random.RandomVariable"),
     ),
     **_alias(
         "sklearn.base.RegressorMixin",
@@ -181,25 +218,112 @@ TYPE_ALIASES: dict[str, str] = {
     **_alias(
         "collections.abc.Mapping",
         "Mapping",
+        "mapping",
         target=_class("collections.abc.Mapping"),
     ),
     **_alias(
         "collections.abc.Sequence",
         "Sequence",
+        "sequence",
         target=_class("collections.abc.Sequence"),
     ),
     **_alias("typing.Any", "Any", target=":obj:`~typing.Any`"),
+    "callable": ":py:func:`callable`",
+    "Self": ":py:data:`~typing.Self`",
+    "True": ":py:data:`True`",
+    "False": ":py:data:`False`",
+    "pm.Deterministic": _func("pymc.model.core.Deterministic"),
     "np.inf": _data("numpy.inf"),
     "HDI_PROB": _data("causalpy.constants.HDI_PROB"),
-    **_alias("BaseExperiment", target=_class("causalpy.BaseExperiment")),
+    # Package-root names only resolve when ``causalpy.__all__`` exports them.
+    # Everything else must use the module autosummary actually documents.
+    **_alias(
+        "BaseExperiment",
+        target=_class("causalpy.experiments.base.BaseExperiment"),
+    ),
     **_alias("EffectSummary", target=_class("causalpy.EffectSummary")),
-    **_alias("CheckResult", target=_class("causalpy.CheckResult")),
-    **_alias("Check", target=_class("causalpy.Check")),
+    **_alias("CheckResult", target=_class("causalpy.checks.base.CheckResult")),
+    **_alias("Check", target=_class("causalpy.checks.base.Check")),
     **_alias("Pipeline", target=_class("causalpy.Pipeline")),
     **_alias("PipelineContext", target=_class("causalpy.PipelineContext")),
     **_alias("PipelineResult", target=_class("causalpy.PipelineResult")),
     **_alias("Step", target=_class("causalpy.Step")),
-    **_alias("PyMCModel", target=_class("causalpy.PyMCModel")),
+    **_alias("PyMCModel", target=_class("causalpy.pymc_models.PyMCModel")),
+    **_alias(
+        "PyMCForecastModel",
+        target=_class("causalpy.pymc_forecast_models.PyMCForecastModel"),
+    ),
+    **_alias(
+        "InstrumentalVariableRegression",
+        target=_class("causalpy.pymc_models.InstrumentalVariableRegression"),
+    ),
+    **_alias(
+        "PropensityScore",
+        target=_class("causalpy.pymc_models.PropensityScore"),
+    ),
+    **_alias(
+        "AssuranceResult",
+        target=_class("causalpy.checks.operating_characteristics.AssuranceResult"),
+    ),
+    **_alias(
+        "OperatingCharacteristics",
+        target=_class(
+            "causalpy.checks.operating_characteristics.OperatingCharacteristics"
+        ),
+    ),
+    **_alias(
+        "ModelAdapter",
+        target=_class("causalpy.experiments.model_adapter.ModelAdapter"),
+    ),
+    **_alias(
+        "AugmentedSyntheticControl",
+        target=_class(
+            "causalpy.experiments.augmented_synthetic_control.AugmentedSyntheticControl"
+        ),
+    ),
+    **_alias(
+        "InteractiveFixedEffectsSyntheticControl",
+        target=_class(
+            "causalpy.experiments.interactive_fixed_effects."
+            "InteractiveFixedEffectsSyntheticControl"
+        ),
+    ),
+    **_alias(
+        "InteractiveFixedEffectsResult",
+        target=_class(
+            "causalpy.experiments.interactive_fixed_effects.InteractiveFixedEffectsResult"
+        ),
+    ),
+    **_alias(
+        "SensitivitySummary",
+        target=_class("causalpy.steps.sensitivity.SensitivitySummary"),
+    ),
+    **_alias(
+        "SyntheticControl",
+        target=_class("causalpy.experiments.synthetic_control.SyntheticControl"),
+    ),
+    **_alias("BadIndexException", target=_class("causalpy.BadIndexException")),
+    **_alias("DataException", target=_class("causalpy.DataException")),
+    **_alias(
+        "GroupNotSampledException",
+        target=_class("causalpy.GroupNotSampledException"),
+    ),
+    **_alias(
+        "PriorPredictiveNotSupportedException",
+        target=_class("causalpy.PriorPredictiveNotSupportedException"),
+    ),
+    **_alias("SensitivityAnalysis", target=_class("causalpy.SensitivityAnalysis")),
+    "DataFrameLike": ":py:type:`~causalpy.input_data.DataFrameLike`",
+    "StaggeredDifferenceInDifferencesResult": _literal(
+        "StaggeredDifferenceInDifferencesResult"
+    ),
+    "SyntheticDifferenceInDifferencesResult": _literal(
+        "SyntheticDifferenceInDifferencesResult"
+    ),
+    "_ScalarBayesianStats": _literal("_ScalarBayesianStats"),
+    # Private, and not a documented pymc-forecast object.
+    "_NullModelUnidentifiedError": _literal("_NullModelUnidentifiedError"),
+    "pymc_forecast.ForecastingModel": _literal("pymc_forecast.ForecastingModel"),
     "array-like": _literal("array-like"),
     "dataframe-like": _literal("dataframe-like"),
     "array": _literal("array"),
@@ -282,7 +406,7 @@ def _is_header_at(lines: list[str], index: int) -> bool:
     if index + 1 >= len(lines):
         return False
     name = lines[index].strip().lower().strip(":")
-    return name in _TYPE_SECTIONS and _is_underline(lines[index], lines[index + 1])
+    return name in _NAPOLEON_SECTIONS and _is_underline(lines[index], lines[index + 1])
 
 
 def _rewrite_field(raw: str, *, bare_type: bool) -> tuple[str, str]:
