@@ -17,6 +17,7 @@ from .diff_in_diff import DifferenceInDifferences
 from .instrumental_variable import InstrumentalVariable
 from .interrupted_time_series import InterruptedTimeSeries
 from .inverse_propensity_weighting import InversePropensityWeighting
+from .multivariate_synthetic_control import MultivariateSyntheticControl
 from .panel_regression import PanelRegression
 from .piecewise_its import PiecewiseITS
 from .prepostnegd import PrePostNEGD
@@ -32,6 +33,7 @@ __all__ = [
     "InstrumentalVariable",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
+    "MultivariateSyntheticControl",
     "PiecewiseITS",
     "PanelRegression",
     "PrePostNEGD",
