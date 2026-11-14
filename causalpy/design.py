@@ -906,28 +906,26 @@ def _require_relative_baseline(
 ) -> float:
     """Reject a relative lift whose observed-holdout denominator is undefined."""
     scale = float(np.median(np.abs(training_observed)))
-    if declared_floor is None and not (_RELATIVE_FLOOR_SCALE * scale) > 0.0:
+    floor = _applied_relative_floor(training_observed, declared_floor)
+    if declared_floor is None:
+        convention = (
+            "No relative_floor was declared. The median absolute training "
+            f"outcome is {scale:g}. The applied floor is {floor:g} "
+            f"({_RELATIVE_FLOOR_SCALE:g} times that median)."
+        )
+    else:
+        convention = f"The declared relative_floor is {floor:g}."
+    if declared_floor is None and not floor > 0.0:
         raise ValueError(
             "Relative effects are undefined because the training outcomes do not "
-            "set a strictly positive near-zero floor. The scale rule is "
-            f"{_RELATIVE_FLOOR_SCALE:g} times the median absolute training outcome "
-            f"({scale}). Declare relative_floor to choose a convention. "
-            "relative_floor=0 accepts every strictly positive holdout and still "
-            "rejects non-positive outcomes. No signed-baseline convention is offered."
+            "set a strictly positive near-zero floor. " + convention + " Declare "
+            "relative_floor to choose a convention. relative_floor=0 accepts every "
+            "strictly positive holdout and still rejects non-positive outcomes. "
+            "No signed-baseline convention is offered."
         )
-    floor = _applied_relative_floor(training_observed, declared_floor)
     invalid = ~np.isfinite(observed) | (observed <= 0.0) | (observed <= floor)
     if np.any(invalid):
         labels = [repr(label) for label in holdout_index[invalid]]
-        convention = (
-            f"The declared relative_floor is {floor}."
-            if declared_floor is not None
-            else (
-                "No relative_floor was declared, so the floor is "
-                f"{_RELATIVE_FLOOR_SCALE:g} times the median absolute training "
-                f"outcome ({floor})."
-            )
-        )
         raise ValueError(
             "Relative effects are undefined for holdout observation(s) "
             f"{labels} on treated unit {unit!r}. A relative effect is the lift "

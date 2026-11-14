@@ -176,8 +176,15 @@ def test_undefined_relative_baselines_are_rejected_before_fitting(monkeypatch):
     monkeypatch.setattr(SyntheticControl, "fit", reject_fit)
     signed = _history()
     signed.loc[signed.index[-4:], UNIT] = -1.0
-    with pytest.raises(ValueError, match="Relative effects are undefined"):
+    with pytest.raises(ValueError, match="Relative effects are undefined") as exc:
         _planner(signed).evaluate(durations=[4], relative_lifts=[0.1])
+    text = str(exc.value)
+    median = float(text.split("outcome is ", 1)[1].split(". The applied floor", 1)[0])
+    applied = float(text.split("applied floor is ", 1)[1].split(" ", 1)[0])
+    assert applied < median
+    assert applied < 1e-6
+    assert applied == pytest.approx(1e-8 * median)
+    assert "outcome (" not in text
     near_zero = _history()
     near_zero.loc[near_zero.index[-4:], UNIT] = 1e-12
     with pytest.raises(ValueError, match="Relative effects are undefined"):
