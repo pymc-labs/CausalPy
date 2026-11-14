@@ -563,15 +563,22 @@ def _needs_displacement(clause: str) -> bool:
     return _has_comma_outside_braces(clause)
 
 
+def _as_literal(value: str) -> str:
+    text = value.strip()
+    if len(text) >= 4 and text.startswith("``") and text.endswith("``"):
+        return text
+    return f"``{text}``"
+
+
 def _note_for(clause: str) -> str:
     match = _TRAILING_KIND.match(clause.strip())
     if match is None:
-        return f"Also ``{clause.strip()}``."
+        return f"Also {_as_literal(clause)}."
     kind = match.group("kind").lower()
-    value = match.group("value").strip()
+    shown = _as_literal(match.group("value"))
     if kind == "default":
-        return f"Defaults to ``{value}``."
-    return f"Shape ``{value}``."
+        return f"Defaults to {shown}."
+    return f"Shape {shown}."
 
 
 def _rewrite_brackets(text: str) -> str:

@@ -112,6 +112,44 @@ def test_default_already_described_is_not_repeated() -> None:
     assert lines[3:] == ["    Width and height. Defaults to ``(7, 8)``."]
 
 
+def test_displaced_literal_is_not_wrapped_again() -> None:
+    rewritten, note = rewrite_type_spec(
+        'list of str or tuple of str, default ``("unit_0",)``'
+    )
+    assert rewritten == "list of str or tuple of str"
+    assert note == 'Defaults to ``("unit_0",)``.'
+    _, shape_note = rewrite_type_spec("array-like, shape ``(n, 1)``")
+    assert shape_note == "Shape ``(n, 1)``."
+    _, bare = rewrite_type_spec("tuple of float, default (7, 8)")
+    assert bare == "Defaults to ``(7, 8)``."
+
+    lines = [
+        "Parameters",
+        "----------",
+        'treated_units : list of str or tuple of str, default ``("unit_0",)``',
+        "    Names for the treated-unit dimension of ``y``.",
+    ]
+    normalize_docstring_lines(None, "function", "build_coords", None, None, lines)
+    pytest.importorskip("sphinx")
+    from docutils.core import publish_doctree
+    from sphinx.ext.napoleon import Config
+    from sphinx.ext.napoleon.docstring import NumpyDocstring
+
+    rendered = NumpyDocstring(
+        lines,
+        Config(napoleon_preprocess_types=True, napoleon_type_aliases=TYPE_ALIASES),
+    ).lines()
+    document = publish_doctree(
+        "\n".join(rendered), settings_overrides={"report_level": 5}
+    )
+    literals = [
+        node.astext()
+        for node in document.findall(lambda node: node.tagname == "literal")
+    ]
+    assert '("unit_0",)' in literals
+    assert all("`" not in text for text in literals)
+
+
 def test_examples_section_is_left_alone() -> None:
     lines = [
         "Examples",
