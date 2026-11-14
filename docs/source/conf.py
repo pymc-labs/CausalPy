@@ -204,7 +204,9 @@ bibtex_reference_style = "author_year"
 # turns type tokens into cross-references. Sphinx 9 splits commas inside brackets
 # before alias lookup, so ``list[matplotlib.axes.Axes]`` never matches an alias.
 # ``napoleon_types.normalize_docstring_lines`` rewrites those fields on the lines
-# Napoleon is about to parse. Source docstrings stay unchanged.
+# Napoleon is about to parse. The processor gate leaves preprocessing off for
+# objects defined outside ``causalpy``, so inherited PyMC Raises prose is not
+# promoted into class roles. Source docstrings stay unchanged.
 _napoleon_types = importlib.import_module("napoleon_types")
 napoleon_preprocess_types = True
 napoleon_type_aliases = {
@@ -215,12 +217,13 @@ napoleon_type_aliases = {
 
 
 def setup(app):
-    """Rewrite type fields before Napoleon tokenizes them."""
+    """Rewrite owned type fields, and do not preprocess inherited docstrings."""
     app.connect(
         "autodoc-process-docstring",
         _napoleon_types.normalize_docstring_lines,
         priority=400,
     )
+    _napoleon_types.install_preprocess_gate(app)
     return {"parallel_read_safe": True, "parallel_write_safe": True}
 
 

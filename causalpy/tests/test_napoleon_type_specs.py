@@ -272,7 +272,7 @@ _INVENTORY_TARGETS = frozenset(
     {
         "True",
         "False",
-        "arviz.InferenceData",
+        # arviz.InferenceData is literalized: the live inventory does not list it.
         "callable",
         "collections.abc.Mapping",
         "collections.abc.Sequence",
@@ -439,3 +439,108 @@ def test_promoted_type_tokens_are_aliased_or_builtin() -> None:
             if target not in allowed:
                 unresolved.setdefault(target, spec)
     assert unresolved == {}
+
+
+def test_inference_data_alias_is_a_literal() -> None:
+    target = TYPE_ALIASES["InferenceData"]
+    assert target == "``arviz.InferenceData``"
+    assert ":class:" not in target
+
+
+def test_preprocess_gate_follows_the_defining_module() -> None:
+    pymc = pytest.importorskip("pymc")
+    from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
+
+    assert _napoleon_types.preprocess_types_for(pymc.Model.check_start_vals) is False
+    assert _napoleon_types.preprocess_types_for(InterruptedTimeSeries.plot) is True
+
+
+def test_inherited_pymc_raises_are_not_turned_into_roles() -> None:
+    pytest.importorskip("sphinx")
+    pymc = pytest.importorskip("pymc")
+    from sphinx.ext.napoleon import Config
+
+    lines = inspect.getdoc(pymc.Model.check_start_vals).splitlines()
+    app = type("App", (), {"config": Config(napoleon_preprocess_types=True)})()
+    _napoleon_types.process_owned_docstring(
+        app,
+        "method",
+        "causalpy.InterruptedTimeSeries.check_start_vals",
+        pymc.Model.check_start_vals,
+        None,
+        lines,
+    )
+    rendered = "\n".join(lines)
+    assert ":py:class:`the parameters" not in rendered
+    assert ":py:class:`an invalid" not in rendered
+    assert "the parameters" in rendered
+
+
+def test_owned_docstrings_still_link_matplotlib_returns() -> None:
+    pytest.importorskip("sphinx")
+    from sphinx.ext.napoleon import Config
+
+    from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
+
+    lines = inspect.cleandoc(InterruptedTimeSeries.plot.__doc__).splitlines()
+    normalize_docstring_lines(
+        None,
+        "method",
+        "causalpy.experiments.interrupted_time_series.InterruptedTimeSeries.plot",
+        InterruptedTimeSeries.plot,
+        None,
+        lines,
+    )
+    app = type(
+        "App",
+        (),
+        {
+            "config": Config(
+                napoleon_preprocess_types=True,
+                napoleon_type_aliases=TYPE_ALIASES,
+                napoleon_use_rtype=False,
+            )
+        },
+    )()
+    _napoleon_types.process_owned_docstring(
+        app,
+        "method",
+        "causalpy.experiments.interrupted_time_series.InterruptedTimeSeries.plot",
+        InterruptedTimeSeries.plot,
+        None,
+        lines,
+    )
+    rendered = "\n".join(lines)
+    assert ":class:`~matplotlib.figure.Figure`" in rendered
+    assert ":class:`~matplotlib.axes.Axes`" in rendered
+
+
+def test_install_replaces_the_napoleon_processor() -> None:
+    pytest.importorskip("sphinx")
+    from types import SimpleNamespace
+
+    from sphinx.ext.napoleon import _process_docstring
+
+    class _Events:
+        def __init__(self) -> None:
+            self.listeners = {
+                "autodoc-process-docstring": [
+                    SimpleNamespace(id=7, handler=_process_docstring, priority=500)
+                ]
+            }
+            self.connected: list[tuple[str, object, int]] = []
+
+        def disconnect(self, listener_id: int) -> None:
+            assert listener_id == 7
+            self.listeners["autodoc-process-docstring"].clear()
+
+        def connect(self, name: str, callback: object, priority: int = 500) -> int:
+            self.connected.append((name, callback, priority))
+            return 8
+
+    events = _Events()
+    _napoleon_types.install_preprocess_gate(SimpleNamespace(events=events))
+    assert events.listeners["autodoc-process-docstring"] == []
+    assert events.connected == [
+        ("autodoc-process-docstring", _napoleon_types.process_owned_docstring, 500)
+    ]

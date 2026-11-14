@@ -7,12 +7,15 @@ such as ``list[matplotlib.axes.Axes]`` is therefore one missing class, not a
 is about to parse, into the ``list of ...`` / ``A or B`` forms the tokenizer
 already links. Aliases name the object Sphinx documents; a token with no such
 object stays a literal so preprocessing does not emit a missing reference.
-The checked-in docstrings stay in the typing style the code uses.
+Preprocessing stays off for inherited third-party docstrings. Their Raises
+blocks are not NumPy fields, and Napoleon would turn the prose into missing
+class roles. The checked-in docstrings stay in the typing style the code uses.
 """
 
 from __future__ import annotations
 
 import re
+from typing import Any
 
 _TYPE_SECTIONS = frozenset(
     {
@@ -180,11 +183,13 @@ TYPE_ALIASES: dict[str, str] = {
         "xr.DataTree",
         target=_class("xarray.DataTree"),
     ),
+    # The ArviZ HTML page exists, but objects.inv does not list InferenceData.
+    # A class role would be a new missing target.
     **_alias(
         "arviz.InferenceData",
         "InferenceData",
         "az.InferenceData",
-        target=_class("arviz.InferenceData"),
+        target=_literal("arviz.InferenceData"),
     ),
     **_alias(
         "pymc.Model",
@@ -375,6 +380,81 @@ def normalize_docstring_lines(
                 lines.insert(index + 1, " " * (field_indent + 4) + note)
                 index += 1
             index += 1
+
+
+def preprocess_types_for(obj: object) -> bool:
+    """Return whether Napoleon may turn this object's type tokens into roles.
+
+    Inherited methods keep the defining module, so a documented name under
+    ``causalpy`` is not enough. PyMC's ``check_start_vals`` is the case this
+    rejects: preprocessing wraps ``the parameters`` in a class role.
+    """
+    module = _defining_module(obj)
+    return module == "causalpy" or module.startswith("causalpy.")
+
+
+def _defining_module(obj: object) -> str:
+    module = getattr(obj, "__module__", None)
+    if isinstance(module, str) and module:
+        return module
+    wrapped = getattr(obj, "__func__", None)
+    if wrapped is None:
+        wrapped = getattr(obj, "fget", None)
+    module = getattr(wrapped, "__module__", None)
+    return module if isinstance(module, str) else ""
+
+
+class _PreprocessOff:
+    """Napoleon config view that leaves type tokens as text."""
+
+    def __init__(self, config: object) -> None:
+        self._config = config
+
+    @property
+    def napoleon_preprocess_types(self) -> bool:
+        return False
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._config, name)
+
+
+def process_owned_docstring(
+    app: Any,
+    what: str,
+    name: str,
+    obj: object,
+    options: object,
+    lines: list[str],
+) -> None:
+    """Run Napoleon, but do not preprocess types outside ``causalpy``."""
+    from sphinx.ext.napoleon.docstring import GoogleDocstring, NumpyDocstring
+
+    config = app.config
+    if not preprocess_types_for(obj):
+        config = _PreprocessOff(config)
+    result = lines
+    if config.napoleon_numpy_docstring:
+        result = NumpyDocstring(result, config, app, what, name, obj, options).lines()
+    if config.napoleon_google_docstring:
+        result = GoogleDocstring(result, config, app, what, name, obj, options).lines()
+    lines[:] = list(result)
+
+
+def install_preprocess_gate(app: object) -> None:
+    """Replace Napoleon's processor so inherited docstrings stay unpreprocessed."""
+    from sphinx.ext.napoleon import _process_docstring
+
+    events = app.events
+    listeners = events.listeners.get("autodoc-process-docstring", [])
+    replaced = False
+    for listener in list(listeners):
+        if listener.handler is _process_docstring:
+            events.disconnect(listener.id)
+            replaced = True
+    if not replaced:
+        msg = "sphinx.ext.napoleon docstring processor is not connected"
+        raise RuntimeError(msg)
+    events.connect("autodoc-process-docstring", process_owned_docstring, priority=500)
 
 
 def rewrite_type_spec(spec: str) -> tuple[str, str]:
