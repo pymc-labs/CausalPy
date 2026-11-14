@@ -21,6 +21,8 @@ More windows make that bias visible. They do not remove it.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -41,9 +43,14 @@ from causalpy.experiments.model_adapter import ModelAdapter
 from causalpy.experiments.synthetic_control import SyntheticControl
 from causalpy.historical_validation import (
     CalibrationRecord,
+    HistoricalReplay,
     ScheduleRequest,
     WindowReplay,
+    _calibration_from_windows,
+    _NullModelUnidentifiedError,
+    _require_window_boundaries,
     _score_window,
+    _stored_labels,
 )
 from causalpy.pymc_models import WeightedSumFitter
 
@@ -1188,3 +1195,565 @@ def test_high_rhat_without_divergences_still_feeds_the_conditional_curve(monkeyp
     assert replay.calibration.evidence_level == "model-conditional"
     assert replay.windows[0].max_rhat == 1.42
     assert replay.windows[0].divergences == 0
+
+
+def _inapplicable_record(**overrides: object) -> CalibrationRecord:
+    payload = {
+        "evidence_level": "inconclusive",
+        "reasons": ("no scored window",),
+        "applicable": False,
+        "curve_validated": False,
+        "null_samples": None,
+        "fold_sds": None,
+        "fold_means": None,
+        "rope_half_width": 0.0,
+        "threshold": 0.95,
+        "scored_window_count": 0,
+        "overlapping_pair_count": 0,
+        "shared_training_pair_count": 0,
+        "model": "not-applicable",
+    }
+    payload.update(overrides)
+    return CalibrationRecord(**payload)  # type: ignore[arg-type]
+
+
+def _handoff(schedule, **overrides: object) -> HistoricalReplay:
+    payload = {
+        "schedule": schedule,
+        "decision": RULE,
+        "windows": tuple(
+            WindowReplay(plan=window, status="not-run", reason=window.reason)
+            for window in schedule.windows
+        ),
+        "evidence_level": "insufficient-history",
+        "reasons": ("No usable selection window was available to score.",),
+        "calibration": _inapplicable_record(),
+        "bias_cumulative_mean": None,
+        "bias_average_mean": None,
+        "bias_cumulative_sd": None,
+        "persistent_bias": None,
+        "n_inference_fits": 0,
+    }
+    payload.update(overrides)
+    return HistoricalReplay(**payload)  # type: ignore[arg-type]
+
+
+def test_schedule_contract_rejects_unimplemented_policies():
+    frame = _integer_frame()
+    with pytest.raises(ValueError, match="at least one origin"):
+        ScheduleRequest(selection_origins=(), horizons=(2,))
+    with pytest.raises(ValueError, match="audit_origins must be unique"):
+        ScheduleRequest(selection_origins=(4,), audit_origins=(5, 5), horizons=(2,))
+    with pytest.raises(ValueError, match="cannot be both"):
+        ScheduleRequest(selection_origins=(4,), audit_origins=(4,), horizons=(2,))
+    with pytest.raises(ValueError, match="at least one duration"):
+        ScheduleRequest(selection_origins=(4,), horizons=())
+    with pytest.raises(ValueError, match="horizons must be unique"):
+        ScheduleRequest(selection_origins=(4,), horizons=(2, 2))
+    with pytest.raises(ValueError, match="at least 1"):
+        ScheduleRequest(selection_origins=(4,), horizons=(0,))
+    with pytest.raises(ValueError, match="must be 'reject'"):
+        ScheduleRequest(selection_origins=(4,), horizons=(2,), missing_data="impute")
+    with pytest.raises(ValueError, match="pre-origin-only"):
+        ScheduleRequest(
+            selection_origins=(4,), horizons=(2,), training_policy="all-history"
+        )
+    with pytest.raises(ValueError, match="must not be empty"):
+        ScheduleRequest(selection_origins=(4,), horizons=(2,), cadence="")
+    with pytest.raises(ValueError, match="at least 1"):
+        ScheduleRequest(selection_origins=(4,), horizons=(2,), cadence=0)
+    with pytest.raises(TypeError, match="DateOffset"):
+        ScheduleRequest(selection_origins=(4,), horizons=(2,), cadence=1.5)
+    with pytest.raises(TypeError, match="ScheduleRequest"):
+        validate_schedule(frame, "y", DONORS, object())
+    with pytest.raises(ValueError, match="not in the history index"):
+        validate_schedule(frame, "y", DONORS, _request(4, exclusions=({"no": 1},)))
+    with pytest.raises(ValueError, match="not in the history index"):
+        _stored_labels(frame.index, (99,))
+    with pytest.raises(TypeError, match="treated_unit must be a string"):
+        validate_schedule(frame, 1, DONORS, _request(4))
+    with pytest.raises(ValueError, match="at least one control"):
+        validate_schedule(frame, "y", (), _request(4))
+    with pytest.raises(TypeError, match="control_units must be strings"):
+        validate_schedule(frame, "y", (1,), _request(4))
+    with pytest.raises(ValueError, match="control_units must be unique"):
+        validate_schedule(frame, "y", ("a", "a"), _request(4))
+    with pytest.raises(ValueError, match="cannot also be a control"):
+        validate_schedule(frame, "y", ("y",), _request(4))
+    with pytest.raises(ValueError, match="missing column"):
+        validate_schedule(frame, "y", ("missing",), _request(4))
+    non_numeric = frame.copy()
+    non_numeric["a"] = non_numeric["a"].astype(str)
+    with pytest.raises(TypeError, match="must be numeric"):
+        validate_schedule(non_numeric, "y", DONORS, _request(4))
+
+
+def test_schedule_summary_names_status_and_null_endpoints():
+    frame = _integer_frame()
+    schedule = validate_schedule(frame, "y", DONORS, _request(4, 99))
+    usable = schedule.windows[0]
+    assert usable.status == "usable"
+    assert usable.reason is None
+    table = schedule.summary()
+    assert table.loc[table["origin"] == 4, "status"].item() == "usable"
+    assert table.loc[table["origin"] == 99, "status"].item() == "missing"
+    assert "training_policy" in table.columns
+    dates = schedule.exact_dates()
+    missing = dates.loc[dates["origin"] == 99].iloc[0]
+    assert pd.isna(missing["training_start"])
+    assert pd.isna(missing["holdout_end"])
+
+
+def test_window_planning_records_short_training_and_a_horizon_past_history():
+    frame = _integer_frame()
+    short = validate_schedule(
+        frame,
+        "y",
+        DONORS,
+        ScheduleRequest(
+            selection_origins=(2,),
+            horizons=(2,),
+            cadence=1,
+            min_training_periods=5,
+        ),
+    )
+    assert short.windows[0].status == "incomplete"
+    assert "min_training_periods" in (short.windows[0].reason or "")
+    past = validate_schedule(
+        frame,
+        "y",
+        DONORS,
+        ScheduleRequest(selection_origins=(10,), horizons=(5,), cadence=None),
+    )
+    assert past.windows[0].status == "incomplete"
+    assert "extends" in (past.windows[0].reason or "")
+    assert past.windows[0].holdout_count < 5
+
+
+def test_cadence_failures_stay_on_the_window_instead_of_imputing():
+    labels = pd.Index(["a", "b", "c", "d"])
+    labeled = pd.DataFrame(
+        {name: np.arange(4, dtype=float) for name in ("y", *DONORS)},
+        index=labels,
+    )
+    applied = validate_schedule(
+        labeled,
+        "y",
+        DONORS,
+        ScheduleRequest(selection_origins=("b",), horizons=(2,), cadence=1),
+    )
+    assert applied.windows[0].status == "incomplete"
+    assert "cannot be applied" in (applied.windows[0].reason or "")
+
+    index = pd.date_range("2020-01-05", periods=8, freq="W")
+    dated = pd.DataFrame(
+        {name: np.arange(8, dtype=float) for name in ("y", *DONORS)},
+        index=index,
+    )
+    with pytest.raises(ValueError, match="integer cadence is not a date frequency"):
+        validate_schedule(
+            dated,
+            "y",
+            DONORS,
+            ScheduleRequest(selection_origins=(index[3],), horizons=(2,), cadence=1),
+        )
+    unknown = validate_schedule(
+        dated,
+        "y",
+        DONORS,
+        ScheduleRequest(
+            selection_origins=(index[0],),
+            horizons=(2,),
+            cadence="not-a-freq",
+        ),
+    )
+    assert unknown.windows[0].status == "incomplete"
+    assert "cannot build a holdout" in (unknown.windows[0].reason or "")
+    assert len(unknown.windows[0].analysis_index) == 0
+
+
+def test_replay_rejects_a_schedule_it_cannot_execute():
+    frame = _integer_frame()
+    schedule = validate_schedule(frame, "y", DONORS, _request(4))
+    template = _wide_template()
+    with pytest.raises(TypeError, match="HistoricalSchedule"):
+        replay_history(
+            frame, "y", DONORS, object(), RULE, model=template, random_seed=1
+        )
+    with pytest.raises(TypeError, match="DecisionRule"):
+        replay_history(
+            frame, "y", DONORS, schedule, object(), model=template, random_seed=1
+        )
+    with pytest.raises(TypeError, match="random_seed"):
+        replay_history(
+            frame,
+            "y",
+            DONORS,
+            schedule,
+            RULE,
+            model=template,
+            random_seed=np.int64(1),
+        )
+    with pytest.raises(TypeError, match="rope_half_width"):
+        replay_history(
+            frame,
+            "y",
+            DONORS,
+            schedule,
+            RULE,
+            model=template,
+            random_seed=1,
+            rope_half_width="wide",
+        )
+    with pytest.raises(TypeError, match="threshold must be a real number"):
+        replay_history(
+            frame,
+            "y",
+            DONORS,
+            schedule,
+            RULE,
+            model=template,
+            random_seed=1,
+            threshold=True,
+        )
+    with pytest.raises(ValueError, match="do not match the schedule"):
+        replay_history(
+            frame,
+            "a",
+            ("b", "c", "d", "y"),
+            schedule,
+            RULE,
+            model=template,
+            random_seed=1,
+        )
+    with pytest.raises(ValueError, match="missing scheduled label"):
+        replay_history(
+            frame.drop(index=4),
+            "y",
+            DONORS,
+            schedule,
+            RULE,
+            model=template,
+            random_seed=1,
+        )
+    with pytest.raises(TypeError, match="sample_kwargs must be a dict"):
+        replay_history(
+            frame,
+            "y",
+            DONORS,
+            schedule,
+            RULE,
+            model=template,
+            random_seed=1,
+            sample_kwargs="no",
+        )
+    with pytest.raises(ValueError, match="include 'draws'"):
+        replay_history(
+            frame,
+            "y",
+            DONORS,
+            schedule,
+            RULE,
+            model=None,
+            sample_kwargs={"tune": 1},
+        )
+    with pytest.raises(TypeError, match="WeightedSumFitter"):
+        replay_history(
+            frame, "y", DONORS, schedule, RULE, model=object(), random_seed=1
+        )
+    with pytest.raises(ValueError, match="no 'draws'"):
+        replay_history(
+            frame,
+            "y",
+            DONORS,
+            schedule,
+            RULE,
+            model=WeightedSumFitter(sample_kwargs={"tune": 1}),
+            random_seed=1,
+        )
+
+
+class _BoundaryIndex:
+    def __init__(self, index: pd.Index) -> None:
+        self.index = index
+
+
+class _BoundaryCoords:
+    def __init__(self, index: pd.Index) -> None:
+        self._index = index
+
+    def to_index(self) -> pd.Index:
+        return self._index
+
+
+class _BoundaryDesign:
+    def __init__(self, index: pd.Index) -> None:
+        self.coords = {"obs_ind": _BoundaryCoords(index)}
+
+
+class _BoundaryExperiment:
+    def __init__(
+        self,
+        window,
+        *,
+        datapre: pd.Index | None = None,
+        datapost: pd.Index | None = None,
+        data: pd.Index | None = None,
+        pre: pd.Index | None = None,
+        post: pd.Index | None = None,
+    ) -> None:
+        self.datapre = _BoundaryIndex(
+            window.training_index if datapre is None else datapre
+        )
+        self.datapost = _BoundaryIndex(
+            window.holdout_index if datapost is None else datapost
+        )
+        self.data = _BoundaryIndex(window.analysis_index if data is None else data)
+        self.pre_design = {
+            "treated": _BoundaryDesign(window.training_index if pre is None else pre)
+        }
+        self.post_design = {
+            "control": _BoundaryDesign(window.holdout_index if post is None else post)
+        }
+
+
+def test_boundary_checker_names_the_frame_that_leaves_the_window():
+    frame = _integer_frame()
+    window = validate_schedule(frame, "y", DONORS, _request(4)).windows[0]
+    with pytest.raises(RuntimeError, match="training index"):
+        _require_window_boundaries(
+            _BoundaryExperiment(window, datapre=window.training_index[:0]),
+            window,
+        )
+    leaked = replace(window, forbidden_index=window.analysis_index[:1])
+    with pytest.raises(RuntimeError, match="Forbidden label"):
+        _require_window_boundaries(_BoundaryExperiment(window), leaked)
+    with pytest.raises(RuntimeError, match="pre-period design"):
+        _require_window_boundaries(
+            _BoundaryExperiment(window, pre=window.training_index[:0]),
+            window,
+        )
+    with pytest.raises(RuntimeError, match="post-period donor"):
+        _require_window_boundaries(
+            _BoundaryExperiment(window, post=window.holdout_index[:0]),
+            window,
+        )
+
+
+def test_negative_rule_counts_draws_below_the_threshold():
+    import xarray as xr
+
+    frame = _integer_frame()
+    window = validate_schedule(frame, "y", DONORS, _request(4)).windows[0]
+    draws = np.array([[[[1.0, 2.0], [1.5, 2.5], [0.5, 1.5], [1.2, 1.8]]]])
+    impact = xr.DataArray(
+        draws,
+        dims=("treated_units", "chain", "draw", "obs_ind"),
+        coords={"treated_units": ["y"]},
+    )
+
+    class Backend:
+        def sampling_diagnostics(self):
+            return {
+                "divergences": 0,
+                "max_rhat": 1.0,
+                "min_bulk_ess": 100.0,
+                "diagnostics_status": "available",
+                "diagnostics_reason": None,
+            }
+
+    class Result:
+        impact_post = impact
+        predictions_post = impact
+
+    class Experiment:
+        treated_units = ["y"]
+        result = Result()
+        _model_backend = Backend()
+
+    rule = DecisionRule("negative", "cumulative", threshold=0.0, probability=0.95)
+    scored = _score_window(Experiment(), window, rule)
+    assert scored.tail_probability == 0.0
+    assert scored.detected is False
+    assert scored.average_hdi_above_zero is True
+    assert scored.average_hdi_below_zero is False
+
+
+def test_average_interval_below_zero_is_reported_separately():
+    frame = _integer_frame()
+    window = validate_schedule(frame, "y", DONORS, _request(4)).windows[0]
+    scored = WindowReplay(
+        plan=window,
+        status="scored",
+        reason=None,
+        average_hdi_lower=-0.4,
+        average_hdi_upper=-0.1,
+    )
+    assert scored.average_hdi_below_zero is True
+    assert scored.average_hdi_above_zero is False
+
+
+def test_calibration_record_refuses_independence_and_bad_samples():
+    base = {
+        "evidence_level": "model-conditional",
+        "reasons": ("conditional on the learned-null model",),
+        "applicable": True,
+        "null_samples": np.array([0.0, 0.1]),
+        "fold_sds": np.array([0.2, 0.3]),
+        "fold_means": np.array([0.0, 0.1]),
+        "rope_half_width": 0.0,
+        "threshold": 0.95,
+        "scored_window_count": 2,
+        "model": "learned-null-normal",
+    }
+    with pytest.raises(ValueError, match="not independent experiments"):
+        CalibrationRecord(**base, windows_independent=True)
+    with pytest.raises(ValueError, match="independent_experiment_count stays unset"):
+        CalibrationRecord(**base, independent_experiment_count=2)
+    with pytest.raises(ValueError, match="applicable requires finite"):
+        CalibrationRecord(**{**base, "null_samples": None})
+    with pytest.raises(ValueError, match="evidence_level"):
+        CalibrationRecord(**{**base, "evidence_level": "historical-descriptive"})
+    with pytest.raises(ValueError, match="learned-null-normal"):
+        CalibrationRecord(**{**base, "model": "other"})
+    with pytest.raises(ValueError, match="rope_half_width and threshold"):
+        CalibrationRecord(**{**base, "rope_half_width": None})
+    with pytest.raises(ValueError, match="positive fold_sds"):
+        CalibrationRecord(**{**base, "fold_sds": np.array([0.2, 0.0])})
+    with pytest.raises(ValueError, match="must not carry null_samples"):
+        CalibrationRecord(
+            evidence_level="inconclusive",
+            reasons=("raw samples kept off the engine",),
+            applicable=False,
+            null_samples=np.array([0.1]),
+        )
+
+
+def test_calibration_seam_refuses_undefensible_learned_null_inputs(monkeypatch):
+    frame = _integer_frame()
+    plans = validate_schedule(frame, "y", DONORS, _request(4, 6)).windows
+
+    def scored(window, **kwargs):
+        fields = {
+            "plan": window,
+            "status": "scored",
+            "reason": None,
+            "cumulative_sd": 0.4,
+            "bias_cumulative": 0.1,
+            "divergences": 0,
+            "diagnostics_status": "available",
+        }
+        fields.update(kwargs)
+        return WindowReplay(**fields)
+
+    def calibrate(windows, **kwargs):
+        options = {
+            "rope_half_width": 0.0,
+            "threshold": 0.95,
+            "fit_learned_null": True,
+            "sample_kwargs": dict(LIGHT),
+            "random_seed": 1,
+        }
+        options.update(kwargs)
+        return _calibration_from_windows(windows, **options)
+
+    record, fits = calibrate([scored(plans[0], cumulative_sd=0.0), scored(plans[1])])
+    assert fits == 0
+    assert record.applicable is False
+    assert record.evidence_level == "inconclusive"
+    assert "non-positive" in " ".join(record.reasons)
+
+    record, fits = calibrate(
+        [scored(plans[0]), scored(plans[1])],
+        fit_learned_null=False,
+    )
+    assert fits == 0
+    assert record.evidence_level == "historical-descriptive"
+    assert "not requested" in " ".join(record.reasons)
+
+    def unidentified(*args, **kwargs):
+        raise _NullModelUnidentifiedError("null model was not identified")
+
+    monkeypatch.setattr(
+        "causalpy.historical_validation._fit_learned_null",
+        unidentified,
+    )
+    record, fits = calibrate([scored(plans[0]), scored(plans[1])])
+    assert fits == 1
+    assert record.evidence_level == "inconclusive"
+    assert "not identified" in " ".join(record.reasons)
+
+    def exploded(*args, **kwargs):
+        raise RuntimeError("sampler exploded")
+
+    monkeypatch.setattr(
+        "causalpy.historical_validation._fit_learned_null",
+        exploded,
+    )
+    record, fits = calibrate([scored(plans[0]), scored(plans[1])])
+    assert fits == 1
+    assert record.evidence_level == "fit-failed"
+    assert "RuntimeError" in " ".join(record.reasons)
+
+    def bad_theta(*args, **kwargs):
+        return None, "not-samples"
+
+    monkeypatch.setattr(
+        "causalpy.historical_validation._fit_learned_null",
+        bad_theta,
+    )
+    record, fits = calibrate([scored(plans[0]), scored(plans[1])])
+    assert fits == 1
+    assert record.evidence_level == "inconclusive"
+    assert "not a finite one-dimensional" in " ".join(record.reasons)
+
+
+def test_recommendation_names_an_unverified_or_touched_audit():
+    frame = _integer_frame()
+    missing = validate_schedule(frame, "y", DONORS, _request(4, audit_origins=(99,)))
+    assert missing.audit_reserved is True
+    assert missing.selection_audit_separated is False
+    assert "origin is missing" in _handoff(missing).recommendation()
+
+    separated = validate_schedule(frame, "y", DONORS, _request(4, audit_origins=(8,)))
+    selection = separated.windows[0]
+    audit = separated.windows[1]
+    touched = replace(
+        separated,
+        windows=(
+            selection,
+            replace(audit, holdout_index=selection.analysis_index[:1]),
+        ),
+        selection_audit_separated=True,
+    )
+    text = _handoff(touched).recommendation()
+    assert "later audit was not untouched" in text
+    assert str(selection.analysis_index[0]) in text
+
+
+def test_failed_fit_records_unavailable_diagnostics(monkeypatch):
+    frame = _integer_frame()
+    schedule = validate_schedule(frame, "y", DONORS, _request(4))
+
+    def fit(self):
+        def boom():
+            raise RuntimeError("diag down")
+
+        self._model_backend.sampling_diagnostics = boom
+        raise RuntimeError("fit down")
+
+    monkeypatch.setattr(SyntheticControl, "fit", fit)
+    replay = replay_history(
+        frame,
+        "y",
+        DONORS,
+        schedule,
+        RULE,
+        model=_wide_template(),
+        random_seed=1,
+    )
+    window = replay.windows[0]
+    assert window.status == "fit-failed"
+    assert window.diagnostics_status == "unavailable"
+    assert "diag down" in (window.diagnostics_reason or "")
+    assert window.n_inference_fits == 1
