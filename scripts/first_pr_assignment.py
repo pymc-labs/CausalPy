@@ -30,7 +30,12 @@ LABEL_DESCRIPTION = (
     "First pull request does not fix an issue the author is assigned to. "
     "Triage flag, not a rejection."
 )
-FIRST_TIME_ASSOCIATIONS = frozenset({"FIRST_TIMER", "FIRST_TIME_CONTRIBUTOR"})
+# A member token sees FIRST_TIMER or FIRST_TIME_CONTRIBUTOR for a new author.
+# The workflow token cannot: pulls.get with that token, like an unauthenticated
+# read, returns NONE for those authors and still returns MEMBER, OWNER,
+# COLLABORATOR, or CONTRIBUTOR for everyone else. Flag the values this job
+# can actually observe. Do not flag the established roles.
+FIRST_TIME_ASSOCIATIONS = frozenset({"FIRST_TIMER", "FIRST_TIME_CONTRIBUTOR", "NONE"})
 # Same substring checks as .github/workflows/welcome.yml. GitHub's contains()
 # is case-sensitive, so these markers are too.
 BOT_ACTOR_MARKERS = ("[bot]", "dependabot", "renovate")
@@ -106,8 +111,9 @@ def should_flag(
 ) -> bool:
     """Return whether this pull request gets the triage label and comment.
 
-    ``author_association`` is the pull request API value, not the
-    ``pull_request_target`` event value. That event reports ``NONE`` for
+    ``author_association`` is the pull request API value read by the workflow
+    token, not a member's view of the same field and not the
+    ``pull_request_target`` event value. That token reports ``NONE`` for
     first-time authors. ``issues`` are closing references loaded from this
     repository. A missing issue is omitted by the caller. A pull request
     payload does not count as an issue assignment. Pass if any remaining

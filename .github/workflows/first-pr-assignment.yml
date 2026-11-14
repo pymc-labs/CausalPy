@@ -26,9 +26,10 @@ jobs:
     timeout-minutes: 10
     # Skip bots the same way as welcome.yml. Do not gate on
     # github.event.pull_request.author_association: this event reports NONE
-    # for first-time authors, so that comparison never runs. The script below
-    # reads author_association from the pull request API. The helper still
-    # flags only FIRST_TIMER and FIRST_TIME_CONTRIBUTOR.
+    # for first-time authors, and so does pulls.get with the workflow token.
+    # The script reads the API value and the helper flags FIRST_TIMER,
+    # FIRST_TIME_CONTRIBUTOR, and that token's NONE. It does not flag
+    # MEMBER, OWNER, COLLABORATOR, or CONTRIBUTOR.
     if: >-
       !contains(github.actor, '[bot]') &&
       !contains(github.actor, 'dependabot') &&

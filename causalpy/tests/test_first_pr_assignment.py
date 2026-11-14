@@ -180,7 +180,7 @@ def test_any_assigned_closing_issue_passes(script_module) -> None:
 
 @pytest.mark.parametrize(
     "association",
-    ["MEMBER", "OWNER", "COLLABORATOR", "CONTRIBUTOR", "NONE", "MANNEQUIN"],
+    ["MEMBER", "OWNER", "COLLABORATOR", "CONTRIBUTOR", "MANNEQUIN", ""],
 )
 def test_established_associations_are_not_flagged(
     script_module, association: str
@@ -192,6 +192,28 @@ def test_established_associations_are_not_flagged(
         issues=[],
     )
     assert flagged is False
+
+
+def test_workflow_token_none_is_flagged_unless_assigned(script_module) -> None:
+    """The workflow token sees NONE where a member token sees FIRST_TIME_*."""
+    assert (
+        script_module.should_flag(
+            actor="new-author",
+            author_association="NONE",
+            author="new-author",
+            issues=[],
+        )
+        is True
+    )
+    assert (
+        script_module.should_flag(
+            actor="new-author",
+            author_association="NONE",
+            author="new-author",
+            issues=[_issue("new-author")],
+        )
+        is False
+    )
 
 
 @pytest.mark.parametrize(
