@@ -46,18 +46,14 @@ jobs:
           pr_message: |
             👋 **Welcome to CausalPy, @${{ env.ACTOR }}!**
 
-            Thank you for opening your first pull request! We're excited to have you contribute to the project. 🎉
+            Thank you for opening a pull request.
 
-            Here are a few tips to help your PR get merged smoothly:
+            A first pull request is accepted for review when a maintainer has assigned you to an issue that the pull request fixes. We do this because a flood of unsolicited pull requests was taking review time away from work we had asked for. The policy is in [CONTRIBUTING.md](https://github.com/pymc-labs/CausalPy/blob/main/CONTRIBUTING.md#first-pull-requests). If this pull request does not fix an issue you are assigned to, it is labeled `spam?`. That label is a question for maintainers, not a claim that you or this change are spam.
+
+            While the pull request is open:
             - ✅ Make sure all CI checks pass (tests, linting, type checking)
             - 📝 Run `prek run --all-files` locally before pushing
             - 📖 Check our [Contributing Guide](https://github.com/pymc-labs/CausalPy/blob/main/CONTRIBUTING.md) for more details
-
-            A maintainer will review your changes soon. Thanks for helping make CausalPy better! 🚀
-
-            ---
-
-            💼 **LinkedIn Shoutout**: Once your PR is merged, we'd love to give you a shoutout on LinkedIn to thank you for your contribution! If you're interested, just drop your LinkedIn profile URL in a comment below.
 
       # Add label for first-time contributors on PRs
       # FIRST_TIMER: never contributed to any GitHub repo
