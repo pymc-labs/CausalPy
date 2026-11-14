@@ -130,6 +130,87 @@ class _NullModelUnidentifiedError(ValueError):
     """
 
 
+def _fit_learned_null(
+    fold_means: np.ndarray,
+    fold_sds: np.ndarray,
+    *,
+    prior_scale: float,
+    sample_kwargs: dict[str, Any],
+    random_seed: int | None,
+) -> tuple[Any, np.ndarray]:
+    """Fit the hierarchical status-quo model and return theta_new draws.
+
+    This is the identification and sampling path :meth:`PlaceboInTime._build_status_quo_model`
+    already uses. Historical validation calls it so a second hierarchical model
+    is not copied beside it. The seed split is unchanged: an explicit sampling
+    seed overrides the master seed for ``pm.sample`` only, and posterior
+    predictive draws keep the master seed when one was supplied.
+    """
+    n_folds = len(fold_means)
+    fold_sds = np.where(fold_sds < 1e-6, 1e-6, fold_sds)
+    prior_mu_center = float(np.nanmean(fold_means))
+    prior_mu_scale = float(np.nanstd(fold_means))
+    if not np.isfinite(prior_mu_scale) or prior_mu_scale <= 0.0:
+        raise _NullModelUnidentifiedError(
+            "Cannot identify the hierarchical status-quo null: the "
+            f"{n_folds} completed placebo fold(s) have no between-fold "
+            "spread in their cumulative impacts (np.nanstd(fold_means) is "
+            "not positive). Use more folds or a longer pre-intervention "
+            "span so the placebo windows differ."
+        )
+    coords = {"fold": np.arange(n_folds)}
+    with pm.Model(coords=coords) as model:
+        observed_fold_means = pm.Data("observed_fold_means", fold_means, dims="fold")
+        observed_fold_sd = pm.Data("observed_fold_sd", fold_sds, dims="fold")
+        mu_status_quo = pm.Normal(
+            "mu_status_quo",
+            mu=prior_mu_center,
+            sigma=5.0 * prior_scale * prior_mu_scale,
+        )
+        tau_status_quo = pm.HalfNormal(
+            "tau_status_quo",
+            sigma=2.0 * prior_scale * prior_mu_scale,
+        )
+        fold_z = pm.Normal("fold_z", mu=0.0, sigma=1.0, dims="fold")
+        fold_true_effect = pm.Deterministic(
+            "fold_true_effect",
+            mu_status_quo + tau_status_quo * fold_z,
+            dims="fold",
+        )
+        pm.Normal(
+            "likelihood_fold_means",
+            mu=fold_true_effect,
+            sigma=observed_fold_sd,
+            observed=observed_fold_means,
+            dims="fold",
+        )
+        resolved = dict(sample_kwargs)
+        if "random_seed" not in resolved and random_seed is not None:
+            resolved["random_seed"] = random_seed
+        idata = pm.sample(**resolved)
+    with model:
+        model.add_coords({"new_period": np.arange(1)})
+        pm.Normal(
+            "theta_new",
+            mu=mu_status_quo,
+            sigma=tau_status_quo,
+            dims="new_period",
+        )
+        posterior_predictive_seed = random_seed
+        if posterior_predictive_seed is None:
+            posterior_predictive_seed = resolved.get("random_seed")
+        posterior_predictive_kwargs: dict[str, Any] = {"var_names": ["theta_new"]}
+        if posterior_predictive_seed is not None:
+            posterior_predictive_kwargs["random_seed"] = posterior_predictive_seed
+        pp = pm.sample_posterior_predictive(idata, **posterior_predictive_kwargs)
+    theta_new_samples = (
+        pp["posterior_predictive"]["theta_new"]
+        .stack(sample=("chain", "draw"))
+        .values.squeeze()
+    )
+    return idata, theta_new_samples
+
+
 def _is_non_positive_length(length: Any) -> bool:
     """Return whether a window length is orderable against zero and not positive.
 
@@ -1235,91 +1316,13 @@ class PlaceboInTime:
             null in that case would collapse it to a prior-driven width and
             could report a spurious verdict. A subclass of ``ValueError``.
         """
-        n_folds = len(fold_means)
-        fold_sds = np.where(fold_sds < 1e-6, 1e-6, fold_sds)
-
-        prior_mu_center = float(np.nanmean(fold_means))
-        prior_mu_scale = float(np.nanstd(fold_means))
-        # A non-positive (or non-finite) between-fold spread means the null's
-        # scale is unidentified from these folds. Silently substituting a bare
-        # ``1.0`` here strips all data scaling from the ``mu`` and ``tau``
-        # priors and collapses the null to a prior-driven O(1) width, which on
-        # a large-scale series flips the verdict to a spurious SUPPORTED. Fail
-        # loudly instead. ``run`` already abstains (INCONCLUSIVE) before
-        # reaching this point when fewer than ``MIN_USABLE_FOLDS`` folds
-        # complete; this guards the residual case of >= 2 folds whose
-        # cumulative impacts coincide (e.g. an almost-constant series).
-        if not np.isfinite(prior_mu_scale) or prior_mu_scale <= 0.0:
-            raise _NullModelUnidentifiedError(
-                "Cannot identify the hierarchical status-quo null: the "
-                f"{n_folds} completed placebo fold(s) have no between-fold "
-                "spread in their cumulative impacts (np.nanstd(fold_means) is "
-                "not positive). Use more folds or a longer pre-intervention "
-                "span so the placebo windows differ."
-            )
-
-        scale = self.prior_scale
-        coords = {"fold": np.arange(n_folds)}
-
-        with pm.Model(coords=coords) as model:
-            observed_fold_means = pm.Data(
-                "observed_fold_means", fold_means, dims="fold"
-            )
-            observed_fold_sd = pm.Data("observed_fold_sd", fold_sds, dims="fold")
-
-            mu_status_quo = pm.Normal(
-                "mu_status_quo",
-                mu=prior_mu_center,
-                sigma=5.0 * scale * prior_mu_scale,
-            )
-            tau_status_quo = pm.HalfNormal(
-                "tau_status_quo",
-                sigma=2.0 * scale * prior_mu_scale,
-            )
-
-            fold_z = pm.Normal("fold_z", mu=0.0, sigma=1.0, dims="fold")
-            fold_true_effect = pm.Deterministic(
-                "fold_true_effect",
-                mu_status_quo + tau_status_quo * fold_z,
-                dims="fold",
-            )
-
-            pm.Normal(
-                "likelihood_fold_means",
-                mu=fold_true_effect,
-                sigma=observed_fold_sd,
-                observed=observed_fold_means,
-                dims="fold",
-            )
-
-            sample_kwargs = dict(self.sample_kwargs)
-            if "random_seed" not in sample_kwargs and self.random_seed is not None:
-                sample_kwargs["random_seed"] = self.random_seed
-            idata = pm.sample(**sample_kwargs)
-
-        with model:
-            model.add_coords({"new_period": np.arange(1)})
-            pm.Normal(
-                "theta_new",
-                mu=mu_status_quo,
-                sigma=tau_status_quo,
-                dims="new_period",
-            )
-            posterior_predictive_seed = self.random_seed
-            if posterior_predictive_seed is None:
-                posterior_predictive_seed = sample_kwargs.get("random_seed")
-            posterior_predictive_kwargs: dict[str, Any] = {"var_names": ["theta_new"]}
-            if posterior_predictive_seed is not None:
-                posterior_predictive_kwargs["random_seed"] = posterior_predictive_seed
-            pp = pm.sample_posterior_predictive(idata, **posterior_predictive_kwargs)
-
-        theta_new_samples = (
-            pp["posterior_predictive"]["theta_new"]
-            .stack(sample=("chain", "draw"))
-            .values.squeeze()
+        return _fit_learned_null(
+            fold_means,
+            fold_sds,
+            prior_scale=self.prior_scale,
+            sample_kwargs=dict(self.sample_kwargs),
+            random_seed=self.random_seed,
         )
-
-        return idata, theta_new_samples
 
     @staticmethod
     def bayesian_rope_decision(
