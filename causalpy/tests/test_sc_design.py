@@ -19,6 +19,8 @@ treated values are not fit inputs, so that comparison should agree up to
 graph-compilation noise; the tolerance is not a second sampler's slack.
 """
 
+from types import SimpleNamespace
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -31,6 +33,8 @@ from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB
 from causalpy.design import (
     DecisionRule,
+    HorizonEvaluation,
+    PlannerResult,
     SyntheticControlPlanner,
     _score_translated_lifts,
 )
@@ -547,3 +551,284 @@ def test_custom_priors_survive_copying_and_refits():
             "HalfNormal"
         )
     assert second.n_inference_fits == 1
+
+
+def _install_posterior(experiment, *, impact: float) -> None:
+    holdout = experiment.datapost.index
+    coords = {"obs_ind": holdout}
+    values = np.full((1, 2, len(holdout)), impact)
+    experiment._result = SimpleNamespace(
+        predictions_post=xr.DataArray(
+            np.zeros_like(values),
+            dims=("chain", "draw", "obs_ind"),
+            coords=coords,
+        ),
+        impact_post=xr.DataArray(
+            values, dims=("chain", "draw", "obs_ind"), coords=coords
+        ),
+    )
+
+
+def _result_shell(scores: tuple = ()) -> PlannerResult:
+    horizon = HorizonEvaluation(
+        duration=1,
+        treatment_time=0,
+        training_index=pd.Index([0]),
+        holdout_index=pd.Index([1]),
+        status="historical-descriptive",
+        fit_error=None,
+        n_inference_fits=1,
+        counterfactual=None,
+        baseline_impact=None,
+        observed_holdout=None,
+        applied_relative_floor=None,
+        observation_noise_rate=None,
+        y_hat_distribution=None,
+        user_priors={},
+        scores=scores,
+    )
+    return PlannerResult(
+        status="historical-descriptive",
+        fit_error=None,
+        decision=DECISION,
+        estimator="synthetic_control",
+        treated_unit=UNIT,
+        control_units=tuple(CONTROLS),
+        relative_floor=None,
+        relative_baseline_convention="observed-holdout",
+        horizon_policy="separate-fits",
+        random_seed=None,
+        n_inference_fits=1,
+        horizons=(horizon,),
+    )
+
+
+def test_rejected_inputs_do_not_fit(monkeypatch):
+    def reject_fit(*args, **kwargs):
+        raise AssertionError("rejected input reached a fit")
+
+    monkeypatch.setattr(SyntheticControl, "fit", reject_fit)
+    history = _history()
+    with pytest.raises(TypeError, match="real number"):
+        DecisionRule("positive", "cumulative", True, 0.95)
+    with pytest.raises(ValueError, match="finite"):
+        DecisionRule("positive", "cumulative", np.nan, 0.95)
+    with pytest.raises(ValueError, match="Unsupported decision direction"):
+        DecisionRule("up", "cumulative", 0.0, 0.95)
+    with pytest.raises(ValueError, match="Unsupported estimand"):
+        DecisionRule("positive", "total", 0.0, 0.95)
+    with pytest.raises(ValueError, match="probability must be strictly above 0"):
+        DecisionRule("positive", "cumulative", 0.0, 0.0)
+    with pytest.raises(TypeError, match="decision must be a DecisionRule"):
+        SyntheticControlPlanner(history, UNIT, CONTROLS, "positive")
+    with pytest.raises(TypeError, match="auto_scale_sigma must be a bool"):
+        _planner(history, auto_scale_sigma=1)
+    with pytest.raises(ValueError, match="relative_floor must be at least 0"):
+        _planner(history, relative_floor=-1.0)
+    with pytest.raises(TypeError, match="random_seed must be an int"):
+        _planner(history, random_seed=True)
+    with pytest.raises(ValueError, match="min_donor_correlation must be between"):
+        _planner(history, min_donor_correlation=1.5)
+    with pytest.raises(ValueError, match="at least one donor"):
+        SyntheticControlPlanner(history, UNIT, [], DECISION)
+    with pytest.raises(TypeError, match="unit-name strings"):
+        SyntheticControlPlanner(history, UNIT, [1], DECISION)
+    with pytest.raises(ValueError, match="duplicate donor"):
+        SyntheticControlPlanner(history, UNIT, [CONTROLS[0], CONTROLS[0]], DECISION)
+    with pytest.raises(ValueError, match="cannot also be a control"):
+        SyntheticControlPlanner(history, UNIT, [UNIT, *CONTROLS], DECISION)
+    missing = history.drop(columns=CONTROLS[0])
+    with pytest.raises(ValueError, match="missing columns"):
+        _planner(missing)
+    duplicated = history.copy()
+    labels = list(duplicated.index)
+    labels[1] = labels[0]
+    duplicated.index = labels
+    with pytest.raises(ValueError, match="index must be unique"):
+        _planner(duplicated)
+    reversed_history = history.copy()
+    reversed_history.index = list(reversed(history.index))
+    with pytest.raises(ValueError, match="sorted ascending"):
+        _planner(reversed_history)
+    with pytest.raises(ValueError, match="at least three rows"):
+        _planner(history.iloc[:2])
+    non_finite = history.copy()
+    non_finite.iloc[0, 0] = np.nan
+    with pytest.raises(ValueError, match="non-finite"):
+        _planner(non_finite)
+    planner = _planner(history)
+    with pytest.raises(KeyError, match="not in the stored history"):
+        planner.screen(periods=["not-a-period"])
+    with pytest.raises(ValueError, match="at least two observations"):
+        planner.screen(periods=history.index[:1])
+    with pytest.raises(TypeError, match="sequence of positive integers"):
+        planner.evaluate(durations="4", absolute_lifts=[1.0])
+    with pytest.raises(ValueError, match="at least one duration"):
+        planner.evaluate(durations=[], absolute_lifts=[1.0])
+    with pytest.raises(TypeError, match="positive integer"):
+        planner.evaluate(durations=[1.5], absolute_lifts=[1.0])
+    with pytest.raises(ValueError, match="at least 1"):
+        planner.evaluate(durations=[0], absolute_lifts=[1.0])
+    with pytest.raises(ValueError, match="training rows"):
+        planner.evaluate(durations=[len(history) - 1], absolute_lifts=[1.0])
+    with pytest.raises(ValueError, match="at least one absolute or relative"):
+        planner.evaluate(durations=[1])
+    with pytest.raises(TypeError, match="sequence of finite lifts"):
+        planner.evaluate(durations=[1], relative_lifts="0.1")
+    with pytest.raises(ValueError, match="is empty"):
+        planner.evaluate(durations=[1], absolute_lifts=[])
+
+
+def test_unfitted_template_records_the_seed_without_sampling(monkeypatch):
+    def reject_fit(*args, **kwargs):
+        raise AssertionError("template construction sampled")
+
+    monkeypatch.setattr(SyntheticControl, "fit", reject_fit)
+    planner = SyntheticControlPlanner(
+        _history(),
+        UNIT,
+        CONTROLS,
+        DECISION,
+        random_seed=3,
+    )
+    assert isinstance(planner.model, WeightedSumFitter)
+    assert planner.model.idata is None
+    assert planner.model.sample_kwargs["random_seed"] == 3
+    assert planner.model.sample_kwargs["progressbar"] is False
+    unseeded = SyntheticControlPlanner(_history(), UNIT, CONTROLS, DECISION)
+    assert unseeded.model.idata is None
+    assert "random_seed" not in unseeded.model.sample_kwargs
+
+
+def test_screen_accepts_a_stored_period_subset():
+    history = _history()
+    screen = _planner(history).screen(periods=history.index[:4])
+    assert screen.periods.equals(history.index[:4])
+    assert set(screen.correlation) == set(CONTROLS)
+
+
+def test_sampling_overrides_reach_the_cloned_fit(monkeypatch):
+    seen = []
+
+    def record(self, **kwargs):
+        seen.append(dict(self.model.sample_kwargs))
+        raise RuntimeError("stop after recording the fit arguments")
+
+    monkeypatch.setattr(SyntheticControl, "fit", record)
+    result = _planner(_history(), random_seed=11).evaluate(
+        durations=[1],
+        absolute_lifts=[1.0],
+        sample_kwargs={"tune": 3},
+    )
+    assert result.status == "fit-failed"
+    assert seen[0]["random_seed"] == 11
+    assert seen[0]["tune"] == 3
+
+
+def test_a_fit_that_drifts_the_requested_window_is_refused(monkeypatch):
+    def drift_training(self, **kwargs):
+        self.data = self.data.iloc[1:].copy()
+
+    monkeypatch.setattr(SyntheticControl, "fit", drift_training)
+    with pytest.raises(RuntimeError, match="trained on a different window"):
+        _planner(_history()).evaluate(durations=[1], absolute_lifts=[1.0])
+
+    def drift_holdout(self, **kwargs):
+        extra = self.data.iloc[[-1]].copy()
+        extra.index = [int(self.data.index[-1]) + 1]
+        self.data = pd.concat([self.data, extra])
+
+    monkeypatch.setattr(SyntheticControl, "fit", drift_holdout)
+    with pytest.raises(RuntimeError, match="held out a different window"):
+        _planner(_history()).evaluate(durations=[1], absolute_lifts=[1.0])
+
+
+def test_a_swapped_fit_model_is_refused(monkeypatch):
+    def swap(self, **kwargs):
+        from sklearn.linear_model import LinearRegression
+
+        self.model = LinearRegression()
+        _install_posterior(self, impact=4.0)
+
+    monkeypatch.setattr(SyntheticControl, "fit", swap)
+    with pytest.raises(TypeError, match="remain a WeightedSumFitter"):
+        _planner(_history()).evaluate(durations=[1], absolute_lifts=[1.0])
+
+
+def test_negative_decision_uses_the_lower_tail():
+    baseline = xr.DataArray(
+        np.full((1, 1, 2), -1.0),
+        dims=("chain", "draw", "obs_ind"),
+        coords={"obs_ind": [0, 1]},
+    )
+    observed = xr.DataArray(np.ones(2), dims="obs_ind", coords={"obs_ind": [0, 1]})
+    scores = _score_translated_lifts(
+        baseline_impact=baseline,
+        observed=observed,
+        counterfactual=xr.zeros_like(baseline),
+        relative_lifts=None,
+        absolute_lifts=(0.0,),
+        decision=DecisionRule("negative", "cumulative", 0.0, 0.9),
+    )
+    cumulative = next(score for score in scores if score.estimand == "cumulative")
+    assert cumulative.detected is True
+    assert cumulative.tail_probability == pytest.approx(1.0)
+
+
+def test_translated_result_reports_detection_plot_and_mixed_status(monkeypatch):
+    def fit(self, **kwargs):
+        if self.treatment_time == _history().index[-1]:
+            raise RuntimeError("sampling failed")
+        _install_posterior(self, impact=4.0)
+        self.model.priors["y_hat"].parameters["sigma"] = 1.0
+
+    monkeypatch.setattr(SyntheticControl, "fit", fit)
+    result = _planner(_history()).evaluate(
+        durations=[4, 1],
+        absolute_lifts=[1.0, 1.0],
+    )
+    assert result.status == "mixed"
+    assert result.n_inference_fits == 2
+    assert "No single recommendation" in result.recommendation()
+    failed = next(horizon for horizon in result.horizons if horizon.duration == 1)
+    assert failed.status == "fit-failed"
+    scored = next(horizon for horizon in result.horizons if horizon.duration == 4)
+    assert scored.observation_noise_rate is None
+    absolute = [
+        score.lift
+        for score in scored.scores
+        if score.effect_scale == "absolute" and score.estimand == "cumulative"
+    ]
+    assert absolute == [0.0, 1.0]
+    assert scored.scores[0].detected is True
+    fig, ax = result.plot(horizon=4)
+    assert ax.get_xlabel() == "Injected absolute lift"
+    assert "decision rule met" in [
+        text.get_text() for text in ax.get_legend().get_texts()
+    ]
+    plt.close(fig)
+    with pytest.raises(ValueError, match="effect_scale must be"):
+        result.plot(horizon=4, effect_scale="nope")
+    with pytest.raises(ValueError, match="estimand must be"):
+        result.plot(horizon=4, estimand="nope")
+    with pytest.raises(ValueError, match="No relative"):
+        result.plot(horizon=4, effect_scale="relative")
+    with pytest.raises(KeyError, match="No horizon with duration"):
+        result.plot(horizon=99)
+    success = PlannerResult(
+        status="historical-descriptive",
+        fit_error=None,
+        decision=result.decision,
+        estimator=result.estimator,
+        treated_unit=result.treated_unit,
+        control_units=result.control_units,
+        relative_floor=None,
+        relative_baseline_convention=result.relative_baseline_convention,
+        horizon_policy=result.horizon_policy,
+        random_seed=None,
+        n_inference_fits=1,
+        horizons=(scored,),
+    )
+    assert success.recommendation().startswith("Historical-descriptive")
+    with pytest.raises(ValueError, match="no scores to plot"):
+        _result_shell().plot()
