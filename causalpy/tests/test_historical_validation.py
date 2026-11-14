@@ -1037,3 +1037,154 @@ def test_failed_selection_window_blocks_the_conditional_curve(monkeypatch):
     assert "not dropped" in text
     with pytest.raises(ValueError, match="cannot feed"):
         replay.calibration.conditional_curve()
+
+
+def test_score_window_keeps_divergent_diagnostics():
+    import xarray as xr
+
+    frame = _integer_frame()
+    window = validate_schedule(frame, "y", DONORS, _request(4)).windows[0]
+    draws = np.array([[[[1.0, 2.0], [1.5, 2.5], [0.5, 1.5], [1.2, 1.8]]]])
+    impact = xr.DataArray(
+        draws,
+        dims=("treated_units", "chain", "draw", "obs_ind"),
+        coords={"treated_units": ["y"]},
+    )
+
+    class Backend:
+        def sampling_diagnostics(self):
+            return {
+                "divergences": 7,
+                "max_rhat": 1.42,
+                "min_bulk_ess": 3.0,
+                "diagnostics_status": "available",
+                "diagnostics_reason": None,
+            }
+
+    class Result:
+        impact_post = impact
+        predictions_post = impact
+
+    class Experiment:
+        treated_units = ["y"]
+        result = Result()
+        _model_backend = Backend()
+
+    scored = _score_window(Experiment(), window, RULE)
+    assert scored.status == "scored"
+    assert scored.diagnostics_status == "available"
+    assert scored.divergences == 7
+    assert scored.max_rhat == 1.42
+    assert scored.min_bulk_ess == 3.0
+
+
+def test_positive_divergences_block_the_conditional_curve(monkeypatch):
+    frame = _integer_frame()
+    schedule = validate_schedule(frame, "y", DONORS, _request(4, 6))
+
+    def replay_one(*args, **kwargs):
+        window = args[3]
+        scored, fits = _scored_replay_window(*args, **kwargs)
+        if window.origin == 4:
+            scored = WindowReplay(
+                plan=scored.plan,
+                status=scored.status,
+                reason=None,
+                cumulative_mean=scored.cumulative_mean,
+                cumulative_sd=scored.cumulative_sd,
+                bias_cumulative=scored.bias_cumulative,
+                bias_average=scored.bias_average,
+                diagnostics_status="available",
+                divergences=7,
+                max_rhat=1.42,
+                min_bulk_ess=3.0,
+                n_inference_fits=fits,
+            )
+        else:
+            scored = WindowReplay(
+                plan=scored.plan,
+                status=scored.status,
+                reason=None,
+                cumulative_mean=scored.cumulative_mean,
+                cumulative_sd=scored.cumulative_sd,
+                bias_cumulative=scored.bias_cumulative,
+                bias_average=scored.bias_average,
+                diagnostics_status="available",
+                divergences=0,
+                max_rhat=1.42,
+                min_bulk_ess=3.0,
+                n_inference_fits=fits,
+            )
+        return scored, fits
+
+    monkeypatch.setattr("causalpy.historical_validation._replay_window", replay_one)
+    replay = replay_history(
+        frame,
+        "y",
+        DONORS,
+        schedule,
+        RULE,
+        model=_wide_template(),
+        random_seed=1,
+    )
+    assert [window.status for window in replay.windows] == ["scored", "scored"]
+    assert replay.calibration.applicable is False
+    assert replay.calibration.evidence_level == "inconclusive"
+    assert replay.calibration.null_samples is None
+    text = " ".join(replay.calibration.reasons)
+    assert "7 divergence" in text
+    assert "not fed" in text
+    summary = replay.summary()
+    divergent = summary.loc[summary["origin"] == 4].iloc[0]
+    assert divergent["divergences"] == 7
+    assert divergent["max_rhat"] == 1.42
+    assert divergent["min_bulk_ess"] == 3.0
+    healthy = summary.loc[summary["origin"] == 6].iloc[0]
+    assert healthy["divergences"] == 0
+    assert healthy["max_rhat"] == 1.42
+    with pytest.raises(ValueError, match="cannot feed"):
+        replay.calibration.conditional_curve()
+
+
+def test_high_rhat_without_divergences_still_feeds_the_conditional_curve(monkeypatch):
+    frame = _integer_frame()
+    schedule = validate_schedule(frame, "y", DONORS, _request(4, 6))
+
+    def replay_one(*args, **kwargs):
+        scored, fits = _scored_replay_window(*args, **kwargs)
+        return (
+            WindowReplay(
+                plan=scored.plan,
+                status=scored.status,
+                reason=None,
+                cumulative_mean=scored.cumulative_mean,
+                cumulative_sd=scored.cumulative_sd,
+                bias_cumulative=scored.bias_cumulative,
+                bias_average=scored.bias_average,
+                diagnostics_status="available",
+                divergences=0,
+                max_rhat=1.42,
+                min_bulk_ess=3.0,
+                n_inference_fits=fits,
+            ),
+            fits,
+        )
+
+    monkeypatch.setattr("causalpy.historical_validation._replay_window", replay_one)
+    monkeypatch.setattr(
+        "causalpy.historical_validation._fit_learned_null",
+        lambda *args, **kwargs: (None, np.array(0.25)),
+    )
+    replay = replay_history(
+        frame,
+        "y",
+        DONORS,
+        schedule,
+        RULE,
+        model=_wide_template(),
+        random_seed=1,
+    )
+    assert replay.calibration.applicable is True
+    assert replay.calibration.evidence_level == "model-conditional"
+    assert replay.windows[0].max_rhat == 1.42
+    assert replay.windows[0].divergences == 0

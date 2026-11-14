@@ -1002,7 +1002,8 @@ class WindowReplay:
     Audit windows stay ``reserved`` unless fitting was requested. Incomplete
     and missing windows stay ``not-run``. A fit that raises is ``fit-failed``
     and is kept. Scored windows carry both cumulative and average-period
-    zero-lift impacts. Bias is the posterior mean minus zero, because no
+    zero-lift impacts, plus the sampling-diagnostic numbers the adapter
+    already computed. Bias is the posterior mean minus zero, because no
     effect was injected. It is not a corrected effect.
 
     Attributes
@@ -1068,6 +1069,9 @@ class WindowReplay:
     detected: bool | None = None
     diagnostics_status: str | None = None
     diagnostics_reason: str | None = None
+    divergences: int | None = None
+    max_rhat: float | None = None
+    min_bulk_ess: float | None = None
     n_inference_fits: int = 0
     counterfactual_mean: np.ndarray | None = None
 
@@ -1383,6 +1387,9 @@ class HistoricalReplay:
                     "detected": window.detected,
                     "diagnostics_status": window.diagnostics_status,
                     "diagnostics_reason": window.diagnostics_reason,
+                    "divergences": window.divergences,
+                    "max_rhat": window.max_rhat,
+                    "min_bulk_ess": window.min_bulk_ess,
                     "n_inference_fits": window.n_inference_fits,
                 }
             )
@@ -1554,8 +1561,10 @@ def replay_history(
     fit_learned_null : bool, optional
         Default true. The null model runs only when at least two selection
         windows scored, no usable selection window failed or was refused,
-        their diagnostics are available, and their posterior standard
-        deviations are positive. Otherwise the record stays inapplicable and
+        their diagnostics are available, no scored selection window has a
+        positive divergence count, and their posterior standard deviations
+        are positive. High R-hat and low ESS are kept on the window and are
+        not given a cutoff here. Otherwise the record stays inapplicable and
         names the reason.
     rope_half_width : float, optional
         Stored on the calibration record for the operating-characteristics
@@ -1789,6 +1798,9 @@ def _replay_window(
                 reason=f"{type(exc).__name__}: {exc}",
                 diagnostics_status=diagnostics.get("diagnostics_status"),
                 diagnostics_reason=diagnostics.get("diagnostics_reason"),
+                divergences=diagnostics.get("divergences"),
+                max_rhat=diagnostics.get("max_rhat"),
+                min_bulk_ess=diagnostics.get("min_bulk_ess"),
                 n_inference_fits=1,
             ),
             1,
@@ -1906,6 +1918,9 @@ def _score_window(
         detected=bool(tail >= decision.probability),
         diagnostics_status=diagnostics.get("diagnostics_status"),
         diagnostics_reason=diagnostics.get("diagnostics_reason"),
+        divergences=diagnostics.get("divergences"),
+        max_rhat=diagnostics.get("max_rhat"),
+        min_bulk_ess=diagnostics.get("min_bulk_ess"),
         n_inference_fits=1,
         counterfactual_mean=np.asarray(
             counterfactual.mean(("chain", "draw")).values, dtype=float
@@ -2002,9 +2017,11 @@ def _calibration_from_windows(
 ) -> tuple[CalibrationRecord, int]:
     """Build the calibration seam from scored selection windows only.
 
-    A fit-failed selection window, or a usable selection window that replay
-    refused, blocks the conditional curve even when other windows scored.
-    Incomplete windows that were never usable do not.
+    A fit-failed selection window, a usable selection window that replay
+    refused, or a scored selection window with a positive divergence count
+    blocks the conditional curve even when other windows scored. Incomplete
+    windows that were never usable do not. High R-hat and low ESS are
+    surfaced and are not a cutoff.
     """
     scored = [
         window
@@ -2077,6 +2094,27 @@ def _calibration_from_windows(
                 f"selection window ({named}). The learned-null model was not "
                 "fed. Partial or unavailable diagnostics are inconclusive, "
                 "not a conditional curve.",
+                dependence,
+            ),
+            scored,
+            base,
+        ), 0
+    divergent = [
+        window
+        for window in scored
+        if window.divergences is not None and window.divergences > 0
+    ]
+    if divergent:
+        named = "; ".join(
+            f"{window.plan.origin}: {window.divergences} divergence(s)"
+            for window in divergent
+        )
+        return _inapplicable(
+            "inconclusive",
+            (
+                "A scored selection window has positive divergences, so the "
+                "conditional curve was not fed. An unconverged fit is not "
+                f"reusable evidence: {named}",
                 dependence,
             ),
             scored,
