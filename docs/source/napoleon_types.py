@@ -441,20 +441,23 @@ def process_owned_docstring(
 
 
 def install_preprocess_gate(app: object) -> None:
-    """Replace Napoleon's processor so inherited docstrings stay unpreprocessed."""
+    """Replace Napoleon's processor without moving its listener slot."""
+    from sphinx.events import EventListener
     from sphinx.ext.napoleon import _process_docstring
 
-    events = app.events
-    listeners = events.listeners.get("autodoc-process-docstring", [])
+    listeners = app.events.listeners.get("autodoc-process-docstring", [])
     replaced = False
-    for listener in list(listeners):
+    for index, listener in enumerate(listeners):
         if listener.handler is _process_docstring:
-            events.disconnect(listener.id)
+            # disconnect+connect appends after other priority-500 handlers,
+            # including sphinx-autodoc-typehints when it still uses the default.
+            listeners[index] = EventListener(
+                listener.id, process_owned_docstring, listener.priority
+            )
             replaced = True
     if not replaced:
         msg = "sphinx.ext.napoleon docstring processor is not connected"
         raise RuntimeError(msg)
-    events.connect("autodoc-process-docstring", process_owned_docstring, priority=500)
 
 
 def rewrite_type_spec(spec: str) -> tuple[str, str]:

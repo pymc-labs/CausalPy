@@ -515,32 +515,23 @@ def test_owned_docstrings_still_link_matplotlib_returns() -> None:
     assert ":class:`~matplotlib.axes.Axes`" in rendered
 
 
-def test_install_replaces_the_napoleon_processor() -> None:
+def test_install_replaces_the_napoleon_processor_in_place() -> None:
     pytest.importorskip("sphinx")
     from types import SimpleNamespace
 
+    from sphinx.events import EventListener
     from sphinx.ext.napoleon import _process_docstring
 
-    class _Events:
-        def __init__(self) -> None:
-            self.listeners = {
-                "autodoc-process-docstring": [
-                    SimpleNamespace(id=7, handler=_process_docstring, priority=500)
-                ]
-            }
-            self.connected: list[tuple[str, object, int]] = []
+    def later_peer(*_args: object) -> None:
+        return None
 
-        def disconnect(self, listener_id: int) -> None:
-            assert listener_id == 7
-            self.listeners["autodoc-process-docstring"].clear()
-
-        def connect(self, name: str, callback: object, priority: int = 500) -> int:
-            self.connected.append((name, callback, priority))
-            return 8
-
-    events = _Events()
-    _napoleon_types.install_preprocess_gate(SimpleNamespace(events=events))
-    assert events.listeners["autodoc-process-docstring"] == []
-    assert events.connected == [
-        ("autodoc-process-docstring", _napoleon_types.process_owned_docstring, 500)
+    listeners = [
+        EventListener(7, _process_docstring, 500),
+        EventListener(8, later_peer, 500),
     ]
+    events = SimpleNamespace(listeners={"autodoc-process-docstring": listeners})
+    _napoleon_types.install_preprocess_gate(SimpleNamespace(events=events))
+    assert listeners[0] == EventListener(
+        7, _napoleon_types.process_owned_docstring, 500
+    )
+    assert listeners[1].handler is later_peer
