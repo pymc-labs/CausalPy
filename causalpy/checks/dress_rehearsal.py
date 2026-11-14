@@ -15,7 +15,9 @@
 
 Wraps :meth:`SyntheticControl.validate_design` as a ``Check``. This check is
 opt-in: it is not registered as a default sensitivity check, because it
-refits the model and requires an injected effect.
+refits the model and requires an injected effect. A pass is not a
+calibration. The result table includes a zero-effect row when the injected
+effect is not already zero.
 """
 
 from __future__ import annotations
@@ -33,7 +35,8 @@ class DressRehearsalCheck:
     """Pipeline-compatible dress rehearsal for Synthetic Control.
 
     Calls :meth:`SyntheticControl.validate_design` and wraps the result as a
-    :class:`causalpy.checks.base.CheckResult`.
+    :class:`causalpy.checks.base.CheckResult`. Coverage of the planted effect
+    is not a calibration. SyntheticControl subclasses are rejected.
 
     Parameters
     ----------
@@ -70,9 +73,11 @@ class DressRehearsalCheck:
         experiment : BaseExperiment
             Experiment the pipeline is about to rehearse.
         """
-        if not isinstance(experiment, SyntheticControl):
+        if type(experiment) is not SyntheticControl:
             raise TypeError(
-                "DressRehearsalCheck requires a SyntheticControl experiment."
+                "DressRehearsalCheck requires a SyntheticControl instance, "
+                f"not {type(experiment).__name__}. Design methods are "
+                "SyntheticControl-only."
             )
         if not isinstance(experiment.model, PyMCModel):
             raise TypeError(

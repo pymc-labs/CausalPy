@@ -64,6 +64,54 @@ def _align_prior_draws(model: PyMCModel) -> None:
     model.prior_sample_kwargs = prior
 
 
+def _require_synthetic_control_design(experiment: object) -> None:
+    """Reject design-method calls on a SyntheticControl subclass.
+
+    Duck-typed shells used by unit tests are not instances, so they pass.
+    A real subclass such as UpDownGeoLift does not.
+    """
+    if (
+        isinstance(experiment, SyntheticControl)
+        and type(experiment) is not SyntheticControl
+    ):
+        raise TypeError(
+            "Design methods are SyntheticControl-only. "
+            f"{type(experiment).__name__} cannot use from_pre_period, "
+            "donor_pool_quality, validate_design, or power_analysis. "
+            "UpDownGeoLift takes arms, not control_units and treated_units, "
+            "so the inherited factory cannot construct it and a power loop "
+            "would drop the arms. Use SyntheticControl for a pre-period "
+            "design check."
+        )
+
+
+def _require_synthetic_control_design_class(cls: type) -> None:
+    """Reject ``from_pre_period`` on a subclass."""
+    if cls is SyntheticControl:
+        return
+    raise TypeError(
+        "Design methods are SyntheticControl-only. "
+        f"{cls.__name__} cannot use from_pre_period, donor_pool_quality, "
+        "validate_design, or power_analysis. UpDownGeoLift takes arms, "
+        "not control_units and treated_units, so the inherited factory "
+        "cannot construct it and a power loop would drop the arms. "
+        "Use SyntheticControl for a pre-period design check."
+    )
+
+
+def _pseudo_treatment_time(index: pd.Index) -> pd.Timestamp | float | int:
+    """Place a treatment time one step after the last observation."""
+    if isinstance(index, pd.DatetimeIndex):
+        return index.max() + pd.Timedelta(days=1)
+    if pd.api.types.is_numeric_dtype(index):
+        return index.max() + 1
+    raise TypeError(
+        "from_pre_period requires a DatetimeIndex or a numeric index "
+        "so a pseudo treatment time can be placed after the last "
+        "observation."
+    )
+
+
 class SyntheticControl(BaseExperiment[CausalResult]):
     """The class for the synthetic control experiment.
 
@@ -120,9 +168,12 @@ class SyntheticControl(BaseExperiment[CausalResult]):
     :meth:`from_pre_period` fits the supplied rows as pre-period only.
     :meth:`donor_pool_quality`, :meth:`validate_design`, and
     :meth:`power_analysis` then ask whether that donor pool can recover an
-    effect you inject. They require a PyMC model. ``power_analysis`` adds iid
-    Gaussian noise and is a heuristic, not a sampling distribution of the
-    treatment effect.
+    effect you inject. They are ``SyntheticControl``-only and require a
+    PyMC model. An imperfect pre-period fit can shift the recovered
+    impact, including at a true effect of zero, so coverage of a planted
+    effect is not a calibration. ``power_analysis`` adds iid Gaussian
+    noise. It is a provisional sketch, not a sampling distribution of the
+    treatment effect and not a sample-size calculator.
 
     **Estimate extraction**
 
@@ -891,20 +942,13 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         Raises
         ------
         TypeError
-            If the index is neither a ``DatetimeIndex`` nor numeric, so a
-            pseudo treatment time cannot be placed after the last observation.
+            If called on a subclass, or if the index is neither a
+            ``DatetimeIndex`` nor numeric, so a pseudo treatment time cannot
+            be placed after the last observation.
         """
+        _require_synthetic_control_design_class(cls)
         frame = to_pandas_with_time_index(data, time_column)
-        if isinstance(frame.index, pd.DatetimeIndex):
-            treatment_time = frame.index.max() + pd.Timedelta(days=1)
-        elif pd.api.types.is_numeric_dtype(frame.index):
-            treatment_time = frame.index.max() + 1
-        else:
-            raise TypeError(
-                "from_pre_period requires a DatetimeIndex or a numeric index "
-                "so a pseudo treatment time can be placed after the last "
-                "observation."
-            )
+        treatment_time = _pseudo_treatment_time(frame.index)
         experiment = cls(
             frame,
             treatment_time,
@@ -925,6 +969,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         holdout_periods: int | None = None,
         effect_type: Literal["relative", "absolute"] = "relative",
         sample_kwargs: dict[str, Any] | None = None,
+        include_null: bool = True,
     ) -> DressRehearsalResult:
         """Inject a known effect into a holdout window and check recovery.
 
@@ -934,6 +979,12 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         truth is that same unit's cumulative injection, so a one-unit design
         matches the historical comparison. The effect is still applied to
         every treated column.
+
+        An imperfect pre-period fit can shift that recovery, including at a
+        true effect of zero (Ferman and Pinto, 2021). Coverage of the planted
+        effect is not a calibration. By default the same holdout is also
+        rehearsed at effect zero and attached as ``null_rehearsal``. See
+        CausalPy issue 913.
 
         Parameters
         ----------
@@ -948,20 +999,32 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         sample_kwargs : dict, optional
             MCMC overrides for the refit. Merged onto the parent model's
             ``sample_kwargs``. The prior phase uses the same draw count.
+        include_null : bool, default True
+            When the injected effect is not already zero, also rehearse a
+            zero effect on the same holdout. A power loop should pass
+            ``False`` so it does not fit twice per simulation.
 
         Returns
         -------
         DressRehearsalResult
             Recovery of the injected effect for the first treated unit.
+            ``null_rehearsal`` is set when the zero-effect comparison ran.
 
         Raises
         ------
         TypeError
-            If the model is not a ``PyMCModel``.
+            If called on a subclass, or the model is not a ``PyMCModel``.
         ValueError
             If the holdout would leave fewer than 10 pre-period rows, or
             ``effect_type`` is unknown.
+
+        References
+        ----------
+        Ferman, B., & Pinto, C. (2021). Synthetic controls with imperfect
+        pretreatment fit. *Quantitative Economics*, 12(4), 1197-1221.
+        https://doi.org/10.3982/QE1596
         """
+        _require_synthetic_control_design(self)
         if not isinstance(self.model, PyMCModel):
             raise TypeError(
                 "validate_design() requires a PyMC model. "
@@ -971,7 +1034,34 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             raise ValueError(
                 f"effect_type must be 'relative' or 'absolute', got {effect_type!r}."
             )
+        result = self._rehearse(
+            injected_effect,
+            holdout_periods=holdout_periods,
+            effect_type=effect_type,
+            sample_kwargs=sample_kwargs,
+        )
+        if include_null and injected_effect != 0:
+            result.null_rehearsal = self._rehearse(
+                0.0,
+                holdout_periods=holdout_periods,
+                effect_type=effect_type,
+                sample_kwargs=sample_kwargs,
+            )
+        return result
 
+    def _rehearse(
+        self,
+        injected_effect: float,
+        *,
+        holdout_periods: int | None,
+        effect_type: Literal["relative", "absolute"],
+        sample_kwargs: dict[str, Any] | None,
+    ) -> DressRehearsalResult:
+        """Fit one holdout injection and return its recovery.
+
+        Does not attach a zero-effect companion. Callers that want that
+        comparison run this twice.
+        """
         pre = self.datapre
         n_pre = len(pre)
         if holdout_periods is None:
@@ -1027,7 +1117,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         self,
         effect_sizes: list[float],
         *,
-        n_simulations: int = 50,
+        n_simulations: int,
         criterion: Literal[
             "hdi_excludes_zero", "prob_gt_zero", "recovery_accuracy"
         ] = "hdi_excludes_zero",
@@ -1036,26 +1126,35 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         sample_kwargs: dict[str, Any] | None = None,
         random_seed: int | None = None,
     ) -> PowerCurveResult:
-        """Estimate a heuristic power curve by repeating a dress rehearsal.
+        """Estimate a provisional power curve by repeating a dress rehearsal.
 
         For each candidate effect size, the treated pre-period is perturbed
         with iid Gaussian noise and :meth:`validate_design` is run. The noise
         scale is the pre-period residual standard deviation of the first
         treated unit. Every treated unit receives that same residual draw.
         This is not a sampling distribution of the treatment effect, and it
-        does not model autocorrelation, seasonality, or heteroscedasticity.
-        Those limitations are why an iid Gaussian curve can overstate power
-        for a time-series donor pool.
+        does not model autocorrelation, seasonality, or heteroscedasticity
+        (CausalPy issue 914). Those limitations are why an iid Gaussian curve
+        can overstate power for a time-series donor pool.
+
+        The method is a sketch, not a stable sample-size result. The
+        detection criterion and the noise model may change. It is not the
+        post-experiment power analysis that needs a finished experiment.
+        The default criterion, ``hdi_excludes_zero``, counts a biased null
+        as a detection (Ferman and Pinto, 2021; CausalPy issue 913). Include
+        ``0`` in ``effect_sizes`` to see that false-detection rate.
 
         Parameters
         ----------
         effect_sizes : list of float
             Candidate effects passed to :meth:`validate_design`.
-        n_simulations : int, default 50
-            Simulations per effect size.
+        n_simulations : int
+            Simulations per effect size. Required. There is no default,
+            because each simulation refits the model.
         criterion : {"hdi_excludes_zero", "prob_gt_zero", "recovery_accuracy"}
             Detection rule. ``hdi_excludes_zero`` asks whether the cumulative
-            impact HDI excludes 0. ``prob_gt_zero`` asks whether
+            impact HDI excludes 0. A biased null can meet that rule.
+            ``prob_gt_zero`` asks whether
             ``P(impact > 0) > 0.95``. ``recovery_accuracy`` asks whether the
             posterior mean is within 20% of the injected truth.
         effect_type : {"relative", "absolute"}, default "relative"
@@ -1076,10 +1175,12 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         Raises
         ------
         TypeError
-            If the model is not a ``PyMCModel``.
+            If called on a subclass, or the model is not a ``PyMCModel``.
         ValueError
-            If ``criterion`` is unknown.
+            If ``n_simulations`` is less than 1, ``criterion`` is unknown,
+            or ``effect_type`` is unknown.
         """
+        _require_synthetic_control_design(self)
         if not isinstance(self.model, PyMCModel):
             raise TypeError(
                 "power_analysis() requires a PyMC model. "
@@ -1123,6 +1224,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
                     holdout_periods=holdout_periods,
                     effect_type=effect_type,
                     sample_kwargs=sample_kwargs,
+                    include_null=False,
                 )
                 sim_results.append(result)
                 if self._criterion_met(result, criterion):
@@ -1151,17 +1253,19 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         rng: np.random.Generator,
         sample_kwargs: dict[str, Any] | None,
     ) -> "SyntheticControl":
-        """Fit a design-only SyntheticControl on a noisy copy of the pre-period.
+        """Return an unfitted SyntheticControl on a noisy copy of the pre-period.
 
-        Always returns this class, not a subclass. ``UpDownGeoLift`` does not
-        accept the unit arguments this constructor passes.
+        The caller refits through :meth:`validate_design`. Fitting here would
+        sample a posterior that the rehearsal never reads. Always returns
+        this class, not a subclass.
         """
         noisy = pre.copy()
         noise = rng.normal(0, residual_std, size=len(pre))
         for column in self.treated_units:
             noisy[column] = noisy[column] + noise
-        return SyntheticControl.from_pre_period(
+        return SyntheticControl(
             noisy,
+            _pseudo_treatment_time(noisy.index),
             list(self.control_units),
             list(self.treated_units),
             model=self._clone_for_design(sample_kwargs),
@@ -1196,6 +1300,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         reported. An undefined donor correlation, such as a constant donor,
         is omitted from the composite correlation score and kept in
         ``per_donor_details``. The experiment must already be fitted.
+        SyntheticControl subclasses are rejected.
 
         Returns
         -------
@@ -1205,10 +1310,11 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         Raises
         ------
         TypeError
-            If the model is not a ``PyMCModel``.
+            If called on a subclass, or the model is not a ``PyMCModel``.
         RuntimeError
             If the model has no posterior draws.
         """
+        _require_synthetic_control_design(self)
         if not isinstance(self.model, PyMCModel):
             raise TypeError(
                 "donor_pool_quality() requires a PyMC model. "

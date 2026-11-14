@@ -135,7 +135,7 @@ def test_design_methods_reject_an_ols_model(method):
         if method == "validate_design":
             design.validate_design(0.1)
         elif method == "power_analysis":
-            design.power_analysis([0.1])
+            design.power_analysis([0.1], n_simulations=1)
         else:
             design.donor_pool_quality()
 
@@ -182,7 +182,9 @@ def test_validate_design_rejects_a_holdout_that_leaves_too_little_pre_period(des
 
 
 def test_validate_design_recovers_a_relative_effect(design_sc):
-    result = design_sc.validate_design(0.15, sample_kwargs=SAMPLE_KWARGS)
+    result = design_sc.validate_design(
+        0.15, sample_kwargs=SAMPLE_KWARGS, include_null=False
+    )
 
     assert isinstance(result, DressRehearsalResult)
     assert result.effect_type == "relative"
@@ -190,6 +192,7 @@ def test_validate_design_recovers_a_relative_effect(design_sc):
     assert np.isfinite(result.recovered_effect_mean)
     assert len(result.recovered_effect_hdi) == 2
     assert isinstance(result.hdi_covers_truth, bool)
+    assert result.null_rehearsal is None
     assert result.posterior_samples.sizes["sample"] == 20
 
 
@@ -198,6 +201,7 @@ def test_validate_design_scores_an_absolute_effect(design_sc):
         5.0,
         effect_type="absolute",
         sample_kwargs=SAMPLE_KWARGS,
+        include_null=False,
     )
 
     assert result.effect_type == "absolute"
@@ -242,7 +246,7 @@ def test_power_analysis_is_reproducible_for_a_fixed_seed(design_sc):
 
 def test_power_analysis_rejects_an_unknown_criterion_before_fitting(design_sc):
     with pytest.raises(ValueError, match="Unknown criterion"):
-        design_sc.power_analysis([0.1], criterion="not-a-rule")
+        design_sc.power_analysis([0.1], n_simulations=1, criterion="not-a-rule")
 
 
 def test_dress_rehearsal_check_returns_a_check_result(design_sc):
@@ -334,7 +338,7 @@ def test_donor_pool_quality_labels_span_the_three_bands():
 
 def test_dress_rehearsal_validate_rejects_the_wrong_experiment_and_model():
     check = DressRehearsalCheck()
-    with pytest.raises(TypeError, match="SyntheticControl experiment"):
+    with pytest.raises(TypeError, match="SyntheticControl-only"):
         check.validate(object())
 
     design = cp.SyntheticControl.from_pre_period(
@@ -353,7 +357,7 @@ def test_design_methods_reject_bad_controls_before_sampling(design_sc):
     with pytest.raises(ValueError, match="n_simulations"):
         design_sc.power_analysis([0.1], n_simulations=0)
     with pytest.raises(ValueError, match="effect_type"):
-        design_sc.power_analysis([0.1], effect_type="nope")
+        design_sc.power_analysis([0.1], n_simulations=1, effect_type="nope")
 
 
 def test_criterion_met_applies_each_detection_rule():
@@ -432,7 +436,10 @@ def test_validate_design_scores_impact_without_a_treated_unit_dimension(
 
     monkeypatch.setattr(cp.SyntheticControl, "fit", fake_fit)
     result = design_sc.validate_design(
-        0.1, holdout_periods=10, sample_kwargs=SAMPLE_KWARGS
+        0.1,
+        holdout_periods=10,
+        sample_kwargs=SAMPLE_KWARGS,
+        include_null=False,
     )
 
     assert result.recovered_effect_mean == pytest.approx(3.0)
@@ -539,3 +546,49 @@ def test_donor_pool_quality_omits_undefined_correlations_from_the_score(design_s
     assert np.isnan(result.correlation_score)
     assert result.per_donor_details["mean_correlation"].isna().all()
     assert list(result.per_donor_details["donor"]) == list(design_sc.control_units)
+
+
+def test_validate_design_attaches_a_zero_lift_rehearsal(design_sc):
+    result = design_sc.validate_design(0.15, sample_kwargs=SAMPLE_KWARGS)
+
+    assert result.null_rehearsal is not None
+    assert result.null_rehearsal.injected_effect == 0
+    assert result.null_rehearsal.injected_truth == 0
+    assert result.null_rehearsal.null_rehearsal is None
+    assert list(result.summary()["injected_effect"]) == [0.15, 0.0]
+    assert "not a calibration" in result.to_check_result().text
+    plt.close("all")
+
+
+def test_design_methods_reject_up_down_geolift():
+    frame = _tiny_panel().rename(columns={"y": "up", "a": "down", "b": "control"})
+    panel = frame[["up", "down", "control"]]
+    geo = cp.UpDownGeoLift(
+        panel,
+        panel.index[8],
+        {"up": ["up"], "down": ["down"], "control": ["control"]},
+        model=cp.pymc_models.WeightedSumFitter(sample_kwargs=SAMPLE_KWARGS),
+    )
+
+    with pytest.raises(TypeError, match="SyntheticControl-only"):
+        cp.UpDownGeoLift.from_pre_period(panel, ["control"], ["up"])
+    with pytest.raises(TypeError, match="SyntheticControl-only"):
+        geo.donor_pool_quality()
+    with pytest.raises(TypeError, match="SyntheticControl-only"):
+        geo.validate_design(0.1)
+    with pytest.raises(TypeError, match="SyntheticControl-only"):
+        geo.power_analysis([0.1], n_simulations=1)
+
+
+def test_noisy_pre_period_is_not_fitted(design_sc):
+    noisy = design_sc._build_noisy_experiment(
+        design_sc.datapre,
+        1.0,
+        np.random.default_rng(0),
+        SAMPLE_KWARGS,
+    )
+
+    assert isinstance(noisy, cp.SyntheticControl)
+    assert type(noisy) is cp.SyntheticControl
+    assert noisy.model.idata is None
+    assert len(noisy.datapost) == 0

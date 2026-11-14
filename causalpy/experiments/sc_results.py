@@ -41,6 +41,13 @@ class DressRehearsalResult:
 
     Produced by :meth:`SyntheticControl.validate_design`.
 
+    ``null_rehearsal`` is a second fit of the same holdout with the injected
+    effect set to zero. It is present when the caller asked for that
+    comparison and the planted effect was not already zero. Coverage of the
+    planted effect is not a calibration: an imperfect pre-period fit can
+    shift the recovered impact, including at a true effect of zero
+    (Ferman and Pinto, 2021; see CausalPy issue 913).
+
     Attributes
     ----------
     injected_effect : float
@@ -61,6 +68,8 @@ class DressRehearsalResult:
     injected_truth : float
         Absolute cumulative effect implied by the injection, in outcome
         units. This is the quantity the HDI is compared against.
+    null_rehearsal : DressRehearsalResult or None
+        Zero-effect rehearsal on the same holdout, when one was run.
     """
 
     injected_effect: float
@@ -70,22 +79,39 @@ class DressRehearsalResult:
     hdi_covers_truth: bool
     posterior_samples: xr.DataArray
     injected_truth: float
+    null_rehearsal: DressRehearsalResult | None = None
 
     def summary(self) -> pd.DataFrame:
-        """Return a one-row summary of the dress rehearsal."""
+        """Return the planted rehearsal, and the zero-effect row when present."""
+        rows = [self._summary_row()]
+        if self.null_rehearsal is not None:
+            rows.append(self.null_rehearsal._summary_row())
+        return pd.DataFrame(rows)
+
+    def _summary_row(self) -> dict[str, float | str | bool]:
+        """Return one rehearsal as a summary-table row."""
         lower, upper = self.recovered_effect_hdi
-        return pd.DataFrame(
-            [
-                {
-                    "injected_effect": self.injected_effect,
-                    "effect_type": self.effect_type,
-                    "injected_truth": self.injected_truth,
-                    "recovered_effect_mean": self.recovered_effect_mean,
-                    "hdi_lower": lower,
-                    "hdi_upper": upper,
-                    "hdi_covers_truth": self.hdi_covers_truth,
-                }
-            ]
+        return {
+            "injected_effect": self.injected_effect,
+            "effect_type": self.effect_type,
+            "injected_truth": self.injected_truth,
+            "recovered_effect_mean": self.recovered_effect_mean,
+            "hdi_lower": lower,
+            "hdi_upper": upper,
+            "hdi_covers_truth": self.hdi_covers_truth,
+        }
+
+    def _null_rehearsal_sentence(self) -> str:
+        """Describe the attached zero-effect rehearsal, or return an empty string."""
+        null = self.null_rehearsal
+        if null is None:
+            return ""
+        covers = "covers" if null.hdi_covers_truth else "misses"
+        lower, upper = null.recovered_effect_hdi
+        return (
+            f" A zero-effect rehearsal on the same holdout recovered mean "
+            f"{null.recovered_effect_mean:.3f} "
+            f"(HDI [{lower:.3f}, {upper:.3f}]) and {covers} zero."
         )
 
     def plot(self) -> tuple[plt.Figure, plt.Axes]:
@@ -132,7 +158,10 @@ class DressRehearsalResult:
                 f"{self.injected_effect}: recovered mean "
                 f"{self.recovered_effect_mean:.3f} "
                 f"(HDI [{lower:.3f}, {upper:.3f}]). "
-                f"HDI {covers} the injected truth ({self.injected_truth:.3f})."
+                f"HDI {covers} the injected truth ({self.injected_truth:.3f}). "
+                "Coverage of an injected effect is not a calibration: an "
+                "imperfect pre-period fit can shift the recovered impact, "
+                "including at a true effect of zero." + self._null_rehearsal_sentence()
             ),
             figures=[self.plot()[0]],
             metadata={"dress_rehearsal_result": self},
@@ -144,8 +173,10 @@ class PowerCurveResult:
     """Result of a simulation-based power analysis.
 
     Produced by :meth:`SyntheticControl.power_analysis`. The curve is a
-    heuristic under an iid Gaussian residual model, not a sampling
-    distribution of the treatment effect.
+    provisional heuristic under an iid Gaussian residual model, not a
+    sampling distribution of the treatment effect and not a sample-size
+    calculator. The detection criterion and the noise model may change.
+    ``hdi_excludes_zero`` counts a biased null as a detection.
 
     Attributes
     ----------
