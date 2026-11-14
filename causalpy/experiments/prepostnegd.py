@@ -412,9 +412,9 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : list[matplotlib.axes.Axes]
+        ax : list of :class:`~matplotlib.axes.Axes`
             The two axes (top: scatter and posterior predictive bands,
             bottom: estimated treatment effect posterior).
         """

@@ -683,9 +683,9 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : matplotlib.axes.Axes
+        ax : :class:`~matplotlib.axes.Axes`
             The axes object containing the coefficient plot.
         """
         return self._render_plot(
@@ -723,7 +723,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[plt.Figure, plt.Axes]
+        tuple of :class:`~matplotlib.figure.Figure` and :class:`~matplotlib.axes.Axes`
             Figure and axes objects
         """
         return self._plot_coefficients_internal(hdi_prob=hdi_prob, group=group)
@@ -877,7 +877,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[plt.Figure, plt.Axes]
+        tuple of :class:`~matplotlib.figure.Figure` and :class:`~matplotlib.axes.Axes`
             Figure and axes objects
 
         Raises
@@ -904,7 +904,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[plt.Figure, plt.Axes]
+        tuple of :class:`~matplotlib.figure.Figure` and :class:`~matplotlib.axes.Axes`
             Figure and axes objects
 
         Raises
@@ -996,7 +996,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[plt.Figure, np.ndarray]
+        tuple of :class:`~matplotlib.figure.Figure` and :class:`~numpy.ndarray`
             Figure and array of axes objects
 
         Raises
@@ -1183,7 +1183,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[plt.Figure, plt.Axes]
+        tuple of :class:`~matplotlib.figure.Figure` and :class:`~matplotlib.axes.Axes`
             Figure and axes objects
         """
         plot_data = self.get_plot_data()

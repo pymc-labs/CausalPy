@@ -456,7 +456,7 @@ class OperatingCharacteristics:
 
         Returns
         -------
-        matplotlib.figure.Figure
+        :class:`~matplotlib.figure.Figure`
             Figure containing the operating-characteristics display.
         """
         effects = self._validate_plot_grid()
