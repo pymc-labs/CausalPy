@@ -18,6 +18,8 @@ This test file focuses on code coverage for edge cases and error handling
 in BayesianBasisExpansionTimeSeries and StateSpaceTimeSeries.
 """
 
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -306,6 +308,39 @@ class TestStateSpaceTimeSeriesCoverage:
         )
         return y_da
 
+    def test_graduated_model_emits_no_future_warning(self):
+        """StateSpaceTimeSeries is production, so it no longer warns.
+
+        Scoped to CausalPy's own warning rather than turning every
+        FutureWarning into an error: a dependency deprecating something
+        upstream is not a failure of this class.
+        """
+        with warnings.catch_warnings(record=True) as records:
+            warnings.simplefilter("always", FutureWarning)
+            cp.pymc_models.StateSpaceTimeSeries(
+                sample_kwargs={"draws": 10, "tune": 10, "progressbar": False}
+            )
+
+        ours = [
+            record
+            for record in records
+            if "StateSpaceTimeSeries" in str(record.message)
+        ]
+        assert ours == []
+
+    def test_basis_expansion_model_stays_experimental(self):
+        """BayesianBasisExpansionTimeSeries keeps its experimental warning.
+
+        The warning fires before any component is built, so this does not need
+        pymc-marketing.
+        """
+        with pytest.warns(FutureWarning, match="is experimental") as records:
+            cp.pymc_models.BayesianBasisExpansionTimeSeries(
+                sample_kwargs={"draws": 10, "tune": 10, "progressbar": False}
+            )
+
+        assert not any("deprecated" in str(record.message) for record in records)
+
     def test_custom_trend_component_wrong_type(self):
         """Test validation error when custom trend component is not a
         statespace component."""
@@ -331,10 +366,16 @@ class TestStateSpaceTimeSeriesCoverage:
             )
 
     def test_custom_statespace_components_accepted(self, sample_data):
-        """Real pymc-extras structural components are valid custom components."""
+        """Real pymc-extras structural components are valid custom components.
+
+        The `level_order` and `seasonal_length` guards cover the default
+        components only, so the out-of-range values here must pass.
+        """
         from pymc_extras.statespace import structural as st
 
         model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=0,
+            seasonal_length=1,
             trend_component=st.LevelTrend(order=1),
             seasonality_component=st.FrequencySeasonality(season_length=7, name="freq"),
             sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
@@ -641,6 +682,195 @@ class TestStateSpaceTimeSeriesCoverage:
             "treated_units",
         )
 
+    @pytest.mark.correctness
+    def test_missing_y_values_handled(self, sample_data):
+        """The Kalman filter handles NaN in y; predictions stay finite.
+
+        Correctness-marked so it runs against real NUTS. The session-wide
+        `pm.sample` mock is never instantiated in that lane, and asserting
+        that a posterior is finite is meaningless against mocked prior draws.
+        """
+        y_da = sample_data.copy()
+        y_da[5, 0] = np.nan
+        y_da[12, 0] = np.nan
+
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+            },
+        )
+        idata = model.fit(X=None, y=y_da)
+
+        y_hat = idata.posterior_predictive["y_hat"]
+        assert np.isfinite(y_hat.isel(obs_ind=[5, 12]).values).all()
+
+    def test_short_series(self, sample_data, mock_pymc_sample):
+        """A short series (n=25) fits and predicts in sample.
+
+        Shape only: the suite mocks `pm.sample`, so the posterior carries no
+        information about the fit.
+        """
+        y_da = sample_data.isel(obs_ind=slice(None, 25))
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+            },
+        )
+        model.fit(X=None, y=y_da)
+        pred = model.predict(X=None)
+        assert pred.posterior_predictive["y_hat"].sizes["obs_ind"] == 25
+
+    @pytest.mark.parametrize("level_order", [0, -1, 1.0, 1.5, True])
+    def test_level_order_not_positive_integer_raises(self, level_order):
+        """level_order outside the positive integers is rejected with a clear error.
+
+        Left to pymc-extras, 0 and -1 fail at build time with `IndexError:
+        index -1 is out of bounds` and `negative dimensions are not allowed`;
+        floats such as 1.0 pass a plain lower-bound check and fail with
+        `TypeError: len() of unsized object`.
+        """
+        with pytest.raises(ValueError, match="level_order must be an integer"):
+            cp.pymc_models.StateSpaceTimeSeries(
+                level_order=level_order,
+                sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            )
+
+    @pytest.mark.parametrize("seasonal_length", [1, 0, -1, 7.0, 7.5])
+    def test_seasonal_length_not_integer_above_one_raises(self, seasonal_length):
+        """seasonal_length outside the integers above 1 is rejected with a clear error.
+
+        The message must not offer a seasonality-free model: `build_model`
+        always adds a seasonal component, so there is no such path. Floats
+        are rejected because pymc-extras silently accepts a period like 7.5.
+        """
+        with pytest.raises(
+            ValueError, match="seasonal_length must be an integer"
+        ) as err:
+            cp.pymc_models.StateSpaceTimeSeries(
+                seasonal_length=seasonal_length,
+                sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+            )
+        assert "always carries a seasonal component" in str(err.value)
+
+    def test_numpy_integer_orders_are_cast_to_int(self, sample_data, mock_pymc_sample):
+        """numpy integers are accepted and cast, since pymc-extras rejects them.
+
+        Without the cast, `np.int64(7)` fails inside pymc-extras with
+        `season_length must be a positive number, got 7`.
+        """
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=np.int64(1),
+            seasonal_length=np.int64(7),
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        model.fit(X=None, y=sample_data)
+        assert type(model.level_order) is int
+        assert type(model.seasonal_length) is int
+
+    def test_integer_index_without_datetime_raises(self):
+        """Integer obs_ind without a datetime_index fallback is rejected."""
+        y_int = xr.DataArray(
+            np.random.default_rng(seed=42).normal(size=(30, 1)),
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": np.arange(30), "treated_units": ["unit_0"]},
+        )
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        with pytest.raises(ValueError, match="must contain datetime values"):
+            model.build_model(y=y_int)
+
+    @pytest.mark.parametrize("gap_days, warns", [(4, True), (1, False)])
+    def test_forecast_index_warns_only_on_mismatch(
+        self, sample_data, mock_pymc_sample, gap_days, warns
+    ):
+        """Out-of-sample dates warn only when they break the training frequency.
+
+        The warning is raised in `predict` from the index alone, so mocked
+        sampling is enough to exercise it.
+        """
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={
+                "draws": 10,
+                "tune": 10,
+                "chains": 1,
+                "progressbar": False,
+            },
+        )
+        model.fit(X=None, y=sample_data)
+
+        last = pd.Timestamp(sample_data.coords["obs_ind"].values[-1])
+        dates = pd.date_range(last + pd.Timedelta(days=gap_days), periods=5, freq="D")
+        X = xr.DataArray(
+            np.zeros((5, 0)),
+            dims=["obs_ind", "coeffs"],
+            coords={"obs_ind": dates, "coeffs": []},
+        )
+        with warnings.catch_warnings(record=True) as records:
+            warnings.simplefilter("always")
+            model.predict(X=X, out_of_sample=True)
+
+        matched = [r for r in records if "relabeled onto X's dates" in str(r.message)]
+        assert (len(matched) == 1) == warns
+
+    def test_training_index_frequency_is_recovered(self, sample_data, mock_pymc_sample):
+        """Regular observations keep their frequency on the training index.
+
+        Rebuilding a DatetimeIndex from raw values drops `freq`. pymc-extras
+        infers it again itself, so the forecast still works, but it warns
+        about the missing frequency on every fit. The warning is the
+        regression this test guards.
+        """
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=7,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        with warnings.catch_warnings(record=True) as records:
+            warnings.simplefilter("always")
+            model.build_model(y=sample_data)
+
+        assert not any("No frequency" in str(r.message) for r in records)
+        assert model._train_index.freq == pd.tseries.frequencies.to_offset("D")
+
+    def test_irregular_index_leaves_frequency_unset(self, mock_pymc_sample):
+        """Irregular observations have no frequency to recover.
+
+        The model must still build. Out-of-sample prediction then fails
+        inside pymc-extras, which needs a frequency to lay out the forecast
+        index, so this covers the build path only.
+        """
+        dates = pd.DatetimeIndex(
+            ["2020-01-01", "2020-01-02", "2020-01-04", "2020-01-07", "2020-01-11"]
+        )
+        y_da = xr.DataArray(
+            np.random.default_rng(seed=42).normal(size=(len(dates), 1)),
+            dims=["obs_ind", "treated_units"],
+            coords={"obs_ind": dates, "treated_units": ["unit_0"]},
+        )
+        model = cp.pymc_models.StateSpaceTimeSeries(
+            level_order=1,
+            seasonal_length=2,
+            sample_kwargs={"draws": 10, "tune": 10, "progressbar": False},
+        )
+        model.build_model(y=y_da)
+
+        assert model._train_index.freq is None
+
     def test_default_model_free_rvs(self, sample_data):
         """Lock the default model contract: same five RVs as before the
         priors refactor."""
@@ -679,8 +909,6 @@ class TestStateSpaceTimeSeriesCoverage:
     def test_extract_exog_names(self):
         """Intercept handling: dropped silently when alone, with a warning
         when other covariates remain."""
-        import warnings
-
         model = cp.pymc_models.StateSpaceTimeSeries(
             sample_kwargs={"draws": 10, "tune": 10, "progressbar": False}
         )
@@ -798,23 +1026,23 @@ class TestStateSpaceTimeSeriesCoverage:
             unfit.get_shrinkage_factors()
 
     @pytest.mark.parametrize("vs_hyperparams", [None, {"expected_model_size": 1}])
+    @pytest.mark.parametrize("n_covariates", [4, 8])
     def test_vs_spike_and_slab_structure(
-        self, sample_data, mock_pymc_sample, vs_hyperparams
+        self, sample_data, mock_pymc_sample, vs_hyperparams, n_covariates
     ):
         """Spike-and-slab on covariates: selection variables in the
         posterior and a well-formed inclusion-probability table.
 
         Structure-only by design: the requested mock makes posterior values prior draws.
+        Eight covariates covers the "many covariates" edge case listed in #758 and #982.
         """
         y_da = sample_data
         n = len(y_da)
+        names = [f"x{i + 1}" for i in range(n_covariates)]
         X = xr.DataArray(
-            np.random.default_rng(42).normal(size=(n, 4)),
+            np.random.default_rng(42).normal(size=(n, n_covariates)),
             dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": y_da.coords["obs_ind"],
-                "coeffs": ["x1", "x2", "x3", "x4"],
-            },
+            coords={"obs_ind": y_da.coords["obs_ind"], "coeffs": names},
         )
         model = cp.pymc_models.StateSpaceTimeSeries(
             level_order=1,
@@ -830,17 +1058,21 @@ class TestStateSpaceTimeSeriesCoverage:
         )
         model.fit(X=X, y=y_da)
 
+        assert model._exog_names == names
         assert "beta_exog" in model.idata.posterior
         assert "gamma_beta_exog" in model.idata.posterior
 
         prior = model.vs_prior._prior_instance
-        assert prior.pi_alpha == pytest.approx(1 if vs_hyperparams else 2)
-        assert prior.pi_beta == pytest.approx(3 if vs_hyperparams else 2)
+        # expected_model_size=1 with pi_concentration=4 (default) gives
+        # Beta(4 / p, 4 - 4 / p); without it the prior is Beta(2, 2).
+        pi = 4 / n_covariates
+        assert prior.pi_alpha == pytest.approx(pi if vs_hyperparams else 2)
+        assert prior.pi_beta == pytest.approx(4 - pi if vs_hyperparams else 2)
 
         incl = model.get_inclusion_probabilities()
         assert isinstance(incl, pd.DataFrame)
         assert list(incl.columns) == ["prob", "selected", "gamma_mean"]
-        assert list(incl.index) == ["x1", "x2", "x3", "x4"]
+        assert list(incl.index) == names
 
     def test_vs_horseshoe_structure(self, sample_data, mock_pymc_sample):
         """Horseshoe on covariates: shrinkage factor table is well formed.
@@ -1285,8 +1517,6 @@ class TestTimeSeriesModelCloneIsUnfitted:
 
 def test_statespace_refit_overwrites_ppc_silently(monkeypatch):
     """Refit assigns posterior_predictive explicitly: no raw PyMC warning."""
-    import warnings
-
     import pymc as pm
     import xarray as xr
 

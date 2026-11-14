@@ -109,7 +109,8 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 - `SyntheticDifferenceInDifferencesWeightFitter` — SyntheticDifferenceInDifferences
 - `InstrumentalVariableRegression` — InstrumentalVariable
 - `PropensityScore` — InversePropensityWeighting
-- `BayesianBasisExpansionTimeSeries` / `StateSpaceTimeSeries` — ITS alternatives (experimental). Basis expansion calibrates stock coefficient, observation-noise, trend, and Fourier priors from fitted pre-period inputs; explicit priors and custom components take precedence, and `auto_scale_priors=False` retains the legacy scales.
+- `StateSpaceTimeSeries` — BSTS for ITS: level/trend + seasonality, optional exogenous regressors with variable selection priors
+- `BayesianBasisExpansionTimeSeries` — ITS alternative (experimental). Basis expansion calibrates stock coefficient, observation-noise, trend, and Fourier priors from fitted pre-period inputs; explicit priors and custom components take precedence, and `auto_scale_priors=False` retains the legacy scales.
 
 ## Key Conventions
 

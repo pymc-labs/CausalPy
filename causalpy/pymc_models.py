@@ -2906,9 +2906,11 @@ class StateSpaceTimeSeries(PyMCModel):
     Parameters
     ----------
     level_order : int, optional
-        Order of the local level/trend component. Defaults to 2.
+        Order of the local level/trend component: 1 for a local level, 2 for a
+        local linear trend. Must be at least 1. Defaults to 2.
     seasonal_length : int, optional
-        Seasonal period (e.g., 12 for monthly data with annual seasonality). Defaults to 12.
+        Seasonal period (e.g., 12 for monthly data with annual seasonality). Must
+        be at least 2. Defaults to 12.
     trend_component : optional
         Custom state-space trend component. Must be a pymc-extras structural
         component (e.g. `pymc_extras.statespace.structural.LevelTrend`).
@@ -3024,14 +3026,6 @@ class StateSpaceTimeSeries(PyMCModel):
             prior_sample_kwargs=prior_sample_kwargs,
         )
 
-        # Warn that this is experimental
-        warnings.warn(
-            "StateSpaceTimeSeries is experimental and its API may change in future versions. "
-            "Not recommended for production use.",
-            FutureWarning,
-            stacklevel=2,
-        )
-
         self._custom_trend_component = trend_component
         self._custom_seasonality_component = seasonality_component
         self.level_order = level_order
@@ -3079,8 +3073,9 @@ class StateSpaceTimeSeries(PyMCModel):
 
     def _validate_and_initialize_components(self):
         """
-        Validate custom components only. Optional dependencies are imported lazily
-        when default components are actually needed.
+        Validate custom components and the default component orders. Optional
+        dependencies are imported lazily when default components are actually
+        needed.
         """
         # Validate custom components. The base class is only needed when the
         # user supplies one, so the import stays out of the default path.
@@ -3105,6 +3100,36 @@ class StateSpaceTimeSeries(PyMCModel):
                         "component (e.g. pymc_extras.statespace.structural.LevelTrend), "
                         f"got {type(component).__name__}."
                     )
+
+        # Validate the orders the default components are built with. pymc-extras
+        # wants plain Python ints: floats such as 1.0 fail inside it with
+        # "len() of unsized object" and numpy integers with "season_length must
+        # be a positive number", so reject non-integers and cast the rest.
+        def _is_integer(value: Any) -> bool:
+            return isinstance(value, (int, np.integer)) and not isinstance(value, bool)
+
+        if self._custom_trend_component is None:
+            # LevelTrend needs at least the level state; order=0 fails with an
+            # obscure IndexError inside pymc-extras, and negative orders with
+            # "negative dimensions are not allowed"
+            if not _is_integer(self.level_order) or self.level_order < 1:
+                raise ValueError(
+                    "level_order must be an integer of at least 1 (1 for a local "
+                    f"level, 2 for a local linear trend), got {self.level_order!r}."
+                )
+            self.level_order = int(self.level_order)
+        if self._custom_seasonality_component is None:
+            # FrequencySeasonality needs at least one harmonic; season_length=1
+            # fails inside pymc-extras with "n must be a positive integer, got 0"
+            if not _is_integer(self.seasonal_length) or self.seasonal_length < 2:
+                raise ValueError(
+                    "seasonal_length must be an integer of at least 2, since the "
+                    "default FrequencySeasonality component needs at least one "
+                    f"harmonic, got {self.seasonal_length!r}. The model always "
+                    "carries a seasonal component; pass seasonality_component to "
+                    "swap the default for a different pymc-extras component."
+                )
+            self.seasonal_length = int(self.seasonal_length)
 
         # Initialize components
         self._trend_component = None
@@ -3247,6 +3272,13 @@ class StateSpaceTimeSeries(PyMCModel):
                 "coords must contain 'datetime_index' (pd.DatetimeIndex)."
             )
 
+        # Rebuilding an index from raw values drops its frequency. pymc-extras
+        # infers it again on its own, but warns about the missing frequency
+        # on every fit. Infer it here first, on a fresh index so the caller's
+        # object is left alone; it stays unset when the spacing is irregular.
+        if datetime_index.freq is None:
+            datetime_index = pd.DatetimeIndex(datetime_index, freq="infer")
+
         self._train_index = datetime_index
 
         # Instantiate components and build state-space object
@@ -3268,7 +3300,10 @@ class StateSpaceTimeSeries(PyMCModel):
             )
         # `mode` belongs on the state-space model itself; passing it to
         # `build_statespace_graph` is deprecated in pymc-extras.
-        self.ss_mod = combined.build(mode=self.mode)
+        # verbose=False suppresses the "Model Requirements" table pymc-extras
+        # prints on every build. It tells the reader which priors to declare,
+        # which this class does itself just below.
+        self.ss_mod = combined.build(mode=self.mode, verbose=False)
 
         # Build coordinates for the model
         coordinates = self.ss_mod.coords.copy()
@@ -3695,6 +3730,20 @@ class StateSpaceTimeSeries(PyMCModel):
             if "time" in forecast_copy.dims:
                 forecast_copy = forecast_copy.rename({"time": "obs_ind"})
 
+            # The forecast generates its own future index from the training
+            # frequency; results are then relabeled with X's dates. Warn when
+            # the two disagree, since values map positionally.
+            forecast_idx = pd.DatetimeIndex(forecast_copy.coords["obs_ind"].values)
+            if not forecast_idx.equals(idx):
+                warnings.warn(
+                    "The dates in X do not match the forecast index generated "
+                    "from the training data frequency. Forecast values are "
+                    "relabeled onto X's dates by position; check that the "
+                    "post-period dates continue the training frequency.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
             # Extract the forecasted observed data and add treated_units dimension
             y_hat = forecast_copy["forecast_observed"].isel(observed_state=0)
             y_hat_with_units = y_hat.expand_dims(
@@ -3723,6 +3772,11 @@ class StateSpaceTimeSeries(PyMCModel):
     ) -> pd.Series:
         """
         Score the Bayesian R^2 given inputs X and outputs y.
+
+        In-sample predictions come from the Kalman smoother, which conditions
+        on the observed y, so this R^2 reads higher than for models that
+        predict from covariates alone. Compare scores only within
+        state-space models.
 
         Parameters
         ----------
