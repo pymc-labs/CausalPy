@@ -194,7 +194,9 @@ class ScheduleRequest:
     ----------
     selection_origins : tuple
         Origins used to score bias and, when defensible, to feed the
-        learned-null model. Required and unique.
+        learned-null model. Required. ``validate_schedule`` treats two caller
+        labels that name one history position as one origin and rejects the
+        second use.
     horizons : tuple of int
         Positive unique Python ints. Each is fitted separately. Prefix reuse
         is not available.
@@ -203,8 +205,11 @@ class ScheduleRequest:
         not fitted unless replay is asked to fit them. Fitting an audit
         origin means it is no longer untouched.
     exclusions : tuple
-        Labels removed from training and holdout. A holdout exclusion makes
-        that window incomplete. Unknown labels are a contract error.
+        Labels removed from training and holdout. ``validate_schedule``
+        resolves each label to the index's own label before membership, so a
+        date string that names a timestamp is excluded rather than left in
+        the fitted window. A holdout exclusion makes that window incomplete.
+        Unknown labels are a contract error.
     cadence : int, str, pandas offset, or None
         ``None`` takes the next ``horizon`` index labels and does not check
         calendar gaps. An int cadence expects ``origin + i * cadence`` on a
@@ -510,6 +515,47 @@ def _endpoint(index: pd.Index, position: int) -> Any:
     return index[position]
 
 
+def _stored_labels(index: pd.Index, labels: tuple[Any, ...]) -> pd.Index:
+    """Return the index's own labels for aliases ``get_indexer`` accepts."""
+    if not labels:
+        return index[:0]
+    positions: list[int] = []
+    for label in labels:
+        position = _label_position(index, label)
+        if position is None:
+            raise ValueError(f"label {label!r} is not in the history index.")
+        positions.append(position)
+    return index[list(dict.fromkeys(positions))]
+
+
+def _resolved_origins(
+    index: pd.Index, request: ScheduleRequest
+) -> tuple[tuple[Any, ...], tuple[Any, ...]]:
+    """Resolve origin aliases to stored labels and reject one label used twice."""
+
+    def resolve(labels: tuple[Any, ...], name: str) -> tuple[Any, ...]:
+        resolved: list[Any] = []
+        seen: dict[int, Any] = {}
+        for label in labels:
+            position = _label_position(index, label)
+            if position is None:
+                resolved.append(label)
+                continue
+            previous = seen.get(position)
+            if previous is not None:
+                raise ValueError(
+                    f"{name} {label!r} is the same history label as {previous!r}."
+                )
+            seen[position] = label
+            resolved.append(index[position])
+        return tuple(resolved)
+
+    return (
+        resolve(request.selection_origins, "selection_origins"),
+        resolve(request.audit_origins, "audit_origins"),
+    )
+
+
 def validate_schedule(
     history: pd.DataFrame,
     treated_unit: str,
@@ -548,8 +594,9 @@ def validate_schedule(
     ValueError
         If the request mixes selection and audit, names an unknown exclusion,
         asks for a cadence the index cannot support, puts an audit origin
-        before a selection origin, or lets a selection analysis index
-        intersect an audit holdout.
+        before a selection origin, lets a selection analysis index intersect
+        an audit holdout, or names two origins that resolve to one history
+        label.
     DataException
         If the history index is missing, duplicated, or not sorted.
     """
@@ -562,11 +609,13 @@ def validate_schedule(
     _require_known_exclusions(frame.index, request.exclusions)
     _require_cadence_matches_index(frame.index, request.cadence)
     _require_audit_after_selection(frame.index, request)
+    exclusions = _stored_labels(frame.index, request.exclusions)
+    selection_origins, audit_origins = _resolved_origins(frame.index, request)
 
     windows: list[WindowPlan] = []
     roles: tuple[tuple[WindowRole, tuple[Any, ...]], ...] = (
-        ("selection", request.selection_origins),
-        ("audit", request.audit_origins),
+        ("selection", selection_origins),
+        ("audit", audit_origins),
     )
     for role, origins in roles:
         for origin in origins:
@@ -580,6 +629,7 @@ def validate_schedule(
                         origin=origin,
                         horizon=horizon,
                         request=request,
+                        exclusions=exclusions,
                     )
                 )
     planned = tuple(windows)
@@ -731,6 +781,7 @@ def _plan_window(
     origin: Any,
     horizon: int,
     request: ScheduleRequest,
+    exclusions: pd.Index,
 ) -> WindowPlan:
     """Plan one window, retaining every failure instead of dropping it."""
     index = frame.index
@@ -757,10 +808,10 @@ def _plan_window(
         index, position, stored_origin, horizon, request.cadence
     )
     pre = index[:position]
-    excluded_training = pre[pre.isin(request.exclusions)]
-    training = pre[~pre.isin(request.exclusions)]
-    excluded_holdout = holdout[holdout.isin(request.exclusions)]
-    analysis_holdout = holdout[~holdout.isin(request.exclusions)]
+    excluded_training = pre[pre.isin(exclusions)]
+    training = pre[~pre.isin(exclusions)]
+    excluded_holdout = holdout[holdout.isin(exclusions)]
+    analysis_holdout = holdout[~holdout.isin(exclusions)]
     analysis = training.append(analysis_holdout)
     forbidden = index[~index.isin(analysis)]
     reasons: list[str] = []

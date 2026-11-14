@@ -215,6 +215,62 @@ def test_datetime_cadence_records_gaps_instead_of_imputing():
     assert index[4] not in gapped_window.analysis_index
 
 
+def test_caller_label_aliases_resolve_to_stored_index_labels():
+    index = pd.date_range("2020-01-05", periods=8, freq="W")
+    frame = pd.DataFrame(
+        {name: np.arange(8, dtype=float) for name in ("y", *DONORS)},
+        index=index,
+    )
+    excluded = index[4].strftime("%Y-%m-%d")
+    schedule = validate_schedule(
+        frame,
+        "y",
+        DONORS,
+        ScheduleRequest(
+            selection_origins=(index[3].strftime("%Y-%m-%d"),),
+            horizons=(2,),
+            cadence="W",
+            exclusions=(excluded,),
+        ),
+    )
+    window = schedule.windows[0]
+    assert window.origin == index[3]
+    assert window.status == "incomplete"
+    assert list(window.excluded_holdout) == [index[4]]
+    assert index[4] not in window.analysis_index
+    with pytest.raises(ValueError, match="same history label"):
+        validate_schedule(
+            frame,
+            "y",
+            DONORS,
+            ScheduleRequest(
+                selection_origins=(index[3], index[3].strftime("%Y-%m-%d")),
+                horizons=(2,),
+                cadence="W",
+            ),
+        )
+    with pytest.raises(ValueError, match="strictly after"):
+        validate_schedule(
+            frame,
+            "y",
+            DONORS,
+            ScheduleRequest(
+                selection_origins=(index[1],),
+                audit_origins=(index[1].strftime("%Y-%m-%d"),),
+                horizons=(2,),
+                cadence="W",
+            ),
+        )
+    integer = _integer_frame()
+    with pytest.raises(ValueError, match="same history label"):
+        validate_schedule(
+            integer,
+            "y",
+            DONORS,
+            ScheduleRequest(selection_origins=(4, np.int64(4)), horizons=(2,)),
+        )
+
+
 def test_unsorted_or_duplicate_index_is_rejected():
     frame = _integer_frame()
     duplicated = frame.copy()
