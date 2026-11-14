@@ -1916,7 +1916,7 @@ class PlaceboInTime:
 
         Returns
         -------
-        matplotlib.figure.Figure
+        :class:`~matplotlib.figure.Figure`
             Shared-axis comparison with a zero reference and failed-fold annotations.
         """
         if not results:
@@ -2028,7 +2028,7 @@ class PlaceboInTime:
 
         Returns
         -------
-        matplotlib.figure.Figure
+        :class:`~matplotlib.figure.Figure`
             The drawn composition.  When the run produced no null model, a
             single annotated panel is returned instead and a warning is
             emitted.

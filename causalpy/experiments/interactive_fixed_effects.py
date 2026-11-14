@@ -365,7 +365,7 @@ class InteractiveFixedEffectsSyntheticControl:
 
         Returns
         -------
-        tuple of matplotlib.figure.Figure and numpy.ndarray
+        tuple of :class:`~matplotlib.figure.Figure` and :class:`~numpy.ndarray`
             Three panels: untreated trajectory, point impact, cumulative impact.
         """
         if self.result is None:

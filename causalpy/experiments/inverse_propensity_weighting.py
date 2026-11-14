@@ -655,7 +655,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[plt.Figure, list[plt.Axes]]
+        tuple of :class:`~matplotlib.figure.Figure` and list of :class:`~matplotlib.axes.Axes`
             The matplotlib Figure and a list of three Axes objects.
         """
         # IPW estimand is computed per-draw from propensity draws;
@@ -869,7 +869,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[plt.Figure, list[plt.Axes]]
+        tuple of :class:`~matplotlib.figure.Figure` and list of :class:`~matplotlib.axes.Axes`
             The matplotlib Figure and a list of two Axes objects (raw ECDF on
             the left, weighted ECDF on the right).
         """
