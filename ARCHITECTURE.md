@@ -84,6 +84,8 @@ Draw-derived state lives in per-experiment bundles (`causalpy/experiments/_resul
 
 Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls the subclass's backend-agnostic `_plot(group=..., ...)`. Uncertainty rendering keys on data properties of the canonical prediction container (`has_posterior_draws()`), not on backend identity. `plot(group="prior")` renders a reduced panel set (counterfactual vs observed only). `effect_summary(group=...)` returns `EffectSummary(table, text)` using helpers from `causalpy.reporting`; prior-group prose reads as a plausibility check, not a causal claim.
 
+Hierarchical DiD follows the same lazy phases through a specialized `build()` for X, Z and group indices. Its internal Formulaic parser remains separate from the ordinary Patsy path. `HierarchicalDifferenceInDifferencesResult` stores the population interaction coefficient, group deviations, fitted counterfactual and design-averaged ICC; it does not introduce new prediction capabilities.
+
 ## Experiment Inventory
 
 | Class | Method | Backends | Notable quirk |
@@ -91,6 +93,7 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 | `InterruptedTimeSeries` | ITS | OLS + Bayes | 3-period design via `treatment_end_time` |
 | `PiecewiseITS` | Segmented ITS | OLS + Bayes | Fits full series; `step()`/`ramp()` transforms |
 | `DifferenceInDifferences` | DiD | OLS + Bayes | Effect from interaction coefficient |
+| `HierarchicalDifferenceInDifferences` | Hierarchical DiD | Bayes only | Random effects via mixed-model formula |
 | `StaggeredDifferenceInDifferences` | Staggered DiD | OLS + Bayes | Fits untreated obs only |
 | `SyntheticControl` | SC | OLS + Bayes | Multi-unit; control/treated unit lists, no formula |
 | `UpDownGeoLift` | Three-arm geo lift | Bayes only | Extends synthetic control with up/down/control assignment and joint draw summaries |
@@ -105,6 +108,7 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 ## PyMC Models
 
 - `LinearRegression` — ITS, DiD, RD, RKD, PrePostNEGD, PiecewiseITS, StaggeredDiD, PanelRegression
+- `HierarchicalLinearRegression` — Hierarchical DiD; static complete priors, independent random coefficients, specialized X/Z/group build inputs. New-data prediction and scoring are deferred and raise explicitly.
 - `WeightedSumFitter` / `SoftmaxWeightedSumFitter` — SyntheticControl
 - `SyntheticDifferenceInDifferencesWeightFitter` — SyntheticDifferenceInDifferences
 - `InstrumentalVariableRegression` — InstrumentalVariable

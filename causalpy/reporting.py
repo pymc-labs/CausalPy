@@ -37,6 +37,7 @@ from causalpy.experiments._results import (
     CausalResult,
     CoefficientResult,
     DiscontinuityResult,
+    HierarchicalDifferenceInDifferencesResult,
     KinkResult,
     StaggeredDifferenceInDifferencesResult,
 )
@@ -454,7 +455,9 @@ def _detect_experiment_type(result):
         return "rkink"  # Regression Kink
     elif isinstance(bundle, StaggeredDifferenceInDifferencesResult):
         return "staggered_did"  # Staggered Difference-in-Differences
-    elif isinstance(bundle, CoefficientResult):
+    elif isinstance(
+        bundle, (CoefficientResult, HierarchicalDifferenceInDifferencesResult)
+    ):
         return "did"  # Difference-in-Differences or ANCOVA/PrePostNEGD
     elif isinstance(bundle, CausalResult):
         return "its_or_sc"  # ITS or Synthetic Control
