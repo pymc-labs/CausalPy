@@ -21,8 +21,9 @@ import causalpy as cp
 
 
 @pytest.mark.integration
-def test_its_with_bsts_model():
+def test_its_with_bsts_model(mock_pymc_sample):
     """InterruptedTimeSeries integration using BayesianBasisExpansionTimeSeries."""
+    # Not a recovery: mock_pymc_sample keeps this fit off the PR NUTS path.
     pytest.importorskip(
         "pymc_marketing", reason="pymc-marketing optional for default BSTS components"
     )
@@ -80,11 +81,12 @@ def test_its_with_bsts_model():
 
 
 @pytest.mark.integration
-def test_its_with_state_space_model():
+def test_its_with_state_space_model(mock_pymc_sample):
     """InterruptedTimeSeries integration using StateSpaceTimeSeries.
 
     Skips when pymc-extras is not installed.
     """
+    # Not a recovery: mock_pymc_sample keeps this fit off the PR NUTS path.
     # Skip if pymc-extras is not available
     try:
         from pymc_extras.statespace import structural  # noqa: F401
@@ -147,8 +149,9 @@ def test_its_with_state_space_model():
 
 
 @pytest.mark.integration
-def test_state_space_predict_and_score():
+def test_state_space_predict_and_score(mock_pymc_sample):
     """Test StateSpaceTimeSeries predict and score methods directly."""
+    # Not a recovery: mock_pymc_sample keeps this fit off the PR NUTS path.
     # Skip if pymc-extras is not available
     try:
         from pymc_extras.statespace import structural  # noqa: F401
@@ -294,6 +297,7 @@ def test_its_with_state_space_covariates(mock_pymc_sample):
 
 
 @pytest.mark.integration
+@pytest.mark.nightly
 def test_its_with_state_space_variable_selection(mock_pymc_sample):
     """ITS + StateSpaceTimeSeries with spike-and-slab covariate selection.
 
