@@ -31,6 +31,7 @@ from causalpy.checks.operating_characteristics import (
     operating_characteristics,
     operating_characteristics_from_calibration,
 )
+from causalpy.custom_exceptions import DataException
 from causalpy.design import (
     DecisionRule,
     replay_history,
@@ -128,7 +129,7 @@ def test_schedule_geometry_keeps_failures_and_forbids_outside_rows():
         "y",
         DONORS,
         _request(
-            4, 8, horizons=(2, 3), cadence=2, exclusions=(1, 6), audit_origins=(10,)
+            4, 8, horizons=(2, 3), cadence=2, exclusions=(1, 6), audit_origins=(11,)
         ),
     )
     pd.testing.assert_frame_equal(frame, original)
@@ -212,6 +213,106 @@ def test_datetime_cadence_records_gaps_instead_of_imputing():
     assert gapped_window.status == "incomplete"
     assert "missing label" in (gapped_window.reason or "")
     assert index[4] not in gapped_window.analysis_index
+
+
+def test_unsorted_or_duplicate_index_is_rejected():
+    frame = _integer_frame()
+    duplicated = frame.copy()
+    duplicated.index = pd.Index([0, 1, 2, 2, 3, 4, 5, 6, 7, 8, 9, 10], name="time")
+    with pytest.raises(DataException, match="duplicate"):
+        validate_schedule(duplicated, "y", DONORS, _request(4))
+    unsorted = frame.copy()
+    unsorted.index = pd.Index([0, 1, 2, 4, 3, 5, 6, 7, 8, 9, 10, 11], name="time")
+    with pytest.raises(DataException, match="not sorted"):
+        validate_schedule(unsorted, "y", DONORS, _request(4, 6))
+    schedule = validate_schedule(frame, "y", DONORS, _request(4))
+    with pytest.raises(DataException, match="not sorted"):
+        replay_history(
+            unsorted,
+            "y",
+            DONORS,
+            schedule,
+            RULE,
+            sample_kwargs=LIGHT,
+        )
+
+
+def test_selection_horizon_that_reaches_an_audit_holdout_is_rejected():
+    frame = _integer_frame(16)
+    with pytest.raises(ValueError, match="audit holdout"):
+        validate_schedule(
+            frame,
+            "y",
+            DONORS,
+            _request(4, horizons=(8,), cadence=1, audit_origins=(8,)),
+        )
+    separated = validate_schedule(
+        frame,
+        "y",
+        DONORS,
+        _request(4, horizons=(2,), cadence=1, audit_origins=(8,)),
+    )
+    assert separated.selection_audit_separated is True
+    assert separated.windows[1].role == "audit"
+    assert set(separated.windows[0].analysis_index).isdisjoint(
+        separated.windows[1].holdout_index
+    )
+
+
+def test_nonfinite_replay_holdout_is_not_scored():
+    frame = _integer_frame(8)
+    schedule = validate_schedule(frame, "y", DONORS, _request(4))
+    assert schedule.windows[0].status == "usable"
+    replay_frame = frame.copy()
+    replay_frame.loc[5, "y"] = np.nan
+    replay = replay_history(
+        replay_frame,
+        "y",
+        DONORS,
+        schedule,
+        RULE,
+        sample_kwargs=LIGHT,
+    )
+    window = replay.windows[0]
+    assert window.status == "not-run"
+    assert window.n_inference_fits == 0
+    assert "non-finite" in (window.reason or "")
+    assert window.bias_cumulative is None
+    assert "not imputed" in replay.recommendation()
+
+
+def test_boundary_mismatch_does_not_drop_later_windows(monkeypatch):
+    frame = _integer_frame()
+    schedule = validate_schedule(frame, "y", DONORS, _request(4, 6))
+    fitted: list[object] = []
+
+    def check(experiment, window):
+        if window.origin == 4:
+            raise RuntimeError("training index does not match the planned window")
+
+    def fit(self):
+        fitted.append(self.treatment_time)
+        raise RuntimeError("sentinel fit")
+
+    monkeypatch.setattr(
+        "causalpy.historical_validation._require_window_boundaries",
+        check,
+    )
+    monkeypatch.setattr(SyntheticControl, "fit", fit)
+    replay = replay_history(
+        frame,
+        "y",
+        DONORS,
+        schedule,
+        RULE,
+        model=_wide_template(),
+        random_seed=1,
+    )
+    assert replay.windows[0].status == "not-run"
+    assert "planned window" in (replay.windows[0].reason or "")
+    assert replay.windows[0].n_inference_fits == 0
+    assert replay.windows[1].status == "fit-failed"
+    assert fitted == [6]
 
 
 def test_nonfinite_training_is_rejected_without_imputation():

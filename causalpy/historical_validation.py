@@ -51,6 +51,7 @@ from causalpy.checks.placebo_in_time import (
     _NullModelUnidentifiedError,
 )
 from causalpy.constants import HDI_PROB
+from causalpy.custom_exceptions import DataException
 from causalpy.experiments.synthetic_control import SyntheticControl
 from causalpy.input_data import to_pandas_with_time_index
 from causalpy.pymc_models import WeightedSumFitter
@@ -422,9 +423,11 @@ class HistoricalSchedule:
     audit_reserved : bool
         True when at least one audit origin was requested.
     selection_audit_separated : bool
-        True when every requested origin is present and every audit origin
-        sits strictly after every selection origin. False when an origin is
-        missing, so the untouched-audit claim cannot be verified.
+        True when every requested origin is present, every audit origin sits
+        strictly after every selection origin, and no selection analysis index
+        intersects an audit holdout. False when an origin is missing, so the
+        untouched-audit claim cannot be verified. A holdout intersection is a
+        contract error and does not produce a schedule.
     assumptions : tuple of str
         The handoff assumptions. The same text is on
         :data:`HISTORICAL_REPLAY_ASSUMPTIONS`.
@@ -544,8 +547,9 @@ def validate_schedule(
         If a duration, cadence, or unit argument has an unsupported type.
     ValueError
         If the request mixes selection and audit, names an unknown exclusion,
-        or asks for a cadence the index cannot support. An audit origin that
-        is not strictly after every selection origin is also a contract error.
+        asks for a cadence the index cannot support, puts an audit origin
+        before a selection origin, or lets a selection analysis index
+        intersect an audit holdout.
     DataException
         If the history index is missing, duplicated, or not sorted.
     """
@@ -586,6 +590,13 @@ def validate_schedule(
     # An origin can produce several horizons. Separation fails if any requested
     # origin is absent, which shows up as a missing window.
     missing_origin = any(window.status == "missing" for window in planned)
+    touched = _selection_audit_holdout_overlap(planned)
+    if touched:
+        raise ValueError(
+            "selection analysis intersects an audit holdout at "
+            f"{list(touched)!r}. A later audit is not untouched when its "
+            "holdout is inside a selection scoring window."
+        )
     return HistoricalSchedule(
         request=request,
         treated_unit=treated,
@@ -601,9 +612,41 @@ def validate_schedule(
     )
 
 
+def _selection_audit_holdout_overlap(
+    windows: Sequence[WindowPlan],
+) -> tuple[Any, ...]:
+    """Return selection-analysis labels that fall inside an audit holdout."""
+    pieces = [
+        window.holdout_index
+        for window in windows
+        if window.role == "audit" and len(window.holdout_index)
+    ]
+    if not pieces:
+        return ()
+    holdout = pieces[0]
+    for extra in pieces[1:]:
+        holdout = holdout.union(extra)
+    hits: list[Any] = []
+    for window in windows:
+        if window.role != "selection" or len(window.analysis_index) == 0:
+            continue
+        hits.extend(window.analysis_index.intersection(holdout).tolist())
+    return tuple(hits)
+
+
 def _history_frame(history: pd.DataFrame, time_column: str | None) -> pd.DataFrame:
     """Return an owned, sorted, unique time-indexed frame."""
     frame = to_pandas_with_time_index(history, time_column)
+    if not frame.index.is_unique:
+        raise DataException(
+            "history index has duplicate labels, so it cannot be a time axis. "
+            "Remove the duplicates before validating a schedule."
+        )
+    if not frame.index.is_monotonic_increasing:
+        raise DataException(
+            "history index is not sorted, so window order would not match "
+            "label order. Sort the history before validating a schedule."
+        )
     frame.index = frame.index.copy()
     return frame
 
@@ -1321,8 +1364,33 @@ class HistoricalReplay:
                 "origin is missing."
             )
         else:
+            touched = _selection_audit_holdout_overlap(self.schedule.windows)
+            if touched:
+                parts.append(
+                    "Selection analysis intersects an audit holdout at "
+                    f"{list(touched)!r}. The later audit was not untouched."
+                )
+            else:
+                parts.append(
+                    "Audit windows were planned and were not used as "
+                    "calibration inputs."
+                )
+        audit_positions = {
+            position
+            for position, window in enumerate(self.schedule.windows)
+            if window.role == "audit"
+        }
+        audit_pairs = tuple(
+            pair
+            for pair in self.schedule.overlapping_pairs
+            if pair[0] in audit_positions or pair[1] in audit_positions
+        )
+        if audit_pairs:
             parts.append(
-                "Audit windows were planned and were not used as calibration inputs."
+                "Planned audit windows overlap other analysis windows at "
+                f"schedule pairs {audit_pairs}. That overlap is not in the "
+                "scored-selection pair count, and those windows are not "
+                "independent experiments."
             )
         return " ".join(part for part in parts if part)
 
@@ -1408,11 +1476,10 @@ def replay_history(
     ValueError
         If the history or units do not match the schedule, or if sampling
         settings would silently use the heavy model default.
-    RuntimeError
-        If a constructed experiment's training or holdout index does not match
-        the window plan. That is a contract failure, not a fit-failed row.
     DataException
-        If the history index is missing, duplicated, or not sorted.
+        If the history index is missing, duplicated, or not sorted. A boundary
+        mismatch is recorded on that window as not-run; it does not abort the
+        remaining windows.
     """
     from causalpy.design import DecisionRule as DecisionRuleRuntime
 
@@ -1565,6 +1632,21 @@ def _replay_window(
             ),
             0,
         )
+    bad_labels = _finite_block(
+        frame, window.analysis_index, [treated_unit, *control_units]
+    )
+    if len(bad_labels):
+        return (
+            WindowReplay(
+                plan=window,
+                status="not-run",
+                reason=(
+                    "non-finite outcome on "
+                    f"{list(bad_labels)!r}; missing data is rejected, not imputed."
+                ),
+            ),
+            0,
+        )
     analysis = frame.loc[list(window.analysis_index), [treated_unit, *control_units]]
     cloned = template._clone()
     cloned.sample_kwargs = dict(template.sample_kwargs)
@@ -1577,7 +1659,17 @@ def _replay_window(
         min_donor_correlation=donor_correlation,
         auto_scale_sigma=auto_scale_sigma,
     )
-    _require_window_boundaries(experiment, window)
+    try:
+        _require_window_boundaries(experiment, window)
+    except RuntimeError as exc:
+        return (
+            WindowReplay(
+                plan=window,
+                status="not-run",
+                reason=str(exc),
+            ),
+            0,
+        )
     try:
         experiment.fit()
     except Exception as exc:
@@ -1655,10 +1747,19 @@ def _score_window(
     impact = experiment.result.impact_post.sel(
         treated_units=experiment.treated_units[0]
     )
-    cumulative = impact.sum("obs_ind")
-    average = impact.mean("obs_ind")
+    cumulative = impact.sum("obs_ind", skipna=False)
+    average = impact.mean("obs_ind", skipna=False)
     cumulative_mean = float(cumulative.mean().item())
     average_mean = float(average.mean().item())
+    if not np.isfinite(cumulative_mean) or not np.isfinite(average_mean):
+        return WindowReplay(
+            plan=window,
+            status="fit-failed",
+            reason=(
+                "non-finite impact; a missing period was not dropped from the score."
+            ),
+            n_inference_fits=1,
+        )
     cumulative_sd = float(cumulative.std().item())
     average_sd = float(average.std().item())
     cumulative_lower, cumulative_upper = hdi_bounds(
@@ -1727,6 +1828,14 @@ def _replay_evidence(
             + "; ".join(window.reason or "fit failed" for window in failed)
         )
         return "fit-failed", tuple(reasons), None, None, None, None
+    refused = [window for window in selection if window.status == "not-run"]
+    if refused:
+        reasons.append(
+            "Some selection windows were not scored: "
+            + "; ".join(window.reason or "not run" for window in refused)
+        )
+    if not scored:
+        return "insufficient-history", tuple(reasons), None, None, None, None
     if failed:
         reasons.append(
             "Some selection windows failed and were retained: "
