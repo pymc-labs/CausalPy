@@ -565,11 +565,16 @@ def generate_geolift_data(seed: int | None = None) -> pd.DataFrame:
 def generate_multicell_geolift_data(
     seed: int | None = None,
 ) -> pd.DataFrame:
-    """Generate synthetic data for a geolift example. This will consists of 6 untreated
-    countries. The treated unit `Denmark` is a weighted combination of the untreated
-    units. We additionally specify a treatment effect which takes effect after the
-    `treatment_time`. The timeseries data is observed at weekly resolution and has
-    annual seasonality, with this seasonality being a drawn from a Gaussian Process with
+    """Generate synthetic multi-cell geolift data.
+
+    The returned frame has 12 untreated columns `u1` through `u12` and 4
+    treated columns `t1` through `t4`. There is no `Denmark` column.
+
+    Each treated column is a Dirichlet-weighted combination of the untreated
+    units, plus a treatment effect after 2022-01-01. Observation noise with
+    `scale=0.1` is added to every geo after that weighted sum, so a pre-period
+    fit of a treated column on the untreated columns is not exact. The series
+    are weekly and have annual seasonality drawn from a Gaussian process with
     a periodic kernel.
 
     :param seed:
@@ -728,8 +733,10 @@ def generate_staggered_did_data(
     treatment_effects : dict[int, float], optional
         Dictionary mapping event-time (t - G) to treatment effect.
         Event-time 0 is the first treated period.
-        Default: {0: 1.0, 1: 1.5, 2: 2.0, 3: 2.5} with constant effect
-        of 2.5 for all subsequent periods.
+        Default: {0: 1.0, 1: 1.5, 2: 2.0, 3: 2.5} with a constant effect
+        of 2.5 for all subsequent periods. A missing event-time keeps the
+        effect of the latest mapped event-time at or before it. Event-times
+        before the first mapped key have effect 0.
     unit_fe_scale : float, default=2.0
         Scale of unit fixed effects (drawn from Normal(0, unit_fe_scale)).
     time_fe_scale : float, default=1.0
@@ -816,16 +823,15 @@ def generate_staggered_did_data(
             # Counterfactual outcome (no treatment)
             y0 = unit_fe[i] + time_fe[t]
 
-            # Treatment effect based on event-time
+            # Treatment effect based on event-time. Missing times are filled
+            # forward from the latest mapped key already in the past.
             if is_treated:
                 event_time = int(t - g_i)
-                # Use specified effect or last available effect for later periods
                 if event_time in treatment_effects:
                     tau = treatment_effects[event_time]
                 else:
-                    # Use the effect for the maximum specified event-time
-                    max_event_time = max(treatment_effects.keys())
-                    tau = treatment_effects[max_event_time]
+                    past_keys = [key for key in treatment_effects if key <= event_time]
+                    tau = treatment_effects[max(past_keys)] if past_keys else 0.0
             else:
                 tau = 0.0
 

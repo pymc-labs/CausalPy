@@ -56,6 +56,28 @@ from causalpy.utils import _as_scalar
 from .base import BaseExperiment
 
 
+def _ols_prob_mean_positive(impact: np.ndarray) -> float:
+    """Probability that the mean impact is positive under the OLS sampling model.
+
+    This is the frequentist counterpart of the Bayesian comparison probability
+    ``P(post_mean > 0)``. It uses the same Student-t model as the OLS average
+    effect: the sample mean, a ``ddof=1`` standard error, and ``n - 1`` degrees
+    of freedom. A two-sided p-value is not this probability. ``1 - p`` is near
+    1 when a reversed effect is estimated precisely.
+    """
+    values = np.asarray(impact, dtype=float).ravel()
+    mean = float(np.mean(values))
+    n = values.size
+    if n < 2:
+        return 1.0 if mean > 0.0 else 0.0
+    standard_error = float(np.std(values, ddof=1) / np.sqrt(n))
+    if not np.isfinite(standard_error) or standard_error == 0.0:
+        return 1.0 if mean > 0.0 else 0.0
+    from scipy.stats import t
+
+    return float(t.sf(0.0, df=n - 1, loc=mean, scale=standard_error))
+
+
 class InterruptedTimeSeries(BaseExperiment[CausalResult]):
     """
     The class for interrupted time series analysis.
@@ -461,7 +483,10 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
         else:
             # OLS: Compute statistics for both periods
-            from causalpy.reporting import _compute_statistics_ols
+            from causalpy.reporting import (
+                _compute_statistics_ols,
+                _format_probability_as_percent,
+            )
 
             intervention_stats = _compute_statistics_ols(
                 np.asarray(intervention_impact).ravel(),
@@ -486,12 +511,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 / (intervention_stats["avg"]["mean"] + epsilon)
             ) * 100
 
-            # For OLS, use 1 - p-value as proxy for probability
-            prob_persisted = (
-                1 - post_stats["avg"]["p_value"]
-                if "p_value" in post_stats["avg"]
-                else None
-            )
+            # Same definition as the Bayesian branch: P(post-period mean > 0).
+            prob_persisted = _ols_prob_mean_positive(post_intervention_impact)
 
             # Build simple table
             table_data = {
@@ -518,22 +539,22 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             )
 
             # Generate simple prose
-            ci_pct = int((1 - alpha) * 100)
+            ci_coverage = _format_probability_as_percent(1 - alpha)
             if prob_persisted is not None:
                 text = (
                     f"Effect persistence: The post-intervention effect "
-                    f"({post_stats['avg']['mean']:.1f}, {ci_pct}% CI [{post_stats['avg']['ci_lower']:.1f}, {post_stats['avg']['ci_upper']:.1f}]) "
+                    f"({post_stats['avg']['mean']:.1f}, {ci_coverage} CI [{post_stats['avg']['ci_lower']:.1f}, {post_stats['avg']['ci_upper']:.1f}]) "
                     f"was {persistence_ratio_pct:.1f}% of the intervention effect "
-                    f"({intervention_stats['avg']['mean']:.1f}, {ci_pct}% CI [{intervention_stats['avg']['ci_lower']:.1f}, {intervention_stats['avg']['ci_upper']:.1f}]), "
+                    f"({intervention_stats['avg']['mean']:.1f}, {ci_coverage} CI [{intervention_stats['avg']['ci_lower']:.1f}, {intervention_stats['avg']['ci_upper']:.1f}]), "
                     f"with a probability of {prob_persisted:.2f} that some effect persisted "
                     f"beyond the intervention period."
                 )
             else:
                 text = (
                     f"Effect persistence: The post-intervention effect "
-                    f"({post_stats['avg']['mean']:.1f}, {ci_pct}% CI [{post_stats['avg']['ci_lower']:.1f}, {post_stats['avg']['ci_upper']:.1f}]) "
+                    f"({post_stats['avg']['mean']:.1f}, {ci_coverage} CI [{post_stats['avg']['ci_lower']:.1f}, {post_stats['avg']['ci_upper']:.1f}]) "
                     f"was {persistence_ratio_pct:.1f}% of the intervention effect "
-                    f"({intervention_stats['avg']['mean']:.1f}, {ci_pct}% CI [{intervention_stats['avg']['ci_lower']:.1f}, {intervention_stats['avg']['ci_upper']:.1f}])."
+                    f"({intervention_stats['avg']['mean']:.1f}, {ci_coverage} CI [{intervention_stats['avg']['ci_lower']:.1f}, {intervention_stats['avg']['ci_upper']:.1f}])."
                 )
 
         return EffectSummary(table=table, text=_apply_prior_grouping(text, group))
@@ -1416,6 +1437,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         )
 
         # Handle period parameter for three-period designs
+        post_coords = None
         if period is not None:
             # Validate period parameter
             valid_periods = ["intervention", "post", "comparison"]
@@ -1454,7 +1476,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 summary.text = note_prediction_summary(summary.text, response_type)
                 return summary
 
-            # For "intervention" or "post" periods, use _extract_window with tuple windows
+            # Intervention uses a label tuple. Post uses the period-split mask.
             if period == "intervention":
                 # Intervention period: treatment_time <= index < treatment_end_time
                 intervention_indices = self.datapost.index[
@@ -1464,8 +1486,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 window = (self.treatment_time, intervention_indices.max())
                 prefix = "During intervention"
             elif period == "post":
-                # Post-intervention period: index >= treatment_end_time (inclusive)
-                window = (self.treatment_end_time, self.datapost.index.max())
+                # Same inclusive bound as the period split. Do not pass
+                # treatment_end_time into _extract_window.
+                post_coords = self.datapost.index[
+                    self.datapost.index >= self.treatment_end_time
+                ]
                 prefix = "Post-intervention"
 
         # Resolve the group's bundle once; helpers consume containers.
@@ -1478,12 +1503,18 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             log_response_type_once("summary")
 
         # Extract windowed impact data
-        windowed_impact, window_coords = _extract_window(
-            bundle.impact_post,
-            self.datapost.index,
-            window,
-            treated_unit=treated_unit,
-        )
+        if post_coords is not None:
+            if len(post_coords) == 0:
+                raise ValueError("Window contains no time points")
+            windowed_impact = bundle.impact_post.sel(obs_ind=post_coords)
+            window_coords = post_coords
+        else:
+            windowed_impact, window_coords = _extract_window(
+                bundle.impact_post,
+                self.datapost.index,
+                window,
+                treated_unit=treated_unit,
+            )
 
         # Extract counterfactual for relative effects
         counterfactual = _extract_counterfactual(

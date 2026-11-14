@@ -11,7 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Contract for the cross-model Bayesian synthetic-control note and notebook."""
+"""Contract for the Bayesian synthetic-control comparison notebook."""
 
 from pathlib import Path
 
@@ -23,19 +23,20 @@ from causalpy.experiments.interactive_fixed_effects import (
 )
 
 _REPO = Path(__file__).resolve().parents[2]
-_NOTE = (
-    _REPO
-    / "docs"
-    / "source"
-    / "knowledgebase"
-    / "comparing-bayesian-synthetic-control.md"
-)
-_NOTEBOOK = (
+_NOTEBOOKS = (
     _REPO
     / "docs"
     / "source"
     / "notebooks"
-    / "comparing-bayesian-synthetic-control-pymc.ipynb"
+    / "comparing-bayesian-synthetic-control-pymc.ipynb",
+    _REPO / "docs" / "source" / "notebooks" / "interactive-fixed-effects-pymc.ipynb",
+    _REPO / "docs" / "source" / "notebooks" / "augmented-synthetic-control-pymc.ipynb",
+)
+_DELETED_PAGE_STEMS = (
+    "interactive-fixed-effects.md",
+    "augmented-synthetic-control.md",
+    "comparing-bayesian-synthetic-control.md",
+    "bayesian_synthetic_control_known_truth_report.md",
 )
 
 # Names the comparison must not read. Absence is not a defect.
@@ -47,26 +48,17 @@ _DROPPED = (
 )
 
 
-def test_methods_note_cites_phase_2_and_does_not_reopen_dropped_quantities():
-    text = _NOTE.read_text(encoding="utf-8")
-    notebook = _NOTEBOOK.read_text(encoding="utf-8")
-    combined = text + notebook
-
-    assert "bayesian_synthetic_control_known_truth_report.md" in text
-    assert "latent_factor" in text
-    assert "donor_shock" in text
+def test_comparison_notebook_does_not_reopen_dropped_quantities():
+    notebook = _NOTEBOOKS[0].read_text(encoding="utf-8")
+    for path in _NOTEBOOKS:
+        text = path.read_text(encoding="utf-8")
+        for stem in _DELETED_PAGE_STEMS:
+            assert stem not in text
+        assert "../knowledgebase/" not in text
     assert "causalpy.tests" not in notebook
     assert "known_truth_panels" not in notebook
-    assert "nominal coverage" in text
-    assert "WeightedSumFitter" in text
-    assert "not a frequentist coverage rate" in text
-    assert "pre-intervention" in text
-
     for name in _DROPPED:
-        assert name not in combined
-    assert "fix to the owning model" not in text
-    assert "shrinkage_state" in text
-    assert "pre-period prediction error" in text
+        assert name not in notebook
 
 
 def test_augmented_model_exposes_only_the_frozen_inference_names():

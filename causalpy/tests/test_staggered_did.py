@@ -20,6 +20,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import pytest
+import xarray as xr
 from matplotlib import pyplot as plt
 from sklearn.linear_model import LinearRegression
 
@@ -728,11 +729,7 @@ def test_staggered_did_effect_summary(mock_pymc_sample):
 
 @pytest.mark.integration
 def test_staggered_did_hdi_prob_stored_and_reported(mock_pymc_sample):
-    """Test that Bayesian results store hdi_prob and report it correctly in prose.
-
-    This verifies the fix for the mismatch between computed interval bounds
-    (94% by default) and reported percentage in effect_summary prose.
-    """
+    """Plot aggregation stores 0.94; effect_summary follows 1 - alpha."""
     df = generate_staggered_did_data(
         n_units=30, n_time_periods=10, treatment_cohorts={5: 10, 8: 10}, seed=42
     )
@@ -746,17 +743,345 @@ def test_staggered_did_hdi_prob_stored_and_reported(mock_pymc_sample):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    # Verify hdi_prob is stored on the result bundle
     assert hasattr(result.result, "hdi_prob"), (
         "Bayesian result should have hdi_prob attr"
     )
     assert result.result.hdi_prob == 0.94, "Default hdi_prob should be 0.94"
 
-    # Verify effect summary prose reports the correct percentage
     summary = result.effect_summary()
-    assert "94% HDI" in summary.text, (
-        f"Effect summary should report '94% HDI' but got: {summary.text}"
+    assert "95% HDI" in summary.text, (
+        f"Default effect_summary should report '95% HDI' but got: {summary.text}"
     )
+    assert "94% HDI" not in summary.text
+    assert result.result.hdi_prob == 0.94
+
+
+def _average_identified_post_bounds(frame: pd.DataFrame) -> tuple[float, float]:
+    post = frame[frame["event_time"] >= 0]
+    if "identified" in post.columns:
+        post = post[post["identified"]]
+    return float(post["att_lower"].mean()), float(post["att_upper"].mean())
+
+
+def _identified_post_event_draws(result, y_pred) -> np.ndarray:
+    """Draw-wise unweighted mean of identified post-treatment event-time ATTs."""
+    mu = y_pred.isel(treated_units=0)
+    tau = result._observed_outcome.to_numpy() - mu.values
+    treated_mask = ~result.data["_is_untreated"].to_numpy()
+    treated = result.data.loc[treated_mask]
+    event_time = np.asarray(treated["event_time"].values)
+    treated_tau = tau[:, :, np.where(treated_mask)[0]]
+    draws = []
+    for event in sorted(np.unique(event_time[~np.isnan(event_time)])):
+        if not result._is_event_time_att_identified(int(event)):
+            continue
+        mask = event_time == event
+        if mask.sum() == 0:
+            continue
+        draws.append(treated_tau[:, :, np.where(mask)[0]].mean(axis=2))
+    return np.mean(np.stack(draws, axis=0), axis=0)
+
+
+@pytest.mark.integration
+def test_staggered_effect_summary_recomputes_hdi_from_alpha(mock_pymc_sample):
+    """effect_summary(alpha) recomputes an HDI at 1 - alpha from draws.
+
+    Reprinting the stored 94% aggregation bounds, or averaging per-event HDI
+    endpoints, fails this check. The prose interval is the HDI of the same
+    average the sentence reports. A wider alpha must name a wider interval.
+    """
+    df = generate_staggered_did_data(
+        n_units=3,
+        n_time_periods=6,
+        treatment_cohorts={3: 1, 4: 1},
+        seed=1,
+    )
+    sample_kwargs_light = {
+        "draws": 20,
+        "tune": 20,
+        "chains": 1,
+        "cores": 1,
+        "progressbar": False,
+        "compute_convergence_checks": False,
+        "random_seed": 1,
+    }
+    result = cp.StaggeredDifferenceInDifferences(
+        df,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs_light),
+    ).fit()
+
+    stored_lower, stored_upper = _average_identified_post_bounds(
+        result.result.att_event_time
+    )
+    # Replace the mock draws with a skewed posterior large enough that a 95%
+    # HDI is strictly inside a 99% HDI. The bundle is frozen.
+    old = result.result.y_pred
+    n_draws = 400
+    shape = tuple(n_draws if dim == "draw" else old.sizes[dim] for dim in old.dims)
+    coords = {dim: old.coords[dim] for dim in old.dims if dim != "draw"}
+    coords["draw"] = np.arange(n_draws)
+    synthetic = xr.DataArray(
+        np.random.default_rng(0).exponential(size=shape),
+        dims=old.dims,
+        coords=coords,
+    )
+    object.__setattr__(result.result, "y_pred", synthetic)
+
+    summary_95 = result.effect_summary(alpha=0.05)
+    summary_99 = result.effect_summary(alpha=0.01)
+    summary_975 = result.effect_summary(alpha=0.025)
+
+    assert "95% HDI" in summary_95.text
+    assert "99% HDI" in summary_99.text
+    assert "97.5% HDI" in summary_975.text
+    assert "average 95% HDI" not in summary_95.text
+    assert result.result.hdi_prob == 0.94
+
+    from causalpy._arviz_compat import hdi_bounds
+
+    def _oracle(prob: float) -> pd.DataFrame:
+        mu = synthetic.isel(treated_units=0)
+        tau = result._observed_outcome.to_numpy() - mu.values
+        rows = []
+        treated = result.data.loc[~result.data["_is_untreated"]]
+        event_time = np.asarray(treated["event_time"].values)
+        treated_tau = tau[:, :, np.where(~result.data["_is_untreated"].to_numpy())[0]]
+        for event in sorted(np.unique(event_time[~np.isnan(event_time)])):
+            mask = event_time == event
+            tau_e = treated_tau[:, :, np.where(mask)[0]].mean(axis=2)
+            lower, upper = hdi_bounds(tau_e, prob=prob, flatten_chains_draws=True)
+            rows.append(
+                {
+                    "event_time": int(event),
+                    "att_lower": lower,
+                    "att_upper": upper,
+                }
+            )
+        frame = pd.DataFrame(rows)
+        frame = frame[frame["event_time"] >= 0]
+        return frame
+
+    oracle_95 = _oracle(0.95)
+    oracle_99 = _oracle(0.99)
+    got_95 = summary_95.table.loc[
+        summary_95.table["event_time"] >= 0, ["event_time", "att_lower", "att_upper"]
+    ]
+    got_99 = summary_99.table.loc[
+        summary_99.table["event_time"] >= 0, ["event_time", "att_lower", "att_upper"]
+    ]
+    # Non-identified cells are masked to NaN in the summary; compare identified rows.
+    if "identified" in summary_95.table.columns:
+        identified = summary_95.table.loc[
+            summary_95.table["event_time"] >= 0, "identified"
+        ].to_numpy()
+        got_95 = got_95.loc[identified]
+        got_99 = got_99.loc[identified]
+        oracle_95 = oracle_95[oracle_95["event_time"].isin(got_95["event_time"])]
+        oracle_99 = oracle_99[oracle_99["event_time"].isin(got_99["event_time"])]
+    pd.testing.assert_frame_equal(
+        got_95.reset_index(drop=True),
+        oracle_95.reset_index(drop=True),
+        check_exact=False,
+        rtol=1e-12,
+    )
+    pd.testing.assert_frame_equal(
+        got_99.reset_index(drop=True),
+        oracle_99.reset_index(drop=True),
+        check_exact=False,
+        rtol=1e-12,
+    )
+    avg_draws = _identified_post_event_draws(result, synthetic)
+    lower_95, upper_95 = hdi_bounds(avg_draws, prob=0.95, flatten_chains_draws=True)
+    lower_99, upper_99 = hdi_bounds(avg_draws, prob=0.99, flatten_chains_draws=True)
+    mean_lower, mean_upper = _average_identified_post_bounds(summary_95.table)
+    assert (upper_95 - lower_95) < (upper_99 - lower_99)
+    assert not np.isclose(lower_95, mean_lower) or not np.isclose(upper_95, mean_upper)
+    assert not np.isclose(lower_95, stored_lower) or not np.isclose(
+        upper_95, stored_upper
+    )
+    assert f"[{lower_95:.2f}, {upper_95:.2f}]" in summary_95.text
+    assert f"[{lower_99:.2f}, {upper_99:.2f}]" in summary_99.text
+    assert f"[{mean_lower:.2f}, {mean_upper:.2f}]" not in summary_95.text
+    assert f"[{stored_lower:.2f}, {stored_upper:.2f}]" not in summary_95.text
+    assert f"{float(np.mean(avg_draws)):.2f}" in summary_95.text
+
+
+@pytest.mark.integration
+def test_staggered_effect_summary_window_and_identification(mock_pymc_sample):
+    """Summary intervals follow the event window and skip non-identified times."""
+    df = generate_staggered_did_data(
+        n_units=3,
+        n_time_periods=6,
+        treatment_cohorts={3: 1, 4: 1},
+        seed=1,
+    )
+    sample_kwargs_light = {
+        "draws": 20,
+        "tune": 20,
+        "chains": 1,
+        "cores": 1,
+        "progressbar": False,
+        "compute_convergence_checks": False,
+        "random_seed": 1,
+    }
+    result = cp.StaggeredDifferenceInDifferences(
+        df,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        event_window=(-1, 2),
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs_light),
+    ).fit()
+    observed_times = result.data["event_time"].dropna()
+    assert ((observed_times < -1) | (observed_times > 2)).any()
+
+    old = result.result.y_pred
+    n_draws = 400
+    shape = tuple(n_draws if dim == "draw" else old.sizes[dim] for dim in old.dims)
+    coords = {dim: old.coords[dim] for dim in old.dims if dim != "draw"}
+    coords["draw"] = np.arange(n_draws)
+    synthetic = xr.DataArray(
+        np.random.default_rng(0).exponential(size=shape),
+        dims=old.dims,
+        coords=coords,
+    )
+    object.__setattr__(result.result, "y_pred", synthetic)
+
+    summary = result.effect_summary(alpha=0.05)
+    assert summary.table["event_time"].between(-1, 2).all()
+    assert "95% HDI" in summary.text
+
+    post_at_zero = result.data.loc[
+        (~result.data["_is_untreated"]) & (result.data["event_time"] == 0)
+    ]
+    assert len(post_at_zero) > 0
+    result.non_identified_periods_.add(post_at_zero[result.time_variable_name].iloc[0])
+    assert not result._is_event_time_att_identified(0)
+
+    from causalpy._arviz_compat import hdi_bounds
+
+    def _windowed_average(*, identified_only: bool) -> np.ndarray:
+        mu = synthetic.isel(treated_units=0)
+        tau = result._observed_outcome.to_numpy() - mu.values
+        treated_mask = ~result.data["_is_untreated"].to_numpy()
+        treated = result.data.loc[treated_mask]
+        event_time = np.asarray(treated["event_time"].values)
+        treated_tau = tau[:, :, np.where(treated_mask)[0]]
+        draws = []
+        low, high = result.event_window
+        for event in sorted(np.unique(event_time[~np.isnan(event_time)])):
+            if event < 0 or event < low or event > high:
+                continue
+            if identified_only and not result._is_event_time_att_identified(int(event)):
+                continue
+            mask = event_time == event
+            draws.append(treated_tau[:, :, np.where(mask)[0]].mean(axis=2))
+        return np.mean(np.stack(draws, axis=0), axis=0)
+
+    skipped = result.effect_summary(alpha=0.05)
+    unidentified = skipped.table.loc[skipped.table["event_time"] == 0]
+    assert len(unidentified) == 1
+    assert not bool(unidentified["identified"].iloc[0])
+    assert unidentified["att"].isna().all()
+    kept = _windowed_average(identified_only=True)
+    included = _windowed_average(identified_only=False)
+    lower, upper = hdi_bounds(kept, prob=0.95, flatten_chains_draws=True)
+    wide_lower, wide_upper = hdi_bounds(included, prob=0.95, flatten_chains_draws=True)
+    assert f"[{lower:.2f}, {upper:.2f}]" in skipped.text
+    assert not np.isclose(lower, wide_lower) or not np.isclose(upper, wide_upper)
+
+    result.event_window = (50, 60)
+    assert result._identified_post_treatment_att_draws(result.result) is None
+    empty = result.effect_summary(alpha=0.05)
+    assert "HDI" not in empty.text
+    assert empty.table.empty or empty.table["event_time"].between(50, 60).all()
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("empty_window", [(50, 60), (3, 3)])
+def test_staggered_effect_summary_empty_window_at_fit(
+    mock_pymc_sample, empty_window, capsys
+):
+    """A window that matches nothing at fit still has summary columns.
+
+    Setting a window that contains event times afterward recomputes those
+    times at ``1 - alpha``. It must not keep serving the empty stored frame.
+    """
+    df = generate_staggered_did_data(
+        n_units=3,
+        n_time_periods=6,
+        treatment_cohorts={3: 1, 4: 1},
+        seed=1,
+    )
+    sample_kwargs_light = {
+        "draws": 20,
+        "tune": 20,
+        "chains": 1,
+        "cores": 1,
+        "progressbar": False,
+        "compute_convergence_checks": False,
+        "random_seed": 1,
+    }
+    result = cp.StaggeredDifferenceInDifferences(
+        df,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        event_window=empty_window,
+        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs_light),
+    ).fit()
+    observed = result.data["event_time"].dropna()
+    assert observed.between(-4, 2).all()
+    assert not observed.between(*empty_window).any()
+
+    required = {"event_time", "att", "att_lower", "att_upper", "identified"}
+    stored = result.result.att_event_time
+    assert stored.empty
+    assert required.issubset(stored.columns)
+
+    empty = result.effect_summary(alpha=0.05)
+    assert empty.table.empty
+    assert required.issubset(empty.table.columns)
+    assert "HDI" not in empty.text
+    result.summary()
+    assert "event_time" in capsys.readouterr().out
+
+    old = result.result.y_pred
+    n_draws = 400
+    shape = tuple(n_draws if dim == "draw" else old.sizes[dim] for dim in old.dims)
+    coords = {dim: old.coords[dim] for dim in old.dims if dim != "draw"}
+    coords["draw"] = np.arange(n_draws)
+    synthetic = xr.DataArray(
+        np.random.default_rng(0).exponential(size=shape),
+        dims=old.dims,
+        coords=coords,
+    )
+    object.__setattr__(result.result, "y_pred", synthetic)
+    result.event_window = (-1, 2)
+
+    from causalpy._arviz_compat import hdi_bounds
+
+    average = result._identified_post_treatment_att_draws(result.result)
+    assert average is not None
+    lower, upper = hdi_bounds(average, prob=0.95, flatten_chains_draws=True)
+    wide_lower, wide_upper = hdi_bounds(average, prob=0.99, flatten_chains_draws=True)
+    summary = result.effect_summary(alpha=0.05)
+    summary_99 = result.effect_summary(alpha=0.01)
+    assert not summary.table.empty
+    assert summary.table["event_time"].between(-1, 2).all()
+    assert required.issubset(summary.table.columns)
+    assert f"95% HDI [{lower:.2f}, {upper:.2f}]" in summary.text
+    assert f"99% HDI [{wide_lower:.2f}, {wide_upper:.2f}]" in summary_99.text
+    assert (wide_upper - wide_lower) > (upper - lower)
+    assert result.result.att_event_time.empty
+    result.summary()
+    assert "event_time" in capsys.readouterr().out
 
 
 # ==============================================================================
@@ -803,6 +1128,48 @@ def test_generate_staggered_did_data_too_many_units():
             n_units=10,
             treatment_cohorts={5: 20},  # More than n_units
         )
+
+
+def test_generate_staggered_did_data_fills_effects_forward():
+    """Missing event-times keep the latest mapped effect already in the past."""
+    quiet = {"unit_fe_scale": 0.0, "time_fe_scale": 0.0, "sigma": 0.0, "seed": 0}
+
+    gap = generate_staggered_did_data(
+        n_units=1,
+        n_time_periods=8,
+        treatment_cohorts={0: 1},
+        treatment_effects={0: 1.0, 5: 0.0},
+        **quiet,
+    )
+    assert gap["tau"].tolist() == [1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0]
+    assert (gap["y"] - gap["y0"]).tolist() == gap["tau"].tolist()
+
+    delayed = generate_staggered_did_data(
+        n_units=1,
+        n_time_periods=5,
+        treatment_cohorts={0: 1},
+        treatment_effects={3: 4.0},
+        **quiet,
+    )
+    assert delayed["tau"].tolist() == [0.0, 0.0, 0.0, 4.0, 4.0]
+
+    stepped = generate_staggered_did_data(
+        n_units=1,
+        n_time_periods=7,
+        treatment_cohorts={0: 1},
+        treatment_effects={0: 1.0, 2: 3.0, 5: 0.0},
+        **quiet,
+    )
+    assert stepped["tau"].tolist() == [1.0, 1.0, 3.0, 3.0, 3.0, 0.0, 0.0]
+
+    never = generate_staggered_did_data(
+        n_units=1,
+        n_time_periods=4,
+        treatment_cohorts={},
+        treatment_effects={3: 4.0},
+        **quiet,
+    )
+    assert never["tau"].tolist() == [0.0, 0.0, 0.0, 0.0]
 
 
 # ==============================================================================
@@ -1002,6 +1369,162 @@ def test_staggered_did_effect_summary_excludes_non_identified_cells():
     summary = result.effect_summary()
     assert "Staggered DiD" in summary.text
     assert isinstance(summary.table, pd.DataFrame)
+
+
+def _always_treated_cohort_panel() -> pd.DataFrame:
+    """Unit A is treated in every period; unit C is treated from time 2."""
+    rows = []
+    for unit, start in (("A", 0), ("B", None), ("C", 2)):
+        for time in range(4):
+            treated = int(start is not None and time >= start)
+            rows.append(
+                {
+                    "unit": unit,
+                    "time": time,
+                    "treated": treated,
+                    "y": 10.0 * (unit == "A") + 5.0 * treated,
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def test_always_treated_cohort_is_non_identified():
+    """A cohort with no untreated observation of its own unit is not identified.
+
+    Calendar-period untreated support from other units is not enough. Cohort is
+    the treatment time, not the unit label. On current main this panel wrongly
+    reports cohort 0.0 as identified with ATT 15.0 and averages that cell in.
+    """
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        result = cp.StaggeredDifferenceInDifferences(
+            _always_treated_cohort_panel(),
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            treated_variable_name="treated",
+            model=LinearRegression(),
+        ).fit()
+
+    group_time = result.result.att_group_time
+    always_treated = group_time[group_time["cohort"] == 0.0]
+    later = group_time[group_time["cohort"] == 2.0]
+    assert len(always_treated) == 4
+    assert not always_treated["identified"].any()
+    assert always_treated["att"].isna().all()
+    assert 0.0 in result.non_identified_cohorts_
+    assert later["identified"].all()
+    assert np.allclose(later["att"], 5.0)
+
+    event_time = result.result.att_event_time
+    post = event_time[event_time["event_time"] >= 0]
+    only_always = post[post["event_time"].isin([2, 3])]
+    shared = post[post["event_time"].isin([0, 1])]
+    assert len(only_always) == 2
+    assert not only_always["identified"].any()
+    assert only_always["att"].isna().all()
+    assert np.issubdtype(only_always["n_obs"].dtype, np.number)
+    assert list(only_always["n_obs"]) == [1, 1]
+    assert shared["identified"].all()
+    assert np.allclose(shared["att"], 5.0)
+    assert list(shared["n_obs"]) == [1, 1]
+    assert post.loc[post["identified"], "att"].mean() == 5.0
+    summary = result.effect_summary().text
+    assert "12.50" not in summary
+    assert "5.00" in summary
+    assert any(
+        "no untreated observation of their own units" in str(item.message)
+        for item in caught
+    )
+    # An event time with no contributing cohort stays identified.
+    assert result._is_event_time_att_identified(10_000) is True
+    # The writer must not duplicate an ineligible event time already in the frame.
+    restored = result._append_missing_own_unit_event_rows(event_time)
+    assert list(restored["event_time"]) == list(event_time["event_time"])
+    assert len(restored) == len(event_time)
+
+
+@pytest.mark.integration
+def test_always_treated_cohort_bayesian_paths_skip_ineligible_event_times(
+    mock_pymc_sample,
+):
+    """Bayesian aggregation, plots, and summaries skip always-treated cohorts.
+
+    Event times that only the always-treated cohort contributes are omitted from
+    the draw mean and restored as non-identified rows. Event times shared with a
+    cohort that has its own untreated observation stay identified.
+    """
+    with pytest.warns(UserWarning, match="no untreated observation of their own units"):
+        result = cp.StaggeredDifferenceInDifferences(
+            _always_treated_cohort_panel(),
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            treated_variable_name="treated",
+            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
+        ).fit()
+
+    event_time = result.result.att_event_time
+    only_always = event_time[event_time["event_time"].isin([2, 3])]
+    shared = event_time[event_time["event_time"].isin([0, 1])]
+    assert not only_always["identified"].any()
+    assert only_always["att"].isna().all()
+    assert shared["identified"].all()
+    assert shared["att"].notna().all()
+
+    plot_data = result.get_plot_data(hdi_prob=0.8)
+    plot_only = plot_data[plot_data["event_time"].isin([2, 3])]
+    plot_shared = plot_data[plot_data["event_time"].isin([0, 1])]
+    assert not plot_only["identified"].any()
+    assert plot_only["att"].isna().all()
+    assert plot_shared["identified"].all()
+    assert np.issubdtype(plot_data["n_obs"].dtype, np.number)
+
+    summary = result.effect_summary(alpha=0.05)
+    assert "Staggered DiD" in summary.text
+    assert set(summary.table.loc[summary.table["identified"], "event_time"]) >= {0, 1}
+    assert not summary.table.loc[
+        summary.table["event_time"].isin([2, 3]), "identified"
+    ].any()
+
+
+def test_cohort_with_one_own_untreated_observation_stays_identified():
+    """One untreated observation of the cohort's own unit keeps that cohort identified."""
+    rows = []
+    for unit, start, times in (
+        ("A", 0, range(0, 4)),
+        ("D", 0, range(-1, 4)),
+        ("B", None, range(-1, 4)),
+        ("C", 2, range(-1, 4)),
+    ):
+        for time in times:
+            treated = int(start is not None and time >= start)
+            rows.append(
+                {
+                    "unit": unit,
+                    "time": time,
+                    "treated": treated,
+                    "y": 10.0 * (unit == "A") + 3.0 * (unit == "D") + 5.0 * treated,
+                }
+            )
+
+    result = cp.StaggeredDifferenceInDifferences(
+        pd.DataFrame(rows),
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        treated_variable_name="treated",
+        model=LinearRegression(),
+    ).fit()
+
+    group_time = result.result.att_group_time
+    cohort_0 = group_time[group_time["cohort"] == 0.0]
+    cohort_2 = group_time[group_time["cohort"] == 2.0]
+    assert cohort_0["identified"].all()
+    assert np.allclose(cohort_0["att"], 9.625)
+    assert cohort_2["identified"].all()
+    assert np.allclose(cohort_2["att"], 5.0)
+    assert result.result.att_event_time["identified"].all()
 
 
 def test_staggered_did_mark_non_identified_att_rows_edge_cases():
@@ -1818,14 +2341,15 @@ def test_staggered_did_only_never_treated_as_controls():
         }
     )
 
-    result = cp.StaggeredDifferenceInDifferences(
-        df,
-        formula="y ~ 1 + C(unit) + C(time)",
-        unit_variable_name="unit",
-        time_variable_name="time",
-        treatment_time_variable_name="treatment_time",
-        model=LinearRegression(),
-    )
+    with pytest.warns(UserWarning, match="no untreated observation of their own units"):
+        result = cp.StaggeredDifferenceInDifferences(
+            df,
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            treatment_time_variable_name="treatment_time",
+            model=LinearRegression(),
+        ).fit()
 
     # Training set should only contain never-treated observations
     training_mask = result.data["_is_untreated"]
@@ -1833,6 +2357,15 @@ def test_staggered_did_only_never_treated_as_controls():
 
     # Only units 2 and 3 should be in training set
     assert set(training_units) == {2, 3}
+    event_time = result.result.att_event_time
+    assert len(event_time) == 3
+    assert not event_time["identified"].any()
+    assert event_time["att"].isna().all()
+    assert list(event_time["n_obs"]) == [2, 2, 2]
+    assert np.issubdtype(event_time["n_obs"].dtype, np.number)
+    assert not pd.api.types.is_object_dtype(event_time["att"])
+    result.plot()
+    plt.close("all")
 
 
 def test_staggered_did_supports_ols_bayes_attrs():

@@ -2,7 +2,7 @@
 
 Markdown skills in this directory teach AI coding agents how to use CausalPy for causal inference tasks. They are distributed to end users via [Decision AI Hub](https://hub.decision.ai).
 
-Developer-focused skills (environment setup, PR workflows, testing conventions, etc.) live in `.agents/skills/`. They are **not** included here.
+These are user-facing skills only. Maintainer workflow is not packaged here. Repo-level agent skills, if any, live in `.agents/skills/` and are reserved for crucial CausalPy practice that does not belong in `AGENTS.md`.
 
 When these user-facing skills change, update the distributed Decision AI Hub copy after the PR lands, or leave an explicit follow-up task if the Hub update cannot happen in the same workflow.
 

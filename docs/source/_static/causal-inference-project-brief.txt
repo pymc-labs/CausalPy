@@ -1,0 +1,19 @@
+CAUSAL INFERENCE PROJECT BRIEF
+
+1. The question and decision
+What decision should this work change, who owns it, and what would count as a useful answer?
+
+2. The intervention and its timing
+What changed, when it started and ended, and which units were exposed? Note rollout, geography, or eligibility rules.
+
+3. Available data and units
+Which outcomes, units, and time coverage are available? Summarize frequency, known gaps, and who can share the data. Do not include personal records in an initial inquiry.
+
+4. Existing experiments
+Note any randomized tests, geo or lift tests, holdouts, or earlier analyses that could validate an estimate.
+
+5. Timeline
+When is the decision needed? Who will use the result, and are there procurement or review dates?
+
+6. Open questions
+What still needs to be resolved before scope can be agreed?

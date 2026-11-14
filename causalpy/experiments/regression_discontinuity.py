@@ -329,10 +329,15 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
                 f"({self.bandwidth}) when bandwidth is finite."
             )
 
-        # Convert integer treated variables, including pandas nullable integers,
-        # without mutating the caller's DataFrame.
-        if pd.api.types.is_integer_dtype(self.data["treated"]):
-            self.data["treated"] = self.data["treated"].astype(bool)
+        # Numeric 0/1 indicators, including pandas nullable integers and floats,
+        # become bool before the design is built. A numeric factor disagrees
+        # with the boolean prediction grid and fit raises AttributeError.
+        # to_pandas already copied the caller's frame.
+        treated = self.data["treated"]
+        if pd.api.types.is_integer_dtype(treated) or pd.api.types.is_float_dtype(
+            treated
+        ):
+            self.data["treated"] = treated.astype(bool)
 
     def _is_treated(self, x: np.ndarray | pd.Series) -> np.ndarray:
         """Returns ``True`` if `x` is greater than or equal to the treatment threshold.
@@ -622,6 +627,9 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
             + guides(color=False)
             + labs(title=title, x=xcol, y=ycol)
         ).draw()
+        # ``draw()`` closes the figure on exit, which unregisters it from
+        # pyplot; re-register it so ``plt.show()`` and Jupyter display it.
+        plt.figure(fig)
         if figsize is not None:
             fig.set_size_inches(figsize)
         ax = fig.axes[0]

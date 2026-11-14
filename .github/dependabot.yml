@@ -28,3 +28,8 @@ updates:
     labels:
       - "devops"
       - "no releasenotes"
+    # pandas2 must stay `>=2.3,<3`. A semver-major pandas update widens that cap and resolves pandas 3 on the pandas 2 CI leg. Pandas 3 updates belong on the pandas3 group, not a Dependabot major bump.
+    ignore:
+      - dependency-name: "pandas"
+        update-types:
+          - "version-update:semver-major"

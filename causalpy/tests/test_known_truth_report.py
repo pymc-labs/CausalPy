@@ -11,35 +11,24 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Perturbation check and known-truth interval report.
+"""Perturbation check for known-truth panels.
 
-The default suite runs the perturbation check and one fixed-seed smoke.
-Refits of the other panel-model cells are nightly. They score the five
-existing panels only.
+Shifting treated post-period outcomes moves impact and leaves the untreated
+trajectory unchanged.
 """
 
 from __future__ import annotations
 
-import re
-
 import numpy as np
 import pytest
 
-from causalpy.constants import HDI_PROB
 from causalpy.tests.known_truth_report import (
     MODELS,
-    NOTE_PATH,
     PANELS,
-    POSTERIOR_TARGET,
     fit_panel,
     posterior_draws,
-    score_fit,
 )
 
-_ROW = re.compile(
-    r"^\| (?P<panel>[a-z_]+) \| (?P<model>[A-Za-z]+) \| "
-    r"(?P<posterior>[a-z_]+) \| (?P<time>\d+) \| (?P<inside>[01]) \|$"
-)
 _PERTURB = {
     "draws": 20,
     "tune": 20,
@@ -49,48 +38,6 @@ _PERTURB = {
     "progressbar": False,
 }
 _SHIFT = 5.0
-
-
-def _recorded_rows() -> dict[tuple[str, str, str, int], int]:
-    rows: dict[tuple[str, str, str, int], int] = {}
-    for line in NOTE_PATH.read_text(encoding="utf-8").splitlines():
-        match = _ROW.match(line)
-        if match is None:
-            continue
-        key = (
-            match.group("panel"),
-            match.group("model"),
-            match.group("posterior"),
-            int(match.group("time")),
-        )
-        rows[key] = int(match.group("inside"))
-    return rows
-
-
-def test_note_names_models_intervals_and_both_regimes() -> None:
-    """The committed note is the surface #1240 cites."""
-    text = NOTE_PATH.read_text(encoding="utf-8")
-    assert "HDI_PROB" in text
-    assert f"{HDI_PROB}" in text
-    assert "not a frequentist coverage rate" in text
-    assert "nominal coverage" not in text.lower()
-    assert "%" not in text
-    assert "latent_factor" in text
-    assert "InteractiveFixedEffectsSyntheticControl" in text
-    assert "improves on `SyntheticControl`" in text
-    assert "does not by itself establish causal validity" in text
-    assert "donor_shock" in text
-    assert "CausalResult.impact_post" in text
-    rows = _recorded_rows()
-    expected = {
-        (panel, model, posterior, time)
-        for panel in PANELS
-        for model, targets in POSTERIOR_TARGET.items()
-        for posterior in targets
-        for time in (4, 5, 6, 7)
-    }
-    assert set(rows) == expected
-    assert set(MODELS) == set(POSTERIOR_TARGET)
 
 
 @pytest.mark.parametrize("model_name", MODELS)
@@ -125,24 +72,3 @@ def test_treated_post_perturbation_changes_impact_not_untreated(
     )
     impact_shift = after[impact_name].values - before[impact_name].values
     np.testing.assert_allclose(impact_shift, _SHIFT, atol=1e-6)
-
-
-def test_fixed_seed_smoke_matches_note() -> None:
-    """One fixed-seed inside/outside cell matches the committed note."""
-    rows = _recorded_rows()
-    scored = score_fit("SyntheticControl", "placebo")
-    for (posterior, time), flag in scored.items():
-        assert rows[("placebo", "SyntheticControl", posterior, time)] == flag
-
-
-@pytest.mark.nightly
-@pytest.mark.parametrize("panel_name", list(PANELS))
-@pytest.mark.parametrize("model_name", MODELS)
-def test_nightly_refit_matches_note(panel_name: str, model_name: str) -> None:
-    """Refit the recorded cell. Update the note if this disagrees."""
-    if panel_name == "placebo" and model_name == "SyntheticControl":
-        pytest.skip("covered by the default-suite smoke")
-    rows = _recorded_rows()
-    scored = score_fit(model_name, panel_name)
-    for (posterior, time), flag in scored.items():
-        assert rows[(panel_name, model_name, posterior, time)] == flag

@@ -159,6 +159,11 @@ rediraffe_redirects = {
     "notebooks/sc_skl": "notebooks/synthetic-control-sklearn",
     "notebooks/sdid_pymc": "notebooks/synthetic-difference-in-differences-pymc",
     "notebooks/staggered_did_pymc": "notebooks/staggered-difference-in-differences-pymc",
+    # Deleted knowledge-base model notes. Keys stay so the old RTD URLs redirect.
+    "knowledgebase/augmented-synthetic-control": "notebooks/augmented-synthetic-control-pymc",
+    "knowledgebase/bayesian_synthetic_control_known_truth_report": "notebooks/comparing-bayesian-synthetic-control-pymc",
+    "knowledgebase/comparing-bayesian-synthetic-control": "notebooks/comparing-bayesian-synthetic-control-pymc",
+    "knowledgebase/interactive-fixed-effects": "notebooks/interactive-fixed-effects-pymc",
 }
 rediraffe_branch = "main"
 rediraffe_auto_redirect_perc = 0
@@ -248,7 +253,7 @@ sitemap_url_scheme = f"{{lang}}{rtd_version}/{{link}}"
 
 html_theme = "labs_sphinx_theme"
 html_static_path = ["_static"]
-html_css_files = ["gallery.css"]
+html_css_files = ["gallery.css", "custom.css"]
 html_extra_path = ["robots.txt", "llms.txt"]
 html_favicon = "_static/favicon_logo.png"
 # Theme options are theme-specific and customize the look and feel of a theme
@@ -260,6 +265,9 @@ html_theme_options = {
         "image_dark": "_static/flat_logo_darkmode.png",
     },
     "analytics": {"google_analytics_id": "G-3MCDG3M7X6"},
+    # navbar_persistent is the only header slot shown at every width. Setting
+    # it replaces the theme default, so keep the search button first.
+    "navbar_persistent": ["search-button-field", "navbar-contact-button.html"],
 }
 
 html_context = {

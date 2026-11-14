@@ -20,15 +20,16 @@ dependencies:
   - jinja2
   - make
   - matplotlib>=3.5.3
-  - mypy==2.4.0
+  - mypy==2.4.1
   - narwhals>=1.13.1
   - nbconvert
   - nbformat
   - numpy
+  - packaging
   - pandas<4,>=2.3
   - papermill
   - patsy
-  - plotnine>=0.15.7
+  - plotnine>=0.15.9
   - polars
   - prek
   - pyarrow

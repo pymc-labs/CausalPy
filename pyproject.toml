@@ -49,9 +49,10 @@ dependencies = [
     "matplotlib>=3.5.3",
     "narwhals>=1.13.1",
     "numpy",
+    "packaging",
     "pandas<4,>=2.3",
     "patsy",
-    "plotnine>=0.15.7",
+    "plotnine>=0.15.9",
     "polars",
     # Keep these public major-version ranges broad. PyMC metadata supplies compatible PyTensor patch-level ranges, so base installs may select newer PyMC/PyTensor minors.
     # The docs-only PyMC-Marketing pin in docs/requirements.txt has its own narrower resolver constraints; it does not restrict normal runtime installs.
@@ -83,7 +84,7 @@ forecast = [
 dev = [
     "prek",
     # Pinned: a type checker that floats turns an untouched branch red whenever upstream ships new checks. Bump deliberately, with the allowlist in [tool.mypy] re-measured (issue #1127). TOML cannot share the value, so the same pin appears in the ``lint`` extra below and the two must be bumped together.
-    "mypy==2.4.0",
+    "mypy==2.4.1",
     "twine",
     "codespell",
     "nbformat",
@@ -98,7 +99,7 @@ docs = [
     "daft-pgm",
     "pymc-bart",
     "linkify-it-py",
-    "myst-nb<=1.0.0",
+    "myst-nb<=1.4.0",
     "pylint>=4.1.1",
     "sphinx",
     "sphinx-autodoc-typehints",
@@ -120,7 +121,7 @@ docs = [
     "sphinxext-rediraffe",
 ]
 # The mypy pin here must match the one in the ``dev`` extra above; TOML cannot share the value, so bump both together.
-lint = ["prek", "ruff", "mypy==2.4.0"]
+lint = ["prek", "ruff", "mypy==2.4.1"]
 test = [
     "pytest",
     "pytest-cov",
@@ -271,7 +272,7 @@ watcher_on_save = "autorun"
 
 # PyMarkdown linter (pre-commit hook) configuration. Primary motivator (issue #899) is enforcing MD032 — lists must be surrounded by blank lines — to mirror the docstring rule already enforced by ``validate-docstring-lists`` (issue #892). The rules below are deliberately disabled because they conflict with project conventions or are noisy on the existing Markdown corpus (see PR #900 for the audit).
 [tool.pymarkdown]
-# Enable GitHub-flavoured / front-matter extensions so the linter understands YAML front-matter (cursor agent / skill files), GFM task lists, tables, strikethrough, and extended autolinks.
+# Enable GitHub-flavoured / front-matter extensions so the linter understands YAML front-matter (skill files), GFM task lists, tables, strikethrough, and extended autolinks.
 extensions.front-matter.enabled = true
 extensions.markdown-task-list-items.enabled = true
 extensions.markdown-tables.enabled = true
@@ -279,7 +280,7 @@ extensions.markdown-strikethrough.enabled = true
 extensions.markdown-extended-autolinks.enabled = true
 # Project convention: do not hard-wrap Markdown lines (see AGENTS.md).
 plugins.md013.enabled = false
-# Many top-level docs (skills, agent definitions, command snippets) start with YAML front-matter or a short paragraph rather than an H1.
+# Many top-level docs (skills, command snippets) start with YAML front-matter or a short paragraph rather than an H1.
 plugins.md041.enabled = false
 # Allow a mix of setext and atx headings across files.
 plugins.md003.enabled = false

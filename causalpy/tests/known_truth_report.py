@@ -11,23 +11,19 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Fit the five known-truth panels and score posterior HDIs.
+"""Fit known-truth panels for the perturbation test.
 
-Not a public API. Tests and the committed known-truth note share this module.
-It does not add a panel generator.
+Not a public API. Does not add a panel generator.
 """
 
 from __future__ import annotations
 
 import warnings
 from collections.abc import Mapping
-from pathlib import Path
 
 import pandas as pd
 import xarray as xr
 
-from causalpy._arviz_compat import hdi
-from causalpy.constants import HDI_PROB
 from causalpy.experiments.augmented_synthetic_control import AugmentedSyntheticControl
 from causalpy.experiments.interactive_fixed_effects import (
     InteractiveFixedEffectsSyntheticControl,
@@ -36,16 +32,8 @@ from causalpy.experiments.synthetic_control import SyntheticControl
 from causalpy.pymc_models import WeightedSumFitter
 from causalpy.tests import known_truth_panels
 
-NOTE_PATH = (
-    Path(__file__).resolve().parents[2]
-    / "docs"
-    / "source"
-    / "knowledgebase"
-    / "bayesian_synthetic_control_known_truth_report.md"
-)
-
-# One setting for every recorded inside/outside bit. Nightly refits use this
-# mapping and no other.
+# Default sample when the caller does not pass one. The perturbation test
+# passes its own short sample.
 REPORT_SAMPLE: dict[str, int | float | bool] = {
     "draws": 100,
     "tune": 100,
@@ -70,20 +58,11 @@ MODELS = (
     "AugmentedSyntheticControl",
 )
 
-# Posterior name -> planted series it is scored against.
-POSTERIOR_TARGET = {
-    "SyntheticControl": {
-        "predictions_post": "untreated",
-        "impact_post": "effect",
-    },
-    "InteractiveFixedEffectsSyntheticControl": {
-        "predictions_post": "untreated",
-        "impact_post": "effect",
-    },
-    "AugmentedSyntheticControl": {
-        "counterfactual": "untreated",
-        "treatment_effect": "effect",
-    },
+# Posterior series ``posterior_draws`` returns for the treated unit.
+POSTERIOR_NAMES = {
+    "SyntheticControl": ("predictions_post", "impact_post"),
+    "InteractiveFixedEffectsSyntheticControl": ("predictions_post", "impact_post"),
+    "AugmentedSyntheticControl": ("counterfactual", "treatment_effect"),
 }
 
 
@@ -135,53 +114,9 @@ def posterior_draws(
     """Return the recorded posterior series for the single treated unit."""
     panel = PANELS[panel_name]
     unit = panel.treated_units[0]
+    names = POSTERIOR_NAMES[model_name]
     if model_name == "AugmentedSyntheticControl":
         posterior = fitted.idata.posterior
-        return {
-            name: posterior[name].sel(treated_units=unit)
-            for name in POSTERIOR_TARGET[model_name]
-        }
+        return {name: posterior[name].sel(treated_units=unit) for name in names}
     result = fitted.result
-    return {
-        name: getattr(result, name).sel(treated_units=unit)
-        for name in POSTERIOR_TARGET[model_name]
-    }
-
-
-def planted_series(panel_name: str, target: str) -> pd.Series:
-    """Post-period planted untreated path or effect for the treated unit."""
-    panel = PANELS[panel_name]
-    unit = panel.treated_units[0]
-    frame = panel.untreated if target == "untreated" else panel.effect
-    post = frame.index >= panel.treatment_time
-    return frame.loc[post, unit]
-
-
-def inside_flags(draws: xr.DataArray, truth: pd.Series) -> dict[int, int]:
-    """1 if the planted value is inside the HDI at that post time, else 0."""
-    time_dim = "obs_ind" if "obs_ind" in draws.dims else "post_time"
-    bounds = hdi(draws, prob=HDI_PROB, dim=("chain", "draw"))
-    flags: dict[int, int] = {}
-    for time in draws.coords[time_dim].values:
-        lower = float(bounds.sel({time_dim: time, "hdi": "lower"}))
-        higher = float(bounds.sel({time_dim: time, "hdi": "higher"}))
-        value = float(truth.loc[time])
-        flags[int(time)] = int(lower <= value <= higher)
-    return flags
-
-
-def score_fit(
-    model_name: str,
-    panel_name: str,
-    *,
-    sample: Mapping[str, int | float | bool] | None = None,
-) -> dict[tuple[str, int], int]:
-    """Map ``(posterior_name, post_time)`` to inside (1) or outside (0)."""
-    fitted = fit_panel(model_name, panel_name, sample=sample)
-    draws = posterior_draws(model_name, fitted, panel_name)
-    scored: dict[tuple[str, int], int] = {}
-    for posterior_name, target in POSTERIOR_TARGET[model_name].items():
-        flags = inside_flags(draws[posterior_name], planted_series(panel_name, target))
-        for time, flag in flags.items():
-            scored[(posterior_name, time)] = flag
-    return scored
+    return {name: getattr(result, name).sel(treated_units=unit) for name in names}

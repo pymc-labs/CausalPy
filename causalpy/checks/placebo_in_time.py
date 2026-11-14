@@ -80,6 +80,7 @@ from causalpy.checks.operating_characteristics import (
     compute_assurance_rates,
 )
 from causalpy.constants import HDI_PROB
+from causalpy.date_utils import validate_treatment_time_against_index
 from causalpy.experiments.base import BaseExperiment
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.experiments.synthetic_control import SyntheticControl
@@ -91,6 +92,9 @@ MIN_FOLD_OBSERVATIONS = 3
 MAX_RANDOM_SELECTION_RETRIES = 16
 _DEFAULT_PLOT_TITLE = "Placebo-in-Time calibration"
 _DEFAULT_FIGSIZE = (7.0, 9.0)
+_CALENDAR_MISMATCH_REASON = (
+    "comparison index does not match the complete requested frequency grid"
+)
 
 # The hierarchical status-quo (null) model estimates the between-fold spread
 # ``tau_status_quo`` from the completed folds.  That spread is unidentified from
@@ -393,7 +397,7 @@ class PlaceboInTime:
     make_figures : bool, default True
         Whether :meth:`run` appends a figure to ``CheckResult.figures``. Calibrated runs use :meth:`plot_calibration`; descriptive runs use :meth:`plot_folds`. With this control enabled, ``figures[0]`` is available even when all fits fail.
     treatment_times : sequence or None, optional
-        Explicit, strictly ascending unique starts, copied at construction and exactly ``n_folds`` long. Incompatible with random selection. Every historical window is validated before fitting. Overlapping scheduled windows require ``allow_overlap=True`` and ``calibrate=False``.
+        Explicit, strictly ascending unique starts, copied at construction and exactly ``n_folds`` long. Incompatible with random selection. Starts must match the data index type, as ``treatment_time`` does (``pd.Timestamp`` on a ``DatetimeIndex``). Every historical window is validated before fitting. Overlapping scheduled windows require ``allow_overlap=True`` and ``calibrate=False``.
     min_training_rows : int or None, optional
         Nonnegative minimum fitting-history count in every selection mode. Descriptive folds additionally require at least their planned comparison count in training rows; calibrated folds retain the original actual-window history requirement.
     comparison_frequency : str or None, optional
@@ -1025,7 +1029,7 @@ class PlaceboInTime:
                     start, end, freq=self.comparison_frequency, inclusive="left"
                 )
                 if not observed.equals(expected):
-                    reason = "comparison index does not match the complete requested frequency grid"
+                    reason = _CALENDAR_MISMATCH_REASON
         required_rows = (
             self._get_intervention_window_observation_count(
                 data, treatment_time, intervention_length
@@ -1058,6 +1062,11 @@ class PlaceboInTime:
             data.index, pd.DatetimeIndex
         ):
             raise ValueError("comparison_frequency requires a DatetimeIndex")
+        if self.treatment_times is not None:
+            for start in starts:
+                validate_treatment_time_against_index(
+                    data.index, start, name="treatment_times"
+                )
         records = [
             self._plan_window(
                 data, treatment_time, intervention_length, start, position
@@ -1616,16 +1625,23 @@ class PlaceboInTime:
         return [record.skipped_metadata() for record in skipped]
 
     def _warn_skipped_folds(self, records: list[_FoldRecord]) -> None:
-        """Explain training and selection shortfalls from recorded outcomes."""
+        """Explain training, calendar and selection shortfalls from recorded outcomes."""
         insufficient_pre_period_folds = [
             record for record in records if record.reason == "insufficient_pre_period"
+        ]
+        calendar_mismatch_folds = [
+            record for record in records if record.reason == _CALENDAR_MISMATCH_REASON
         ]
         random_selection_shortfall_folds = [
             record
             for record in records
             if record.reason == "insufficient_feasible_random_folds"
         ]
-        if insufficient_pre_period_folds or random_selection_shortfall_folds:
+        if (
+            insufficient_pre_period_folds
+            or calendar_mismatch_folds
+            or random_selection_shortfall_folds
+        ):
             warning_parts: list[str] = []
             if insufficient_pre_period_folds:
                 warning_parts.append(
@@ -1636,18 +1652,46 @@ class PlaceboInTime:
                         else "pre-treatment history shorter than one full intervention window"
                     )
                 )
+            if calendar_mismatch_folds:
+                warning_parts.append(
+                    f"{len(calendar_mismatch_folds)} fold(s) had a comparison "
+                    "window that does not match the complete "
+                    f"comparison_frequency={self.comparison_frequency!r} grid"
+                )
             if random_selection_shortfall_folds:
                 warning_parts.append(
                     f"random selection yielded only "
                     f"{sum(record.plan.start is not None for record in records)} of {self.n_folds} requested "
-                    "feasible fold(s) after eligibility and geometry constraints"
+                    "feasible fold(s) after "
+                    + (
+                        "eligibility and geometry constraints"
+                        if self.comparison_frequency is None
+                        else "eligibility, geometry and comparison_frequency="
+                        f"{self.comparison_frequency!r} grid constraints"
+                    )
                 )
+            calendar_advice = (
+                ". Check that comparison_frequency matches the data index "
+                "frequency with no missing dates"
+                if calendar_mismatch_folds
+                or (
+                    random_selection_shortfall_folds
+                    and self.comparison_frequency is not None
+                )
+                else ""
+            )
+            metadata_note = (
+                "the observed and required pre-period rows"
+                if insufficient_pre_period_folds
+                else "each skipped fold and its reason"
+            )
             warnings.warn(
                 "PlaceboInTime skipped folds because "
                 + "; ".join(warning_parts)
                 + ". Use fewer folds or an experiment_factory tailored to "
-                "the eligible fold data; skipped_folds metadata records the "
-                "observed and required pre-period rows.",
+                "the eligible fold data"
+                + calendar_advice
+                + f"; skipped_folds metadata records {metadata_note}.",
                 stacklevel=3,
             )
 

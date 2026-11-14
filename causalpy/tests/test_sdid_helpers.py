@@ -22,6 +22,7 @@ individual steps without paying the cost of a full MCMC run.
 from types import SimpleNamespace
 from typing import Any, Protocol
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
@@ -558,3 +559,307 @@ class TestConvertTreatmentTimeForAxis:
             axis, ts
         )
         assert result == ts
+
+
+def _panel_with_known_post_impacts(
+    treated_impacts: dict[str, float],
+) -> tuple[pd.DataFrame, list[str], list[str]]:
+    """Build a panel whose equal-weight donor synthetic is known.
+
+    Pre-period treated outcomes match the synthetic control, so each unit's
+    post-period impact equals the supplied shift. The shifts are not a special
+    named pair and need not be symmetric.
+    """
+    donor_a = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    donor_b = np.array([2.0, 1.0, 2.0, 1.0, 2.0, 1.0])
+    synthetic = 0.5 * donor_a + 0.5 * donor_b
+    columns = {"donor_a": donor_a, "donor_b": donor_b}
+    for name, impact in treated_impacts.items():
+        shift = np.zeros_like(synthetic)
+        shift[3:] = impact
+        columns[name] = synthetic + shift
+    frame = pd.DataFrame(columns, index=np.arange(len(synthetic)))
+    return frame, ["donor_a", "donor_b"], list(treated_impacts)
+
+
+def _finalize_with_equal_donor_weights(
+    frame: pd.DataFrame,
+    control_units: list[str],
+    treated_units: list[str],
+) -> SyntheticDifferenceInDifferences:
+    """Construct SDiD and finalize from injected weights. No sampler."""
+    experiment = SyntheticDifferenceInDifferences(
+        frame, 3, control_units, treated_units
+    )
+    n_controls = len(control_units)
+    n_pre = int((frame.index < 3).sum())
+    posterior = xr.Dataset(
+        {
+            "omega": (
+                ("chain", "draw", "coeffs"),
+                np.full((1, 1, n_controls), 1.0 / n_controls),
+            ),
+            "lam": (
+                ("chain", "draw", "obs_ind"),
+                np.full((1, 1, n_pre), 1.0 / n_pre),
+            ),
+            "omega0": (("chain", "draw"), np.array([[0.0]])),
+        }
+    )
+    experiment.model.idata = xr.DataTree.from_dict({"posterior": posterior})
+    experiment._finalize("posterior")
+    return experiment
+
+
+def test_multi_unit_impact_is_stored_under_each_unit_name():
+    """Each treated unit's impact is labeled with that unit, not the mean.
+
+    The failure class is storing the cross-unit average under the first name
+    (or under every name). Three unequal shifts, with the first unit neither
+    the largest nor the mean, reject a two-name special case and a mean label.
+    """
+    impacts = {"alpha": 4.0, "beta": 0.0, "gamma": 9.0}
+    frame, controls, treated = _panel_with_known_post_impacts(impacts)
+    experiment = _finalize_with_equal_donor_weights(frame, controls, treated)
+
+    stored_names = experiment.result.impact_post.treated_units.values.tolist()
+    assert stored_names == treated
+    assert experiment.result.predictions_post.treated_units.values.tolist() == treated
+    # Pooled ATT stays the equal-weighted mean. Named trajectories do not.
+    np.testing.assert_allclose(
+        float(experiment.result.tau_posterior.mean()),
+        np.mean(list(impacts.values())),
+    )
+
+    for name, impact in impacts.items():
+        stored = experiment.result.impact_post.sel(treated_units=name).values
+        np.testing.assert_allclose(stored.reshape(-1), np.full(3, impact))
+        summary = experiment.effect_summary(treated_unit=name)
+        assert summary.table.loc["average", "mean"] == pytest.approx(impact)
+
+    default = experiment.effect_summary()
+    assert default.table.loc["average", "mean"] == pytest.approx(impacts["alpha"])
+    assert default.table.loc["average", "mean"] != pytest.approx(
+        np.mean(list(impacts.values()))
+    )
+
+
+def test_single_treated_unit_impact_is_its_own_series():
+    """A single treated unit keeps its impact; it is not rewritten or dropped."""
+    impacts = {"only": 7.0}
+    frame, controls, treated = _panel_with_known_post_impacts(impacts)
+    experiment = _finalize_with_equal_donor_weights(frame, controls, treated)
+
+    assert experiment.result.impact_post.treated_units.values.tolist() == ["only"]
+    np.testing.assert_allclose(
+        experiment.result.impact_post.values.reshape(-1), np.full(3, 7.0)
+    )
+    assert experiment.effect_summary().table.loc["average", "mean"] == pytest.approx(
+        7.0
+    )
+    np.testing.assert_allclose(float(experiment.result.tau_posterior.mean()), 7.0)
+
+
+def test_multi_unit_plot_labels_the_selected_unit_not_the_mean():
+    """The default plot shows the first unit, and the title names that unit.
+
+    A shared title of only the pooled ATT would hide which trajectory is drawn.
+    Observations must be that unit's series, not the cross-unit mean.
+    """
+    impacts = {"cedar": 2.0, "maple": 8.0}
+    frame, controls, treated = _panel_with_known_post_impacts(impacts)
+    experiment = _finalize_with_equal_donor_weights(frame, controls, treated)
+
+    fig, axes = experiment.plot(show=False)
+    try:
+        title = axes[0].get_title()
+        assert title.startswith("SDiD: cedar (pooled ATT =")
+        assert "maple" not in title
+        observation_y = [
+            list(line.get_ydata())
+            for line in axes[0].get_lines()
+            if line.get_marker() == "."
+        ]
+        assert observation_y
+        np.testing.assert_allclose(
+            observation_y[0], frame.loc[frame.index < 3, "cedar"]
+        )
+        np.testing.assert_allclose(
+            observation_y[1], frame.loc[frame.index >= 3, "cedar"]
+        )
+        pooled_post = frame.loc[frame.index >= 3, ["cedar", "maple"]].mean(axis=1)
+        assert not np.allclose(observation_y[1], pooled_post.to_numpy())
+    finally:
+        plt.close(fig)
+
+    prior_fig, prior_axes = experiment._plot_prior_checks(
+        bundle=experiment.result,
+        style={
+            "ci_prob": 0.94,
+            "kind": "ribbon",
+            "ci_kind": "hdi",
+        },
+    )
+    try:
+        prior_y = [
+            list(line.get_ydata())
+            for line in prior_axes[0].get_lines()
+            if line.get_marker() == "."
+        ]
+        np.testing.assert_allclose(prior_y[0], frame.loc[frame.index < 3, "cedar"])
+        np.testing.assert_allclose(prior_y[1], frame.loc[frame.index >= 3, "cedar"])
+    finally:
+        plt.close(prior_fig)
+
+    only_frame, only_controls, only_treated = _panel_with_known_post_impacts(
+        {"only": 7.0}
+    )
+    only = _finalize_with_equal_donor_weights(only_frame, only_controls, only_treated)
+    only_fig, only_axes = only.plot(show=False)
+    try:
+        assert only_axes[0].get_title().startswith("SDiD: ATT =")
+        assert "pooled" not in only_axes[0].get_title()
+    finally:
+        plt.close(only_fig)
+
+
+def _hand_tau(
+    frame: pd.DataFrame,
+    treatment_time: int,
+    omega: np.ndarray,
+    lam: np.ndarray,
+) -> float:
+    """Double difference on ``index < treatment_time``, in ``datapre`` order."""
+    pre = frame[frame.index < treatment_time]
+    post = frame[frame.index >= treatment_time]
+    controls = ["a", "b"]
+
+    def gaps(part: pd.DataFrame) -> np.ndarray:
+        return part["treated"].to_numpy() - part[controls].to_numpy() @ omega
+
+    return float(gaps(post).mean() - lam @ gaps(pre))
+
+
+def _panel_for_index(times: list[int]) -> pd.DataFrame:
+    """Panel whose gap depends on the time label, not the stored row.
+
+    With ``omega = [0.25, 0.75]`` and ``omega0 = 0``, ``Delta_t`` equals the
+    planted gap. Pre-period gaps are not constant, so a non-uniform lambda
+    disagrees across stored order, time-sorted order, and ``datapre`` order.
+    """
+    gap_by_time = {0: 1.0, 1: 2.0, 2: 4.0, 3: 5.0, 4: 5.0, 5: 5.0}
+    level_by_time = {
+        0: (1.0, 3.0),
+        1: (2.0, 4.0),
+        2: (3.0, 5.0),
+        3: (4.0, 8.0),
+        4: (5.0, 9.0),
+        5: (6.0, 10.0),
+    }
+    omega = np.array([0.25, 0.75])
+    records = []
+    for t in times:
+        a, b = level_by_time[t]
+        records.append(
+            {
+                "a": a,
+                "b": b,
+                "treated": float(omega @ np.array([a, b]) + gap_by_time[t]),
+            }
+        )
+    return pd.DataFrame(records, index=times)
+
+
+def _inject_and_finalize(
+    exp: SyntheticDifferenceInDifferences, lam: np.ndarray
+) -> None:
+    posterior = xr.Dataset(
+        {
+            "omega": (("chain", "draw", "coeffs"), np.array([[[0.25, 0.75]]])),
+            "lam": (
+                ("chain", "draw", "obs_ind"),
+                np.asarray(lam, dtype=float).reshape(1, 1, -1),
+            ),
+            "omega0": (("chain", "draw"), np.zeros((1, 1))),
+        }
+    )
+    exp.model.idata = xr.DataTree.from_dict({"posterior": posterior})
+    exp._finalize("posterior")
+
+
+@pytest.mark.parametrize(
+    "times",
+    [
+        [5, 4, 3, 2, 1, 0],
+        [0, 5, 1, 4, 2, 3],
+        [2, 0, 5, 1, 4, 3],
+        [0, 1, 2, 3, 4, 5],
+    ],
+)
+def test_period_split_follows_time_index_not_row_position(times: list[int]) -> None:
+    """Pre-period weights follow ``index < treatment_time``, in ``datapre`` order."""
+    treatment_time = 3
+    omega = np.array([0.25, 0.75])
+    lam = np.array([0.2, 0.3, 0.5])
+    frame = _panel_for_index(times)
+    exp = SyntheticDifferenceInDifferences(
+        frame, treatment_time, ["a", "b"], ["treated"]
+    )
+    expected = _hand_tau(frame, treatment_time, omega, lam)
+    assert list(exp.datapre.index) == [t for t in times if t < treatment_time]
+
+    _inject_and_finalize(exp, lam)
+    np.testing.assert_allclose(exp.result.tau_posterior.values.reshape(-1), expected)
+
+    X, y, _coords = exp._fit_inputs()
+    np.testing.assert_allclose(y["unit"].to_numpy(), exp.datapre["treated"].to_numpy())
+    np.testing.assert_allclose(
+        X["time"].to_numpy(), exp.datapre[["a", "b"]].to_numpy().T
+    )
+    np.testing.assert_allclose(
+        y["time"].to_numpy(), exp.datapost[["a", "b"]].to_numpy().mean(axis=0)
+    )
+    np.testing.assert_array_equal(
+        exp.result.impact_post.obs_ind.values, exp.datapost.index.to_numpy()
+    )
+    post_gaps = (
+        exp.datapost["treated"].to_numpy() - exp.datapost[["a", "b"]].to_numpy() @ omega
+    )
+    np.testing.assert_allclose(
+        exp.result.impact_post.sel(treated_units="treated").values.reshape(-1),
+        post_gaps,
+    )
+
+
+def test_cited_descending_index_tau_is_five() -> None:
+    """The reported descending index returns the hand value 5, not -5."""
+    times = [5, 4, 3, 2, 1, 0]
+    a = np.array([6.0, 5.0, 4.0, 3.0, 2.0, 1.0])
+    b = np.array([10.0, 9.0, 8.0, 5.0, 4.0, 3.0])
+    omega = np.array([0.25, 0.75])
+    base = omega[0] * a + omega[1] * b
+    effect = np.array([5.0 if t >= 3 else 0.0 for t in times])
+    frame = pd.DataFrame({"a": a, "b": b, "treated": base + effect}, index=times)
+    exp = SyntheticDifferenceInDifferences(frame, 3, ["a", "b"], ["treated"])
+    _inject_and_finalize(exp, np.array([1 / 3, 1 / 3, 1 / 3]))
+    np.testing.assert_allclose(exp.result.tau_posterior.values.reshape(-1), 5.0)
+    np.testing.assert_allclose(
+        exp.result.impact_post.sel(treated_units="treated").values.reshape(-1),
+        [5.0, 5.0, 5.0],
+    )
+    assert list(exp.result.impact_post.obs_ind.values) == [5, 4, 3]
+    assert list(exp.datapre.index) == [2, 1, 0]
+
+
+def test_sorted_index_keeps_current_tau() -> None:
+    """A sorted index keeps the tau the positional split already returned."""
+    times = [0, 1, 2, 3, 4, 5]
+    a = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    b = np.array([3.0, 4.0, 5.0, 8.0, 9.0, 10.0])
+    omega = np.array([0.25, 0.75])
+    base = omega[0] * a + omega[1] * b
+    effect = np.array([5.0 if t >= 3 else 0.0 for t in times])
+    frame = pd.DataFrame({"a": a, "b": b, "treated": base + effect}, index=times)
+    exp = SyntheticDifferenceInDifferences(frame, 3, ["a", "b"], ["treated"])
+    _inject_and_finalize(exp, np.array([1 / 3, 1 / 3, 1 / 3]))
+    np.testing.assert_allclose(exp.result.tau_posterior.values.reshape(-1), 5.0)

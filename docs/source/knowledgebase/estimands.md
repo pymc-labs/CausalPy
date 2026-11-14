@@ -131,6 +131,8 @@ See the [Synthetic Control section of quasi_dags](quasi_dags.ipynb#synthetic-con
 
 **Interpretation note**: The effect is specific to the treated unit and time period. Generalization requires additional assumptions.
 
+Interactive fixed effects and augmented synthetic control target the same unit-time untreated-path contrast, with a different counterfactual construction; see the {doc}`interactive fixed-effects <../notebooks/interactive-fixed-effects-pymc>`, {doc}`augmented synthetic control <../notebooks/augmented-synthetic-control-pymc>`, and {doc}`comparison <../notebooks/comparing-bayesian-synthetic-control-pymc>` how-tos.
+
 ---
 
 ### Regression Discontinuity

@@ -120,12 +120,21 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         """Build design matrices for the propensity score model.
 
         Uses the patsy formula stored in ``self.formula`` to construct treatment
-        and covariate matrices from ``self.data``.  Also creates an augmented
-        design matrix (``self.X_outcome``) that includes the treatment indicator,
-        for use with doubly-robust outcome modelling.
+        and covariate matrices from ``self.data``. Patsy drops rows that are
+        incomplete for that formula and keeps the rest in their original order.
+        ``self.y`` is those same stored rows, taken by position. The caller's
+        index is not used to align outcomes with propensities. Also creates an
+        augmented design matrix (``self.X_outcome``) that includes the treatment
+        indicator, for use with doubly-robust outcome modelling.
         """
+        # Positional index: the dataframe return then reports kept row positions
+        # in stored order. Aligning ``self.y`` by label would pair a propensity
+        # with another unit's outcome.
+        positional = self.data.set_axis(pd.RangeIndex(len(self.data)))
         try:
-            t, X = build_formula_matrices(self.formula, self.data)
+            t, X = build_formula_matrices(
+                self.formula, positional, return_type="dataframe"
+            )
         except PatsyError as err:
             raise DataException(
                 f"Unable to evaluate propensity formula: {err}"
@@ -134,7 +143,8 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
         self.t, self.X = np.asarray(t), np.asarray(X)
-        self.y = self.data[self.outcome_variable]
+        kept_rows = np.asarray(X.index)
+        self.y = np.asarray(self.data[self.outcome_variable])[kept_rows]
 
         COORDS = {"obs_ind": list(range(self.X.shape[0])), "coeffs": self.labels}
         self.coords = COORDS
@@ -248,7 +258,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         ps = self._prepare_ps(ps)  # <--- Safety Check
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
-        X[self.outcome_variable] = self.y
+        X[self.outcome_variable] = np.asarray(self.y)
         t = self.t.flatten()
         p_of_t = np.mean(t)
         X["i_ps"] = np.where(t == 1, (p_of_t / X["ps"]), (1 - p_of_t) / (1 - X["ps"]))
@@ -289,7 +299,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         ps = self._prepare_ps(ps)  # <--- Safety Check
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
-        X[self.outcome_variable] = self.y
+        X[self.outcome_variable] = np.asarray(self.y)
         t = self.t.flatten()
         X["ps"] = np.where(t, X["ps"], 1 - X["ps"])
         X["i_ps"] = 1 / X["ps"]
@@ -329,7 +339,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         ps = self._prepare_ps(ps)  # <--- Safety Check
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
-        X[self.outcome_variable] = self.y
+        X[self.outcome_variable] = np.asarray(self.y)
         t = self.t.flatten()
         X["i_ps"] = np.where(t, (1 - X["ps"]) * t, X["ps"] * (1 - t))
         n_ntrt = (1 - t[t == 0]) * X[t == 0]["i_ps"]
@@ -373,17 +383,18 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         X = pd.DataFrame(self.X, columns=self.labels)
         X["ps"] = ps
         t = self.t.flatten()
+        outcome = np.asarray(self.y).reshape(-1)
         m0 = sk_lin_reg(fit_intercept=False).fit(
-            X[t == 0].astype(float), self.y[t == 0]
+            X[t == 0].astype(float), outcome[t == 0]
         )
         m1 = sk_lin_reg(fit_intercept=False).fit(
-            X[t == 1].astype(float), self.y[t == 1]
+            X[t == 1].astype(float), outcome[t == 1]
         )
         m0_pred = m0.predict(X)
         m1_pred = m1.predict(X)
         ## Compromise between outcome and treatment assignment model
-        weighted_outcome0 = (1 - t) * (self.y - m0_pred) / (1 - X["ps"]) + m0_pred
-        weighted_outcome1 = t * (self.y - m1_pred) / X["ps"] + m1_pred
+        weighted_outcome0 = (1 - t) * (outcome - m0_pred) / (1 - X["ps"]) + m0_pred
+        weighted_outcome1 = t * (outcome - m1_pred) / X["ps"] + m1_pred
         return weighted_outcome0, weighted_outcome1, None, None
 
     def _compute_ate_robust(
