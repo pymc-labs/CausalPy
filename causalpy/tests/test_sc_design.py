@@ -144,6 +144,8 @@ def test_groups_two_sided_and_unsupported_estimators_fail_before_fitting(monkeyp
     history = _history()
     with pytest.raises(TypeError, match="Groups are not supported"):
         SyntheticControlPlanner(history, [UNIT], CONTROLS, DECISION)
+    with pytest.raises(TypeError, match="sequence of unit-name strings"):
+        SyntheticControlPlanner(history, UNIT, "abc", DECISION)
     with pytest.raises(ValueError, match="Two-sided decisions are not supported"):
         DecisionRule("two-sided", "cumulative", 0.0, 0.95)
     with pytest.raises(ValueError, match="Unsupported estimator"):
@@ -203,6 +205,76 @@ def test_declared_relative_floor_replaces_the_scale_rule(monkeypatch):
     assert result.summary()["detected"].isna().all()
 
 
+def test_zero_training_scale_rejects_relative_lifts_unless_floor_is_declared(
+    monkeypatch,
+):
+    calls = []
+
+    def reject_fit(*args, **kwargs):
+        calls.append("fit")
+        raise AssertionError("undefined relative baseline reached a fit")
+
+    monkeypatch.setattr(SyntheticControl, "fit", reject_fit)
+    zero = _history()
+    zero.loc[:, UNIT] = 0.0
+    zero.loc[zero.index[-1], UNIT] = 1e-9
+    with pytest.raises(ValueError, match="strictly positive"):
+        _planner(zero).evaluate(durations=[1], relative_lifts=[0.1])
+    spiked = _history()
+    spiked.loc[:, UNIT] = 0.0
+    spiked.loc[spiked.index[0], UNIT] = 100.0
+    spiked.loc[spiked.index[-1], UNIT] = 1e-9
+    with pytest.raises(ValueError, match="strictly positive"):
+        _planner(spiked).evaluate(durations=[1], relative_lifts=[0.1])
+    assert calls == []
+
+    def stop(self, **kwargs):
+        calls.append("fit")
+        raise RuntimeError("counted")
+
+    monkeypatch.setattr(SyntheticControl, "fit", stop)
+    opened = _history()
+    opened.loc[:, UNIT] = 0.0
+    opened.loc[opened.index[-1], UNIT] = 1e-9
+    result = _planner(opened, relative_floor=0.0).evaluate(
+        durations=[1], relative_lifts=[0.1]
+    )
+    assert calls == ["fit"]
+    assert result.status == "fit-failed"
+    signed = opened.copy()
+    signed.loc[signed.index[-1], UNIT] = -1e-9
+    with pytest.raises(ValueError, match="undefined"):
+        _planner(signed, relative_floor=0.0).evaluate(
+            durations=[1], relative_lifts=[0.1]
+        )
+
+
+def test_nonzero_threshold_does_not_decide_the_other_estimand():
+    baseline = xr.DataArray(
+        np.zeros((1, 1, 4)),
+        dims=("chain", "draw", "obs_ind"),
+        coords={"obs_ind": range(4)},
+    )
+    observed = xr.DataArray(np.ones(4), dims="obs_ind", coords={"obs_ind": range(4)})
+    decision = DecisionRule("positive", "cumulative", 5.0, 0.9)
+    scores = _score_translated_lifts(
+        baseline_impact=baseline,
+        observed=observed,
+        counterfactual=xr.zeros_like(baseline),
+        relative_lifts=None,
+        absolute_lifts=(2.0,),
+        decision=decision,
+    )
+    by_estimand = {score.estimand: score for score in scores}
+    assert by_estimand["cumulative"].truth == pytest.approx(8.0)
+    assert by_estimand["cumulative"].detected is True
+    assert by_estimand["cumulative"].tail_probability == pytest.approx(1.0)
+    assert by_estimand["average"].truth == pytest.approx(2.0)
+    assert by_estimand["average"].detected is None
+    assert by_estimand["average"].tail_probability is None
+    assert by_estimand["average"].mean == pytest.approx(2.0)
+
+
 def test_failed_fit_does_not_report_a_detection(monkeypatch):
     def fail(self, **kwargs):
         raise RuntimeError("sampling failed")
@@ -257,7 +329,11 @@ def test_translation_coverage_is_not_a_detection_curve():
         assert score.truth_covers is _covers(baseline_effect, 0.0)
         assert score.counterfactual is counterfactual
         coverages.add(score.truth_covers)
-        detections.add(score.detected)
+        if score.estimand == decision.estimand:
+            detections.add(score.detected)
+        else:
+            assert score.detected is None
+            assert score.tail_probability is None
     assert len(coverages) == 1
     assert detections == {False, True}
 
@@ -342,8 +418,16 @@ def test_rehearsal_matches_the_analysis_fit_and_the_oracle(fitted_rehearsal):
     table = result.summary()
     assert {"truth_covers", "detected", "estimand", "status"} <= set(table.columns)
     assert set(table["status"]) == {"historical-descriptive"}
-    fig, _ = result.plot()
+    other = table["estimand"] != result.decision.estimand
+    assert table.loc[other, "detected"].isna().all()
+    assert table.loc[other, "tail_probability"].isna().all()
+    assert table.loc[~other, "detected"].notna().all()
+    fig, ax = result.plot(estimand="average")
+    assert len(ax.lines) == 1
+    plt.close(fig)
+    fig, ax = result.plot()
     assert "not a detection curve" in fig.axes[0].get_title()
+    assert len(ax.lines) == 2
     plt.close(fig)
 
 

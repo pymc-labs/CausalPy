@@ -19,11 +19,14 @@ absolute and relative lift grid. Construction and :meth:`screen` do not
 sample. This is not a power curve, not a second probability engine, and not
 :class:`~causalpy.checks.placebo_in_time.PlaceboInTime`.
 
-The draft design-only methods previously attached to
+The draft design surface previously attached to
 :class:`~causalpy.experiments.synthetic_control.SyntheticControl`
 (``from_pre_period``, ``validate_design``, ``donor_pool_quality``, and
-``power_analysis``) are not part of this API. ``power_analysis`` is not a
-compatibility promise.
+``power_analysis``) is not part of this API. ``power_analysis`` is not a
+compatibility promise. ``DressRehearsalCheck``, ``causalpy.experiments.sc_results``,
+and the tests for the noise-injection curve, the ``CheckResult`` wrapper,
+posterior-weight donor quality, and ``from_pre_period`` were dropped rather
+than adapted.
 """
 
 from collections.abc import Sequence
@@ -144,7 +147,9 @@ class LiftScore:
     on this horizon, including the paired null. ``effect`` is that path
     translated to this lift and aggregated to ``estimand``. ``truth_covers``
     reports whether the translated HDI contains the injected truth. It is not
-    ``detected``.
+    ``detected``. ``tail_probability`` and ``detected`` are empty unless this
+    score's estimand is the declared decision. An empty detection is not a
+    non-detection.
     """
 
     effect_scale: Literal["absolute", "relative"]
@@ -156,8 +161,8 @@ class LiftScore:
     hdi_prob: float
     truth: float
     truth_covers: bool
-    tail_probability: float
-    detected: bool
+    tail_probability: float | None
+    detected: bool | None
     effect: np.ndarray
     counterfactual: xr.DataArray
 
@@ -314,8 +319,12 @@ class PlannerResult:
                         "hdi_upper": score.hdi_upper,
                         "truth": score.truth,
                         "truth_covers": score.truth_covers,
-                        "tail_probability": score.tail_probability,
-                        "detected": score.detected,
+                        "tail_probability": (
+                            pd.NA
+                            if score.tail_probability is None
+                            else score.tail_probability
+                        ),
+                        "detected": pd.NA if score.detected is None else score.detected,
                         "decision_estimand": self.decision.estimand,
                         "status": horizon.status,
                         "fit_error": pd.NA,
@@ -392,8 +401,10 @@ class PlannerResult:
             label=f"{chosen.scores[0].hdi_prob:.0%} translated HDI",
         )
         ax.plot(lifts, means, marker="o", label="translated mean")
-        ax.axhline(self.decision.threshold, color="0.4", linestyle="--", linewidth=1)
         if shown_estimand == self.decision.estimand:
+            ax.axhline(
+                self.decision.threshold, color="0.4", linestyle="--", linewidth=1
+            )
             detected = [score for score in scores if score.detected]
             if detected:
                 ax.scatter(
@@ -515,6 +526,13 @@ class SyntheticControlPlanner:
             raise ValueError(
                 "min_donor_correlation must be between -1 and 1, "
                 f"got {min_donor_correlation}."
+            )
+        if isinstance(control_units, (str, bytes)) or not isinstance(
+            control_units, Sequence
+        ):
+            raise TypeError(
+                "control_units must be a sequence of unit-name strings, "
+                "not a single string."
             )
         donors = tuple(control_units)
         if not donors:
@@ -887,6 +905,16 @@ def _require_relative_baseline(
     holdout_index: pd.Index,
 ) -> float:
     """Reject a relative lift whose observed-holdout denominator is undefined."""
+    scale = float(np.median(np.abs(training_observed)))
+    if declared_floor is None and not (_RELATIVE_FLOOR_SCALE * scale) > 0.0:
+        raise ValueError(
+            "Relative effects are undefined because the training outcomes do not "
+            "set a strictly positive near-zero floor. The scale rule is "
+            f"{_RELATIVE_FLOOR_SCALE:g} times the median absolute training outcome "
+            f"({scale}). Declare relative_floor to choose a convention. "
+            "relative_floor=0 accepts every strictly positive holdout and still "
+            "rejects non-positive outcomes. No signed-baseline convention is offered."
+        )
     floor = _applied_relative_floor(training_observed, declared_floor)
     invalid = ~np.isfinite(observed) | (observed <= 0.0) | (observed <= floor)
     if np.any(invalid):
@@ -941,9 +969,10 @@ def _score_translated_lifts(
     """Translate one fitted impact path without refitting.
 
     Adding a constant to every draw and to the injected truth leaves HDI
-    coverage unchanged. Coverage is therefore not a detection curve: the
-    decision reads the tail probability of the translated draws, not whether
-    the interval contains the truth.
+    coverage unchanged. Coverage is therefore not a detection curve. The
+    decision reads the tail probability of the translated draws for its own
+    estimand only. The other estimand keeps its translated interval and leaves
+    detection empty.
     """
 
     scores: list[LiftScore] = []
@@ -969,10 +998,15 @@ def _score_translated_lifts(
                 )
                 lower, upper = hdi_bounds(effect, prob=HDI_PROB, dim=("chain", "draw"))
                 flat = np.asarray(effect.values, dtype=float).reshape(-1)
-                if decision.direction == "positive":
-                    tail = float(np.mean(flat > decision.threshold))
+                if estimand == decision.estimand:
+                    if decision.direction == "positive":
+                        tail = float(np.mean(flat > decision.threshold))
+                    else:
+                        tail = float(np.mean(flat < decision.threshold))
+                    detected: bool | None = bool(tail >= decision.probability)
                 else:
-                    tail = float(np.mean(flat < decision.threshold))
+                    tail = None
+                    detected = None
                 scores.append(
                     LiftScore(
                         effect_scale=scale,  # type: ignore[arg-type]
@@ -985,7 +1019,7 @@ def _score_translated_lifts(
                         truth=truth,
                         truth_covers=bool(lower <= truth <= upper),
                         tail_probability=tail,
-                        detected=bool(tail >= decision.probability),
+                        detected=detected,
                         effect=flat.copy(),
                         counterfactual=counterfactual,
                     )
