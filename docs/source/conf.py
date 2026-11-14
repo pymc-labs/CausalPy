@@ -9,6 +9,7 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 
+import importlib
 import os
 import sys
 from pathlib import Path
@@ -16,6 +17,7 @@ from pathlib import Path
 from causalpy.version import __version__
 
 sys.path.insert(0, os.path.abspath("../"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 
 # Generate gallery before building docs
@@ -198,46 +200,29 @@ bibtex_reference_style = "author_year"
 
 
 # -- Napoleon (NumPy-style docstring) config ----------------------------------
-# We use sphinx.ext.napoleon to parse NumPy-style docstrings. ``napoleon_preprocess_types``
-# turns type strings in ``Parameters``/``Returns`` blocks into cross-references (resolved
-# via intersphinx), so ``matplotlib.figure.Figure`` renders as a link rather than plain
-# text. ``napoleon_type_aliases`` lets docstrings use short forms (e.g. ``Figure``) and
-# have them resolve to the fully-qualified target.
+# sphinx.ext.napoleon parses NumPy-style docstrings. ``napoleon_preprocess_types``
+# turns type tokens into cross-references. Sphinx 9 splits commas inside brackets
+# before alias lookup, so ``list[matplotlib.axes.Axes]`` never matches an alias.
+# ``napoleon_types.normalize_docstring_lines`` rewrites those fields on the lines
+# Napoleon is about to parse. Source docstrings stay unchanged.
+_napoleon_types = importlib.import_module("napoleon_types")
 napoleon_preprocess_types = True
 napoleon_type_aliases = {
-    # matplotlib
-    "Figure": ":class:`~matplotlib.figure.Figure`",
-    "Axes": ":class:`~matplotlib.axes.Axes`",
-    "matplotlib.figure.Figure": ":class:`~matplotlib.figure.Figure`",
-    "matplotlib.axes.Axes": ":class:`~matplotlib.axes.Axes`",
-    # numpy
-    "ndarray": ":class:`~numpy.ndarray`",
-    "np.ndarray": ":class:`~numpy.ndarray`",
-    # pandas
-    "pd.DataFrame": ":class:`~pandas.DataFrame`",
-    "pd.Series": ":class:`~pandas.Series`",
-    "pd.Index": ":class:`~pandas.Index`",
-    "pd.Timestamp": ":class:`~pandas.Timestamp`",
-    "DataFrame": ":class:`~pandas.DataFrame`",
-    "Series": ":class:`~pandas.Series`",
-    # xarray
-    "xarray.DataArray": ":class:`~xarray.DataArray`",
-    "xarray.Dataset": ":class:`~xarray.Dataset`",
-    "DataArray": ":class:`~xarray.DataArray`",
-    "Dataset": ":class:`~xarray.Dataset`",
-    # arviz
-    "InferenceData": ":class:`~arviz.InferenceData`",
-    "az.InferenceData": ":class:`~arviz.InferenceData`",
-    "arviz.InferenceData": ":class:`~arviz.InferenceData`",
-    # pymc / pytensor
-    "Model": ":class:`~pymc.Model`",
-    "pm.Model": ":class:`~pymc.Model`",
-    "TensorVariable": ":class:`~pytensor.tensor.TensorVariable`",
-    "RandomVariable": ":class:`~pytensor.tensor.random.RandomVariable`",
-    # glossary terms
+    **_napoleon_types.TYPE_ALIASES,
     "tensor_like": ":term:`tensor_like`",
     "unnamed_distribution": ":term:`unnamed_distribution`",
 }
+
+
+def setup(app):
+    """Rewrite type fields before Napoleon tokenizes them."""
+    app.connect(
+        "autodoc-process-docstring",
+        _napoleon_types.normalize_docstring_lines,
+        priority=400,
+    )
+    return {"parallel_read_safe": True, "parallel_write_safe": True}
+
 
 # -- sphinx-autodoc-typehints config ------------------------------------------
 # Don't add a separate ``Return type`` section; the type appears alongside the
