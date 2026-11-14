@@ -19,7 +19,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
-from patsy import dmatrix
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
@@ -105,61 +104,6 @@ def test_ramp_transform_datetime():
     # Ramp in days: 0 for days before, then 0, 1, 2, 3, 4 for days at/after threshold
     expected = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 2.0, 3.0, 4.0])
     np.testing.assert_array_equal(result, expected)
-
-
-@pytest.mark.skip(
-    reason="Known Python 3.13 + patsy + pytest interaction bug causes INTERNAL ERROR"
-)
-def test_transforms_with_patsy_dmatrix():
-    """Test that step and ramp work correctly with patsy dmatrix.
-
-    Note: This test works correctly but is skipped due to a pytest INTERNALERROR
-    when patsy raises errors in Python 3.13. The functionality is covered by
-    integration tests that use PiecewiseITS with formulas.
-    """
-    df = pd.DataFrame({"t": np.arange(100), "y": np.random.randn(100)})
-
-    mat = dmatrix("1 + t + step(t, 50) + ramp(t, 50)", df)
-
-    assert mat.shape[1] == 4  # Intercept, t, step, ramp
-    assert "step(t, 50)" in mat.design_info.column_names
-    assert "ramp(t, 50)" in mat.design_info.column_names
-
-    # Verify step values
-    step_col = mat[:, mat.design_info.column_names.index("step(t, 50)")]
-    assert np.all(step_col[:50] == 0)
-    assert np.all(step_col[50:] == 1)
-
-    # Verify ramp values
-    ramp_col = mat[:, mat.design_info.column_names.index("ramp(t, 50)")]
-    assert np.all(ramp_col[:50] == 0)
-    np.testing.assert_array_equal(ramp_col[50:], np.arange(50))
-
-
-@pytest.mark.skip(
-    reason="Known Python 3.13 + patsy + pytest interaction bug causes INTERNAL ERROR"
-)
-def test_transforms_with_patsy_datetime():
-    """Test that step and ramp work with datetime in patsy.
-
-    Note: This test works correctly but is skipped due to a pytest INTERNALERROR
-    when patsy raises errors in Python 3.13. The functionality is covered by
-    integration tests that use PiecewiseITS with datetime formulas.
-    """
-    df = pd.DataFrame(
-        {
-            "date": pd.date_range("2020-01-01", periods=100, freq="D"),
-            "y": np.random.randn(100),
-        }
-    )
-
-    mat = dmatrix("1 + step(date, '2020-02-20') + ramp(date, '2020-02-20')", df)
-
-    assert mat.shape[1] == 3  # Intercept, step, ramp
-    # Day 50 is 2020-02-20 (0-indexed)
-    step_col = mat[:, mat.design_info.column_names.index("step(date, '2020-02-20')")]
-    assert np.all(step_col[:50] == 0)
-    assert np.all(step_col[50:] == 1)
 
 
 # ==============================================================================

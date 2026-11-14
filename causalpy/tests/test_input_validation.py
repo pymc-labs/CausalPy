@@ -65,16 +65,6 @@ def test_did_validation_post_treatment_formula():
             model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         )
 
-    # Test 2: Missing post_treatment variable in formula (duplicate test)
-    with pytest.raises(FormulaException):
-        _ = cp.DifferenceInDifferences(
-            df,
-            formula="y ~ 1 + group*post_SOMETHING",
-            time_variable_name="t",
-            group_variable_name="group",
-            model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-        )
-
     # Test 3: Custom post_treatment_variable_name but formula uses different name
     with pytest.raises(FormulaException):
         _ = cp.DifferenceInDifferences(
@@ -860,6 +850,20 @@ def setup_regression_discontinuity_data(threshold=0.5):
     treated = np.where(x > threshold, 1, 0)
     y = 2 * x + treated + np.random.normal(0, 1, 100)
     return pd.DataFrame({"x": x, "treated": treated, "y": y})
+
+
+def test_rd_negative_epsilon_raises():
+    """epsilon=-1 raises ValueError, the same failure RegressionKink already has."""
+    threshold = 0.5
+    df = setup_regression_discontinuity_data(threshold)
+    with pytest.raises(ValueError, match="Epsilon must be greater than zero"):
+        cp.RegressionDiscontinuity(
+            df,
+            formula="y ~ 1 + x + treated",
+            model=LinearRegression(),
+            treatment_threshold=threshold,
+            epsilon=-1,
+        )
 
 
 def test_regression_discontinuity_int_treatment():
