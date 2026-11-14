@@ -20,9 +20,11 @@ work correctly and that the dispatch mechanism in get_ate functions as expected.
 """
 
 import numpy as np
+import pandas as pd
 import pytest
 
 import causalpy as cp
+from causalpy.custom_exceptions import DataException
 
 
 @pytest.fixture(scope="module")
@@ -46,7 +48,7 @@ def ipw_result(mock_pymc_sample):
         outcome_variable="outcome",
         weighting_scheme="robust",
         model=cp.pymc_models.PropensityScore(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
     return result
 
 
@@ -54,6 +56,48 @@ def ipw_result(mock_pymc_sample):
 def propensity_scores(ipw_result):
     """Extract propensity scores from the first posterior sample."""
     return ipw_result.idata["posterior"]["p"].stack(z=("chain", "draw"))[:, 0].values
+
+
+def test_ipw_accepts_binary_transformed_treatment(mock_pymc_sample):
+    """IPW validates and fits the treatment vector produced by Patsy."""
+    df = cp.load_data("nhefs")
+    result = cp.InversePropensityWeighting(
+        df,
+        formula="I(1 - trt) ~ 1 + age + race",
+        outcome_variable="outcome",
+        weighting_scheme="robust",
+        model=cp.pymc_models.PropensityScore(
+            sample_kwargs={"tune": 5, "draws": 5, "chains": 1}
+        ),
+    )
+
+    np.testing.assert_array_equal(result.t.ravel(), 1 - df["trt"].to_numpy())
+
+
+def test_ipw_rejects_nonbinary_transformed_treatment():
+    """A transformed LHS must still satisfy the Bernoulli model's 0/1 contract."""
+    df = cp.load_data("nhefs")
+
+    with pytest.raises(DataException, match="0-1 binary"):
+        cp.InversePropensityWeighting(
+            df,
+            formula="center(trt) ~ 1 + age + race",
+            outcome_variable="outcome",
+            weighting_scheme="robust",
+        )
+
+
+def test_ipw_missing_treatment_expression_raises_data_exception():
+    """Missing formula inputs retain a CausalPy validation error."""
+    df = cp.load_data("nhefs")
+
+    with pytest.raises(DataException, match="Unable to evaluate propensity formula"):
+        cp.InversePropensityWeighting(
+            df,
+            formula="missing_treatment ~ 1 + age + race",
+            outcome_variable="outcome",
+            weighting_scheme="robust",
+        )
 
 
 class TestComputeAteRobust:
@@ -209,14 +253,71 @@ class TestGetAteDispatch:
         assert np.isclose(ate_list[1], trt, equal_nan=True)
         assert np.isclose(ate_list[2], ntrt, equal_nan=True)
 
-    def test_get_ate_with_unknown_method_falls_back_to_doubly_robust(self, ipw_result):
-        """Verify get_ate with unknown method falls back to doubly_robust."""
-        ate_list = ipw_result.get_ate(0, ipw_result.idata, method="unknown_method")
-        ps = ipw_result.idata["posterior"]["p"].stack(z=("chain", "draw"))[:, 0].values
-        ate, trt, ntrt = ipw_result._compute_ate_doubly_robust(ps)
+    def test_get_ate_with_unknown_method_raises(self):
+        """An unknown weighting method raises instead of changing the estimand."""
+        df = pd.DataFrame({"trt": [0, 1], "x": [0.0, 1.0], "outcome": [1.0, 2.0]})
+        experiment = cp.InversePropensityWeighting(
+            df,
+            formula="trt ~ 1 + x",
+            outcome_variable="outcome",
+            weighting_scheme="robust",
+        )
+        with pytest.raises(ValueError, match="unknown_method"):
+            experiment.get_ate(0, experiment.idata, method="unknown_method")
 
-        assert isinstance(ate_list, list)
-        assert len(ate_list) == 3
-        assert np.isclose(ate_list[0], ate, equal_nan=True)
-        assert np.isclose(ate_list[1], trt, equal_nan=True)
-        assert np.isclose(ate_list[2], ntrt, equal_nan=True)
+
+class TestDesignInfoAttributes:
+    """Regression for #835: ``_t_design_info`` must hold the treatment design
+    (left-hand side of the formula) and ``_x_design_info`` must hold the
+    covariate design (right-hand side). The previous implementation assigned
+    both to ``_t_design_info``, silently overwriting the treatment side."""
+
+    def test_t_design_info_is_treatment_side(self, ipw_result):
+        """The treatment side of ``trt ~ 1 + age + race`` is the lone column ``trt``."""
+        assert ipw_result._t_design_info.column_names == ["trt"]
+
+    def test_x_design_info_is_covariate_side(self, ipw_result):
+        """The covariate side mirrors the right-hand side of the formula."""
+        assert hasattr(ipw_result, "_x_design_info")
+        assert "age" in ipw_result._x_design_info.column_names
+        assert "race" in ipw_result._x_design_info.column_names
+
+    def test_t_and_x_design_info_are_distinct(self, ipw_result):
+        """The two attributes must point to different design objects."""
+        assert ipw_result._t_design_info is not ipw_result._x_design_info
+
+
+def _ipw_without_fit(X, y, t, labels):
+    """Build an IPW instance whose weighting methods can run without MCMC."""
+    ipw = cp.InversePropensityWeighting.__new__(cp.InversePropensityWeighting)
+    ipw.X = np.asarray(X, dtype=float)
+    ipw.labels = list(labels)
+    ipw.y = np.asarray(y, dtype=float)
+    ipw.t = np.asarray(t, dtype=float).reshape(-1, 1)
+    ipw.outcome_variable = "y"
+    return ipw
+
+
+def test_raw_and_robust_ate_agree_for_binary_treatment():
+    """Raw and robust IPW match for binary treatment, including unequal arms.
+
+    The robust scheme multiplies by the treatment rate and divides by the arm
+    count. Those factors cancel, so the ATE and both arm means match raw IPW.
+    """
+    rng = np.random.default_rng(0)
+    n = 40
+    X = np.column_stack([np.ones(n), rng.normal(size=(n, 2))])
+    y = rng.normal(size=n)
+    labels = ["Intercept", "x1", "x2"]
+    designs = {
+        "equal_arms": np.array([1.0, 0.0] * (n // 2)),
+        "unequal_arms": np.array([1.0] * 10 + [0.0] * 30),
+    }
+    for name, t in designs.items():
+        ps = np.clip(rng.uniform(0.05, 0.95, size=n), 0.05, 0.95)
+        ipw = _ipw_without_fit(X, y, t, labels)
+        raw = ipw._compute_ate_raw(ps)
+        robust = ipw._compute_ate_robust(ps)
+        np.testing.assert_allclose(
+            raw, robust, atol=1e-12, err_msg=f"{name} raw and robust differ"
+        )

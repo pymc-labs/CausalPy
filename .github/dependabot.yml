@@ -14,3 +14,27 @@ updates:
       actions:
         patterns:
           - "*"
+  # Keep uv.lock from silently going stale between manual `uv lock` runs.
+  # This only opens PRs for out-of-range updates that pyproject.toml allows;
+  # it does not run `uv lock --upgrade` on a schedule. A weekly full-upgrade
+  # job (`uv sync --upgrade` against a single CI leg) is a follow-up, tracked
+  # alongside issue #1174.
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    cooldown:
+      default-days: 7
+    labels:
+      - "devops"
+      - "no releasenotes"
+    # pandas2 must stay `>=2.3,<3`. A semver-major pandas update widens that cap and resolves pandas 3 on the pandas 2 CI leg. Pandas 3 updates belong on the pandas3 group, not a Dependabot major bump.
+    ignore:
+      - dependency-name: "pandas"
+        update-types:
+          - "version-update:semver-major"
+    # Group all version updates, including majors, into one lockfile resolution (#1362). Security updates remain separate.
+    groups:
+      uv:
+        patterns:
+          - "*"

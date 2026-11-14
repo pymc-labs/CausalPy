@@ -18,13 +18,18 @@ from causalpy.checks.base import Check, CheckResult
 from causalpy.checks.convex_hull import ConvexHullCheck
 from causalpy.checks.leave_one_out import LeaveOneOut
 from causalpy.checks.mccrary import McCraryDensityTest
+from causalpy.checks.operating_characteristics import (
+    AssuranceResult,
+    OperatingCharacteristics,
+    operating_characteristics,
+)
+from causalpy.checks.outcome_falsification import (
+    FalsificationResult,
+    OutcomeFalsification,
+)
 from causalpy.checks.persistence import PersistenceCheck
 from causalpy.checks.placebo_in_space import PlaceboInSpace
-from causalpy.checks.placebo_in_time import (
-    AssuranceResult,
-    PlaceboFoldResult,
-    PlaceboInTime,
-)
+from causalpy.checks.placebo_in_time import PlaceboFoldResult, PlaceboInTime
 from causalpy.checks.pre_treatment_placebo import PreTreatmentPlaceboCheck
 from causalpy.checks.prior_sensitivity import PriorSensitivity
 from causalpy.steps.sensitivity import register_default_check
@@ -35,8 +40,12 @@ __all__ = [
     "Check",
     "CheckResult",
     "ConvexHullCheck",
+    "FalsificationResult",
     "LeaveOneOut",
     "McCraryDensityTest",
+    "OutcomeFalsification",
+    "OperatingCharacteristics",
+    "operating_characteristics",
     "PersistenceCheck",
     "PlaceboFoldResult",
     "PlaceboInSpace",

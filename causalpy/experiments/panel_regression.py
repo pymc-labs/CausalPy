@@ -11,32 +11,61 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""
-Panel Regression with Fixed Effects
-"""
+"""Panel Regression with Fixed Effects."""
 
+import re
+import warnings
 from typing import Any, Literal
 
-import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import xarray as xr
 from matplotlib.gridspec import GridSpec
-from patsy import dmatrices
+from patsy import ModelDesc, NAAction
 from scipy import stats
 from sklearn.base import RegressorMixin
 
+from causalpy._arviz_compat import hdi_bound_arrays
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
+from causalpy.experiments.model_adapter import build_coords
+from causalpy.formula_utils import build_formula_matrices
+from causalpy.input_data import DataFrameLike, to_pandas
+from causalpy.plot_utils import _plot_interval_band
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
-from causalpy.utils import round_num
 
+from ._results import ResultBundle
 from .base import BaseExperiment
 
 
-class PanelRegression(BaseExperiment):
+class _KeptRowNAAction(NAAction):
+    """Record the positional rows Patsy keeps when it drops missing values."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.kept_rows: np.ndarray | None = None
+
+    def handle_NA(self, values, is_NAs, origins):
+        if is_NAs:
+            dropped = np.zeros(is_NAs[0].shape[0], dtype=bool)
+            for is_na in is_NAs:
+                dropped |= np.asarray(is_na, dtype=bool)
+            self.kept_rows = ~dropped
+        return super().handle_NA(values, is_NAs, origins)
+
+    def rows_for(self, data: pd.DataFrame, values: np.ndarray) -> np.ndarray:
+        """Return a positional mask aligned with ``data`` for ``values``."""
+        if self.kept_rows is not None:
+            return self.kept_rows
+        if len(values) == len(data):
+            return np.ones(len(data), dtype=bool)
+        raise ValueError(
+            "Patsy dropped formula rows without reporting which rows were kept."
+        )
+
+
+class PanelRegression(BaseExperiment[ResultBundle]):
     """Panel regression with fixed effects estimation.
 
     Enables panel-aware visualization and diagnostics, with support for both
@@ -44,9 +73,10 @@ class PanelRegression(BaseExperiment):
 
     Parameters
     ----------
-    data : pd.DataFrame
-        A pandas dataframe with panel data. Each row is an observation for a
-        unit at a time period.
+    data : dataframe-like
+        Panel data as any eager dataframe Narwhals supports, such as pandas,
+        Polars, or PyArrow. Each row is an observation for a unit at a time
+        period. Converted to pandas internally.
     formula : str
         A statistical model formula using patsy syntax. For the unpooled
         dummy-variable fixed-effects approach, include ``C(unit_var)`` (and
@@ -80,6 +110,55 @@ class PanelRegression(BaseExperiment):
     _group_means : dict
         Stored group means for recovering unit effects (demeaned method only).
 
+    Notes
+    -----
+    **Estimate extraction**
+
+    ``PanelRegression`` fits the formula after representing fixed effects with dummy variables or demeaning, but it does not select a treatment term or compute a single built-in causal effect. Any causal estimand is extracted from the fitted coefficient chosen by the analyst, and its interpretation depends on the formula and identification assumptions.
+
+    The demeaned transformation (de-meaning by group) removes time-invariant
+    confounders but also drops time-invariant covariates from the model. A
+    covariate with no within-unit variation is collinear with dummy-variable
+    unit fixed effects. That coefficient is reported as 0, matching the within
+    estimator, and the unit effects absorb the level. For the ``"dummies"``
+    approach (unpooled FE), individual unit effects can be extracted from the
+    coefficients. For the demeaned approach, unit effects can be recovered
+    post-hoc using the stored group means (``_group_means``), which are always
+    computed from the original (pre-demeaning) data.
+
+    This class does not yet implement hierarchical/partial-pooling fixed
+    effects. Those semantics are intentionally kept out of scope here so
+    ``fe_method="dummies"`` remains an accurate label for the current
+    unpooled estimator.
+
+    Two-way fixed effects (unit + time) control for both unit-specific and
+    time-specific unobserved heterogeneity. This is the standard approach in
+    difference-in-differences estimation.
+
+    **Balanced vs unbalanced panels**: A panel is *balanced* when every unit
+    is observed in every time period; otherwise it is *unbalanced* (e.g. unit
+    entry/exit, missing waves). When both unit and time fixed effects are
+    requested with ``fe_method="demeaned"``, sequential demeaning of the
+    constructed formula columns (first by unit, then by time) is algebraically
+    equivalent to the standard two-way within transformation only for balanced
+    panels. The interaction ``treatment:x`` is the within transform of the
+    product, not the product of the within-transformed factors. For unbalanced
+    panels, iterative alternating demeaning would be needed for exact
+    convergence; the single-pass approximation used here may introduce small
+    biases. Unbalanced panels are common in practice (e.g. firm or worker
+    panels with attrition); for heavily unbalanced data, consider checking
+    sensitivity or using dedicated FE packages that implement iterative
+    two-way demeaning (e.g. reghdfe, pyfixest).
+
+    **Lazy lifecycle**
+
+    Construction only validates inputs and builds the design matrices — no
+    sampling happens. Call :meth:`fit` to draw posterior samples (and
+    optionally :meth:`sample_prior_predictive` first for a prior predictive
+    check); every method that reads draws raises
+    :class:`~causalpy.custom_exceptions.GroupNotSampledException` until you
+    do.
+
     Examples
     --------
     Small panel with dummy variables:
@@ -110,9 +189,9 @@ class PanelRegression(BaseExperiment):
     ...     time_fe_variable="time",
     ...     fe_method="dummies",
     ...     model=cp.pymc_models.LinearRegression(
-    ...         sample_kwargs={"random_seed": 42, "progressbar": False}
+    ...         sample_kwargs={"random_seed": 42, "progressbar": False, "cores": 1}
     ...     ),
-    ... )
+    ... ).fit()
 
     Large panel with demeaned transformation:
 
@@ -140,60 +219,32 @@ class PanelRegression(BaseExperiment):
     ...     time_fe_variable="time",
     ...     fe_method="demeaned",
     ...     model=cp.pymc_models.LinearRegression(
-    ...         sample_kwargs={"random_seed": 42, "progressbar": False}
+    ...         sample_kwargs={"random_seed": 42, "progressbar": False, "cores": 1}
     ...     ),
-    ... )
-
-    Notes
-    -----
-    The demeaned transformation (de-meaning by group) removes time-invariant
-    confounders but also drops time-invariant covariates from the model. For
-    the ``"dummies"`` approach (unpooled FE), individual unit effects can be
-    extracted from the coefficients. For the demeaned approach, unit effects
-    can be recovered post-hoc using the stored group means (``_group_means``),
-    which are always computed from the original (pre-demeaning) data.
-
-    This class does not yet implement hierarchical/partial-pooling fixed
-    effects. Those semantics are intentionally kept out of scope here so
-    ``fe_method="dummies"`` remains an accurate label for the current
-    unpooled estimator.
-
-    Two-way fixed effects (unit + time) control for both unit-specific and
-    time-specific unobserved heterogeneity. This is the standard approach in
-    difference-in-differences estimation.
-
-    **Balanced vs unbalanced panels**: A panel is *balanced* when every unit
-    is observed in every time period; otherwise it is *unbalanced* (e.g. unit
-    entry/exit, missing waves). When both unit and time fixed effects are
-    requested with ``fe_method="demeaned"``, the sequential demeaning
-    (first by unit, then by time) is algebraically equivalent to the standard
-    two-way demeaned transformation only for balanced panels. For unbalanced
-    panels, iterative alternating demeaning would be needed for exact
-    convergence; the single-pass approximation used here may introduce small
-    biases. Unbalanced panels are common in practice (e.g. firm or worker
-    panels with attrition); for heavily unbalanced data, consider checking
-    sensitivity or using dedicated FE packages that implement iterative
-    two-way demeaning (e.g. reghdfe, pyfixest).
+    ... ).fit()
     """
 
     supports_ols = True
     supports_bayes = True
+    # PanelRegression stores no result bundle; fitted state is keyed off the
+    # backend and every draw-reading method guards via _resolve_group.
+    _supports_results = False
 
     def __init__(
         self,
-        data: pd.DataFrame,
+        data: DataFrameLike,
         formula: str,
         unit_fe_variable: str,
         time_fe_variable: str | None = None,
         fe_method: Literal["dummies", "demeaned"] = "dummies",
         model: PyMCModel | RegressorMixin | None = None,
-        **kwargs: dict,
     ) -> None:
         super().__init__(model=model)
 
-        # Rename the index to "obs_ind" (on original, before copying)
-        data.index.name = "obs_ind"
-        self.data = data
+        # to_pandas returns a copy, so this rename lands on ours, not the caller's dataframe.
+        pandas_data = to_pandas(data)
+        pandas_data.index.name = "obs_ind"
+        self.data = pandas_data
         self.expt_type = "Panel Regression"
         self.formula = formula
         self.unit_fe_variable = unit_fe_variable
@@ -203,20 +254,20 @@ class PanelRegression(BaseExperiment):
         # Store a copy of original data for recovering group means in demeaned
         # transformation.  Other experiment classes don't need this because
         # they don't demean the data before fitting.
-        self._original_data = data.copy()
+        self._original_data = pandas_data.copy()
 
-        # Initialize storage for group means (used in demeaned transformation)
         self._group_means: dict[str, pd.DataFrame] = {}
 
         # Pipeline (matches pattern of other experiment classes)
         self.input_validation()
 
         # Store panel dimensions (after validation confirms columns exist)
-        self.n_units = data[unit_fe_variable].nunique()
-        self.n_periods = data[time_fe_variable].nunique() if time_fe_variable else None
+        self.n_units = pandas_data[unit_fe_variable].nunique()
+        self.n_periods = (
+            pandas_data[time_fe_variable].nunique() if time_fe_variable else None
+        )
         self._build_design_matrices()
         self._prepare_data()
-        self.algorithm()
 
     def input_validation(self) -> None:
         """Validate input parameters."""
@@ -230,152 +281,256 @@ class PanelRegression(BaseExperiment):
                 f"time_fe_variable '{self.time_fe_variable}' not found in data columns"
             )
 
+        for variable in (self.unit_fe_variable, self.time_fe_variable):
+            if variable is not None and self.data[variable].isna().any():
+                raise DataException(
+                    f"Fixed-effect variable '{variable}' must not contain missing values"
+                )
+
         if self.fe_method not in ["dummies", "demeaned"]:
             raise ValueError(
                 "fe_method must be 'dummies' (unpooled fixed effects) or 'demeaned'"
             )
 
-        # Check if formula includes C(unit_var) or C(time_var) when using demeaned method
-        if (
-            self.fe_method == "demeaned"
-            and f"C({self.unit_fe_variable})" in self.formula
-        ):
-            raise ValueError(
-                f"When using fe_method='demeaned', do not include C({self.unit_fe_variable}) "
-                "in the formula. The demeaned transformation handles unit fixed effects automatically."
-            )
+        if self.fe_method == "demeaned":
+            rhs_terms = ModelDesc.from_formula(self.formula).rhs_termlist
+            for variable, effect_type in (
+                (self.unit_fe_variable, "unit"),
+                (self.time_fe_variable, "time"),
+            ):
+                if variable and any(
+                    len(term.factors) == 1
+                    and self._is_fe_factor(term.factors[0].name(), variable)
+                    for term in rhs_terms
+                ):
+                    raise ValueError(
+                        f"When using fe_method='demeaned', do not include C({variable}) "
+                        f"in the formula. The demeaned transformation handles {effect_type} "
+                        "fixed effects automatically."
+                    )
 
-        if (
-            self.fe_method == "demeaned"
-            and self.time_fe_variable
-            and f"C({self.time_fe_variable})" in self.formula
-        ):
-            raise ValueError(
-                f"When using fe_method='demeaned', do not include C({self.time_fe_variable}) "
-                "in the formula. The demeaned transformation handles time fixed effects automatically."
+    @staticmethod
+    def _is_fe_factor(factor_name: str, variable: str) -> bool:
+        """Whether a Patsy factor categorically encodes the given variable.
+
+        ``C(variable)`` and ``C(Q("variable"))`` (either quote) are the same
+        factor. A spaced column name has no other Patsy form. Whitespace and a
+        coding option such as ``Treatment`` do not make it a different factor.
+        """
+        escaped = re.escape(variable)
+        quoted = r"Q\(\s*(['\"])" + escaped + r"\1\s*\)"
+        return (
+            re.match(
+                rf"^C\(\s*(?:{escaped}|{quoted})\s*(?:,|\))",
+                factor_name,
             )
+            is not None
+        )
+
+    def _get_fe_labels(self, variable: str) -> list[str]:
+        """Return labels belonging to the variable's plain fixed-effect term."""
+        labels: list[str] = []
+        for term in self._x_design_info.terms:
+            if len(term.factors) == 1 and self._is_fe_factor(
+                term.factors[0].name(), variable
+            ):
+                labels.extend(self.labels[self._x_design_info.term_slices[term]])
+        return labels
 
     def _build_design_matrices(self) -> None:
         """Build design matrices from formula and data using patsy.
 
-        For ``fe_method="demeaned"`` this first applies the demeaned
-        transformation (de-meaning by unit, and optionally by time) before
-        constructing the patsy design matrices.
+        For ``fe_method="demeaned"`` the formula is evaluated on the raw
+        columns, then the outcome and each constructed regressor — except the
+        intercept — are sequentially demeaned. That is the within transform of
+        the formula. Demeaning the raw columns first would make ``treatment:x``
+        the product of demeaned factors, which is not the dummy-variable
+        within estimator of the same formula.
+
+        Patsy drops rows with a missing value in a used formula column before
+        the matrices are returned. The within transform uses those retained
+        rows and their unit and time labels. It does not reattach the full
+        frame index.
         """
         data = self._original_data.copy()
-
-        # Apply demeaned transformation if requested
         if self.fe_method == "demeaned":
-            data = self._demean_transform(data, self.unit_fe_variable)
-            if self.time_fe_variable:
-                # TODO: Use iterative alternating demeaning for unbalanced panels
-                # (single-pass is exact only for balanced; see docstring Notes).
-                data = self._demean_transform(data, self.time_fe_variable)
-
-        y, X = dmatrices(self.formula, data)
+            # Patsy would otherwise treat a boolean treatment as a categorical
+            # factor. The previous demean path cast those columns to float so
+            # the formula column keeps the raw column name.
+            for column in self._numeric_columns_for_group_means():
+                if pd.api.types.is_bool_dtype(data[column]):
+                    data[column] = data[column].astype(float)
+        kept_rows = _KeptRowNAAction()
+        y, X = build_formula_matrices(self.formula, data, NA_action=kept_rows)
         self.outcome_variable_name = y.design_info.column_names[0]
         self._y_design_info = y.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
-        self.y, self.X = np.asarray(y), np.asarray(X)
+        y_values = np.asarray(y, dtype=float)
+        x_values = np.asarray(X, dtype=float)
+        if self.fe_method == "demeaned":
+            group_vars = [self.unit_fe_variable]
+            if self.time_fe_variable:
+                # TODO: Use iterative alternating demeaning for unbalanced panels
+                # (single-pass is exact only for balanced; see docstring Notes).
+                group_vars.append(self.time_fe_variable)
+            for group_var in group_vars:
+                self._record_original_group_means(group_var)
+            retained = data.iloc[kept_rows.rows_for(data, y_values)]
+            y_values = self._sequential_within(y_values, retained, group_vars)
+            x_values = self._sequential_within(
+                x_values,
+                retained,
+                group_vars,
+                skip_columns=self._intercept_column_mask(X.design_info),
+            )
+        if self.fe_method == "dummies":
+            x_values = self._absorb_exact_time_invariant_covariates(
+                x_values, data.iloc[kept_rows.rows_for(data, y_values)]
+            )
+        self._y_raw, self._X_raw = y_values, x_values
+
+    def _absorb_exact_time_invariant_covariates(
+        self, design: np.ndarray, retained: pd.DataFrame
+    ) -> np.ndarray:
+        """Zero exact within-unit constants on the dummy-variable path.
+
+        A column that does not change inside a unit is collinear with the unit
+        dummies. Least squares otherwise splits that unit level into the
+        covariate and reports a nonzero treatment where the within estimator is
+        0. Zeroing the column reports that estimate and warns. A column that
+        changes inside any unit is left unchanged.
+        """
+        units = np.asarray(retained[self.unit_fe_variable])
+        if len(units) != len(design):
+            return design
+        protected = set(self._get_fe_labels(self.unit_fe_variable))
+        if not protected:
+            return design
+        if self.time_fe_variable:
+            protected.update(self._get_fe_labels(self.time_fe_variable))
+        absorbed: list[str] = []
+        design = np.array(design, dtype=float, copy=True)
+        for index, label in enumerate(self.labels):
+            if label in protected or label == "Intercept":
+                continue
+            if self._column_varies_within_unit(design[:, index], units):
+                continue
+            design[:, index] = 0.0
+            absorbed.append(label)
+        if absorbed:
+            warnings.warn(
+                "Covariate(s) "
+                f"{absorbed} have no within-unit variation and are collinear "
+                "with the unit fixed effects. The coefficient is reported as 0, "
+                "matching the within estimate, and the unit effects absorb the level.",
+                UserWarning,
+                stacklevel=4,
+            )
+        return design
+
+    @staticmethod
+    def _column_varies_within_unit(column: np.ndarray, units: np.ndarray) -> bool:
+        """Whether ``column`` changes inside any unit."""
+        values = np.asarray(column, dtype=float)
+        if len(values) == 0 or not np.isfinite(values).all():
+            return True
+        grouped = pd.Series(values).groupby(np.asarray(units), observed=True)
+        within_range = grouped.transform("max") - grouped.transform("min")
+        return bool(np.any(within_range.to_numpy(dtype=float) != 0.0))
 
     def _prepare_data(self) -> None:
-        """Convert design matrices to xarray DataArrays."""
-        self.X = xr.DataArray(  # type: ignore[assignment]
-            self.X,
-            dims=["obs_ind", "coeffs"],
-            coords={
-                "obs_ind": np.arange(self.X.shape[0]),
-                "coeffs": self.labels,
-            },
+        """Bundle design matrices into an ``xr.Dataset``."""
+        n = self._X_raw.shape[0]
+        self.design = self._build_design_dataset(
+            self._X_raw,
+            self._y_raw,
+            obs_ind=np.arange(n),
+            coeffs=self.labels,
         )
-        self.y = xr.DataArray(  # type: ignore[assignment]
-            self.y,
-            dims=["obs_ind", "treated_units"],
-            coords={"obs_ind": np.arange(self.y.shape[0]), "treated_units": ["unit_0"]},
+        del self._X_raw, self._y_raw
+
+    def _fit_inputs(self) -> tuple[Any, Any, dict[str, Any] | None]:
+        """Return the design matrices and coordinates for build."""
+        X = self.design["X"]
+        return (
+            X,
+            self.design["y"],
+            build_coords(self.labels, X.shape[0]),
         )
 
-    def algorithm(self) -> None:
-        """Run the experiment algorithm: fit the model."""
-        if isinstance(self.model, PyMCModel):
-            COORDS = {
-                "coeffs": self.labels,
-                "obs_ind": np.arange(self.X.shape[0]),
-                "treated_units": ["unit_0"],
-            }
-            self.model.fit(X=self.X, y=self.y, coords=COORDS)  # type: ignore[arg-type]
-        elif isinstance(self.model, RegressorMixin):
-            # For scikit-learn models, set fit_intercept=False so that the
-            # patsy intercept column is included in the coefficients array.
-            # TODO: later, this should be handled in ScikitLearnAdaptor itself
-            if hasattr(self.model, "fit_intercept"):
-                self.model.fit_intercept = False
-            self.model.fit(X=self.X, y=self.y)
+    def _numeric_columns_for_group_means(self) -> list[str]:
+        """Return original numeric columns whose group means are stored.
 
-    def _demean_transform(self, data: pd.DataFrame, group_var: str) -> pd.DataFrame:
-        """Apply demeaned transformation (demean by group).
-
-        Parameters
-        ----------
-        data : pd.DataFrame
-            Input data
-        group_var : str
-            Column name to group by (unit or time variable)
-
-        Returns
-        -------
-        pd.DataFrame
-            Demeaned data
-
-        Notes
-        -----
-        When two-way fixed effects are requested (both unit and time), the
-        sequential single-pass demeaning (first by unit, then by time) is
-        algebraically equivalent to the standard two-way demeaned transformation
-
-        .. math:: \\tilde{y}_{it} = y_{it} - \\bar{y}_{i\\cdot}
-                   - \\bar{y}_{\\cdot t} + \\bar{y}_{\\cdot\\cdot}
-
-        **only for balanced panels** (every unit observed in every period).
-        For unbalanced panels the single pass is an approximation; iterative
-        alternating demeaning would be needed for exact convergence.
-
-        Group means stored in ``_group_means`` are always computed from the
-        **original** (pre-demeaning) data so that unit and time effects can
-        be recovered post-hoc without confusion.
+        Group variables are excluded. Boolean columns are included so a
+        boolean treatment still has a recoverable group mean.
         """
-        data = data.copy()
-
-        # Identify numeric and boolean columns to demean (exclude group variables).
-        # Boolean columns (e.g. treatment indicators) must be included; pandas
-        # select_dtypes(include=[np.number]) excludes bool.
-        numeric_cols = data.select_dtypes(include=[np.number, "bool"]).columns.tolist()
-        group_vars_to_exclude = [self.unit_fe_variable]
+        numeric_cols = [
+            column
+            for column, dtype in self._original_data.dtypes.items()
+            if isinstance(column, str)
+            and (
+                pd.api.types.is_numeric_dtype(dtype)
+                or pd.api.types.is_bool_dtype(dtype)
+            )
+        ]
+        excluded = {self.unit_fe_variable}
         if self.time_fe_variable:
-            group_vars_to_exclude.append(self.time_fe_variable)
+            excluded.add(self.time_fe_variable)
+        return [column for column in numeric_cols if column not in excluded]
 
-        numeric_cols = [c for c in numeric_cols if c not in group_vars_to_exclude]
+    def _record_original_group_means(self, group_var: str) -> None:
+        """Store group means from the original data, once per grouping variable."""
+        if group_var in self._group_means:
+            return
+        numeric_cols = self._numeric_columns_for_group_means()
+        self._group_means[group_var] = self._original_data.groupby(
+            group_var, observed=True
+        )[numeric_cols].mean()
 
-        # Cast boolean columns to float so that demeaning produces correct
-        # numeric results (bool - float would otherwise raise or produce
-        # unexpected dtypes).
-        for col in numeric_cols:
-            if data[col].dtype == "bool":
-                data[col] = data[col].astype(float)
+    @staticmethod
+    def _intercept_column_mask(design_info: Any) -> np.ndarray:
+        """Mark Patsy intercept columns, which the within transform must keep."""
+        mask = np.zeros(len(design_info.column_names), dtype=bool)
+        for term, column_slice in design_info.term_slices.items():
+            if len(term.factors) == 0:
+                mask[column_slice] = True
+        return mask
 
-        # Store group means from the ORIGINAL data (before any demeaning in
-        # prior calls) so that fixed effects can be recovered post-hoc.
-        if group_var not in self._group_means:
-            self._group_means[group_var] = self._original_data.groupby(group_var)[
-                numeric_cols
-            ].mean()
+    def _sequential_within(
+        self,
+        values: np.ndarray,
+        data: pd.DataFrame,
+        group_vars: list[str],
+        skip_columns: np.ndarray | None = None,
+    ) -> np.ndarray:
+        """Demean columns by each group variable in order.
 
-        # Demean each numeric column
-        for col in numeric_cols:
-            group_mean = data.groupby(group_var)[col].transform("mean")
-            data[col] = data[col] - group_mean
-
-        return data
+        For a balanced panel, demeaning by unit and then by time is the
+        two-way within transformation. For an unbalanced panel the same
+        single pass is only an approximation.
+        """
+        values = np.asarray(values, dtype=float)
+        squeeze = values.ndim == 1
+        values = values.reshape(-1, 1) if squeeze else np.array(values, copy=True)
+        keep = np.ones(values.shape[1], dtype=bool)
+        if skip_columns is not None:
+            keep = ~np.asarray(skip_columns, dtype=bool)
+        frame = pd.DataFrame(values, index=data.index)
+        columns = [
+            column for column, use in zip(frame.columns, keep, strict=True) if use
+        ]
+        for group_var in group_vars:
+            if not columns:
+                break
+            means = frame.groupby(data[group_var], observed=True)[columns].transform(
+                "mean"
+            )
+            frame[columns] = frame[columns] - means
+        transformed = frame.to_numpy(dtype=float)
+        if squeeze:
+            return transformed.reshape(-1)
+        return transformed
 
     def _get_non_fe_labels(self) -> list[str]:
         """Return coefficient labels with FE dummy names filtered out.
@@ -386,17 +541,10 @@ class PanelRegression(BaseExperiment):
         """
         coeff_labels = self.labels.copy()
         if self.fe_method == "dummies":
-            coeff_labels = [
-                c
-                for c in coeff_labels
-                if not c.startswith(f"C({self.unit_fe_variable})")
-            ]
+            fe_labels = set(self._get_fe_labels(self.unit_fe_variable))
             if self.time_fe_variable:
-                coeff_labels = [
-                    c
-                    for c in coeff_labels
-                    if not c.startswith(f"C({self.time_fe_variable})")
-                ]
+                fe_labels.update(self._get_fe_labels(self.time_fe_variable))
+            coeff_labels = [label for label in coeff_labels if label not in fe_labels]
         return coeff_labels
 
     def summary(self, round_to: int | None = None) -> None:
@@ -407,14 +555,20 @@ class PanelRegression(BaseExperiment):
         round_to : int, optional
             Number of significant figures to round to. Defaults to None,
             in which case 2 significant figures are used.
+
+        Raises
+        ------
+        GroupNotSampledException
+            If the experiment has not been fitted yet.
         """
+        self._resolve_group("posterior")
         print(f"\n{self.expt_type}")
         print("=" * 60)
         print(f"Units: {self.n_units} ({self.unit_fe_variable})")
         if self.n_periods:
             print(f"Periods: {self.n_periods} ({self.time_fe_variable})")
         print(f"FE method: {self.fe_method}")
-        print(f"Observations: {self.X.shape[0]}")
+        print(f"Observations: {self.design['X'].shape[0]}")
         print("=" * 60)
 
         coeff_labels = self._get_non_fe_labels()
@@ -427,27 +581,12 @@ class PanelRegression(BaseExperiment):
             )
 
         print("\nModel Coefficients:")
-        if isinstance(self.model, PyMCModel):
-            # PyMC print_coefficients uses coordinate-based lookup so a
-            # filtered label list works correctly.
-            self.model.print_coefficients(coeff_labels, round_to)
-        else:
-            # For OLS models the base print_coefficients uses positional zip
-            # which would pair filtered labels with the wrong coefficient
-            # values.  We do our own index-based lookup instead.
-            coefs = self.model.get_coeffs()
-            max_label_length = max(len(name) for name in coeff_labels)
-            rd = round_to if round_to is not None else 2
-            print("Model coefficients:")
-            for name in coeff_labels:
-                idx = self.labels.index(name)
-                formatted_name = f"{name:<{max_label_length}}"
-                formatted_val = f"{round_num(coefs[idx], rd):>10}"
-                print(f"  {formatted_name}\t{formatted_val}")
+        self._model_backend.print_coefficients(coeff_labels, round_to)
 
     def effect_summary(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         window: Literal["post"] | tuple | slice = "post",
         direction: Literal["increase", "decrease", "two-sided"] = "increase",
         alpha: float = 0.05,
@@ -457,7 +596,6 @@ class PanelRegression(BaseExperiment):
         treated_unit: str | None = None,
         period: Literal["intervention", "post", "comparison"] | None = None,
         prefix: str = "Post-period",
-        **kwargs: Any,
     ) -> EffectSummary:
         """Generate a decision-ready summary of causal effects.
 
@@ -467,6 +605,31 @@ class PanelRegression(BaseExperiment):
             regression coefficients rather than time-varying causal impacts,
             so the standard ITS/SC-style effect summary does not directly
             apply.  Use :meth:`summary` for coefficient-level inference.
+
+        Parameters
+        ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to summarize. Accepted for API parity with the
+            other experiments; ``PanelRegression`` implements no effect
+            summary for either group.
+        window : str, tuple, or slice, default "post"
+            Time window for analysis (placeholder; not consumed).
+        direction : {"increase", "decrease", "two-sided"}, default "increase"
+            Direction for tail probability calculation.
+        alpha : float, default 0.05
+            Significance level for HDI/CI intervals.
+        cumulative : bool, default True
+            Whether to include cumulative effect statistics.
+        relative : bool, default True
+            Whether to include relative effect statistics.
+        min_effect : float, optional
+            Region of Practical Equivalence (ROPE) threshold.
+        treated_unit : str, optional
+            Treated unit selector for multi-unit experiments.
+        period : {"intervention", "post", "comparison"}, optional
+            Period selector for three-period designs.
+        prefix : str, default "Post-period"
+            Prefix for prose generation.
 
         Raises
         ------
@@ -483,6 +646,7 @@ class PanelRegression(BaseExperiment):
     def plot(
         self,
         *,
+        group: Literal["prior", "posterior"] = "posterior",
         hdi_prob: float = HDI_PROB,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -496,11 +660,18 @@ class PanelRegression(BaseExperiment):
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group to render. ``"posterior"`` (default) plots
+            coefficient draws after :meth:`fit`; ``"prior"`` plots the
+            coefficient draws implied by the prior phase and requires
+            :meth:`sample_prior_predictive` first — on backends without a
+            prior phase that call raises
+            :class:`~causalpy.custom_exceptions.PriorPredictiveNotSupportedException`.
         hdi_prob : float
             Probability mass of the highest density interval drawn around
-            each posterior coefficient via :func:`arviz.plot_forest`. Must
-            be in ``(0, 1]``. Ignored for OLS models. Defaults to
-            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+            each posterior coefficient. Must be in ``(0, 1]``. Ignored for
+            OLS models. Defaults to :data:`~causalpy.constants.HDI_PROB`
+            (currently 0.94).
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
@@ -520,41 +691,49 @@ class PanelRegression(BaseExperiment):
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
+            group=group,
             hdi_prob=hdi_prob,
         )
 
-    def _bayesian_plot(
-        self, hdi_prob: float = HDI_PROB, **kwargs: Any
+    def _plot(
+        self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+        hdi_prob: float = HDI_PROB,
+        **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
-        """Create coefficient plot for Bayesian model.
+        """Create coefficient plot.
+
+        Bayesian models render a forest plot with HDI intervals; point-estimate
+        models render a bar plot of coefficient values.
+
+        ``PanelRegression`` consumes no result bundle (``_supports_results``
+        is ``False``); the requested *group* selects which coefficient
+        draws are rendered instead of being guessed.
 
         Parameters
         ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group whose coefficient draws are rendered.
         hdi_prob : float, optional
             Probability mass of the highest density interval drawn around each
-            posterior coefficient via :func:`arviz.plot_forest`. Must be in
-            ``(0, 1]``. Defaults to :data:`~causalpy.constants.HDI_PROB`
-            (currently 0.94).
+            posterior coefficient. Must be in ``(0, 1]``. Ignored for
+            point-estimate models. Defaults to
+            :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
 
         Returns
         -------
         tuple[plt.Figure, plt.Axes]
             Figure and axes objects
         """
-        return self._plot_coefficients_internal(hdi_prob=hdi_prob)
-
-    def _ols_plot(self, **kwargs: Any) -> tuple[plt.Figure, plt.Axes]:
-        """Create coefficient plot for OLS model.
-
-        Returns
-        -------
-        tuple[plt.Figure, plt.Axes]
-            Figure and axes objects
-        """
-        return self._plot_coefficients_internal()
+        return self._plot_coefficients_internal(hdi_prob=hdi_prob, group=group)
 
     def _plot_coefficients_internal(
-        self, var_names: list[str] | None = None, hdi_prob: float = HDI_PROB
+        self,
+        var_names: list[str] | None = None,
+        hdi_prob: float = HDI_PROB,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
     ) -> tuple[plt.Figure, plt.Axes]:
         """Internal method to create coefficient plot.
 
@@ -567,29 +746,54 @@ class PanelRegression(BaseExperiment):
             Probability mass for the HDI interval when plotting Bayesian
             coefficients. Must be in (0, 1). Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group whose coefficients are rendered.
+
+        Raises
+        ------
+        GroupNotSampledException
+            If the requested draw group has not been sampled.
         """
+        self._resolve_group(group)
         if not 0 < hdi_prob < 1:
             raise ValueError("hdi_prob must be between 0 and 1")
 
         coeff_names = var_names if var_names is not None else self._get_non_fe_labels()
+        if not coeff_names:
+            raise ValueError("var_names must contain at least one coefficient")
 
-        if isinstance(self.model, PyMCModel):
-            # Bayesian: use az.plot_forest directly
-            axes = az.plot_forest(
-                self.model.idata,
-                var_names=["beta"],
-                coords={"coeffs": coeff_names},
-                combined=True,
-                hdi_prob=hdi_prob,
+        coefficients = self._model_backend.coefficients(group=group).sel(
+            coeffs=coeff_names
+        )
+        if "treated_units" in coefficients.dims:
+            if coefficients.sizes["treated_units"] != 1:
+                raise ValueError(
+                    "Panel coefficient plots require exactly one outcome unit."
+                )
+            coefficients = coefficients.isel(treated_units=0, drop=True)
+        with_uncertainty = coefficients.sizes["chain"] * coefficients.sizes["draw"] > 1
+        if with_uncertainty:
+            means = np.asarray(
+                coefficients.mean(dim=["chain", "draw"]).values,
+                dtype=float,
             )
-            ax = axes.ravel()[0]
-            fig = ax.figure
+            lower, upper = hdi_bound_arrays(
+                coefficients,
+                prob=hdi_prob,
+                dim=["chain", "draw"],
+            )
+            y_pos = np.arange(len(coeff_names))
+            fig, ax = plt.subplots(figsize=(10, max(4, len(coeff_names) * 0.5)))
+            ax.hlines(y_pos, lower, upper, color="C0")
+            ax.plot(means, y_pos, "o", color="C0")
+            ax.set_yticks(y_pos)
+            ax.set_yticklabels(coeff_names)
+            ax.axvline(x=0, color="black", linestyle="--", linewidth=0.8)
+            ax.set_xlabel("Coefficient Value")
             ax.set_title(f"Model Coefficients with {hdi_prob:.0%} HDI")
         else:
-            # OLS: point estimates
+            coefs = coefficients.mean(("chain", "draw")).values
             fig, ax = plt.subplots(figsize=(10, max(4, len(coeff_names) * 0.5)))
-            coef_indices = [self.labels.index(c) for c in coeff_names]
-            coefs = self.model.get_coeffs()[coef_indices]
             y_pos = np.arange(len(coeff_names))
             ax.barh(y_pos, coefs)
             ax.set_yticks(y_pos)
@@ -601,58 +805,51 @@ class PanelRegression(BaseExperiment):
         plt.tight_layout()
         return fig, ax
 
-    def get_plot_data_bayesian(self, **kwargs: Any) -> pd.DataFrame:
-        """Get plot data for Bayesian model.
+    def get_plot_data(
+        self, *, group: Literal["prior", "posterior"] = "posterior"
+    ) -> pd.DataFrame:
+        """Get plot data with expected values from the requested draw group.
+
+        Bayesian models additionally return ``y_fitted_lower`` /
+        ``y_fitted_upper`` 95% credible-interval columns.
+
+        Parameters
+        ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group used for expected outcomes and credible intervals.
 
         Returns
         -------
         pd.DataFrame
-            DataFrame with fitted values and credible intervals
+            DataFrame with fitted values (and credible intervals when the
+            model carries draws).
+
+        Raises
+        ------
+        GroupNotSampledException
+            If the requested draw group has not been sampled.
         """
-        # Get posterior predictions
-        if isinstance(self.model, PyMCModel):
-            mu = self.model.idata.posterior["mu"]  # type: ignore[union-attr]
-            pred_mean = mu.mean(dim=["chain", "draw"]).values.flatten()
-            pred_lower = mu.quantile(0.025, dim=["chain", "draw"]).values.flatten()
-            pred_upper = mu.quantile(0.975, dim=["chain", "draw"]).values.flatten()
+        self._resolve_group(group)
+        columns: dict[str, Any] = {"y_actual": self.design["y"].values.flatten()}
+
+        # ponytail: PanelRegression stores no canonical prediction container,
+        # so in-sample fitted values must come from backend-native objects
+        # (idata mu vs sklearn predict); the branch is isolated here. Upgrade
+        # path: store canonical in-sample predictions at fit time.
+        if self._model_backend.is_bayesian:
+            mu = self._model_backend.require_idata()[group].dataset["mu"]
+            columns["y_fitted"] = mu.mean(dim=["chain", "draw"]).values.flatten()
+            columns["y_fitted_lower"] = mu.quantile(
+                0.025, dim=["chain", "draw"]
+            ).values.flatten()
+            columns["y_fitted_upper"] = mu.quantile(
+                0.975, dim=["chain", "draw"]
+            ).values.flatten()
         else:
-            raise ValueError("Model is not a PyMC model")
+            columns["y_fitted"] = np.squeeze(self.model.predict(self.design["X"]))
+        columns[self.unit_fe_variable] = self.data[self.unit_fe_variable].values
 
-        plot_data = pd.DataFrame(
-            {
-                "y_actual": self.y.values.flatten(),  # type: ignore[attr-defined]
-                "y_fitted": pred_mean,
-                "y_fitted_lower": pred_lower,
-                "y_fitted_upper": pred_upper,
-                self.unit_fe_variable: self.data[self.unit_fe_variable].values,
-            }
-        )
-
-        if self.time_fe_variable:
-            plot_data[self.time_fe_variable] = self.data[self.time_fe_variable].values
-
-        return plot_data
-
-    def get_plot_data_ols(self, **kwargs: Any) -> pd.DataFrame:
-        """Get plot data for OLS model.
-
-        Returns
-        -------
-        pd.DataFrame
-            DataFrame with fitted values
-        """
-        if isinstance(self.model, RegressorMixin):
-            y_fitted = np.squeeze(self.model.predict(self.X))  # type: ignore[attr-defined]
-        else:
-            raise ValueError("Model is not an OLS model")
-
-        plot_data = pd.DataFrame(
-            {
-                "y_actual": self.y.values.flatten(),  # type: ignore[attr-defined]
-                "y_fitted": y_fitted,
-                self.unit_fe_variable: self.data[self.unit_fe_variable].values,
-            }
-        )
+        plot_data = pd.DataFrame(columns)
 
         if self.time_fe_variable:
             plot_data[self.time_fe_variable] = self.data[self.time_fe_variable].values
@@ -682,6 +879,11 @@ class PanelRegression(BaseExperiment):
         -------
         tuple[plt.Figure, plt.Axes]
             Figure and axes objects
+
+        Raises
+        ------
+        ValueError
+            If ``var_names`` is empty or ``hdi_prob`` is outside ``(0, 1)``.
         """
         return self._plot_coefficients_internal(var_names=var_names, hdi_prob=hdi_prob)
 
@@ -709,7 +911,10 @@ class PanelRegression(BaseExperiment):
         ------
         ValueError
             If fe_method is not "dummies"
+        GroupNotSampledException
+            If the experiment has not been fitted yet.
         """
+        self._resolve_group("posterior")
         if self.fe_method != "dummies":
             raise ValueError(
                 "plot_unit_effects() only available with fe_method='dummies'. "
@@ -717,44 +922,26 @@ class PanelRegression(BaseExperiment):
             )
 
         # Extract unit fixed effects from coefficients
-        unit_fe_names = [
-            c for c in self.labels if c.startswith(f"C({self.unit_fe_variable})")
-        ]
+        unit_fe_names = self._get_fe_labels(self.unit_fe_variable)
 
         if not unit_fe_names:
             raise ValueError("No unit fixed effects found in model coefficients")
 
         fig, ax = plt.subplots(figsize=(10, 6))
 
-        if isinstance(self.model, PyMCModel):
-            # Bayesian: get posterior means
-            beta = self.model.idata.posterior["beta"]  # type: ignore[union-attr]
-            unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
-
-            # Get mean and std for each unit FE
-            fe_means = []
-            for idx in unit_fe_indices:
-                fe_means.append(
-                    beta.sel(coeffs=self.labels[idx])
-                    .mean(dim=["chain", "draw"])
-                    .squeeze("treated_units", drop=True)
-                    .item()
+        coefficients = self._model_backend.coefficients().sel(coeffs=unit_fe_names)
+        with_uncertainty = coefficients.sizes["chain"] * coefficients.sizes["draw"] > 1
+        if "treated_units" in coefficients.dims:
+            if coefficients.sizes["treated_units"] != 1:
+                raise ValueError(
+                    "Panel unit-effect plots require exactly one outcome unit."
                 )
-
-            ax.hist(
-                fe_means, bins=min(30, max(1, len(fe_means) // 2)), edgecolor="black"
-            )
+            coefficients = coefficients.isel(treated_units=0, drop=True)
+        fe_means = coefficients.mean(("chain", "draw")).values
+        ax.hist(fe_means, bins=min(30, max(1, len(fe_means) // 2)), edgecolor="black")
+        if with_uncertainty:
             ax.set_xlabel("Unit Fixed Effect (Posterior Mean)")
-
         else:
-            # OLS: get point estimates
-            unit_fe_indices = [self.labels.index(name) for name in unit_fe_names]
-            coefs = self.model.get_coeffs()
-            fe_values = [coefs[idx] for idx in unit_fe_indices]
-
-            ax.hist(
-                fe_values, bins=min(30, max(1, len(fe_values) // 2)), edgecolor="black"
-            )
             ax.set_xlabel("Unit Fixed Effect")
 
         ax.set_ylabel("Count")
@@ -771,6 +958,8 @@ class PanelRegression(BaseExperiment):
         show_mean: bool = True,
         hdi_prob: float = HDI_PROB,
         interval_type: Literal["mean", "predictive"] = "mean",
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
     ) -> tuple[plt.Figure, np.ndarray]:
         """Plot unit-level time series trajectories.
 
@@ -798,9 +987,12 @@ class PanelRegression(BaseExperiment):
         interval_type : {"mean", "predictive"}, default="mean"
             Which uncertainty interval to show for Bayesian models:
 
-            - "mean": HDI of posterior ``mu`` (uncertainty in expected value)
-            - "predictive": HDI of posterior predictive ``y_hat``
+            - "mean": HDI of the requested group's ``mu``
+              (uncertainty in expected value)
+            - "predictive": HDI of its predictive ``y_hat``
               (includes observation noise)
+        group : {"prior", "posterior"}, default "posterior"
+            Draw group used for expected and predictive trajectories.
 
         Returns
         -------
@@ -811,7 +1003,10 @@ class PanelRegression(BaseExperiment):
         ------
         ValueError
             If time_fe_variable is not provided (cannot plot trajectories without time)
+        GroupNotSampledException
+            If the requested draw group has not been sampled.
         """
+        self._resolve_group(group)
         if self.time_fe_variable is None:
             raise ValueError(
                 "plot_trajectories() requires time_fe_variable to be specified"
@@ -819,26 +1014,33 @@ class PanelRegression(BaseExperiment):
         if interval_type not in {"mean", "predictive"}:
             raise ValueError("interval_type must be 'mean' or 'predictive'")
 
-        # Check if model is Bayesian
-        is_bayesian = isinstance(self.model, PyMCModel)
+        # Backend-identity branch is justified: in-sample mu / y_hat draws
+        # live in backend-native idata (PanelRegression stores no canonical
+        # prediction container; see the ponytail note in get_plot_data).
+        is_bayesian = self._model_backend.is_bayesian
 
-        # Get posterior for HDI plotting (Bayesian only)
+        # Get requested draws for HDI plotting (Bayesian only).
         if is_bayesian:
-            mu = self.model.idata.posterior["mu"]  # type: ignore[union-attr]
+            idata = self._model_backend.require_idata()
+            mu = idata[group].dataset["mu"]
             if interval_type == "predictive":
-                posterior_predictive = getattr(
-                    self.model.idata,
-                    "posterior_predictive",
-                    None,  # type: ignore[union-attr]
+                predictive_group = f"{group}_predictive"
+                predictive = (
+                    idata[predictive_group].dataset
+                    if predictive_group in idata.children
+                    else None
                 )
-                if posterior_predictive is None or "y_hat" not in posterior_predictive:
+                if predictive is None or "y_hat" not in predictive:
                     raise ValueError(
-                        "interval_type='predictive' requires posterior predictive "
-                        "samples ('y_hat') in idata.posterior_predictive"
+                        f"interval_type='predictive' requires {group} predictive "
+                        f"samples ('y_hat') in idata.{predictive_group}"
                     )
-                interval_source = posterior_predictive["y_hat"]
+                interval_source = predictive["y_hat"]
             else:
                 interval_source = mu
+
+        if units is None and n_sample <= 0:
+            raise ValueError("n_sample must be positive when units is not provided")
 
         # Select units to plot
         all_units = self.data[self.unit_fe_variable].unique()
@@ -847,14 +1049,14 @@ class PanelRegression(BaseExperiment):
         if units is not None:
             selected_units = units
         elif self.n_units <= n_sample:
-            selected_units = all_units  # type: ignore[assignment]
+            selected_units = all_units
         else:
             if select == "random":
                 rng = np.random.default_rng(42)
-                selected_units = rng.choice(all_units, size=n_sample, replace=False)  # type: ignore[assignment]
+                selected_units = rng.choice(all_units, size=n_sample, replace=False)
             elif select == "extreme":
                 # Select units with the largest and smallest mean outcomes
-                unit_means = self.data.groupby(self.unit_fe_variable)[
+                unit_means = self.data.groupby(self.unit_fe_variable, observed=True)[
                     self.outcome_variable_name
                 ].mean()
                 n_each = max(1, n_sample // 2)
@@ -863,10 +1065,13 @@ class PanelRegression(BaseExperiment):
                 selected_units = top + bottom
             elif select == "high_variance":
                 # Select units with the most within-unit variation
-                unit_var = self.data.groupby(self.unit_fe_variable)[
+                unit_var = self.data.groupby(self.unit_fe_variable, observed=True)[
                     self.outcome_variable_name
                 ].var()
                 selected_units = unit_var.nlargest(n_sample).index.tolist()
+
+        if len(selected_units) == 0:
+            raise ValueError("plot_trajectories() requires at least one unit")
 
         # Create only the subplots we need
         n_units_plot = len(selected_units)
@@ -895,7 +1100,7 @@ class PanelRegression(BaseExperiment):
             sorted_obs_indices = unit_obs_indices[sort_order]
 
             # Get actual y values (sorted by time)
-            y_actual = self.y.values.flatten()[sorted_obs_indices]  # type: ignore[attr-defined]
+            y_actual = self.design["y"].values.flatten()[sorted_obs_indices]
 
             # Plot actual
             ax.plot(
@@ -907,7 +1112,7 @@ class PanelRegression(BaseExperiment):
             )
 
             if is_bayesian:
-                # Get posterior mu for this unit's observations in sorted order
+                # Get the requested mu draws for this unit's sorted observations.
                 # Squeeze out treated_units dimension
                 unit_mu = mu.isel(obs_ind=sorted_obs_indices.tolist())
                 if "treated_units" in unit_mu.dims:
@@ -923,22 +1128,27 @@ class PanelRegression(BaseExperiment):
                     sorted_time_vals,
                     unit_mu.mean(dim=["chain", "draw"]).values,
                     "s--",
-                    label="Fitted",
+                    color="C1",
+                    label="Prior expected" if group == "prior" else "Fitted",
                     alpha=0.7,
                 )
 
-                # Plot HDI using az.plot_hdi
-                az.plot_hdi(
+                _plot_interval_band(
                     sorted_time_vals,
                     unit_interval,
-                    hdi_prob=hdi_prob,
-                    ax=ax,
-                    smooth=False,
-                    fill_kwargs={"alpha": 0.2},
+                    ax,
+                    ci_prob=hdi_prob,
+                    ci_kind="hdi",
+                    plot_hdi_kwargs={
+                        "color": "C1",
+                        "fill_kwargs": {"alpha": 0.2},
+                    },
                 )
             else:
                 # OLS: get fitted values for this unit
-                y_fitted = np.squeeze(self.model.predict(self.X))[sorted_obs_indices]  # type: ignore[union-attr, attr-defined]
+                y_fitted = np.squeeze(self.model.predict(self.design["X"]))[
+                    sorted_obs_indices
+                ]
                 ax.plot(
                     sorted_time_vals,
                     y_fitted,
@@ -976,11 +1186,7 @@ class PanelRegression(BaseExperiment):
         tuple[plt.Figure, plt.Axes]
             Figure and axes objects
         """
-        # Get plot data
-        if isinstance(self.model, PyMCModel):
-            plot_data = self.get_plot_data_bayesian()
-        else:
-            plot_data = self.get_plot_data_ols()
+        plot_data = self.get_plot_data()
 
         # Calculate residuals
         residuals = plot_data["y_actual"] - plot_data["y_fitted"]

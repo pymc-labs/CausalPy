@@ -58,7 +58,13 @@ class PersistenceCheck:
         self.direction = direction
 
     def validate(self, experiment: BaseExperiment) -> None:
-        """Verify the experiment is a three-period ITS with treatment_end_time."""
+        """Verify the experiment is a three-period ITS with treatment_end_time.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            Candidate experiment to validate.
+        """
         if not isinstance(experiment, InterruptedTimeSeries):
             raise TypeError(
                 "PersistenceCheck requires an InterruptedTimeSeries experiment."
@@ -77,7 +83,16 @@ class PersistenceCheck:
         experiment: BaseExperiment,
         context: PipelineContext,
     ) -> CheckResult:
-        """Run persistence analysis and report whether the effect decays."""
+        """Run persistence analysis and report whether the effect decays.
+
+        Parameters
+        ----------
+        experiment : BaseExperiment
+            The fitted three-period ITS experiment.
+        context : PipelineContext
+            Pipeline context (unused by this check; required by the
+            :class:`~causalpy.checks.base.Check` protocol).
+        """
         its: Any = experiment
         persistence = its.analyze_persistence(
             hdi_prob=self.hdi_prob,

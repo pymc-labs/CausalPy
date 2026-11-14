@@ -12,18 +12,29 @@
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
 """
-Regression tests verifying that ``hdi_prob`` is wired through Bayesian plot
-methods so that user-supplied values actually change the rendered HDI bands.
+Regression tests verifying that ``ci_prob`` is wired through Bayesian plot
+methods so that user-supplied values actually change the rendered
+credible-interval bands.
 
 These tests guard against the regression described in GitHub issue
 `pymc-labs/CausalPy#890`_, where ``result.plot(hdi_prob=...)`` was silently
 swallowed by ``**kwargs`` rather than reaching the underlying
-:func:`causalpy.plot_utils.plot_xY` (and equivalent) calls.
+:func:`causalpy.plot_utils.plot_posterior_over_x` (and equivalent) calls.
+
+``hdi_prob`` was the original parameter name. It was renamed to ``ci_prob``
+when ETI support was added (since the parameter controls the *credible interval*
+width, not only HDI). The deprecated ``hdi_prob`` alias was removed from the
+public experiment ``plot()`` methods in `pymc-labs/CausalPy#984`_; passing it
+now raises ``TypeError``. ``PanelRegression`` and
+``StaggeredDifferenceInDifferences`` are not yet migrated and still take
+``hdi_prob`` as their real parameter name.
 
 .. _pymc-labs/CausalPy#890: https://github.com/pymc-labs/CausalPy/issues/890
+.. _pymc-labs/CausalPy#984: https://github.com/pymc-labs/CausalPy/issues/984
 """
 
 import importlib
+import inspect
 from contextlib import ExitStack
 from typing import Any
 from unittest.mock import patch
@@ -44,18 +55,17 @@ sample_kwargs = {"tune": 20, "draws": 20, "chains": 2, "cores": 2}
 
 # Each entry maps a "spy target" (dotted import path of the callable used by
 # the experiment's plot path) to the kwarg name that ``hdi_prob`` flows into.
-# All current targets happen to use the same kwarg name (``hdi_prob``) but the
-# indirection keeps the helper future-proof.
+# ``plot_posterior_over_x`` and local plotting helpers receive ``"ci_prob"``;
+# coefficient HDI helpers receive their explicit ``"prob"`` argument.
 _SpyTarget = tuple[str, str]
 
 
 def _resolve_dotted(dotted: str) -> Any:
-    """Resolve a dotted path that may include attribute access through an alias.
+    """Resolve a dotted import path through a module attribute.
 
-    For example, ``causalpy.experiments.prepostnegd.az.plot_posterior`` is not
-    importable as a module path because ``az`` is an alias inside the module,
-    not a real submodule. We import the longest valid module prefix and then
-    walk the remaining attributes.
+    The local plotting helpers are imported into their experiment modules, so
+    test spies target that stable call-site attribute rather than a private
+    implementation module.
     """
     parts = dotted.split(".")
     for i in range(len(parts), 0, -1):
@@ -100,7 +110,7 @@ def _record_hdi_prob_calls(
 
 
 def _assert_threads(recorded: list[float | None], expected: float) -> None:
-    """Assert that every recorded ``hdi_prob`` value equals ``expected``."""
+    """Assert that every recorded ``ci_prob`` value equals ``expected``."""
     assert len(recorded) > 0, "no spied call sites were exercised"
     assert all(value == expected for value in recorded), (
         f"Expected every spied call to receive hdi_prob={expected}, "
@@ -121,7 +131,7 @@ def fitted_its(its_data):
         pd.to_datetime("2017-01-01"),
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -133,7 +143,7 @@ def fitted_sc(sc_data):
         control_units=["a", "b", "c", "d", "e", "f", "g"],
         treated_units=["actual"],
         model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -145,7 +155,7 @@ def fitted_did(did_data):
         time_variable_name="t",
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -157,7 +167,7 @@ def fitted_rd(rd_data):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         treatment_threshold=0.5,
         epsilon=0.001,
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -170,7 +180,7 @@ def fitted_rkink():
         formula=f"y ~ 1 + x + I((x-{kink})*treated)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
         kink_point=kink,
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -182,7 +192,7 @@ def fitted_prepost(anova1_data):
         group_variable_name="group",
         pretreatment_variable_name="pre",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -193,7 +203,7 @@ def fitted_piecewise():
         df,
         formula="y ~ 1 + t + step(t, 50) + ramp(t, 50)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -226,7 +236,7 @@ def fitted_panel():
         time_fe_variable="time",
         fe_method="dummies",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -243,7 +253,7 @@ def fitted_staggered():
         treated_variable_name="treated",
         treatment_time_variable_name="treatment_time",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
 
 @pytest.fixture(scope="module")
@@ -260,7 +270,22 @@ def fitted_staggered_ols():
         treated_variable_name="treated",
         treatment_time_variable_name="treatment_time",
         model=SkLinearRegression(),
-    )
+    ).fit()
+
+
+@pytest.fixture(scope="module")
+def fitted_sdid():
+    """Fit a SyntheticDifferenceInDifferences once for reuse across wiring tests."""
+    df = cp.load_data("sc")
+    return cp.SyntheticDifferenceInDifferences(
+        df,
+        70,
+        control_units=["a", "b", "c", "d", "e", "f", "g"],
+        treated_units=["actual"],
+        model=cp.pymc_models.SyntheticDifferenceInDifferencesWeightFitter(
+            sample_kwargs=sample_kwargs,
+        ),
+    ).fit()
 
 
 # ---------------------------------------------------------------------------
@@ -273,15 +298,27 @@ def fitted_staggered_ols():
 _PARAMS = [0.50, 0.75, 0.99]
 
 
-def _check_threading(fitted, targets: list[_SpyTarget], hdi_prob: float) -> None:
-    """Call ``fitted.plot(hdi_prob=...)`` and assert ``hdi_prob`` reaches every target."""
+def _check_threading(
+    fitted,
+    targets: list[_SpyTarget],
+    ci_prob: float,
+    plot_kwarg: str = "ci_prob",
+) -> None:
+    """Call ``fitted.plot(ci_prob=...)`` and assert ``ci_prob`` reaches every target.
+
+    ``plot_kwarg`` controls the kwarg name used to call ``plot()`` — use
+    ``"hdi_prob"`` for classes not yet migrated to ``ci_prob``.
+    """
     stack, recorded = _record_hdi_prob_calls(targets)
     with stack:
-        fitted.plot(hdi_prob=hdi_prob)
-    _assert_threads(recorded, hdi_prob)
+        fitted.plot(**{plot_kwarg: ci_prob})
+    _assert_threads(recorded, ci_prob)
 
 
-def _check_default(fitted, targets: list[_SpyTarget]) -> None:
+def _check_default(
+    fitted,
+    targets: list[_SpyTarget],
+) -> None:
     """Call ``fitted.plot()`` (no kwarg) and assert every target gets HDI_PROB or None."""
     stack, recorded = _record_hdi_prob_calls(targets)
     with stack:
@@ -297,141 +334,225 @@ def _check_default(fitted, targets: list[_SpyTarget]) -> None:
 
 
 _ITS_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.interrupted_time_series.plot_xY", "hdi_prob"),
+    ("causalpy.experiments.interrupted_time_series.plot_posterior_over_x", "ci_prob"),
 ]
 _SC_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.synthetic_control.plot_xY", "hdi_prob"),
+    ("causalpy.experiments._panel_counterfactual.plot_posterior_over_x", "ci_prob"),
 ]
 _DID_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.diff_in_diff.plot_xY", "hdi_prob"),
+    ("causalpy.experiments.diff_in_diff.plot_posterior_over_x", "ci_prob"),
 ]
 _RD_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.regression_discontinuity.plot_xY", "hdi_prob"),
+    ("causalpy.experiments.regression_discontinuity.plot_posterior_over_x", "ci_prob"),
 ]
 _RKINK_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.regression_kink.plot_xY", "hdi_prob"),
+    ("causalpy.experiments.regression_kink.plot_posterior_over_x", "ci_prob"),
 ]
 _PREPOST_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.prepostnegd.plot_xY", "hdi_prob"),
-    ("causalpy.experiments.prepostnegd.az.plot_posterior", "hdi_prob"),
+    ("causalpy.experiments.prepostnegd.plot_posterior_over_x", "ci_prob"),
+    ("causalpy.experiments.prepostnegd.plot_scalar_posterior", "ci_prob"),
 ]
 _PIECEWISE_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.piecewise_its.plot_xY", "hdi_prob"),
+    ("causalpy.experiments.piecewise_its.plot_posterior_over_x", "ci_prob"),
 ]
 _PANEL_TARGETS: list[_SpyTarget] = [
-    ("causalpy.experiments.panel_regression.az.plot_forest", "hdi_prob"),
+    ("causalpy.experiments.panel_regression.hdi_bound_arrays", "prob"),
+]
+_SDID_TARGETS: list[_SpyTarget] = [
+    (
+        "causalpy.experiments.synthetic_difference_in_differences.plot_posterior_over_x",
+        "ci_prob",
+    ),
 ]
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_its_plot_threads_hdi_prob(mock_pymc_sample, fitted_its, hdi_prob):
-    """ITS ``plot(hdi_prob=...)`` reaches every ``plot_xY`` call."""
-    _check_threading(fitted_its, _ITS_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_its_plot_threads_ci_prob(mock_pymc_sample, fitted_its, ci_prob):
+    """ITS ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    _check_threading(fitted_its, _ITS_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
-def test_its_plot_default_hdi_prob(mock_pymc_sample, fitted_its):
-    """ITS default ``plot()`` forwards ``HDI_PROB`` to every ``plot_xY`` call."""
+def test_its_plot_default_ci_prob(mock_pymc_sample, fitted_its):
+    """ITS default ``plot()`` forwards ``HDI_PROB`` to every ``plot_posterior_over_x`` call (as ``ci_prob``)."""
     _check_default(fitted_its, _ITS_TARGETS)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_sc_plot_threads_hdi_prob(mock_pymc_sample, fitted_sc, hdi_prob):
-    """Synthetic Control ``plot(hdi_prob=...)`` reaches every ``plot_xY`` call."""
-    _check_threading(fitted_sc, _SC_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_sc_plot_threads_ci_prob(mock_pymc_sample, fitted_sc, ci_prob):
+    """Synthetic Control ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    _check_threading(fitted_sc, _SC_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
-def test_sc_plot_default_hdi_prob(mock_pymc_sample, fitted_sc):
-    """Synthetic Control default ``plot()`` forwards ``HDI_PROB``."""
+def test_sc_plot_default_ci_prob(mock_pymc_sample, fitted_sc):
+    """Synthetic Control default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
     _check_default(fitted_sc, _SC_TARGETS)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_did_plot_threads_hdi_prob(mock_pymc_sample, fitted_did, hdi_prob):
-    """DiD ``plot(hdi_prob=...)`` reaches every ``plot_xY`` call."""
-    _check_threading(fitted_did, _DID_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_did_plot_threads_ci_prob(mock_pymc_sample, fitted_did, ci_prob):
+    """DiD ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    _check_threading(fitted_did, _DID_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
-def test_did_plot_default_hdi_prob(mock_pymc_sample, fitted_did):
-    """DiD default ``plot()`` forwards ``HDI_PROB``."""
+def test_did_plot_default_ci_prob(mock_pymc_sample, fitted_did):
+    """DiD default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
     _check_default(fitted_did, _DID_TARGETS)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_rd_plot_threads_hdi_prob(mock_pymc_sample, fitted_rd, hdi_prob):
-    """RD ``plot(hdi_prob=...)`` reaches every ``plot_xY`` call."""
-    _check_threading(fitted_rd, _RD_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_rd_plot_threads_ci_prob(mock_pymc_sample, fitted_rd, ci_prob):
+    """RD ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    _check_threading(fitted_rd, _RD_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
-def test_rd_plot_default_hdi_prob(mock_pymc_sample, fitted_rd):
-    """RD default ``plot()`` forwards ``HDI_PROB``."""
+def test_rd_plot_default_ci_prob(mock_pymc_sample, fitted_rd):
+    """RD default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
     _check_default(fitted_rd, _RD_TARGETS)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_rkink_plot_threads_hdi_prob(mock_pymc_sample, fitted_rkink, hdi_prob):
-    """Regression Kink ``plot(hdi_prob=...)`` reaches every ``plot_xY`` call."""
-    _check_threading(fitted_rkink, _RKINK_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_rkink_plot_threads_ci_prob(mock_pymc_sample, fitted_rkink, ci_prob):
+    """Regression Kink ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    _check_threading(fitted_rkink, _RKINK_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
-def test_rkink_plot_default_hdi_prob(mock_pymc_sample, fitted_rkink):
-    """Regression Kink default ``plot()`` forwards ``HDI_PROB``."""
+def test_rkink_plot_default_ci_prob(mock_pymc_sample, fitted_rkink):
+    """Regression Kink default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
     _check_default(fitted_rkink, _RKINK_TARGETS)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_prepost_plot_threads_hdi_prob(mock_pymc_sample, fitted_prepost, hdi_prob):
-    """PrePostNEGD ``plot(hdi_prob=...)`` reaches ``plot_xY`` and ``az.plot_posterior``."""
-    _check_threading(fitted_prepost, _PREPOST_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_prepost_plot_threads_ci_prob(mock_pymc_sample, fitted_prepost, ci_prob):
+    """PrePostNEGD ``plot(ci_prob=...)`` reaches both local posterior helpers."""
+    _check_threading(fitted_prepost, _PREPOST_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
-def test_prepost_plot_default_hdi_prob(mock_pymc_sample, fitted_prepost):
-    """PrePostNEGD default ``plot()`` forwards ``HDI_PROB``."""
+def test_prepost_plot_default_ci_prob(mock_pymc_sample, fitted_prepost):
+    """PrePostNEGD default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
     _check_default(fitted_prepost, _PREPOST_TARGETS)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_piecewise_plot_threads_hdi_prob(mock_pymc_sample, fitted_piecewise, hdi_prob):
-    """PiecewiseITS ``plot(hdi_prob=...)`` reaches every ``plot_xY`` call."""
-    _check_threading(fitted_piecewise, _PIECEWISE_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_piecewise_plot_threads_ci_prob(mock_pymc_sample, fitted_piecewise, ci_prob):
+    """PiecewiseITS ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    _check_threading(fitted_piecewise, _PIECEWISE_TARGETS, ci_prob)
 
 
 @pytest.mark.integration
-def test_piecewise_plot_default_hdi_prob(mock_pymc_sample, fitted_piecewise):
-    """PiecewiseITS default ``plot()`` forwards ``HDI_PROB``."""
+def test_piecewise_plot_default_ci_prob(mock_pymc_sample, fitted_piecewise):
+    """PiecewiseITS default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
     _check_default(fitted_piecewise, _PIECEWISE_TARGETS)
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("hdi_prob", _PARAMS)
-def test_panel_plot_threads_hdi_prob(mock_pymc_sample, fitted_panel, hdi_prob):
-    """PanelRegression ``plot(hdi_prob=...)`` reaches ``az.plot_forest``."""
-    _check_threading(fitted_panel, _PANEL_TARGETS, hdi_prob)
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_panel_plot_threads_ci_prob(mock_pymc_sample, fitted_panel, ci_prob):
+    """PanelRegression ``plot(hdi_prob=...)`` reaches its local HDI helper."""
+    _check_threading(fitted_panel, _PANEL_TARGETS, ci_prob, plot_kwarg="hdi_prob")
 
 
 @pytest.mark.integration
-def test_panel_plot_default_hdi_prob(mock_pymc_sample, fitted_panel):
-    """PanelRegression default ``plot()`` forwards ``HDI_PROB``."""
+def test_panel_plot_default_ci_prob(mock_pymc_sample, fitted_panel):
+    """PanelRegression default ``plot()`` forwards ``HDI_PROB`` to its HDI helper."""
     _check_default(fitted_panel, _PANEL_TARGETS)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("ci_prob", _PARAMS)
+def test_sdid_plot_threads_ci_prob(mock_pymc_sample, fitted_sdid, ci_prob):
+    """SDID ``plot(ci_prob=...)`` reaches every ``plot_posterior_over_x`` call."""
+    _check_threading(fitted_sdid, _SDID_TARGETS, ci_prob)
+
+
+@pytest.mark.integration
+def test_sdid_plot_default_ci_prob(mock_pymc_sample, fitted_sdid):
+    """SDID default ``plot()`` forwards ``HDI_PROB`` as ``ci_prob``."""
+    _check_default(fitted_sdid, _SDID_TARGETS)
+
+
+# ---------------------------------------------------------------------------
+# Removed hdi_prob alias (pymc-labs/CausalPy#984).
+#
+# The deprecated experiment-level ``hdi_prob`` alias is gone from the public
+# ``plot()`` methods of the eight migrated classes. Because those signatures
+# are keyword-only with no ``**kwargs`` escape hatch, passing ``hdi_prob``
+# must now raise ``TypeError`` rather than being silently swallowed. Each
+# case also asserts that ``ci_prob`` still threads through, so a future
+# over-eager removal of the ``ci_prob`` wiring cannot pass these tests.
+# ---------------------------------------------------------------------------
+
+# (experiment class name, fitted fixture name, spy targets)
+_MIGRATED_EXPERIMENTS: list[tuple[str, str, list[_SpyTarget]]] = [
+    ("InterruptedTimeSeries", "fitted_its", _ITS_TARGETS),
+    ("DifferenceInDifferences", "fitted_did", _DID_TARGETS),
+    ("PrePostNEGD", "fitted_prepost", _PREPOST_TARGETS),
+    ("RegressionDiscontinuity", "fitted_rd", _RD_TARGETS),
+    ("RegressionKink", "fitted_rkink", _RKINK_TARGETS),
+    ("SyntheticControl", "fitted_sc", _SC_TARGETS),
+    ("SyntheticDifferenceInDifferences", "fitted_sdid", _SDID_TARGETS),
+    ("PiecewiseITS", "fitted_piecewise", _PIECEWISE_TARGETS),
+]
+
+_MIGRATED_CLASS_NAMES = [name for name, _, _ in _MIGRATED_EXPERIMENTS]
+
+
+def test_migrated_experiments_list_covers_all_eight() -> None:
+    """Guard the coverage list itself against silent shrinkage."""
+    assert len(_MIGRATED_EXPERIMENTS) == 8
+    assert len(set(_MIGRATED_CLASS_NAMES)) == 8
+
+
+@pytest.mark.parametrize("class_name", _MIGRATED_CLASS_NAMES)
+def test_public_plot_has_no_hdi_prob_parameter(class_name: str) -> None:
+    """``plot()`` exposes ``ci_prob`` and no longer declares ``hdi_prob``."""
+    params = inspect.signature(getattr(cp, class_name).plot).parameters
+    assert "hdi_prob" not in params, (
+        f"{class_name}.plot() still declares a deprecated hdi_prob parameter"
+    )
+    assert "ci_prob" in params, f"{class_name}.plot() lost its ci_prob parameter"
+    # No ``**kwargs`` escape hatch that could re-absorb ``hdi_prob`` silently.
+    assert not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()), (
+        f"{class_name}.plot() must not accept **kwargs"
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("fixture_name", "targets"),
+    [(fixture, targets) for _, fixture, targets in _MIGRATED_EXPERIMENTS],
+    ids=_MIGRATED_CLASS_NAMES,
+)
+def test_removed_hdi_prob_raises_typeerror_and_ci_prob_still_wired(
+    mock_pymc_sample, request, fixture_name: str, targets: list[_SpyTarget]
+) -> None:
+    """``plot(hdi_prob=...)`` raises ``TypeError``; ``plot(ci_prob=...)`` still threads."""
+    fitted = request.getfixturevalue(fixture_name)
+
+    with pytest.raises(TypeError, match="hdi_prob"):
+        fitted.plot(hdi_prob=0.75)
+
+    # The removal must not have taken the ci_prob wiring with it.
+    _check_threading(fitted, targets, 0.75)
 
 
 # ---------------------------------------------------------------------------
 # StaggeredDifferenceInDifferences has different semantics: HDI bounds are
 # computed during effect aggregation (at fit time), not at plot time. The
 # plot reads cached ``att_lower``/``att_upper`` columns. To prevent silent
-# kwarg swallowing, ``_bayesian_plot`` raises a clear ``ValueError`` when the
+# kwarg swallowing, ``_plot`` raises a clear ``ValueError`` when the
 # caller supplies an ``hdi_prob`` that does not match the cached value.
 # ---------------------------------------------------------------------------
 
@@ -440,7 +561,7 @@ def test_panel_plot_default_hdi_prob(mock_pymc_sample, fitted_panel):
 def test_staggered_plot_uses_cached_hdi_prob(mock_pymc_sample, fitted_staggered):
     """Default ``plot()`` and ``plot(hdi_prob=cached)`` both succeed."""
     fig1, _ = fitted_staggered.plot()
-    fig2, _ = fitted_staggered.plot(hdi_prob=fitted_staggered.hdi_prob_)
+    fig2, _ = fitted_staggered.plot(hdi_prob=fitted_staggered.result.hdi_prob)
     assert fig1 is not None
     assert fig2 is not None
 
@@ -448,6 +569,16 @@ def test_staggered_plot_uses_cached_hdi_prob(mock_pymc_sample, fitted_staggered)
 @pytest.mark.integration
 def test_staggered_plot_rejects_mismatched_hdi_prob(mock_pymc_sample, fitted_staggered):
     """Supplying a non-cached ``hdi_prob`` must raise rather than silently no-op."""
-    other = 0.50 if fitted_staggered.hdi_prob_ != 0.50 else 0.99
+    other = 0.50 if fitted_staggered.result.hdi_prob != 0.50 else 0.99
     with pytest.raises(ValueError, match="HDI bounds are computed during"):
         fitted_staggered.plot(hdi_prob=other)
+
+
+@pytest.mark.integration
+def test_staggered_group_time_plot_rejects_mismatched_hdi_prob(
+    mock_pymc_sample, fitted_staggered
+):
+    """The group-time plot must also reject a non-cached ``hdi_prob``."""
+    other = 0.50 if fitted_staggered.result.hdi_prob != 0.50 else 0.99
+    with pytest.raises(ValueError, match="HDI bounds are computed during"):
+        fitted_staggered.plot_group_time(hdi_prob=other)

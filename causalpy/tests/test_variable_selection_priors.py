@@ -15,6 +15,7 @@
 import numpy as np
 import pymc as pm
 import pytest
+import xarray as xr
 
 from causalpy.variable_selection_priors import (
     HorseshoePrior,
@@ -87,6 +88,148 @@ def test_create_prior_spike_and_slab(coords):
         assert beta.name == "beta"
 
 
+def _create_spike_and_slab_prior(
+    *, n_params=20, instance_hyperparams=None, call_hyperparams=None
+):
+    """Create a spike-and-slab prior and return its resolved implementation."""
+    coords = {"features": [f"x_{i}" for i in range(n_params)]}
+    vs_prior = VariableSelectionPrior(
+        "spike_and_slab", hyperparams=instance_hyperparams
+    )
+    with pm.Model(coords=coords):
+        vs_prior.create_prior(
+            name="beta",
+            n_params=n_params,
+            dims="features",
+            hyperparams=call_hyperparams,
+        )
+    assert isinstance(vs_prior._prior_instance, SpikeAndSlabPrior)
+    return vs_prior._prior_instance
+
+
+def test_expected_model_size_instance_pair_resolves_sparse_prior():
+    """Instance-level expected size maps to the requested Beta parameters."""
+    prior = _create_spike_and_slab_prior(
+        instance_hyperparams={
+            "expected_model_size": 1,
+            "pi_concentration": 40,
+        }
+    )
+
+    assert prior.pi_alpha == pytest.approx(2)
+    assert prior.pi_beta == pytest.approx(38)
+
+
+def test_expected_model_size_call_pair_allows_boundary_heavy_prior():
+    """An explicit low concentration may intentionally produce alpha below one."""
+    prior = _create_spike_and_slab_prior(
+        call_hyperparams={
+            "expected_model_size": 1,
+            "pi_concentration": 4,
+        }
+    )
+
+    assert prior.pi_alpha == pytest.approx(0.2)
+    assert prior.pi_beta == pytest.approx(3.8)
+
+
+def test_expected_model_size_pair_can_be_split_across_layers():
+    """Instance and call values combine using the ordinary precedence rules."""
+    prior = _create_spike_and_slab_prior(
+        instance_hyperparams={"expected_model_size": 1},
+        call_hyperparams={"pi_concentration": 40},
+    )
+
+    assert prior.pi_alpha == pytest.approx(2)
+    assert prior.pi_beta == pytest.approx(38)
+
+
+def test_call_hyperparams_override_one_expected_size_pair_member():
+    """Call-level values override the matching instance-level value."""
+    prior = _create_spike_and_slab_prior(
+        instance_hyperparams={
+            "expected_model_size": 1,
+            "pi_concentration": 40,
+        },
+        call_hyperparams={"pi_concentration": 4},
+    )
+
+    assert prior.pi_alpha == pytest.approx(0.2)
+    assert prior.pi_beta == pytest.approx(3.8)
+
+
+def test_default_spike_and_slab_parameters_are_unchanged():
+    """The convenience pair does not change the existing default prior."""
+    prior = _create_spike_and_slab_prior()
+
+    assert prior.pi_alpha == 2
+    assert prior.pi_beta == 2
+
+
+@pytest.mark.parametrize("layer", ["instance_hyperparams", "call_hyperparams"])
+def test_expected_model_size_defaults_to_concentration_four(layer):
+    """One expected-size key preserves the default Beta prior strength."""
+    prior = _create_spike_and_slab_prior(**{layer: {"expected_model_size": 2}})
+    assert prior.pi_alpha == pytest.approx(0.4)
+    assert prior.pi_beta == pytest.approx(3.6)
+
+
+def test_concentration_requires_expected_model_size():
+    """Concentration alone does not silently select a target mean."""
+    with pytest.raises(ValueError, match="requires expected_model_size"):
+        _create_spike_and_slab_prior(instance_hyperparams={"pi_concentration": 4})
+
+
+@pytest.mark.parametrize("shape_key", ["pi_alpha", "pi_beta"])
+@pytest.mark.parametrize("shape_on_instance", [False, True])
+def test_expected_size_conflicts_across_layers(shape_key, shape_on_instance):
+    """Neither layer silently replaces a different prior parameterization."""
+    shapes = {shape_key: 1}
+    size = {"expected_model_size": 2}
+    instance, call = (shapes, size) if shape_on_instance else (size, shapes)
+    with pytest.raises(ValueError, match="either the instance or call level"):
+        _create_spike_and_slab_prior(
+            instance_hyperparams=instance, call_hyperparams=call
+        )
+
+
+@pytest.mark.parametrize("explicit_key", ["pi_alpha", "pi_beta"])
+def test_expected_size_pair_conflicts_with_explicit_beta_shapes(explicit_key):
+    """Explicit shape keys conflict even when their value equals a default."""
+    with pytest.raises(ValueError, match="cannot be combined"):
+        _create_spike_and_slab_prior(
+            instance_hyperparams={
+                "expected_model_size": 1,
+                "pi_concentration": 40,
+                explicit_key: 2,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "key,value,match",
+    [
+        ("expected_model_size", 0, "greater than 0"),
+        ("expected_model_size", 20, "less than n_params"),
+        ("expected_model_size", np.nan, "finite numeric"),
+        ("expected_model_size", np.inf, "finite numeric"),
+        ("expected_model_size", "1", "finite numeric"),
+        ("pi_concentration", 0, "positive finite"),
+        ("pi_concentration", -1, "positive finite"),
+        ("pi_concentration", np.nan, "positive finite"),
+        ("pi_concentration", np.inf, "positive finite"),
+        ("pi_concentration", "40", "positive finite"),
+    ],
+)
+def test_expected_size_pair_validates_values(key, value, match):
+    """The convenience values must be finite and within their valid ranges."""
+    hyperparams = {"expected_model_size": 1, "pi_concentration": 40}
+    hyperparams[key] = value
+
+    with pytest.raises(ValueError, match=match):
+        _create_spike_and_slab_prior(instance_hyperparams=hyperparams)
+
+
 def test_create_prior_horseshoe(coords, sample_data):
     """Test create_prior for horseshoe."""
     vs_prior = VariableSelectionPrior("horseshoe")
@@ -109,6 +252,56 @@ def test_create_prior_normal(coords, sample_data):
 
         assert "beta" in model.named_vars
         assert beta.name == "beta"
+
+
+def test_inclusion_probabilities_supports_datatree_posterior():
+    """Inclusion summaries operate on ArviZ 1 DataArray extracts."""
+    idata = xr.DataTree.from_dict(
+        {
+            "posterior": xr.Dataset(
+                {
+                    "gamma_beta": (
+                        ("chain", "draw", "features"),
+                        np.array([[[1, 0], [1, 1]], [[0, 0], [1, 0]]]),
+                    )
+                }
+            )
+        }
+    )
+
+    summary = VariableSelectionPrior("spike_and_slab").get_inclusion_probabilities(
+        idata, "beta"
+    )
+
+    np.testing.assert_allclose(summary["prob"], [0.75, 0.25])
+    assert summary["selected"].tolist() == [True, False]
+    np.testing.assert_allclose(summary["gamma_mean"], [0.75, 0.25])
+
+
+def test_shrinkage_factors_supports_datatree_posterior():
+    """Horseshoe summaries broadcast DataArray posterior draws by sample."""
+    idata = xr.DataTree.from_dict(
+        {
+            "posterior": xr.Dataset(
+                {
+                    "tau_beta": (
+                        ("chain", "draw"),
+                        np.array([[2.0, 3.0], [4.0, 5.0]]),
+                    ),
+                    "lambda_tilde_beta": (
+                        ("chain", "draw", "features"),
+                        np.array([[[1.0, 2.0], [3.0, 4.0]], [[5.0, 6.0], [7.0, 8.0]]]),
+                    ),
+                }
+            )
+        }
+    )
+
+    summary = VariableSelectionPrior("horseshoe").get_shrinkage_factors(idata, "beta")
+
+    np.testing.assert_allclose(summary["shrinkage_factor"], [16.5, 20.0])
+    np.testing.assert_allclose(summary["lambda_tilde"], [4.0, 5.0])
+    np.testing.assert_allclose(summary["tau"], 3.5)
 
 
 def test_convenience_function_with_custom_hyperparams(coords):

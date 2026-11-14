@@ -32,7 +32,7 @@ from causalpy.steps.report import GenerateReport
 
 
 @pytest.fixture
-def its_context() -> PipelineContext:
+def its_context(mock_pymc_sample) -> PipelineContext:
     """PipelineContext with a fitted OLS ITS experiment and effect summary."""
     np.random.seed(42)
     n = 100
@@ -40,7 +40,7 @@ def its_context() -> PipelineContext:
     model = cp.create_causalpy_compatible_class(LinearRegression())
     experiment = InterruptedTimeSeries(
         df, treatment_time=70, formula="y ~ 1 + t", model=model
-    )
+    ).fit()
     ctx = PipelineContext(data=df)
     ctx.experiment = experiment
     ctx.effect_summary = experiment.effect_summary()
@@ -137,18 +137,119 @@ class TestGenerateReport:
         ctx = PipelineContext(data=pd.DataFrame({"x": [1]}))
         GenerateReport().validate(ctx)
 
+    def test_includes_check_figures(self, its_context):
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots()
+        ax.plot([0, 1], [0, 1])
+        its_context.sensitivity_results = [
+            CheckResult(check_name="FigureCheck", passed=True, figures=[fig])
+        ]
+        ctx = GenerateReport().run(its_context)
+        plt.close(fig)
+
+        # The alt text is unique to the check, so it distinguishes the check
+        # figure from the experiment plot the report already embedded.
+        assert "FigureCheck figure" in ctx.report
+        assert "data:image/png;base64," in ctx.report
+
+    def test_excludes_check_figures_when_plots_disabled(self, its_context):
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots()
+        ax.plot([0, 1], [0, 1])
+        its_context.sensitivity_results = [
+            CheckResult(check_name="FigureCheck", passed=True, figures=[fig])
+        ]
+        ctx = GenerateReport(include_plots=False).run(its_context)
+        plt.close(fig)
+
+        assert "FigureCheck" in ctx.report
+        assert "data:image/png;base64," not in ctx.report
+
+    def test_check_figures_are_not_closed(self, its_context):
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots()
+        ax.plot([0, 1], [0, 1])
+        its_context.sensitivity_results = [
+            CheckResult(check_name="FigureCheck", passed=True, figures=[fig])
+        ]
+        GenerateReport().run(its_context)
+
+        assert plt.fignum_exists(fig.number)
+        plt.close(fig)
+
+    def test_handles_check_figure_rendering_failure(self, its_context):
+        class BrokenFigure:
+            def savefig(self, *args, **kwargs):
+                raise RuntimeError("savefig failed")
+
+        its_context.sensitivity_results = [
+            CheckResult(check_name="BrokenCheck", passed=True, figures=[BrokenFigure()])
+        ]
+        step = GenerateReport(include_plots=True)
+        ctx = step.run(its_context)
+
+        assert "BrokenCheck" in ctx.report
+
     def test_handles_plot_rendering_failure(self, its_context):
         from unittest.mock import patch
 
+        with (
+            patch.object(
+                type(its_context.experiment),
+                "plot",
+                side_effect=RuntimeError("plot failed"),
+            ),
+            pytest.raises(RuntimeError, match="plot failed"),
+        ):
+            GenerateReport(include_plots=True).run(its_context)
+
+    def test_tolerates_stub_plot_experiments(self, its_context):
+        from unittest.mock import patch
+
+        # IV and IPW raise NotImplementedError by design; a report for
+        # them must degrade to "no pictures", not crash.
         with patch.object(
             type(its_context.experiment),
             "plot",
-            side_effect=RuntimeError("plot failed"),
+            side_effect=NotImplementedError("Plot method not implemented."),
         ):
-            step = GenerateReport(include_plots=True)
-            ctx = step.run(its_context)
-        assert isinstance(ctx.report, str)
+            ctx = GenerateReport(include_plots=True).run(its_context)
+
+        assert "CausalPy Analysis Report" in ctx.report
         assert "data:image/png;base64," not in ctx.report
+
+
+def test_ols_html_report_contains_known_relative_effect(mock_pymc_sample):
+    """The cited constant-impact OLS fit renders formatted relative effect 20, not 200."""
+    df = pd.DataFrame(
+        {
+            "t": np.arange(30),
+            "y": np.concatenate([np.full(20, 5.0), np.full(10, 6.0)]),
+        }
+    )
+    cited = InterruptedTimeSeries(
+        df,
+        treatment_time=20,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+    stats = cited.effect_summary(relative=True, cumulative=True)
+    assert stats.table.loc["cumulative", "relative_mean"] == pytest.approx(20.0)
+    assert stats.table.loc["cumulative", "relative_mean"] != pytest.approx(200.0)
+
+    ctx = PipelineContext(data=df)
+    ctx.experiment = cited
+    ctx.effect_summary = stats
+    rendered = GenerateReport(include_plots=False).run(ctx)
+    # Prose formats only the average relative change as ``20.00%``. The
+    # cumulative cell is the table token ``<td>20.0</td>``; summing per-period
+    # percentages emits ``<td>200.0</td>``, which ``20.00%`` does not reject.
+    assert "20.00%" in rendered.report
+    assert "<td>20.0</td>" in rendered.report
+    assert "<td>200.0</td>" not in rendered.report
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +260,7 @@ class TestGenerateReport:
 class TestGenerateReportPipelineIntegration:
     """Integration tests for GenerateReport within a full pipeline."""
 
-    def test_full_pipeline(self):
+    def test_full_pipeline(self, mock_pymc_sample):
         np.random.seed(42)
         n = 100
         df = pd.DataFrame({"t": np.arange(n), "y": np.random.normal(size=n)})
@@ -192,7 +293,7 @@ class TestStandaloneGenerateReport:
     """Tests for BaseExperiment.generate_report() convenience method."""
 
     @pytest.fixture
-    def experiment(self):
+    def experiment(self, mock_pymc_sample):
         """Return a fitted OLS ITS experiment."""
         np.random.seed(42)
         n = 100
@@ -200,7 +301,7 @@ class TestStandaloneGenerateReport:
         model = cp.create_causalpy_compatible_class(LinearRegression())
         return InterruptedTimeSeries(
             df, treatment_time=70, formula="y ~ 1 + t", model=model
-        )
+        ).fit()
 
     def test_returns_html_string(self, experiment):
         html = experiment.generate_report(include_plots=False)

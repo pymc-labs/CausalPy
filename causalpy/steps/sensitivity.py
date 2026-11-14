@@ -43,6 +43,14 @@ def register_default_check(
 
     Called by check modules at import time so that
     ``SensitivityAnalysis.default_for`` can auto-select checks.
+
+    Parameters
+    ----------
+    check_class : type
+        The check class to register as a default.
+    experiment_types : set of type[BaseExperiment]
+        Experiment classes for which ``check_class`` should be applied by
+        default.
     """
     for exp_type in experiment_types:
         _DEFAULT_CHECKS.setdefault(exp_type, []).append(check_class)
@@ -69,7 +77,18 @@ class SensitivitySummary:
 
     @classmethod
     def from_results(cls, results: list[CheckResult]) -> SensitivitySummary:
-        """Build a summary from a list of check results."""
+        """Build a summary from a list of check results.
+
+        Parameters
+        ----------
+        results : list of CheckResult
+            Individual results to aggregate.
+
+        Returns
+        -------
+        SensitivitySummary
+            Aggregated summary covering all supplied results.
+        """
         verdicts = [r.passed for r in results if r.passed is not None]
         all_passed = all(verdicts) if verdicts else None
 
@@ -127,6 +146,12 @@ class SensitivityAnalysis:
         only check structural issues (e.g. that each object satisfies the
         Check protocol).
 
+        Parameters
+        ----------
+        context : PipelineContext
+            Pipeline context (unused at validation time but required by the
+            pipeline step interface).
+
         Raises
         ------
         TypeError
@@ -141,6 +166,18 @@ class SensitivityAnalysis:
 
     def run(self, context: PipelineContext) -> PipelineContext:
         """Run all checks against the fitted experiment.
+
+        Parameters
+        ----------
+        context : PipelineContext
+            Pipeline context containing the fitted experiment and any
+            ``experiment_config`` required by the checks.
+
+        Returns
+        -------
+        PipelineContext
+            The same context with ``sensitivity_results`` and ``report``
+            populated.
 
         Raises
         ------

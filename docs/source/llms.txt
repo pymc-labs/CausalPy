@@ -1,0 +1,47 @@
+# CausalPy
+
+> CausalPy is an open-source Python library for causal inference in quasi-experiments, built and maintained by PyMC Labs. It provides Bayesian (PyMC) and OLS (scikit-learn) estimators for synthetic control, difference-in-differences (including staggered adoption), interrupted time series, regression discontinuity, instrumental variables, and inverse propensity score weighting. Results come with full posterior uncertainty, effect summaries with credible intervals (HDI), ROPE-based practical significance, and publication-quality plots.
+
+Install with `pip install CausalPy` or `conda install causalpy -c conda-forge`. Source code: https://github.com/pymc-labs/CausalPy (Apache 2.0 license).
+
+Typical usage: load a pandas DataFrame, choose an experiment class (e.g. `causalpy.SyntheticControl`, `causalpy.DifferenceInDifferences`, `causalpy.InterruptedTimeSeries`), pass a model (a PyMC model for Bayesian inference or a scikit-learn estimator for OLS), then inspect `result.summary()` and `result.plot()`.
+
+## Documentation
+
+- [Documentation home](https://causalpy.readthedocs.io/en/stable/): overview, installation, and quickstart for causal inference in quasi-experiments
+- [Example gallery](https://causalpy.readthedocs.io/en/stable/notebooks/index.html): how-to notebooks for every supported quasi-experimental design
+- [API reference](https://causalpy.readthedocs.io/en/stable/api/index.html): experiment classes, PyMC models, and scikit-learn models
+- [Glossary](https://causalpy.readthedocs.io/en/stable/knowledgebase/glossary.html): definitions of causal inference terms used across the docs
+
+## Quasi-experimental methods
+
+- [Synthetic control](https://causalpy.readthedocs.io/en/stable/notebooks/synthetic-control-pymc.html): Bayesian synthetic control to estimate the effect of an intervention on a single treated unit using a weighted combination of control units
+- [Geographical lift testing (geolift)](https://causalpy.readthedocs.io/en/stable/notebooks/geolift-single-cell.html): measure the causal impact of marketing interventions in geographic regions with Bayesian synthetic control
+- [Multi-cell geolift](https://causalpy.readthedocs.io/en/stable/notebooks/multi-cell-geolift.html): geolift analysis with multiple treated regions
+- [Difference-in-differences](https://causalpy.readthedocs.io/en/stable/notebooks/difference-in-differences-pymc.html): estimate treatment effects from pre/post differences between treatment and control groups
+- [Staggered difference-in-differences](https://causalpy.readthedocs.io/en/stable/notebooks/staggered-difference-in-differences-pymc.html): staggered adoption designs where units receive treatment at different times, avoiding two-way fixed effects pitfalls
+- [Synthetic difference-in-differences](https://causalpy.readthedocs.io/en/stable/notebooks/synthetic-difference-in-differences-pymc.html): combines synthetic control weighting with difference-in-differences
+- [Interrupted time series (ITS)](https://causalpy.readthedocs.io/en/stable/notebooks/interrupted-time-series-pymc.html): Bayesian counterfactual forecasting to estimate the causal impact of an intervention on a single time series
+- [Lift testing with ITS](https://causalpy.readthedocs.io/en/stable/notebooks/interrupted-time-series-lift-test.html): marketing lift/incrementality testing without a control group, including MMM calibration
+- [Piecewise ITS (segmented regression)](https://causalpy.readthedocs.io/en/stable/notebooks/piecewise-interrupted-time-series-pymc.html): separate level and slope changes at the intervention point
+- [Regression discontinuity](https://causalpy.readthedocs.io/en/stable/notebooks/regression-discontinuity-pymc.html): treatment effects at a cutoff along a running variable
+- [Regression kink design](https://causalpy.readthedocs.io/en/stable/notebooks/regression-kink-pymc.html): slope changes at a cutoff rather than discrete jumps
+- [Instrumental variables](https://causalpy.readthedocs.io/en/stable/notebooks/instrumental-variables-pymc.html): handle endogeneity/confounding with instruments in a Bayesian framework
+- [Inverse propensity score weighting](https://causalpy.readthedocs.io/en/stable/notebooks/inverse-propensity-pymc.html): adjust for confounding in observational data by weighting on the propensity score
+- [ANCOVA](https://causalpy.readthedocs.io/en/stable/notebooks/ancova-pymc.html): pre/post treatment nonequivalent group designs
+- [Panel fixed effects](https://causalpy.readthedocs.io/en/stable/notebooks/panel-fixed-effects.html): control for stable unit-level confounders in panel data
+
+## Concepts
+
+- [Structural causal models](https://causalpy.readthedocs.io/en/stable/knowledgebase/structural_causal_models.html): SCMs, interventions, and counterfactuals
+- [Causal DAGs for quasi-experiments](https://causalpy.readthedocs.io/en/stable/knowledgebase/quasi_dags.html): directed acyclic graphs underlying each supported design
+- [Causal estimands](https://causalpy.readthedocs.io/en/stable/knowledgebase/estimands.html): ATE, ATT, LATE and what each design identifies
+- [Quasi-experimental design notation](https://causalpy.readthedocs.io/en/stable/knowledgebase/design_notation.html): compact notation for describing designs
+- [Reporting statistics](https://causalpy.readthedocs.io/en/stable/knowledgebase/reporting_statistics.html): how to report Bayesian causal effect estimates
+
+## Optional
+
+- [Workflow pipeline](https://causalpy.readthedocs.io/en/stable/notebooks/pipeline-workflow.html): chain analysis, sensitivity checks, and reporting into one reproducible workflow
+- [Sensitivity checks](https://causalpy.readthedocs.io/en/stable/notebooks/sensitivity_checks.html): placebo-in-time, prior sensitivity, and falsification checks
+- [HTML report generation](https://causalpy.readthedocs.io/en/stable/notebooks/reporting-demo.html): self-contained HTML reports for every experiment
+- [Further reading](https://causalpy.readthedocs.io/en/stable/knowledgebase/causal_written_resources.html): books and papers on causal inference

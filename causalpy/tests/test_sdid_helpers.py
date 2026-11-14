@@ -1,0 +1,865 @@
+#   Copyright 2022 - 2026 The PyMC Labs Developers
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+"""
+Unit tests for the private helper methods of ``SyntheticDifferenceInDifferences``.
+
+The ``algorithm`` method is a thin orchestrator that delegates to a handful of
+private helpers. Testing them directly lets us catch regressions in the
+individual steps without paying the cost of a full MCMC run.
+"""
+
+from types import SimpleNamespace
+from typing import Any, Protocol
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import pytest
+import xarray as xr
+
+from causalpy._arviz_compat import hdi_bounds
+from causalpy.constants import HDI_PROB
+from causalpy.custom_exceptions import BadIndexException
+from causalpy.experiments.synthetic_difference_in_differences import (
+    SyntheticDifferenceInDifferences,
+)
+
+
+class _StubFittableModel(Protocol):
+    """Minimal model protocol for SDiD stub tests."""
+
+    idata: Any
+
+    def fit(self, X: Any, y: Any, *, coords: Any = None) -> Any: ...
+
+
+class _StubModelAdapter:
+    """Minimal adapter for SDiD unit-test stubs that bypass ``__init__``."""
+
+    def __init__(self, model: _StubFittableModel) -> None:
+        self.model = model
+        self.is_ols = False
+        self.is_bayesian = False
+
+    def fit(self, X: Any, y: Any, *, coords: Any | None = None) -> Any:
+        return self.model.fit(X=X, y=y, coords=coords)
+
+    def require_idata(self) -> xr.DataTree:
+        if self.model.idata is None:
+            raise RuntimeError("Model has not been fit yet.")
+        return self.model.idata
+
+
+def _make_experiment_stub(
+    *,
+    control_units: list[str] | None = None,
+    treated_units: list[str] | None = None,
+    data: pd.DataFrame | None = None,
+    treatment_time: int | None = None,
+    model: _StubFittableModel | None = None,
+) -> SyntheticDifferenceInDifferences:
+    """Construct an SDiD instance without running ``__init__``/``algorithm``.
+
+    The private helpers only rely on a handful of attributes. Bypassing
+    ``__init__`` keeps these tests fast and side-effect free.
+    """
+    stub = object.__new__(SyntheticDifferenceInDifferences)
+    stub.control_units = control_units or []
+    stub.labels = list(stub.control_units)
+    stub.treated_units = treated_units or []
+    if data is not None:
+        data.index.name = "obs_ind"
+        stub.data = data
+    if treatment_time is not None:
+        stub.treatment_time = treatment_time
+    if model is not None:
+        # Assigning ``stub.model`` would route through the base-class setter,
+        # which resolves a real backend adapter; install the stub directly.
+        stub._model_backend = _StubModelAdapter(model)  # type: ignore[assignment]
+    return stub
+
+
+@pytest.fixture
+def toy_panel():
+    """A deterministic 2-control, 5-period panel with treatment at t=3."""
+    rng = np.random.default_rng(0)
+    control_units = ["c0", "c1"]
+    treated_units = ["t0"]
+    T, T_pre = 5, 3
+    data = pd.DataFrame(
+        {
+            "c0": rng.normal(size=T),
+            "c1": rng.normal(size=T),
+            "t0": rng.normal(size=T),
+        }
+    )
+    return SimpleNamespace(
+        data=data,
+        control_units=control_units,
+        treated_units=treated_units,
+        treatment_time=T_pre,
+        T=T,
+        T_pre=T_pre,
+    )
+
+
+class TestBuildWeightFitterInputs:
+    """Unit tests for ``_build_weight_fitter_inputs``."""
+
+    def test_shapes_and_coords(self, toy_panel):
+        stub = _make_experiment_stub(control_units=toy_panel.control_units)
+        Y_co = toy_panel.data[toy_panel.control_units].to_numpy().T
+        y_tr = toy_panel.data[toy_panel.treated_units].to_numpy().mean(axis=1)
+
+        X, y, coords = stub._build_weight_fitter_inputs(Y_co, y_tr, toy_panel.T_pre)
+
+        assert set(X.keys()) == {"unit", "time"}
+        assert set(y.keys()) == {"unit", "time"}
+
+        # Unit module: design is (T_pre, N_co), response is (T_pre,).
+        assert X["unit"].dims == ("obs_ind", "coeffs")
+        assert X["unit"].shape == (toy_panel.T_pre, len(toy_panel.control_units))
+        assert y["unit"].dims == ("obs_ind",)
+        assert y["unit"].shape == (toy_panel.T_pre,)
+
+        # Time module: design is (N_co, T_pre), response is (N_co,).
+        assert X["time"].dims == ("coeffs", "obs_ind")
+        assert X["time"].shape == (len(toy_panel.control_units), toy_panel.T_pre)
+        assert y["time"].dims == ("coeffs",)
+        assert y["time"].shape == (len(toy_panel.control_units),)
+
+        assert coords["coeffs"] == toy_panel.control_units
+        assert list(coords["obs_ind"]) == list(range(toy_panel.T_pre))
+        assert coords["coeffs_raw"] == toy_panel.control_units[1:]
+        assert coords["obs_ind_raw"] == list(range(1, toy_panel.T_pre))
+
+    def test_values_match_hand_computed(self, toy_panel):
+        """``X_time`` must equal the pre-period control panel and
+        ``y_time`` the post-period control mean."""
+        stub = _make_experiment_stub(control_units=toy_panel.control_units)
+        Y_co = toy_panel.data[toy_panel.control_units].to_numpy().T
+        y_tr = toy_panel.data[toy_panel.treated_units].to_numpy().mean(axis=1)
+
+        X, y, _ = stub._build_weight_fitter_inputs(Y_co, y_tr, toy_panel.T_pre)
+
+        np.testing.assert_allclose(X["unit"].to_numpy(), Y_co[:, : toy_panel.T_pre].T)
+        np.testing.assert_allclose(y["unit"].to_numpy(), y_tr[: toy_panel.T_pre])
+        np.testing.assert_allclose(X["time"].to_numpy(), Y_co[:, : toy_panel.T_pre])
+        np.testing.assert_allclose(
+            y["time"].to_numpy(), Y_co[:, toy_panel.T_pre :].mean(axis=1)
+        )
+
+
+class TestExtractWeightPosteriors:
+    """Unit tests for ``_extract_weight_posteriors``."""
+
+    def test_returns_expected_arrays_and_counts(self):
+        n_chains, n_draws, n_co, T_pre = 2, 4, 3, 5
+        omega_true = np.arange(n_chains * n_draws * n_co, dtype=float).reshape(
+            n_chains, n_draws, n_co
+        )
+        lam_true = np.arange(n_chains * n_draws * T_pre, dtype=float).reshape(
+            n_chains, n_draws, T_pre
+        )
+        omega0_true = np.arange(n_chains * n_draws, dtype=float).reshape(
+            n_chains, n_draws
+        )
+        posterior = xr.Dataset(
+            {
+                "omega": (("chain", "draw", "coeffs"), omega_true),
+                "lam": (("chain", "draw", "obs_ind"), lam_true),
+                "omega0": (("chain", "draw"), omega0_true),
+            }
+        )
+        idata = xr.DataTree.from_dict({"posterior": posterior})
+        stub = _make_experiment_stub(model=SimpleNamespace(idata=idata))
+        omega, omega0, lam, n_ch, n_dr = stub._extract_weight_posteriors("posterior")
+
+        np.testing.assert_array_equal(omega, omega_true)
+        np.testing.assert_array_equal(lam, lam_true)
+        np.testing.assert_array_equal(omega0, omega0_true)
+        assert (n_ch, n_dr) == (n_chains, n_draws)
+
+
+class TestComputeSyntheticAndGaps:
+    """Unit tests for the static ``_compute_synthetic_and_gaps`` helper."""
+
+    def test_matches_explicit_formula(self):
+        n_chains, n_draws, n_co, T = 2, 3, 4, 6
+        rng = np.random.default_rng(1)
+        omega = rng.normal(size=(n_chains, n_draws, n_co))
+        omega0 = rng.normal(size=(n_chains, n_draws))
+        Y_co = rng.normal(size=(n_co, T))
+        y_tr = rng.normal(size=(T,))
+
+        sc_all, gaps = SyntheticDifferenceInDifferences._compute_synthetic_and_gaps(
+            omega, omega0, Y_co, y_tr
+        )
+
+        assert sc_all.shape == (n_chains, n_draws, T)
+        assert gaps.shape == (n_chains, n_draws, T)
+
+        expected_sc = np.empty((n_chains, n_draws, T))
+        for c in range(n_chains):
+            for d in range(n_draws):
+                expected_sc[c, d, :] = omega0[c, d] + omega[c, d] @ Y_co
+        np.testing.assert_allclose(sc_all, expected_sc)
+        np.testing.assert_allclose(gaps, y_tr[np.newaxis, np.newaxis, :] - expected_sc)
+
+    def test_joint_reordering_of_controls_and_weights_is_invariant(self):
+        """Permuting control units and their weights leaves the synthetic path unchanged."""
+        n_chains, n_draws, n_co, T = 2, 4, 5, 8
+        rng = np.random.default_rng(0)
+        omega = rng.normal(size=(n_chains, n_draws, n_co))
+        omega0 = rng.normal(size=(n_chains, n_draws))
+        Y_co = rng.normal(size=(n_co, T))
+        y_tr = rng.normal(size=(T,))
+        perm = np.array([3, 0, 4, 1, 2])
+
+        sc_all, _gaps = SyntheticDifferenceInDifferences._compute_synthetic_and_gaps(
+            omega, omega0, Y_co, y_tr
+        )
+        reordered, _reordered_gaps = (
+            SyntheticDifferenceInDifferences._compute_synthetic_and_gaps(
+                omega[..., perm], omega0, Y_co[perm], y_tr
+            )
+        )
+
+        np.testing.assert_allclose(sc_all, reordered, atol=1e-12)
+
+
+class TestComputeTau:
+    """Unit tests for the static ``_compute_tau`` helper."""
+
+    def test_double_difference_formula(self):
+        n_chains, n_draws, T_pre, T_post = 2, 3, 4, 3
+        T = T_pre + T_post
+        rng = np.random.default_rng(2)
+        gaps = rng.normal(size=(n_chains, n_draws, T))
+        lam = rng.normal(size=(n_chains, n_draws, T_pre))
+
+        tau = SyntheticDifferenceInDifferences._compute_tau(
+            gaps, lam, T_pre, n_chains, n_draws
+        )
+
+        assert isinstance(tau, xr.DataArray)
+        assert tau.dims == ("chain", "draw")
+        assert tau.shape == (n_chains, n_draws)
+
+        expected = gaps[..., T_pre:].mean(axis=-1) - (lam * gaps[..., :T_pre]).sum(
+            axis=-1
+        )
+        np.testing.assert_allclose(tau.to_numpy(), expected)
+
+    def test_tau_is_zero_when_gaps_are_zero(self):
+        n_chains, n_draws, T_pre, T_post = 2, 3, 4, 5
+        T = T_pre + T_post
+        gaps = np.zeros((n_chains, n_draws, T))
+        lam = np.random.default_rng(3).normal(size=(n_chains, n_draws, T_pre))
+
+        tau = SyntheticDifferenceInDifferences._compute_tau(
+            gaps, lam, T_pre, n_chains, n_draws
+        )
+        np.testing.assert_allclose(tau.to_numpy(), 0.0)
+
+    def test_tau_is_zero_for_constant_gap_and_simplex_weights(self):
+        """A constant gap and simplex time weights cancel in the double difference.
+
+        Zero gaps are not enough: any time weights give tau 0 in that case.
+        Here the gap is 4 everywhere, so tau is 0 only because the weights sum to 1.
+        """
+        n_chains, n_draws, T_pre, T_post = 2, 4, 5, 3
+        gaps = np.full((n_chains, n_draws, T_pre + T_post), 4.0)
+        lam = np.random.default_rng(0).random((n_chains, n_draws, T_pre))
+        lam /= lam.sum(axis=-1, keepdims=True)
+
+        tau = SyntheticDifferenceInDifferences._compute_tau(
+            gaps, lam, T_pre, n_chains, n_draws
+        )
+        np.testing.assert_allclose(tau.to_numpy(), 0.0, atol=1e-12)
+
+        not_simplex = np.full((n_chains, n_draws, T_pre), 0.1)
+        tau_off_simplex = SyntheticDifferenceInDifferences._compute_tau(
+            gaps, not_simplex, T_pre, n_chains, n_draws
+        )
+        np.testing.assert_allclose(tau_off_simplex.to_numpy(), 2.0)
+
+
+class TestBuildReportingObjects:
+    """Unit tests for ``_build_reporting_objects``."""
+
+    def test_sets_expected_attributes(self, toy_panel):
+        stub = _make_experiment_stub(
+            control_units=toy_panel.control_units,
+            treated_units=toy_panel.treated_units,
+            data=toy_panel.data,
+            treatment_time=toy_panel.treatment_time,
+        )
+
+        n_chains, n_draws = 2, 3
+        sc_all = np.random.default_rng(4).normal(size=(n_chains, n_draws, toy_panel.T))
+        tau_posterior = xr.DataArray(
+            np.zeros((n_chains, n_draws)), dims=["chain", "draw"]
+        )
+
+        bundle = stub._build_reporting_objects(
+            sc_all,
+            toy_panel.T_pre,
+            n_chains,
+            n_draws,
+            tau_posterior=tau_posterior,
+        )
+
+        # predictions_pre / predictions_post are canonical prediction DataArrays.
+        for pred, expected_len, index in (
+            (
+                bundle.predictions_pre,
+                toy_panel.T_pre,
+                toy_panel.data.index[: toy_panel.T_pre],
+            ),
+            (
+                bundle.predictions_post,
+                toy_panel.T - toy_panel.T_pre,
+                toy_panel.data.index[toy_panel.T_pre :],
+            ),
+        ):
+            assert isinstance(pred, xr.DataArray)
+            assert pred.dims == ("chain", "draw", "obs_ind", "treated_units")
+            assert pred.shape == (n_chains, n_draws, expected_len, 1)
+            np.testing.assert_array_equal(pred.coords["obs_ind"].values, index.values)
+            assert (
+                pred.coords["treated_units"].values.tolist() == toy_panel.treated_units
+            )
+        # impact_pre / impact_post are xr.DataArrays with the correct dims.
+        for impact, expected_len in (
+            (bundle.impact_pre, toy_panel.T_pre),
+            (bundle.impact_post, toy_panel.T - toy_panel.T_pre),
+        ):
+            assert isinstance(impact, xr.DataArray)
+            assert impact.dims == ("chain", "draw", "obs_ind", "treated_units")
+            assert impact.shape == (n_chains, n_draws, expected_len, 1)
+
+        # cumulative is cumsum of impact_post along time.
+        np.testing.assert_allclose(
+            bundle.impact_post_cumulative.to_numpy(),
+            bundle.impact_post.cumsum(dim="obs_ind").to_numpy(),
+        )
+
+    def test_impact_values_match_observed_minus_counterfactual(self, toy_panel):
+        stub = _make_experiment_stub(
+            control_units=toy_panel.control_units,
+            treated_units=toy_panel.treated_units,
+            data=toy_panel.data,
+            treatment_time=toy_panel.treatment_time,
+        )
+        n_chains, n_draws = 1, 2
+        sc_all = np.random.default_rng(5).normal(size=(n_chains, n_draws, toy_panel.T))
+        tau_posterior = xr.DataArray(
+            np.zeros((n_chains, n_draws)), dims=["chain", "draw"]
+        )
+
+        bundle = stub._build_reporting_objects(
+            sc_all,
+            toy_panel.T_pre,
+            n_chains,
+            n_draws,
+            tau_posterior=tau_posterior,
+        )
+        y_tr_pre = (
+            toy_panel.data.iloc[: toy_panel.T_pre][toy_panel.treated_units]
+            .to_numpy()
+            .mean(axis=1)
+        )
+        y_tr_post = (
+            toy_panel.data.iloc[toy_panel.T_pre :][toy_panel.treated_units]
+            .to_numpy()
+            .mean(axis=1)
+        )
+
+        expected_pre = (
+            y_tr_pre[np.newaxis, np.newaxis, :] - sc_all[..., : toy_panel.T_pre]
+        )
+        expected_post = (
+            y_tr_post[np.newaxis, np.newaxis, :] - sc_all[..., toy_panel.T_pre :]
+        )
+        np.testing.assert_allclose(bundle.impact_pre.to_numpy()[..., 0], expected_pre)
+        np.testing.assert_allclose(bundle.impact_post.to_numpy()[..., 0], expected_post)
+
+
+def test_datetime_index_requires_timestamp_treatment_time(toy_panel):
+    data = toy_panel.data.set_axis(pd.date_range("2020-01-01", periods=5))
+    with pytest.raises(BadIndexException):
+        SyntheticDifferenceInDifferences(
+            data,
+            treatment_time=3,
+            control_units=toy_panel.control_units,
+            treated_units=toy_panel.treated_units,
+        )
+
+
+def test_int_index_rejects_timestamp_treatment_time(toy_panel):
+    with pytest.raises(BadIndexException):
+        SyntheticDifferenceInDifferences(
+            toy_panel.data,
+            treatment_time=pd.Timestamp("2020-01-04"),
+            control_units=toy_panel.control_units,
+            treated_units=toy_panel.treated_units,
+        )
+
+
+class TestInputValidation:
+    """Missing inference data fails before results can be consumed."""
+
+    def test_extract_weight_posteriors_raises_when_idata_is_none(self):
+        stub = _make_experiment_stub(model=SimpleNamespace(idata=None))
+        with pytest.raises(RuntimeError, match="Model has not been fit"):
+            stub._extract_weight_posteriors("posterior")
+
+    def test_finalize_raises_when_fit_leaves_idata_none(self, toy_panel):
+        class _NoIdataModel:
+            """Mimics a PyMCModel whose ``fit`` fails to populate ``idata``."""
+
+            idata = None
+
+            def fit(self, X, y, coords):
+                return None
+
+        stub = _make_experiment_stub(
+            control_units=toy_panel.control_units,
+            treated_units=toy_panel.treated_units,
+            data=toy_panel.data,
+            treatment_time=toy_panel.treatment_time,
+            model=_NoIdataModel(),
+        )
+        with pytest.raises(RuntimeError, match="Model has not been fit"):
+            stub._finalize("posterior")
+
+
+class TestSummaryMultiTreated:
+    """``summary`` prints the list when more than one treated unit is present."""
+
+    def test_multi_treated_branch(self, capsys):
+        stub = _make_experiment_stub(
+            control_units=["c0"],
+            treated_units=["t0", "t1"],
+        )
+        stub.expt_type = "SyntheticDifferenceInDifferences"
+        stub._result = SimpleNamespace(
+            tau_posterior=xr.DataArray(
+                np.array([[1.0, 1.5], [0.5, 2.0]]),
+                dims=["chain", "draw"],
+            )
+        )
+
+        stub.summary()
+
+        captured = capsys.readouterr().out
+        assert "Treated units: ['t0', 't1']" in captured
+        assert "Treated unit:" not in captured
+
+
+class TestSummaryHdiPooling:
+    """``summary`` pools raw ``(chain, draw)`` tau through ``hdi_bounds``."""
+
+    def test_summary_hdi_pools_chain_draw_ndarray(self, capsys):
+        """Frozen pooled 94% HDI for a seeded raw ``tau_posterior`` array.
+
+        Uses the same draws as the compat helper baseline. Per-chain bounds
+        differ, so a missing ``flatten_chains_draws=True`` cannot match.
+        """
+        rng = np.random.default_rng(42)
+        samples = rng.normal(loc=2.0, scale=1.0, size=(4, 200))
+        stub = _make_experiment_stub(
+            control_units=["c0"],
+            treated_units=["t0"],
+        )
+        stub.expt_type = "SyntheticDifferenceInDifferences"
+        stub._result = SimpleNamespace(
+            tau_posterior=xr.DataArray(samples, dims=["chain", "draw"])
+        )
+
+        expected_lower = 0.21329248863192207
+        expected_upper = 3.8478250129560454
+        chain0_lower, _ = hdi_bounds(samples[0], prob=HDI_PROB)
+        assert round(expected_lower, 2) != round(chain0_lower, 2)
+
+        stub.summary()
+        captured = capsys.readouterr().out
+        assert (
+            f"94% HDI: [{round(expected_lower, 2)}, {round(expected_upper, 2)}]"
+            in captured
+        )
+
+    def test_summary_passes_flatten_chains_draws(self, monkeypatch, capsys):
+        seen: dict[str, object] = {}
+
+        def fake_hdi_bounds(data, *, prob=None, flatten_chains_draws=False, **kwargs):
+            seen["prob"] = prob
+            seen["flatten_chains_draws"] = flatten_chains_draws
+            seen["shape"] = np.asarray(data).shape
+            return -1.25, 4.5
+
+        monkeypatch.setattr(
+            "causalpy.experiments.synthetic_difference_in_differences.hdi_bounds",
+            fake_hdi_bounds,
+        )
+        stub = _make_experiment_stub(
+            control_units=["c0"],
+            treated_units=["t0"],
+        )
+        stub.expt_type = "SyntheticDifferenceInDifferences"
+        stub._result = SimpleNamespace(
+            tau_posterior=xr.DataArray(
+                np.zeros((2, 5)),
+                dims=["chain", "draw"],
+            )
+        )
+        stub.summary()
+        assert seen["flatten_chains_draws"] is True
+        assert seen["prob"] == HDI_PROB
+        assert seen["shape"] == (2, 5)
+        assert "94% HDI: [-1.25, 4.5]" in capsys.readouterr().out
+
+
+class TestConvertTreatmentTimeForAxis:
+    """``_convert_treatment_time_for_axis`` falls back when conversion fails."""
+
+    def test_returns_input_when_convert_units_raises_typeerror(self):
+        class _XAxis:
+            @staticmethod
+            def convert_units(_value):
+                raise TypeError("cannot convert")
+
+        axis = SimpleNamespace(xaxis=_XAxis())
+        result = SyntheticDifferenceInDifferences._convert_treatment_time_for_axis(
+            axis, 42
+        )
+        assert result == 42
+
+    def test_returns_input_when_convert_units_raises_valueerror(self):
+        class _XAxis:
+            @staticmethod
+            def convert_units(_value):
+                raise ValueError("bad value")
+
+        axis = SimpleNamespace(xaxis=_XAxis())
+        ts = pd.Timestamp("2020-01-01")
+        result = SyntheticDifferenceInDifferences._convert_treatment_time_for_axis(
+            axis, ts
+        )
+        assert result == ts
+
+
+def _panel_with_known_post_impacts(
+    treated_impacts: dict[str, float],
+) -> tuple[pd.DataFrame, list[str], list[str]]:
+    """Build a panel whose equal-weight donor synthetic is known.
+
+    Pre-period treated outcomes match the synthetic control, so each unit's
+    post-period impact equals the supplied shift. The shifts are not a special
+    named pair and need not be symmetric.
+    """
+    donor_a = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    donor_b = np.array([2.0, 1.0, 2.0, 1.0, 2.0, 1.0])
+    synthetic = 0.5 * donor_a + 0.5 * donor_b
+    columns = {"donor_a": donor_a, "donor_b": donor_b}
+    for name, impact in treated_impacts.items():
+        shift = np.zeros_like(synthetic)
+        shift[3:] = impact
+        columns[name] = synthetic + shift
+    frame = pd.DataFrame(columns, index=np.arange(len(synthetic)))
+    return frame, ["donor_a", "donor_b"], list(treated_impacts)
+
+
+def _finalize_with_equal_donor_weights(
+    frame: pd.DataFrame,
+    control_units: list[str],
+    treated_units: list[str],
+) -> SyntheticDifferenceInDifferences:
+    """Construct SDiD and finalize from injected weights. No sampler."""
+    experiment = SyntheticDifferenceInDifferences(
+        frame, 3, control_units, treated_units
+    )
+    n_controls = len(control_units)
+    n_pre = int((frame.index < 3).sum())
+    posterior = xr.Dataset(
+        {
+            "omega": (
+                ("chain", "draw", "coeffs"),
+                np.full((1, 1, n_controls), 1.0 / n_controls),
+            ),
+            "lam": (
+                ("chain", "draw", "obs_ind"),
+                np.full((1, 1, n_pre), 1.0 / n_pre),
+            ),
+            "omega0": (("chain", "draw"), np.array([[0.0]])),
+        }
+    )
+    experiment.model.idata = xr.DataTree.from_dict({"posterior": posterior})
+    experiment._finalize("posterior")
+    return experiment
+
+
+def test_multi_unit_impact_is_stored_under_each_unit_name():
+    """Each treated unit's impact is labeled with that unit, not the mean.
+
+    The failure class is storing the cross-unit average under the first name
+    (or under every name). Three unequal shifts, with the first unit neither
+    the largest nor the mean, reject a two-name special case and a mean label.
+    """
+    impacts = {"alpha": 4.0, "beta": 0.0, "gamma": 9.0}
+    frame, controls, treated = _panel_with_known_post_impacts(impacts)
+    experiment = _finalize_with_equal_donor_weights(frame, controls, treated)
+
+    stored_names = experiment.result.impact_post.treated_units.values.tolist()
+    assert stored_names == treated
+    assert experiment.result.predictions_post.treated_units.values.tolist() == treated
+    # Pooled ATT stays the equal-weighted mean. Named trajectories do not.
+    np.testing.assert_allclose(
+        float(experiment.result.tau_posterior.mean()),
+        np.mean(list(impacts.values())),
+    )
+
+    for name, impact in impacts.items():
+        stored = experiment.result.impact_post.sel(treated_units=name).values
+        np.testing.assert_allclose(stored.reshape(-1), np.full(3, impact))
+        summary = experiment.effect_summary(treated_unit=name)
+        assert summary.table.loc["average", "mean"] == pytest.approx(impact)
+
+    default = experiment.effect_summary()
+    assert default.table.loc["average", "mean"] == pytest.approx(impacts["alpha"])
+    assert default.table.loc["average", "mean"] != pytest.approx(
+        np.mean(list(impacts.values()))
+    )
+
+
+def test_single_treated_unit_impact_is_its_own_series():
+    """A single treated unit keeps its impact; it is not rewritten or dropped."""
+    impacts = {"only": 7.0}
+    frame, controls, treated = _panel_with_known_post_impacts(impacts)
+    experiment = _finalize_with_equal_donor_weights(frame, controls, treated)
+
+    assert experiment.result.impact_post.treated_units.values.tolist() == ["only"]
+    np.testing.assert_allclose(
+        experiment.result.impact_post.values.reshape(-1), np.full(3, 7.0)
+    )
+    assert experiment.effect_summary().table.loc["average", "mean"] == pytest.approx(
+        7.0
+    )
+    np.testing.assert_allclose(float(experiment.result.tau_posterior.mean()), 7.0)
+
+
+def test_multi_unit_plot_labels_the_selected_unit_not_the_mean():
+    """The default plot shows the first unit, and the title names that unit.
+
+    A shared title of only the pooled ATT would hide which trajectory is drawn.
+    Observations must be that unit's series, not the cross-unit mean.
+    """
+    impacts = {"cedar": 2.0, "maple": 8.0}
+    frame, controls, treated = _panel_with_known_post_impacts(impacts)
+    experiment = _finalize_with_equal_donor_weights(frame, controls, treated)
+
+    fig, axes = experiment.plot(show=False)
+    try:
+        title = axes[0].get_title()
+        assert title.startswith("SDiD: cedar (pooled ATT =")
+        assert "maple" not in title
+        observation_y = [
+            list(line.get_ydata())
+            for line in axes[0].get_lines()
+            if line.get_marker() == "."
+        ]
+        assert observation_y
+        np.testing.assert_allclose(
+            observation_y[0], frame.loc[frame.index < 3, "cedar"]
+        )
+        np.testing.assert_allclose(
+            observation_y[1], frame.loc[frame.index >= 3, "cedar"]
+        )
+        pooled_post = frame.loc[frame.index >= 3, ["cedar", "maple"]].mean(axis=1)
+        assert not np.allclose(observation_y[1], pooled_post.to_numpy())
+    finally:
+        plt.close(fig)
+
+    prior_fig, prior_axes = experiment._plot_prior_checks(
+        bundle=experiment.result,
+        style={
+            "ci_prob": 0.94,
+            "kind": "ribbon",
+            "ci_kind": "hdi",
+        },
+    )
+    try:
+        prior_y = [
+            list(line.get_ydata())
+            for line in prior_axes[0].get_lines()
+            if line.get_marker() == "."
+        ]
+        np.testing.assert_allclose(prior_y[0], frame.loc[frame.index < 3, "cedar"])
+        np.testing.assert_allclose(prior_y[1], frame.loc[frame.index >= 3, "cedar"])
+    finally:
+        plt.close(prior_fig)
+
+    only_frame, only_controls, only_treated = _panel_with_known_post_impacts(
+        {"only": 7.0}
+    )
+    only = _finalize_with_equal_donor_weights(only_frame, only_controls, only_treated)
+    only_fig, only_axes = only.plot(show=False)
+    try:
+        assert only_axes[0].get_title().startswith("SDiD: ATT =")
+        assert "pooled" not in only_axes[0].get_title()
+    finally:
+        plt.close(only_fig)
+
+
+def _hand_tau(
+    frame: pd.DataFrame,
+    treatment_time: int,
+    omega: np.ndarray,
+    lam: np.ndarray,
+) -> float:
+    """Double difference on ``index < treatment_time``, in ``datapre`` order."""
+    pre = frame[frame.index < treatment_time]
+    post = frame[frame.index >= treatment_time]
+    controls = ["a", "b"]
+
+    def gaps(part: pd.DataFrame) -> np.ndarray:
+        return part["treated"].to_numpy() - part[controls].to_numpy() @ omega
+
+    return float(gaps(post).mean() - lam @ gaps(pre))
+
+
+def _panel_for_index(times: list[int]) -> pd.DataFrame:
+    """Panel whose gap depends on the time label, not the stored row.
+
+    With ``omega = [0.25, 0.75]`` and ``omega0 = 0``, ``Delta_t`` equals the
+    planted gap. Pre-period gaps are not constant, so a non-uniform lambda
+    disagrees across stored order, time-sorted order, and ``datapre`` order.
+    """
+    gap_by_time = {0: 1.0, 1: 2.0, 2: 4.0, 3: 5.0, 4: 5.0, 5: 5.0}
+    level_by_time = {
+        0: (1.0, 3.0),
+        1: (2.0, 4.0),
+        2: (3.0, 5.0),
+        3: (4.0, 8.0),
+        4: (5.0, 9.0),
+        5: (6.0, 10.0),
+    }
+    omega = np.array([0.25, 0.75])
+    records = []
+    for t in times:
+        a, b = level_by_time[t]
+        records.append(
+            {
+                "a": a,
+                "b": b,
+                "treated": float(omega @ np.array([a, b]) + gap_by_time[t]),
+            }
+        )
+    return pd.DataFrame(records, index=times)
+
+
+def _inject_and_finalize(
+    exp: SyntheticDifferenceInDifferences, lam: np.ndarray
+) -> None:
+    posterior = xr.Dataset(
+        {
+            "omega": (("chain", "draw", "coeffs"), np.array([[[0.25, 0.75]]])),
+            "lam": (
+                ("chain", "draw", "obs_ind"),
+                np.asarray(lam, dtype=float).reshape(1, 1, -1),
+            ),
+            "omega0": (("chain", "draw"), np.zeros((1, 1))),
+        }
+    )
+    exp.model.idata = xr.DataTree.from_dict({"posterior": posterior})
+    exp._finalize("posterior")
+
+
+@pytest.mark.parametrize(
+    "times",
+    [
+        [5, 4, 3, 2, 1, 0],
+        [0, 5, 1, 4, 2, 3],
+        [2, 0, 5, 1, 4, 3],
+        [0, 1, 2, 3, 4, 5],
+    ],
+)
+def test_period_split_follows_time_index_not_row_position(times: list[int]) -> None:
+    """Pre-period weights follow ``index < treatment_time``, in ``datapre`` order."""
+    treatment_time = 3
+    omega = np.array([0.25, 0.75])
+    lam = np.array([0.2, 0.3, 0.5])
+    frame = _panel_for_index(times)
+    exp = SyntheticDifferenceInDifferences(
+        frame, treatment_time, ["a", "b"], ["treated"]
+    )
+    expected = _hand_tau(frame, treatment_time, omega, lam)
+    assert list(exp.datapre.index) == [t for t in times if t < treatment_time]
+
+    _inject_and_finalize(exp, lam)
+    np.testing.assert_allclose(exp.result.tau_posterior.values.reshape(-1), expected)
+
+    X, y, _coords = exp._fit_inputs()
+    np.testing.assert_allclose(y["unit"].to_numpy(), exp.datapre["treated"].to_numpy())
+    np.testing.assert_allclose(
+        X["time"].to_numpy(), exp.datapre[["a", "b"]].to_numpy().T
+    )
+    np.testing.assert_allclose(
+        y["time"].to_numpy(), exp.datapost[["a", "b"]].to_numpy().mean(axis=0)
+    )
+    np.testing.assert_array_equal(
+        exp.result.impact_post.obs_ind.values, exp.datapost.index.to_numpy()
+    )
+    post_gaps = (
+        exp.datapost["treated"].to_numpy() - exp.datapost[["a", "b"]].to_numpy() @ omega
+    )
+    np.testing.assert_allclose(
+        exp.result.impact_post.sel(treated_units="treated").values.reshape(-1),
+        post_gaps,
+    )
+
+
+def test_cited_descending_index_tau_is_five() -> None:
+    """The reported descending index returns the hand value 5, not -5."""
+    times = [5, 4, 3, 2, 1, 0]
+    a = np.array([6.0, 5.0, 4.0, 3.0, 2.0, 1.0])
+    b = np.array([10.0, 9.0, 8.0, 5.0, 4.0, 3.0])
+    omega = np.array([0.25, 0.75])
+    base = omega[0] * a + omega[1] * b
+    effect = np.array([5.0 if t >= 3 else 0.0 for t in times])
+    frame = pd.DataFrame({"a": a, "b": b, "treated": base + effect}, index=times)
+    exp = SyntheticDifferenceInDifferences(frame, 3, ["a", "b"], ["treated"])
+    _inject_and_finalize(exp, np.array([1 / 3, 1 / 3, 1 / 3]))
+    np.testing.assert_allclose(exp.result.tau_posterior.values.reshape(-1), 5.0)
+    np.testing.assert_allclose(
+        exp.result.impact_post.sel(treated_units="treated").values.reshape(-1),
+        [5.0, 5.0, 5.0],
+    )
+    assert list(exp.result.impact_post.obs_ind.values) == [5, 4, 3]
+    assert list(exp.datapre.index) == [2, 1, 0]
+
+
+def test_sorted_index_keeps_current_tau() -> None:
+    """A sorted index keeps the tau the positional split already returned."""
+    times = [0, 1, 2, 3, 4, 5]
+    a = np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0])
+    b = np.array([3.0, 4.0, 5.0, 8.0, 9.0, 10.0])
+    omega = np.array([0.25, 0.75])
+    base = omega[0] * a + omega[1] * b
+    effect = np.array([5.0 if t >= 3 else 0.0 for t in times])
+    frame = pd.DataFrame({"a": a, "b": b, "treated": base + effect}, index=times)
+    exp = SyntheticDifferenceInDifferences(frame, 3, ["a", "b"], ["treated"])
+    _inject_and_finalize(exp, np.array([1 / 3, 1 / 3, 1 / 3]))
+    np.testing.assert_allclose(exp.result.tau_posterior.values.reshape(-1), 5.0)

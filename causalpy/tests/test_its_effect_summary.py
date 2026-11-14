@@ -164,7 +164,7 @@ def test_effect_summary_2period_pymc_datetime(datetime_data_2period, mock_pymc_s
         treatment_time=treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Default summary (all post-treatment period)
     summary = result.effect_summary()
@@ -191,7 +191,7 @@ def test_effect_summary_2period_ols_datetime(datetime_data_2period):
         treatment_time=treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Default summary
     summary = result.effect_summary()
@@ -216,7 +216,7 @@ def test_effect_summary_2period_pymc_integer(integer_data_2period, mock_pymc_sam
         treatment_time=treatment_time,
         formula="y ~ 1 + t",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     summary = result.effect_summary()
     assert summary is not None
@@ -234,7 +234,7 @@ def test_effect_summary_2period_ols_integer(integer_data_2period):
         treatment_time=treatment_time,
         formula="y ~ 1 + t",
         model=LinearRegression(),
-    )
+    ).fit()
 
     summary = result.effect_summary()
     assert summary is not None
@@ -252,7 +252,7 @@ def test_effect_summary_2period_with_window(datetime_data_2period, mock_pymc_sam
         treatment_time=treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Use a window that's a subset of post-treatment period
     window_start = df.index[df.index >= treatment_time][5]
@@ -276,7 +276,7 @@ def test_effect_summary_2period_with_parameters(
         treatment_time=treatment_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test with different parameters
     summary1 = result.effect_summary(cumulative=True, relative=True)
@@ -308,7 +308,7 @@ def test_effect_summary_3period_intervention_pymc_datetime(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="intervention")
     assert summary is not None
@@ -338,7 +338,7 @@ def test_effect_summary_3period_intervention_ols_datetime(datetime_data_3period)
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="intervention")
     assert summary is not None
@@ -364,7 +364,7 @@ def test_effect_summary_3period_intervention_pymc_integer(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="intervention")
     assert summary is not None
@@ -383,7 +383,7 @@ def test_effect_summary_3period_intervention_ols_integer(integer_data_3period):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t",
         model=LinearRegression(),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="intervention")
     assert summary is not None
@@ -409,7 +409,7 @@ def test_effect_summary_3period_post_pymc_datetime(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="post")
     assert summary is not None
@@ -437,7 +437,7 @@ def test_effect_summary_3period_post_ols_datetime(datetime_data_3period):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="post")
     assert summary is not None
@@ -463,7 +463,7 @@ def test_effect_summary_3period_post_pymc_integer(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="post")
     assert summary is not None
@@ -482,12 +482,134 @@ def test_effect_summary_3period_post_ols_integer(integer_data_3period):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t",
         model=LinearRegression(),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="post")
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
+
+
+@pytest.mark.parametrize(
+    ("index", "treatment_time", "treatment_end_time", "post_value"),
+    [
+        (pd.RangeIndex(12), 4, 4.5, 0.0),
+        (pd.RangeIndex(12), 4, 6.25, 0.0),
+        (pd.Index([0.0, 1.0, 2.0, 3.0, 4.0, 4.5, 5.0, 6.0]), 4, 4.5, 1.0),
+    ],
+)
+def test_effect_summary_post_keeps_float_treatment_end_bound(
+    index, treatment_time, treatment_end_time, post_value
+):
+    """Post summary uses index >= treatment_end_time and does not truncate it.
+
+    The first two ends are not index labels. The third equals a label, so that
+    observation stays in the post period while earlier points do not.
+    """
+    y = np.zeros(len(index), dtype=float)
+    during = (index >= treatment_time) & (index < treatment_end_time)
+    y[during] = 8.0
+    y[index >= treatment_end_time] = post_value
+    df = pd.DataFrame({"y": y}, index=index)
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+
+    post = result.effect_summary(period="post", cumulative=True, relative=False)
+    expected_n = int((index >= treatment_end_time).sum())
+    assert float(post.table.loc["average", "mean"]) == pytest.approx(post_value)
+    assert float(post.table.loc["cumulative", "mean"]) == pytest.approx(
+        post_value * expected_n
+    )
+
+    windowed = result.effect_summary(
+        window=(treatment_end_time, index.max()),
+        cumulative=True,
+        relative=False,
+    )
+    assert float(windowed.table.loc["average", "mean"]) == pytest.approx(post_value)
+
+
+def test_effect_summary_post_float_end_on_range_index_keeps_only_last_label():
+    """A non-label end of 10.5 must not pull label 10 into the post window.
+
+    Outcome is 8 on ``[4, 10.5)`` and 0 after. Truncating 10.5 with ``int()``
+    would start the post window at 10 and report a non-zero mean.
+    """
+    index = pd.RangeIndex(12)
+    treatment_time = 4
+    treatment_end_time = 10.5
+    y = np.zeros(len(index), dtype=float)
+    y[(index >= treatment_time) & (index < treatment_end_time)] = 8.0
+    result = cp.InterruptedTimeSeries(
+        pd.DataFrame({"y": y}, index=index),
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+
+    post = result.effect_summary(period="post", cumulative=True, relative=False)
+    assert "11 to 11" in post.text
+    assert float(post.table.loc["average", "mean"]) == pytest.approx(0.0)
+    assert float(post.table.loc["cumulative", "mean"]) == pytest.approx(0.0)
+
+
+def test_effect_summary_post_integer_end_excludes_prior_label():
+    """An integer end of 6 stays inclusive: post excludes 5 and includes 6."""
+    index = pd.RangeIndex(12)
+    y = np.zeros(len(index), dtype=float)
+    y[(index >= 4) & (index < 6)] = 8.0
+    result = cp.InterruptedTimeSeries(
+        pd.DataFrame({"y": y}, index=index),
+        treatment_time=4,
+        treatment_end_time=6,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+
+    post = result.effect_summary(period="post", cumulative=True, relative=False)
+    assert "6 to 11" in post.text
+    assert "5 to" not in post.text
+    assert float(post.table.loc["average", "mean"]) == pytest.approx(0.0)
+
+
+def test_effect_summary_post_negative_end_keeps_following_label():
+    """A negative end of -0.5 keeps -0.25; ``int(-0.5)`` would drop it."""
+    index = pd.Index([-2.0, -1.0, -0.25, 0.0, 1.0])
+    y = np.array([0.0, 8.0, 0.0, 0.0, 0.0])
+    result = cp.InterruptedTimeSeries(
+        pd.DataFrame({"y": y}, index=index),
+        treatment_time=-1.0,
+        treatment_end_time=-0.5,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+
+    post = result.effect_summary(period="post", cumulative=True, relative=False)
+    assert "-0.25 to 1.0" in post.text
+    assert float(post.table.loc["average", "mean"]) == pytest.approx(0.0)
+    assert float(post.table.loc["cumulative", "mean"]) == pytest.approx(0.0)
+
+
+def test_effect_summary_post_rejects_empty_window_after_the_last_label():
+    """The post mask raises when no label is at or after the end bound."""
+    index = pd.RangeIndex(8)
+    result = cp.InterruptedTimeSeries(
+        pd.DataFrame({"y": np.zeros(len(index))}, index=index),
+        treatment_time=2,
+        treatment_end_time=4.5,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+    result.treatment_end_time = float(index.max()) + 0.5
+
+    with pytest.raises(ValueError, match="Window contains no time points"):
+        result.effect_summary(period="post")
 
 
 # ==============================================================================
@@ -508,7 +630,7 @@ def test_effect_summary_3period_comparison_pymc_datetime(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="comparison")
     assert summary is not None
@@ -544,7 +666,7 @@ def test_effect_summary_3period_comparison_ols_datetime(datetime_data_3period):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="comparison")
     assert summary is not None
@@ -576,7 +698,7 @@ def test_effect_summary_3period_comparison_pymc_integer(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="comparison")
     assert summary is not None
@@ -600,7 +722,7 @@ def test_effect_summary_3period_comparison_ols_integer(integer_data_3period):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t",
         model=LinearRegression(),
-    )
+    ).fit()
 
     summary = result.effect_summary(period="comparison")
     assert summary is not None
@@ -611,6 +733,27 @@ def test_effect_summary_3period_comparison_ols_integer(integer_data_3period):
     assert "intervention" in summary.table.index
     assert "post_intervention" in summary.table.index
     assert "persistence_ratio_pct" in summary.table.columns
+
+
+@pytest.mark.parametrize("alpha, coverage", [(0.025, "97.5%"), (0.001, "99.9%")])
+def test_ols_persistence_prose_names_requested_coverage(alpha, coverage):
+    """OLS persistence prose prints ``1 - alpha``, not a truncated integer percent."""
+    n = 30
+    t = np.arange(n)
+    df = pd.DataFrame({"t": t, "y": 1.0 + 0.05 * t})
+    result = cp.InterruptedTimeSeries(
+        df,
+        treatment_time=10,
+        treatment_end_time=20,
+        formula="y ~ 1 + t",
+        model=LinearRegression(),
+    ).fit()
+
+    text = result.effect_summary(period="comparison", alpha=alpha).text
+    truncated = f"{int((1 - alpha) * 100)}%"
+
+    assert f"{coverage} CI" in text
+    assert f"{truncated} CI" not in text
 
 
 # ==============================================================================
@@ -629,7 +772,7 @@ def test_effect_summary_3period_default_pymc(datetime_data_3period, mock_pymc_sa
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Default should summarize all post-treatment data (backward compatible)
     summary1 = result.effect_summary(period=None)
@@ -652,7 +795,7 @@ def test_effect_summary_3period_default_ols(datetime_data_3period):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Default should summarize all post-treatment data
     summary = result.effect_summary()
@@ -679,7 +822,7 @@ def test_effect_summary_3period_intervention_with_parameters(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test with different parameters
     summary1 = result.effect_summary(
@@ -712,7 +855,7 @@ def test_effect_summary_3period_post_with_parameters(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Test with different parameters
     summary1 = result.effect_summary(period="post", cumulative=True, relative=True)
@@ -790,7 +933,7 @@ def test_effect_summary_3period_consistency_pymc(
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    )
+    ).fit()
 
     # Get summaries for each period
     intervention_summary = result.effect_summary(period="intervention")
@@ -824,7 +967,7 @@ def test_effect_summary_3period_consistency_ols(datetime_data_3period):
         treatment_end_time=treatment_end_time,
         formula="y ~ 1 + t + C(month)",
         model=LinearRegression(),
-    )
+    ).fit()
 
     # Get summaries for each period
     intervention_summary = result.effect_summary(period="intervention")
@@ -845,3 +988,73 @@ def test_effect_summary_3period_consistency_ols(datetime_data_3period):
     # Allow for small floating point differences
     assert abs(intervention_mean_from_comparison - intervention_mean_from_period) < 1e-3
     assert abs(post_mean_from_comparison - post_mean_from_period) < 1e-3
+
+
+def _fit_constant_baseline_its(
+    y: np.ndarray, treatment_time: int, treatment_end_time: int
+):
+    """Fit an OLS ITS whose pre-period outcome is exactly zero."""
+    df = pd.DataFrame({"t": np.arange(y.size), "y": y})
+    return cp.InterruptedTimeSeries(
+        df,
+        treatment_time=treatment_time,
+        treatment_end_time=treatment_end_time,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+
+
+def test_ols_comparison_prob_persisted_is_positive_post_effect_probability():
+    """OLS persistence probability is P(post mean > 0), not one minus a two-sided p-value."""
+    y = np.zeros(30)
+    y[10:20] = 8
+    y[20:30] = -6
+    result = _fit_constant_baseline_its(y, treatment_time=10, treatment_end_time=20)
+    summary = result.effect_summary(
+        period="comparison", cumulative=False, relative=False
+    )
+
+    post = summary.table.loc["post_intervention"]
+    assert post["mean"] == pytest.approx(-6)
+    assert post["persistence_ratio_pct"] == pytest.approx(-75)
+    assert post["prob_persisted"] == 0
+    assert "probability of 0.00" in summary.text
+    assert "probability of 1.00" not in summary.text
+
+    # A precisely estimated positive post effect is the opposite tail.
+    y_positive = np.zeros(30)
+    y_positive[10:20] = 8
+    y_positive[20:30] = 6
+    positive = _fit_constant_baseline_its(
+        y_positive, treatment_time=10, treatment_end_time=20
+    )
+    positive_summary = positive.effect_summary(period="comparison")
+    assert positive_summary.table.loc["post_intervention", "prob_persisted"] == 1
+    assert "probability of 1.00" in positive_summary.text
+
+    # A negative but insignificant post mean is not a precise reversal, so
+    # neither tail is certain. ``1 - p`` is near 0 here and would not reject a
+    # special case that only zeroes a confidence interval lying entirely below 0.
+    y_noisy = np.zeros(30)
+    y_noisy[10:20] = 8
+    y_noisy[20:30] = np.array([-2.0, -1.0, 0.0, 1.0, -1.5, 0.5, -0.2, 0.1, -0.8, -0.4])
+    noisy = _fit_constant_baseline_its(
+        y_noisy, treatment_time=10, treatment_end_time=20
+    )
+    noisy_summary = noisy.effect_summary(period="comparison")
+    noisy_prob = float(noisy_summary.table.loc["post_intervention", "prob_persisted"])
+    assert 0 < noisy_prob < 0.5
+    assert f"{noisy_prob:.2f}" in noisy_summary.text
+    assert "probability of 1.00" not in noisy_summary.text
+
+    # One post observation has no sampling variance. A negative point is not
+    # evidence that a positive effect persisted.
+    y_single = np.zeros(21)
+    y_single[10:20] = 8
+    y_single[20] = -6
+    single = _fit_constant_baseline_its(
+        y_single, treatment_time=10, treatment_end_time=20
+    )
+    single_summary = single.effect_summary(period="comparison")
+    assert single_summary.table.loc["post_intervention", "prob_persisted"] == 0
+    assert "probability of 0.00" in single_summary.text
