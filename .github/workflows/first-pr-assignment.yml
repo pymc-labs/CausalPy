@@ -24,17 +24,15 @@ jobs:
     name: Flag if the author is not assigned
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Skip bots the same way as welcome.yml. Association values must match
-    # FIRST_TIME_ASSOCIATIONS in scripts/first_pr_assignment.py. The helper
-    # repeats this gate so a permissive if cannot flag a member or a bot.
+    # Skip bots the same way as welcome.yml. Do not gate on
+    # github.event.pull_request.author_association: this event reports NONE
+    # for first-time authors, so that comparison never runs. The script below
+    # reads author_association from the pull request API. The helper still
+    # flags only FIRST_TIMER and FIRST_TIME_CONTRIBUTOR.
     if: >-
       !contains(github.actor, '[bot]') &&
       !contains(github.actor, 'dependabot') &&
-      !contains(github.actor, 'renovate') &&
-      (
-        github.event.pull_request.author_association == 'FIRST_TIMER' ||
-        github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
-      )
+      !contains(github.actor, 'renovate')
     permissions:
       # Read the default branch so the job can run the tested helper.
       # The pull request head is not checked out. No contents write.
@@ -136,6 +134,17 @@ jobs:
               }
             }
 
+            const pull = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pullRequest.number,
+            });
+            const association =
+              pull.data && pull.data.author_association
+                ? pull.data.author_association
+                : '';
+            core.info(`Pull request API author_association: ${association}`);
+
             const issuesFile = writeTemp('loaded-issues.json', JSON.stringify(loaded));
             const decision = JSON.parse(
               runHelper(['should-flag', '--issues-file', issuesFile], {
@@ -144,7 +153,7 @@ jobs:
                     ? pullRequest.user.login
                     : '',
                 PR_ACTOR: context.actor,
-                PR_ASSOCIATION: pullRequest.author_association || '',
+                PR_ASSOCIATION: association,
               }),
             );
             if (!decision.flag) {

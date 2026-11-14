@@ -88,7 +88,7 @@ For more instructions see the [Pull request checklist](#pull-request-checklist).
 
 ### First pull requests
 
-This is the policy enforced by [`.github/workflows/first-pr-assignment.yml`](./.github/workflows/first-pr-assignment.yml). It applies when a pull request author's GitHub `author_association` is `FIRST_TIMER` or `FIRST_TIME_CONTRIBUTOR`: no commit of theirs has been merged to this repository yet. It is an automation hook, not a judgment of the person or the change.
+This is the policy enforced by [`.github/workflows/first-pr-assignment.yml`](./.github/workflows/first-pr-assignment.yml). It applies when a pull request author's GitHub `author_association` is `FIRST_TIMER` or `FIRST_TIME_CONTRIBUTOR`: no commit of theirs has been merged to this repository yet. The workflow reads that value from the pull request API. The Actions event reports `NONE` for these authors, so the event field is not the check. It is an automation hook, not a judgment of the person or the change.
 
 - Anyone may open an issue.
 - A first pull request is in good standing only when its author is an assignee of an issue in this repository that the pull request fixes. Being the issue author, or having commented, is not an assignment. Comment on the issue you want to work on, and wait for a maintainer to assign you. GitHub allows assigning anyone who has commented on the issue.

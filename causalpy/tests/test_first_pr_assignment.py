@@ -353,3 +353,18 @@ def test_welcome_comment_agrees_with_policy() -> None:
     assert "CONTRIBUTING.md#first-pull-requests" in pr_message
     assert "prek run --all-files" in pr_message
     assert "spam?" in pr_message
+
+
+def test_workflow_reads_association_from_the_pull_request_api() -> None:
+    """The event field is NONE for first-time authors, so it cannot be the gate."""
+    workflow = (
+        REPO_ROOT / ".github" / "workflows" / "first-pr-assignment.yml"
+    ).read_text(encoding="utf-8")
+    job_if = workflow.split("if: >-", 1)[1].split("permissions:", 1)[0]
+    script = workflow.split("script: |", 1)[1]
+    assert "author_association" not in job_if
+    assert "FIRST_TIMER" not in job_if
+    assert "github.rest.pulls.get" in script
+    assert "pull.data.author_association" in script
+    assert "pullRequest.author_association" not in script
+    assert "PR_ASSOCIATION: association" in script

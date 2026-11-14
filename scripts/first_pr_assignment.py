@@ -106,9 +106,12 @@ def should_flag(
 ) -> bool:
     """Return whether this pull request gets the triage label and comment.
 
-    ``issues`` are closing references loaded from this repository. A missing
-    issue is omitted by the caller. A pull request payload does not count as
-    an issue assignment. Pass if any remaining issue lists ``author``.
+    ``author_association`` is the pull request API value, not the
+    ``pull_request_target`` event value. That event reports ``NONE`` for
+    first-time authors. ``issues`` are closing references loaded from this
+    repository. A missing issue is omitted by the caller. A pull request
+    payload does not count as an issue assignment. Pass if any remaining
+    issue lists ``author``.
     """
     if is_skipped_bot(actor):
         return False
