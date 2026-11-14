@@ -875,3 +875,165 @@ def test_public_names_are_importable_from_the_planner_module():
     assert HISTORICAL_REPLAY_ASSUMPTIONS
     assert "Ferman" in HISTORICAL_REPLAY_ASSUMPTIONS[1]
     assert "Abadie" in HISTORICAL_REPLAY_ASSUMPTIONS[1]
+
+
+def _daily_frame(origin_offset: int = 10, periods: int = 30) -> pd.DataFrame:
+    index = pd.date_range("2020-01-11", periods=periods, freq="D")
+    frame = pd.DataFrame(
+        {name: np.arange(periods, dtype=float) for name in ("y", *DONORS)},
+        index=index,
+    )
+    frame.attrs["origin"] = index[origin_offset]
+    return frame
+
+
+def test_non_forward_date_cadence_is_incomplete():
+    frame = _daily_frame()
+    origin = frame.attrs["origin"]
+    donors = list(DONORS)
+
+    def schedule_for(cadence, horizon=3):
+        return validate_schedule(
+            frame,
+            "y",
+            donors,
+            ScheduleRequest(
+                selection_origins=(origin,),
+                horizons=(horizon,),
+                cadence=cadence,
+            ),
+        )
+
+    for cadence in (
+        pd.DateOffset(days=0),
+        pd.Timedelta(0),
+        pd.Timedelta(days=-1),
+        "-1D",
+    ):
+        window = schedule_for(cadence).windows[0]
+        assert window.status == "incomplete", cadence
+        assert window.holdout_count == 0
+        assert "strictly increasing" in (window.reason or "")
+
+    forward = schedule_for(pd.Timedelta(days=1)).windows[0]
+    assert forward.status == "usable"
+    assert list(forward.holdout_index) == list(frame.index[10:13])
+
+    one_period = schedule_for(pd.DateOffset(days=0), horizon=1).windows[0]
+    assert one_period.status == "usable"
+    assert list(one_period.holdout_index) == [origin]
+
+    integer = validate_schedule(
+        _integer_frame(),
+        "y",
+        donors,
+        _request(4, cadence=2, horizons=(3,)),
+    )
+    assert integer.windows[0].status == "usable"
+    assert list(integer.windows[0].holdout_index) == [4, 6, 8]
+
+
+def test_zero_cadence_replay_does_not_abort():
+    frame = _daily_frame()
+    origin = frame.attrs["origin"]
+    schedule = validate_schedule(
+        frame,
+        "y",
+        DONORS,
+        ScheduleRequest(
+            selection_origins=(origin, frame.index[14]),
+            horizons=(3,),
+            cadence=pd.Timedelta(0),
+        ),
+    )
+    replay = replay_history(
+        frame,
+        "y",
+        DONORS,
+        schedule,
+        RULE,
+        model=_wide_template(),
+        random_seed=1,
+    )
+    assert [window.status for window in replay.windows] == ["not-run", "not-run"]
+    assert replay.calibration.applicable is False
+
+
+def test_boundary_check_exception_does_not_abort_later_windows(monkeypatch):
+    frame = _integer_frame()
+    schedule = validate_schedule(frame, "y", DONORS, _request(4, 6))
+    calls: list[object] = []
+
+    def check(experiment, window):
+        calls.append(window.origin)
+        if window.origin == 4:
+            raise pd.errors.InvalidIndexError(
+                "Reindexing only valid with uniquely valued Index objects"
+            )
+
+    def fit(self):
+        raise RuntimeError("sentinel fit")
+
+    monkeypatch.setattr(
+        "causalpy.historical_validation._require_window_boundaries",
+        check,
+    )
+    monkeypatch.setattr(SyntheticControl, "fit", fit)
+    replay = replay_history(
+        frame,
+        "y",
+        DONORS,
+        schedule,
+        RULE,
+        model=_wide_template(),
+        random_seed=1,
+    )
+    assert calls == [4, 6]
+    assert replay.windows[0].status == "not-run"
+    assert "InvalidIndexError" in (replay.windows[0].reason or "")
+    assert replay.windows[1].status == "fit-failed"
+    assert replay.calibration.applicable is False
+
+
+def test_failed_selection_window_blocks_the_conditional_curve(monkeypatch):
+    frame = _integer_frame()
+    schedule = validate_schedule(frame, "y", DONORS, _request(4, 6, 8))
+
+    def replay_one(*args, **kwargs):
+        window = args[3]
+        if window.origin == 4:
+            return (
+                WindowReplay(
+                    plan=window,
+                    status="fit-failed",
+                    reason="RuntimeError: sampler exploded",
+                    n_inference_fits=1,
+                    diagnostics_status="unavailable",
+                ),
+                1,
+            )
+        return _scored_replay_window(*args, **kwargs)
+
+    monkeypatch.setattr("causalpy.historical_validation._replay_window", replay_one)
+    replay = replay_history(
+        frame,
+        "y",
+        DONORS,
+        schedule,
+        RULE,
+        model=_wide_template(),
+        random_seed=1,
+    )
+    assert [window.status for window in replay.windows] == [
+        "fit-failed",
+        "scored",
+        "scored",
+    ]
+    assert replay.calibration.applicable is False
+    assert replay.calibration.evidence_level == "inconclusive"
+    assert replay.calibration.null_samples is None
+    text = " ".join(replay.calibration.reasons)
+    assert "sampler exploded" in text
+    assert "not dropped" in text
+    with pytest.raises(ValueError, match="cannot feed"):
+        replay.calibration.conditional_curve()

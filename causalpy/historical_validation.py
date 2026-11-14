@@ -213,8 +213,10 @@ class ScheduleRequest:
     cadence : int, str, pandas offset, or None
         ``None`` takes the next ``horizon`` index labels and does not check
         calendar gaps. An int cadence expects ``origin + i * cadence`` on a
-        numeric index. A date frequency expects each generated timestamp to
-        be present. Gaps are recorded, not imputed.
+        numeric index. A date frequency must yield exactly ``horizon``
+        strictly increasing unique labels starting at the origin. A zero,
+        negative, or collapsed offset is incomplete, not a shortened holdout.
+        Gaps are recorded, not imputed.
     min_training_periods : int
         Minimum pre-origin rows after exclusions. Default 2.
     missing_data : {'reject'}
@@ -306,9 +308,9 @@ class WindowPlan:
 
     A window is never dropped. ``missing`` means the origin is absent.
     ``incomplete`` means the window was planned and cannot be scored: a short
-    training prefix, a cadence gap, an exclusion in the holdout, a non-finite
-    outcome, or a horizon that runs past the history. ``usable`` is the only
-    status replay will fit.
+    training prefix, a cadence that does not yield the requested forward
+    holdout, an exclusion in the holdout, a non-finite outcome, or a horizon
+    that runs past the history. ``usable`` is the only status replay will fit.
 
     Attributes
     ----------
@@ -870,6 +872,9 @@ def _expected_holdout(
     expected, error = _cadence_labels(index, origin, horizon, cadence)
     if error is not None:
         return _empty_index_like(index), error
+    forward_error = _non_forward_cadence(expected, origin, horizon, cadence)
+    if forward_error is not None:
+        return _empty_index_like(index), forward_error
     positions = index.get_indexer(expected)
     missing_labels = [expected[i] for i, pos in enumerate(positions) if int(pos) < 0]
     present_positions = [int(pos) for pos in positions if int(pos) >= 0]
@@ -894,14 +899,38 @@ def _cadence_starts_at_origin(label: Any, origin: Any) -> bool:
         return False
 
 
+def _non_forward_cadence(
+    expected: pd.Index, origin: Any, horizon: int, cadence: Any
+) -> str | None:
+    """Reject a generated cadence that is not the requested forward holdout."""
+    reason = (
+        f"cadence {cadence!r} does not yield {horizon} strictly increasing "
+        f"unique labels starting at the origin {origin!r}."
+    )
+    if (
+        len(expected) != horizon
+        or not expected.is_unique
+        or not _cadence_starts_at_origin(expected[0], origin)
+    ):
+        return reason
+    try:
+        forward = all(expected[i] < expected[i + 1] for i in range(horizon - 1))
+    except TypeError:
+        return reason
+    if not forward:
+        return reason
+    return None
+
+
 def _cadence_labels(
     index: pd.Index, origin: Any, horizon: int, cadence: Any
 ) -> tuple[pd.Index, str | None]:
     """Build the labels a declared cadence requires, without imputing gaps.
 
     Anchored offsets such as ``"W"`` or ``"ME"`` are refused when their first
-    generated label is not the origin. Integer and ``Timedelta`` cadences
-    already include the origin and are unchanged.
+    generated label is not the origin. The caller then rejects a sequence that
+    is not ``horizon`` strictly increasing unique labels starting at the origin.
+    Integer cadence below 1 is already rejected at construction.
     """
     if isinstance(cadence, int):
         try:
@@ -1524,9 +1553,10 @@ def replay_history(
         still do not enter calibration.
     fit_learned_null : bool, optional
         Default true. The null model runs only when at least two selection
-        windows scored, their diagnostics are available, and their posterior
-        standard deviations are positive. Otherwise the record stays
-        inapplicable and names the reason.
+        windows scored, no usable selection window failed or was refused,
+        their diagnostics are available, and their posterior standard
+        deviations are positive. Otherwise the record stays inapplicable and
+        names the reason.
     rope_half_width : float, optional
         Stored on the calibration record for the operating-characteristics
         engine. Default 0. This is not the decision rule's effect threshold.
@@ -1551,8 +1581,9 @@ def replay_history(
         settings would silently use the heavy model default.
     DataException
         If the history index is missing, duplicated, or not sorted. A boundary
-        mismatch is recorded on that window as not-run; it does not abort the
-        remaining windows.
+        check failure, including an exception other than RuntimeError, is
+        recorded on that window as not-run; it does not abort the remaining
+        windows.
     """
     from causalpy.design import DecisionRule as DecisionRuleRuntime
 
@@ -1734,12 +1765,16 @@ def _replay_window(
     )
     try:
         _require_window_boundaries(experiment, window)
-    except RuntimeError as exc:
+    except Exception as exc:
+        if isinstance(exc, RuntimeError):
+            reason = str(exc)
+        else:
+            reason = f"{type(exc).__name__}: {exc}"
         return (
             WindowReplay(
                 plan=window,
                 status="not-run",
-                reason=str(exc),
+                reason=reason,
             ),
             0,
         )
@@ -1965,7 +2000,12 @@ def _calibration_from_windows(
     sample_kwargs: dict[str, Any],
     random_seed: int | None,
 ) -> tuple[CalibrationRecord, int]:
-    """Build the calibration seam from scored selection windows only."""
+    """Build the calibration seam from scored selection windows only.
+
+    A fit-failed selection window, or a usable selection window that replay
+    refused, blocks the conditional curve even when other windows scored.
+    Incomplete windows that were never usable do not.
+    """
     scored = [
         window
         for window in windows
@@ -2000,6 +2040,31 @@ def _calibration_from_windows(
             "was not identified, and no conditional curve was produced." + failed_text
         )
         return _inapplicable(level, (reason, dependence), scored, base), 0
+    blocked = [
+        window
+        for window in windows
+        if window.plan.role == "selection"
+        and (
+            window.status == "fit-failed"
+            or (window.plan.status == "usable" and window.status == "not-run")
+        )
+    ]
+    if blocked:
+        named = "; ".join(
+            f"{window.plan.origin}: {window.reason or window.status}"
+            for window in blocked
+        )
+        return _inapplicable(
+            "inconclusive",
+            (
+                "A selection window failed to fit or was not run, so the "
+                "conditional curve was not fed. Missing fits are not dropped "
+                f"from the detection rate: {named}",
+                dependence,
+            ),
+            scored,
+            base,
+        ), 0
     diagnostics_bad = [
         window for window in scored if window.diagnostics_status != "available"
     ]
