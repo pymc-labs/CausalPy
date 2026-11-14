@@ -20,6 +20,7 @@ work correctly and that the dispatch mechanism in get_ate functions as expected.
 """
 
 import numpy as np
+import pandas as pd
 import pytest
 
 import causalpy as cp
@@ -252,17 +253,17 @@ class TestGetAteDispatch:
         assert np.isclose(ate_list[1], trt, equal_nan=True)
         assert np.isclose(ate_list[2], ntrt, equal_nan=True)
 
-    def test_get_ate_with_unknown_method_falls_back_to_doubly_robust(self, ipw_result):
-        """Verify get_ate with unknown method falls back to doubly_robust."""
-        ate_list = ipw_result.get_ate(0, ipw_result.idata, method="unknown_method")
-        ps = ipw_result.idata["posterior"]["p"].stack(z=("chain", "draw"))[:, 0].values
-        ate, trt, ntrt = ipw_result._compute_ate_doubly_robust(ps)
-
-        assert isinstance(ate_list, list)
-        assert len(ate_list) == 3
-        assert np.isclose(ate_list[0], ate, equal_nan=True)
-        assert np.isclose(ate_list[1], trt, equal_nan=True)
-        assert np.isclose(ate_list[2], ntrt, equal_nan=True)
+    def test_get_ate_with_unknown_method_raises(self):
+        """An unknown weighting method raises instead of changing the estimand."""
+        df = pd.DataFrame({"trt": [0, 1], "x": [0.0, 1.0], "outcome": [1.0, 2.0]})
+        experiment = cp.InversePropensityWeighting(
+            df,
+            formula="trt ~ 1 + x",
+            outcome_variable="outcome",
+            weighting_scheme="robust",
+        )
+        with pytest.raises(ValueError, match="unknown_method"):
+            experiment.get_ate(0, experiment.idata, method="unknown_method")
 
 
 class TestDesignInfoAttributes:
