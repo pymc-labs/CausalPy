@@ -62,7 +62,6 @@ from causalpy.planning.contracts import (
     unit_period_effect,
 )
 from causalpy.planning.reference import (
-    HistoryOnlyPlan,
     _index_realized_panel,
     _planned_window,
     _prepare_history,
@@ -213,22 +212,45 @@ class AdapterAnalysisHandoff:
             tuple(self.training_index),
             tuple(self.holdout_index),
         )
-        plan = HistoryOnlyPlan(
-            window,
+        if not isinstance(self.decision, DecisionRule):
+            raise TypeError("decision must be a DecisionRule.")
+        if not isinstance(self.outcome_scale, str) or not self.outcome_scale:
+            raise TypeError("outcome_scale must be a non-empty string.")
+        treated = require_unit_names(
             self.treated_units,
+            what="treated_units",
+            min_count=1,
+            max_count=3,
+        )
+        controls = require_unit_names(
             self.control_units,
+            what="control_units",
+            min_count=1,
+            max_count=None,
+        )
+        allowed = adapter.capabilities().allowed_decision_rules
+        if self.decision.direction not in allowed:
+            raise ValueError(
+                f"{self.estimator} does not allow a {self.decision.direction} "
+                f"decision. Allowed: {allowed}. No fit was started."
+            )
+        fit = adapter.fit_window(
+            WindowRequest(
+                history=window,
+                treated_units=treated,
+                control_units=controls,
+                treatment_time=self.treatment_time,
+                duration=self.duration,
+                outcome_scale=self.outcome_scale,
+            )
+        )
+        evaluation = adapter.translate(
+            fit,
+            EffectScenario("absolute", 0.0),
             self.decision,
-            estimator=self.estimator,
-            adapter=adapter,
+            fit_index=0,
             outcome_scale=self.outcome_scale,
         )
-        observed = EffectScenario("absolute", 0.0)
-        evaluation = plan.evaluate(
-            self.duration,
-            absolute_effects=(0.0,),
-        ).evaluations[0]
-        if evaluation.scenario != observed:
-            raise RuntimeError("The zero-effect evaluation did not stay at zero.")
         return replace(
             evaluation,
             boundary=replace(
