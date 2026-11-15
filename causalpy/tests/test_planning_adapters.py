@@ -360,6 +360,44 @@ def test_interactive_fixed_effects_keeps_timezone_aware_holdout_labels() -> None
     assert list(result.draws.unit_impact.coords["obs_ind"].values) == list(holdout)
 
 
+def test_interactive_fixed_effects_aligns_a_cross_zone_treatment_instant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frame = _panel()
+    frame.index = pd.date_range(
+        "2020-03-06", periods=len(frame), freq="D", tz="America/New_York", name="time"
+    )
+    holdout = frame.index[-DURATION:]
+    utc_treatment = holdout[0].tz_convert("UTC")
+    seen: dict[str, object] = {}
+    real_init = InteractiveFixedEffectsSyntheticControl.__init__
+
+    def spy(self, data, treatment_time, *args, **kwargs):
+        seen["treatment"] = treatment_time
+        seen["holdout_start"] = data.index[-DURATION]
+        return real_init(self, data, treatment_time, *args, **kwargs)
+
+    monkeypatch.setattr(InteractiveFixedEffectsSyntheticControl, "__init__", spy)
+    adapter = ADAPTERS["interactive_fixed_effects"](model=None, sample_kwargs=LIGHT)
+    fit = adapter.fit_window(
+        WindowRequest(
+            history=frame,
+            treated_units=("t1",),
+            control_units=DONORS,
+            treatment_time=utc_treatment,
+            duration=DURATION,
+            outcome_scale="outcome",
+        )
+    )
+    aligned = holdout[0].tz_localize(None)
+    assert seen["treatment"] == aligned
+    assert seen["holdout_start"] == aligned
+    assert seen["treatment"] != utc_treatment.tz_localize(None)
+    assert fit.boundary.holdout_index.equals(holdout)
+    assert fit.unit_impact.sizes["obs_ind"] == DURATION
+    assert list(fit.unit_impact.coords["obs_ind"].values) == list(holdout)
+
+
 @pytest.mark.parametrize("estimator", METHODS)
 def test_contract_journey(estimator: str, monkeypatch: pytest.MonkeyPatch) -> None:
     frame = _panel()

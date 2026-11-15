@@ -593,14 +593,17 @@ class InteractiveFixedEffectsAdapter(_RegisteredAdapter):
     ) -> tuple[xr.DataArray, xr.DataArray, FitDiagnostics]:
         # WidePanel stores a named index as an obs_ind coordinate. A
         # timezone-aware coordinate cannot be subtracted after sampling, so
-        # the experiment sees naive instants. Returned labels stay on the
-        # request index.
+        # the experiment sees naive instants. Convert the treatment instant
+        # into the index zone first; stripping each zone's wall clock would
+        # train on a different row. Returned labels stay on the request index.
         frame = window.copy()
         treatment = treatment_time
         if isinstance(frame.index, pd.DatetimeIndex) and frame.index.tz is not None:
+            if getattr(treatment, "tzinfo", None) is not None:
+                treatment = pd.Timestamp(treatment).tz_convert(frame.index.tz)
             frame.index = frame.index.tz_localize(None)
             if getattr(treatment, "tzinfo", None) is not None:
-                treatment = pd.Timestamp(treatment).tz_localize(None)
+                treatment = treatment.tz_localize(None)
         frame.index = frame.index.rename(None)
         experiment = InteractiveFixedEffectsSyntheticControl(
             frame,
