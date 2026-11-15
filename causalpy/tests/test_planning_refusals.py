@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 import types
 from dataclasses import replace
@@ -28,8 +29,12 @@ from sklearn.linear_model import LinearRegression
 import causalpy as cp
 from causalpy.custom_exceptions import DataException
 from causalpy.planning import (
+    CANDIDATE_COLUMNS,
+    CANDIDATE_FILTER_REASONS,
     AnalysisHandoff,
+    BalanceConstraint,
     CandidateRequest,
+    CandidateTable,
     DecisionRule,
     EffectScenario,
     HistoryOnlyPlan,
@@ -376,10 +381,17 @@ def test_power_and_candidate_contracts_reject_undeclared_inputs() -> None:
             group_size=4,
             duration=4,
         )
-    accepted = CandidateRequest(("a",), 1, 3, ())
+    accepted = CandidateRequest(("a",), 1, 3, random_seed=0)
     assert accepted.max_group_size == 3
+    assert accepted.random_seed == 0
     with pytest.raises(ValueError, match="1..3"):
-        CandidateRequest(("a",), 0, 3, ())
+        CandidateRequest(("a",), 0, 3, random_seed=0)
+    with pytest.raises(TypeError):
+        CandidateRequest(("a",), 1, 3, ())
+    with pytest.raises(TypeError, match="constraints"):
+        CandidateRequest(("a",), 1, 3, random_seed=0, constraints=())
+    with pytest.raises(TypeError, match="random_seed"):
+        CandidateRequest(("a",), 1, 3)
 
 
 def test_passed_adapter_must_match_the_declared_protocol(
@@ -724,3 +736,595 @@ def test_stored_window_must_be_comparable_and_consistent() -> None:
             duration=2,
             treatment_time=3,
         ).run(_frame([0, 1, 2, 3]))
+
+
+def _selection_history() -> pd.DataFrame:
+    return pd.DataFrame(
+        {"a": [1.0, 2.0], "b": [3.0, 4.0], "c": [5.0, 6.0]},
+        index=pd.Index([10, 20], name="time"),
+    )
+
+
+def _request(**overrides: object) -> CandidateRequest:
+    fields: dict[str, object] = {
+        "units": ("a", "b", "c"),
+        "min_group_size": 1,
+        "max_group_size": 3,
+        "random_seed": 0,
+    }
+    fields.update(overrides)
+    return CandidateRequest(**fields)
+
+
+def _candidate_row(**overrides: object) -> dict[str, object]:
+    row: dict[str, object] = {
+        "candidate_id": "a",
+        "treated": ("a",),
+        "donors": ("b",),
+        "n_donors": 1,
+        "estimand": "draw_aligned_unit_impact_sum",
+        "member_weight": 1.0,
+        "cost": 1.0,
+        "outcome_share": pd.NA,
+        "proxy_score": pd.NA,
+        "proxy_role": "unavailable",
+        "boundary": False,
+        "status": "shortlisted",
+        "filter_reasons": (),
+        "shortlist_rank": 1,
+    }
+    row.update(overrides)
+    if "candidate_id" not in overrides:
+        treated = tuple(row["treated"])  # type: ignore[arg-type]
+        donors = tuple(row["donors"])  # type: ignore[arg-type]
+        row["candidate_id"] = json.dumps(
+            [list(treated), list(donors)], separators=(",", ":")
+        )
+    return row
+
+
+def _empty_candidate_frame() -> pd.DataFrame:
+    return pd.DataFrame({name: pd.Series(dtype=object) for name in CANDIDATE_COLUMNS})
+
+
+def _table(**overrides: object) -> CandidateTable:
+    fields: dict[str, object] = {
+        "frame": _empty_candidate_frame(),
+        "n_space": 0,
+        "n_enumerated": 0,
+        "n_filtered": 0,
+        "n_shortlisted": 0,
+        "partial": False,
+        "enumeration_policy": "exact",
+        "estimand": "draw_aligned_unit_impact_sum",
+        "n_inference_fits": 0,
+    }
+    fields.update(overrides)
+    return CandidateTable(**fields)
+
+
+def test_candidate_constants_are_the_screen_contract() -> None:
+    assert CANDIDATE_COLUMNS == (
+        "candidate_id",
+        "treated",
+        "donors",
+        "n_donors",
+        "estimand",
+        "member_weight",
+        "cost",
+        "outcome_share",
+        "proxy_score",
+        "proxy_role",
+        "boundary",
+        "status",
+        "filter_reasons",
+        "shortlist_rank",
+    )
+    assert CANDIDATE_FILTER_REASONS == (
+        "excluded_unit",
+        "not_treatment_eligible",
+        "not_donor_eligible",
+        "missing_required",
+        "donor_depleted",
+        "spillover_donor",
+        "over_budget",
+        "cost_unknown",
+        "outcome_share",
+        "representativeness",
+        "duplicate",
+        "group_size",
+    )
+
+
+def test_candidate_request_accepts_a_consistent_screen() -> None:
+    request = _request(
+        treatment_eligible=("a", "b"),
+        donor_eligible=("b", "c"),
+        always_control=("c",),
+        required_treated=("a",),
+        fixed_treated=("a", "b"),
+        donor_pools=(("c",),),
+        spillover_exclusions=(("a", "b"),),
+        history=_selection_history(),
+        selection_end=20,
+        min_outcome_share=0.0,
+        max_outcome_share=1.0,
+        unit_costs=(("a", 1.0), ("b", 2.0)),
+        budget=10.0,
+        unit_covariates=(("income", (("a", 1.0), ("b", 2.0))),),
+        balance_constraints=(BalanceConstraint("income", 0.5),),
+        random_seed=7,
+    )
+    assert request.units == ("a", "b", "c")
+    assert request.fixed_treated == ("a", "b")
+    assert request.random_seed == 7
+    assert request.exact_ceiling == 5000
+    listed = _request(units=["a", "b"], max_group_size=1, always_control=["b"])
+    assert listed.units == ("a", "b")
+    assert listed.always_control == ("b",)
+
+
+def test_candidate_request_rejects_inconsistent_screens() -> None:
+    history = _selection_history()
+    with pytest.raises(ValueError, match="unknown unit"):
+        _request(always_control=("z",))
+    with pytest.raises(ValueError, match="always_control and excluded_units overlap"):
+        _request(always_control=("a",), excluded_units=("a",))
+    with pytest.raises(ValueError, match="longer than max_group_size"):
+        _request(required_treated=("a", "b"), max_group_size=1)
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        _request(supplied_groups=(("a",),), fixed_treated=("a",))
+    with pytest.raises(ValueError, match="donor_pools requires fixed_treated"):
+        _request(donor_pools=(("b",),))
+    with pytest.raises(ValueError, match="self-pair"):
+        _request(spillover_exclusions=(("a", "a"),))
+    with pytest.raises(ValueError, match="selection_end is required"):
+        _request(history=history)
+    with pytest.raises(ValueError, match="selection_end requires history"):
+        _request(selection_end=20)
+    with pytest.raises(ValueError, match="not in the history index"):
+        _request(history=history, selection_end=99)
+    with pytest.raises(ValueError, match="min_outcome_share must be in"):
+        _request(min_outcome_share=-0.1)
+    with pytest.raises(ValueError, match="max_outcome_share must be in"):
+        _request(max_outcome_share=1.1)
+    with pytest.raises(ValueError, match="must not exceed"):
+        _request(min_outcome_share=0.8, max_outcome_share=0.2)
+    with pytest.raises(ValueError, match="nonnegative"):
+        _request(budget=-1.0)
+    with pytest.raises(TypeError, match="bool"):
+        _request(budget=True)
+    with pytest.raises(TypeError, match="bool"):
+        _request(random_seed=True)
+    with pytest.raises(TypeError, match="bool"):
+        _request(min_group_size=True, max_group_size=3)
+    with pytest.raises(ValueError, match="must increase"):
+        _request(history=history.iloc[::-1], selection_end=20)
+    with pytest.raises(ValueError, match="must be unique"):
+        duplicated = pd.concat([history, history])
+        _request(history=duplicated, selection_end=20)
+    with pytest.raises(TypeError, match="DataFrame"):
+        _request(history={"a": [1.0]}, selection_end=0)
+    with pytest.raises(ValueError, match="missing units"):
+        _request(history=history.drop(columns="c"), selection_end=20)
+    with pytest.raises(TypeError, match="numeric"):
+        text = history.copy()
+        text["a"] = ["x", "y"]
+        _request(history=text, selection_end=20)
+    with pytest.raises(ValueError, match="fixed_treated size"):
+        _request(fixed_treated=("a",), min_group_size=2)
+    with pytest.raises(ValueError, match="must contain required_treated"):
+        _request(fixed_treated=("a",), required_treated=("b",))
+    with pytest.raises(ValueError, match="cannot include a treated unit"):
+        _request(fixed_treated=("a",), donor_pools=(("a", "b"),))
+    with pytest.raises(ValueError, match="cannot include excluded_units"):
+        _request(
+            fixed_treated=("a",),
+            excluded_units=("c",),
+            donor_pools=(("b", "c"),),
+        )
+    with pytest.raises(ValueError, match="must be donor-eligible"):
+        _request(
+            fixed_treated=("a",),
+            donor_eligible=("b",),
+            donor_pools=(("c",),),
+        )
+    with pytest.raises(ValueError, match="absent from treatment_eligible"):
+        _request(always_control=("a",), treatment_eligible=("a", "b"))
+    with pytest.raises(ValueError, match="must be treatment-eligible"):
+        _request(required_treated=("a",), treatment_eligible=("b",))
+    with pytest.raises(ValueError, match="absent from donor_eligible"):
+        _request(excluded_units=("a",), donor_eligible=("a",))
+    with pytest.raises(ValueError, match="spillover_exclusions must be unique"):
+        _request(spillover_exclusions=(("a", "b"), ("a", "b")))
+    with pytest.raises(ValueError, match="unknown unit"):
+        _request(spillover_exclusions=(("a", "z"),))
+    with pytest.raises(TypeError, match="bool"):
+        _request(unit_costs=(("a", True),))
+    with pytest.raises(ValueError, match="unit_costs names must be unique"):
+        _request(unit_costs=(("a", 1.0), ("a", 2.0)))
+    with pytest.raises(ValueError, match="unit_covariates names must be unique"):
+        _request(
+            unit_covariates=(
+                ("income", (("a", 1.0),)),
+                ("income", (("b", 2.0),)),
+            )
+        )
+    with pytest.raises(ValueError, match="max_abs_mean_gap must be nonnegative"):
+        BalanceConstraint("income", -0.1)
+    with pytest.raises(TypeError, match="BalanceConstraint"):
+        _request(balance_constraints=(("income", 0.1),))
+    with pytest.raises(ValueError, match="covariates must be unique"):
+        _request(
+            balance_constraints=(
+                BalanceConstraint("income", 0.1),
+                BalanceConstraint("income", 0.2),
+            )
+        )
+    with pytest.raises(TypeError, match="positive integer"):
+        _request(exact_ceiling=0)
+    with pytest.raises(TypeError, match="positive integer"):
+        _request(max_generated=0)
+    with pytest.raises(TypeError, match="positive integer"):
+        _request(shortlist_size=0)
+    with pytest.raises(TypeError, match="positive integer"):
+        _request(min_remaining_donors=0)
+    with pytest.raises(ValueError, match="needs at least 1"):
+        _request(units=())
+    with pytest.raises(TypeError, match="sequence of unit groups"):
+        _request(supplied_groups="ab")
+    with pytest.raises(TypeError, match="single time index"):
+        wide = history.copy()
+        wide.index = pd.MultiIndex.from_arrays([history.index, history.index])
+        _request(history=wide, selection_end=20)
+    with pytest.raises(TypeError, match="must be an int"):
+        _request(random_seed="no")
+    with pytest.raises(TypeError, match="sequence of pairs"):
+        _request(spillover_exclusions="ab")
+    with pytest.raises(TypeError, match="pairs of unit names"):
+        _request(spillover_exclusions=(("a",),))
+    with pytest.raises(TypeError, match="sequence of"):
+        _request(unit_costs="a")
+    with pytest.raises(TypeError, match="must be"):
+        _request(unit_costs=(("a",),))
+    with pytest.raises(TypeError, match="sequence of covariate"):
+        _request(unit_covariates="income")
+    with pytest.raises(TypeError, match="entries must be"):
+        _request(unit_covariates=(("income",),))
+    with pytest.raises(TypeError, match="non-empty strings"):
+        _request(unit_covariates=(("", (("a", 1.0),)),))
+    with pytest.raises(TypeError, match="covariate values must be"):
+        _request(unit_covariates=(("income", "a"),))
+    with pytest.raises(TypeError, match="covariate values must be"):
+        _request(unit_covariates=(("income", (("a",),)),))
+    with pytest.raises(ValueError, match="units must be unique"):
+        _request(unit_covariates=(("income", (("a", 1.0), ("a", 2.0))),))
+    with pytest.raises(TypeError, match="non-empty strings"):
+        labelled = history.copy()
+        labelled.columns = [1, "b", "c"]
+        _request(history=labelled, selection_end=20)
+    with pytest.raises(ValueError, match="columns must be unique"):
+        duplicated_columns = history.copy()
+        duplicated_columns.columns = ["a", "a", "c"]
+        _request(history=duplicated_columns, selection_end=20)
+    with pytest.raises(TypeError, match="non-empty string"):
+        BalanceConstraint("", 1.0)
+    with pytest.raises(ValueError, match="must be treatment-eligible"):
+        _request(fixed_treated=("a",), treatment_eligible=("b",))
+    with pytest.raises(TypeError, match="sequence of BalanceConstraint"):
+        _request(balance_constraints="income")
+    with pytest.raises(ValueError, match="must be donor-eligible"):
+        _request(always_control=("c",), donor_eligible=("b",))
+    bounded = _request(min_outcome_share=0.2)
+    assert bounded.history is None
+    assert bounded.min_outcome_share == 0.2
+    longer = pd.DataFrame(
+        {"a": [1.0, 2.0, "later"], "b": [3.0, 4.0, 8.0], "c": [5.0, 6.0, 9.0]},
+        index=pd.Index([10, 20, 30], name="time"),
+    )
+    window = _request(history=longer, selection_end=20)
+    assert list(window.history.index) == [10, 20]
+    longer.loc[10, "a"] = 999.0
+    assert window.history.loc[10, "a"] == 1.0
+
+
+def test_candidate_table_rejects_fits_and_partial_disagreement() -> None:
+    accepted = _table()
+    assert accepted.n_inference_fits == 0
+    assert accepted.partial is False
+    partial = _table(
+        frame=pd.DataFrame(
+            [
+                _candidate_row(),
+                _candidate_row(
+                    treated=("b",),
+                    donors=("a",),
+                    filter_reasons=("group_size",),
+                    shortlist_rank=pd.NA,
+                    status="filtered",
+                ),
+            ]
+        ),
+        n_space=4,
+        n_enumerated=2,
+        n_filtered=1,
+        n_shortlisted=1,
+        partial=True,
+        enumeration_policy="seeded_hash_sample",
+    )
+    assert partial.partial is True
+    with pytest.raises(ValueError, match="n_inference_fits must be 0"):
+        _table(n_inference_fits=1)
+    with pytest.raises(ValueError, match="n_inference_fits must be 0"):
+        _table(n_inference_fits=False)
+    with pytest.raises(ValueError, match="partial must be true only"):
+        _table(partial=True)
+    with pytest.raises(ValueError, match="cannot exceed n_space"):
+        _table(
+            n_space=1,
+            n_enumerated=2,
+            partial=True,
+            enumeration_policy="seeded_hash_sample",
+        )
+    with pytest.raises(ValueError, match="cannot exceed n_enumerated"):
+        _table(n_space=1, n_enumerated=1, n_filtered=2)
+    with pytest.raises(ValueError, match="unfiltered count"):
+        _table(n_space=2, n_enumerated=2, n_filtered=1, n_shortlisted=2)
+    with pytest.raises(TypeError, match="partial must be a bool"):
+        _table(partial=1)
+    with pytest.raises(ValueError, match="enumeration_policy"):
+        _table(enumeration_policy="first_n")
+    with pytest.raises(ValueError, match="partial table uses"):
+        _table(
+            n_space=2,
+            n_enumerated=1,
+            partial=True,
+            enumeration_policy="exact",
+        )
+    with pytest.raises(ValueError, match="exact table is not a sample"):
+        _table(enumeration_policy="seeded_hash_sample")
+    with pytest.raises(ValueError, match="estimand must be DRAW_ALIGNED_UNIT_SUM"):
+        _table(estimand="raw_sum_versus_simplex")
+    with pytest.raises(ValueError, match="missing columns"):
+        _table(frame=pd.DataFrame({"candidate_id": []}))
+    with pytest.raises(TypeError, match="DataFrame"):
+        _table(frame=[])
+    bad_role = pd.DataFrame([_candidate_row(proxy_role="fitted_simplex")])
+    with pytest.raises(ValueError, match="proxy_role"):
+        _table(frame=bad_role, n_space=1, n_enumerated=1, n_shortlisted=1)
+    bad_estimand = pd.DataFrame([_candidate_row(estimand="other")])
+    with pytest.raises(ValueError, match="frame estimand"):
+        _table(frame=bad_estimand, n_space=1, n_enumerated=1, n_shortlisted=1)
+    with pytest.raises(ValueError, match="frame length must equal"):
+        _table(n_space=5, n_enumerated=5, n_filtered=1, n_shortlisted=2)
+    simplex = pd.DataFrame([_candidate_row(member_weight=0.9)])
+    with pytest.raises(ValueError, match="member_weight must be 1/k"):
+        _table(frame=simplex, n_space=1, n_enumerated=1, n_shortlisted=1)
+    invented = pd.DataFrame(
+        [_candidate_row(filter_reasons=("invented_reason",), shortlist_rank=pd.NA)]
+    )
+    with pytest.raises(ValueError, match="CANDIDATE_FILTER_REASONS"):
+        _table(frame=invented, n_space=1, n_enumerated=1, n_filtered=1)
+    ranked_filter = pd.DataFrame(
+        [
+            _candidate_row(filter_reasons=("group_size",), shortlist_rank=1),
+            _candidate_row(
+                treated=("b",),
+                donors=("a",),
+                filter_reasons=(),
+                shortlist_rank=pd.NA,
+                status="enumerated",
+            ),
+        ]
+    )
+    with pytest.raises(ValueError, match="cannot have a shortlist_rank"):
+        _table(
+            frame=ranked_filter,
+            n_space=2,
+            n_enumerated=2,
+            n_filtered=1,
+            n_shortlisted=1,
+        )
+    valid = pd.DataFrame([_candidate_row()])
+    stored = _table(frame=valid, n_space=1, n_enumerated=1, n_shortlisted=1)
+    assert stored.frame["candidate_id"].iloc[0] == '[["a"],["b"]]'
+    assert stored.frame["member_weight"].iloc[0] == 1.0
+    view = stored.frame
+    view.loc[0, "member_weight"] = 0.2
+    assert stored.frame["member_weight"].iloc[0] == 1.0
+    with pytest.raises(TypeError, match="nonnegative integer"):
+        _table(n_space=1.5)
+
+
+def test_candidate_request_uses_the_exact_history_label() -> None:
+    index = pd.to_datetime(["2020-06-01", "2020-07-01"])
+    history = pd.DataFrame({"a": [1.0, 2.0]}, index=index)
+    end = index[0]
+    request = _request(units=("a",), history=history, selection_end=end)
+    assert request.selection_end == end
+    assert list(request.history.index) == [end]
+    view = request.history
+    view.loc[end, "a"] = 9.0
+    assert request.history.loc[end, "a"] == 1.0
+    leaked = request.history
+    leaked.loc[pd.Timestamp("2020-08-01")] = 9.0
+    assert list(request.history.index) == [end]
+    integer = pd.DataFrame({"a": [1.0, 2.0, 3.0]}, index=pd.Index([10, 20, 30]))
+    stored_history = _request(units=("a",), history=integer, selection_end=20)
+    appended = stored_history.history
+    appended.loc[30] = 9.0
+    assert list(stored_history.history.index) == [10, 20]
+    missing_none = pd.DataFrame(index=pd.Index([10, 20, 30]))
+    missing_none["a"] = pd.Series(
+        [None, 2.0, 3.0], index=missing_none.index, dtype=object
+    )
+    with pytest.raises(TypeError, match="numeric"):
+        _request(units=("a",), history=missing_none, selection_end=20)
+    with pytest.raises(ValueError, match="not in the history index"):
+        _request(units=("a",), history=history, selection_end="2020-06")
+    missing = history.copy()
+    missing.iloc[0, 0] = np.nan
+    with pytest.raises(ValueError, match="finite"):
+        _request(units=("a",), history=missing, selection_end=end)
+    screened = _request(supplied_groups=(("a", "b"),), max_group_size=1)
+    assert screened.supplied_groups == (("a", "b"),)
+    control = _request(supplied_groups=(("a",),), always_control=("a",))
+    assert control.supplied_groups == (("a",),)
+    omitted = _request(supplied_groups=(("a",),), required_treated=("b",))
+    assert omitted.supplied_groups == (("a",),)
+    gap = _request(balance_constraints=(BalanceConstraint("income", 0.5),))
+    assert gap.balance_constraints[0].covariate == "income"
+
+
+def test_screen_contracts_compare_stored_frames_by_value() -> None:
+    history = _selection_history()
+    left = _request(history=history, selection_end=20)
+    right = _request(history=history.copy(), selection_end=20)
+    assert left == right
+    assert left != _request()
+    assert _table() == _table()
+    with pytest.raises(TypeError):
+        hash(left)
+    with pytest.raises(TypeError):
+        hash(_table())
+
+
+def test_candidate_table_rejects_a_smuggled_or_inconsistent_row() -> None:
+    ranked = pd.DataFrame(
+        [
+            _candidate_row(),
+            _candidate_row(
+                treated=("b",),
+                donors=("a",),
+                shortlist_rank=None,
+                status="enumerated",
+            ),
+        ]
+    )
+    accepted = _table(frame=ranked, n_space=2, n_enumerated=2, n_shortlisted=1)
+    assert accepted.frame["shortlist_rank"].iloc[0] == 1
+    duplicate = pd.DataFrame(
+        [
+            _candidate_row(),
+            _candidate_row(treated=("b",), donors=("a",), shortlist_rank=1),
+        ]
+    )
+    with pytest.raises(ValueError, match="without duplicates"):
+        _table(frame=duplicate, n_space=2, n_enumerated=2, n_shortlisted=2)
+    extra = pd.DataFrame([_candidate_row()])
+    extra["posterior"] = 1.0
+    with pytest.raises(ValueError, match="outside CANDIDATE_COLUMNS"):
+        _table(frame=extra, n_space=1, n_enumerated=1, n_shortlisted=1)
+    with pytest.raises(ValueError, match="must be sorted"):
+        _table(
+            frame=pd.DataFrame([_candidate_row(treated=("b", "a"), member_weight=0.5)]),
+            n_space=1,
+            n_enumerated=1,
+            n_shortlisted=1,
+        )
+    with pytest.raises(ValueError, match="disjoint"):
+        _table(
+            frame=pd.DataFrame([_candidate_row(donors=("a",))]),
+            n_space=1,
+            n_enumerated=1,
+            n_shortlisted=1,
+        )
+    with pytest.raises(ValueError, match="candidate_id must be"):
+        _table(
+            frame=pd.DataFrame([_candidate_row(candidate_id="a")]),
+            n_space=1,
+            n_enumerated=1,
+            n_shortlisted=1,
+        )
+    outside = _candidate_row(
+        treated=("a", "b", "c", "d"),
+        donors=(),
+        n_donors=0,
+        member_weight=0.25,
+        filter_reasons=(),
+        status="shortlisted",
+    )
+    with pytest.raises(ValueError, match="group_size"):
+        _table(
+            frame=pd.DataFrame([outside]), n_space=1, n_enumerated=1, n_shortlisted=1
+        )
+    filtered = outside | {
+        "filter_reasons": ("group_size",),
+        "shortlist_rank": pd.NA,
+        "status": "filtered",
+    }
+    stored = _table(
+        frame=pd.DataFrame([filtered]),
+        n_space=1,
+        n_enumerated=1,
+        n_filtered=1,
+        n_shortlisted=0,
+    )
+    assert stored.n_filtered == 1
+    fitted = _candidate_row(
+        proxy_role="preperiod_weighted_proportion", proxy_score=0.25
+    )
+    _table(frame=pd.DataFrame([fitted]), n_space=1, n_enumerated=1, n_shortlisted=1)
+    with pytest.raises(ValueError, match="must be finite"):
+        _table(
+            frame=pd.DataFrame(
+                [
+                    _candidate_row(
+                        proxy_role="preperiod_weighted_proportion",
+                        proxy_score=pd.NA,
+                    )
+                ]
+            ),
+            n_space=1,
+            n_enumerated=1,
+            n_shortlisted=1,
+        )
+    disagreed = _candidate_row(
+        filter_reasons=("group_size",),
+        shortlist_rank=pd.NA,
+        status="shortlisted",
+        boundary=True,
+    )
+    with pytest.raises(ValueError, match="status must match"):
+        _table(
+            frame=pd.DataFrame([disagreed]),
+            n_space=1,
+            n_enumerated=1,
+            n_filtered=1,
+            n_shortlisted=0,
+        )
+    with pytest.raises(ValueError, match="n_donors must equal"):
+        _table(
+            frame=pd.DataFrame([_candidate_row(n_donors=5)]),
+            n_space=1,
+            n_enumerated=1,
+            n_shortlisted=1,
+        )
+    with pytest.raises(ValueError, match="must be null"):
+        _table(
+            frame=pd.DataFrame(
+                [_candidate_row(proxy_role="unavailable", proxy_score=0.2)]
+            ),
+            n_space=1,
+            n_enumerated=1,
+            n_shortlisted=1,
+        )
+    with pytest.raises(ValueError, match="identity must be unique"):
+        _table(
+            frame=pd.DataFrame(
+                [
+                    _candidate_row(),
+                    _candidate_row(shortlist_rank=pd.NA, status="enumerated"),
+                ]
+            ),
+            n_space=2,
+            n_enumerated=2,
+            n_shortlisted=1,
+        )
+    with pytest.raises(ValueError, match="outcome_share must be null or finite"):
+        _table(
+            frame=pd.DataFrame([_candidate_row(outcome_share="later")]),
+            n_space=1,
+            n_enumerated=1,
+            n_shortlisted=1,
+        )

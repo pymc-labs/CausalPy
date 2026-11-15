@@ -135,14 +135,25 @@ class PowerEvaluator(Protocol):
 
 
 class CandidateGenerator(Protocol):
-    """Screen candidate groups. Screening does not fit a model."""
+    """Screen candidate groups. Screening does not fit a model.
+
+    ``generate`` must follow the enumeration, filter, hash-sample, shortlist,
+    proxy, and estimand policy on :class:`CandidateRequest` and
+    :class:`CandidateTable`. It must not invent another ranking, another
+    proxy, or a string constraint language. It must not sample.
+    """
 
     def generate(self, request: CandidateRequest) -> CandidateTable:
-        """Return plot-ready rows with no posterior and no estimator class.
+        """Return every enumerated identity, including filtered rows.
 
         Parameters
         ----------
         request : CandidateRequest
-            Constraints and the maximum number of rows.
+            Units, eligibility, and the required seed. Not a constraint string.
+
+        Returns
+        -------
+        CandidateTable
+            Plot-ready rows with no posterior and no estimator class.
         """
         ...

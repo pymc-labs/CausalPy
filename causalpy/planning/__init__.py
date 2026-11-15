@@ -27,10 +27,13 @@ Repeated-experiment power is not computed.
 
 Group fitting, augmented synthetic control, and interactive fixed effects
 are the issue #1440 seam. Power is the issue #1439 seam. Candidate screening
-is the issue #1441 seam.
+is the issue #1441 seam. :class:`CandidateRequest` stores that screen. It
+does not enumerate or fit.
 """
 
 from causalpy.planning.contracts import (
+    CANDIDATE_COLUMNS,
+    CANDIDATE_FILTER_REASONS,
     DRAW_ALIGNED_UNIT_SUM,
     FIXED_DESIGN_FIT_CEILING,
     REFERENCE_CAPABILITIES,
@@ -38,6 +41,7 @@ from causalpy.planning.contracts import (
     RELATIVE_BASELINE_CONVENTION,
     VALIDATION_MATRIX,
     AnalysisDecision,
+    BalanceConstraint,
     CandidateRequest,
     CandidateTable,
     CanonicalEvaluation,
@@ -75,6 +79,8 @@ from causalpy.planning.seams import (
 )
 
 __all__ = [
+    "CANDIDATE_COLUMNS",
+    "CANDIDATE_FILTER_REASONS",
     "DRAW_ALIGNED_UNIT_SUM",
     "FIXED_DESIGN_FIT_CEILING",
     "OWNERSHIP",
@@ -84,6 +90,7 @@ __all__ = [
     "VALIDATION_MATRIX",
     "AnalysisDecision",
     "AnalysisHandoff",
+    "BalanceConstraint",
     "CandidateGenerator",
     "CandidateRequest",
     "CandidateTable",
