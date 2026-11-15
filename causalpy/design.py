@@ -645,6 +645,54 @@ class SyntheticControlPlanner:
         self.min_donor_correlation = min_donor_correlation
         self.auto_scale_sigma = auto_scale_sigma
 
+    def _rebind(
+        self,
+        treated_unit: str,
+        control_units: Sequence[str],
+        random_seed: int,
+    ) -> "SyntheticControlPlanner":
+        """Bind one candidate onto a copy of this planner's indexed history."""
+        if isinstance(control_units, (str, bytes)) or not isinstance(
+            control_units, Sequence
+        ):
+            raise TypeError(
+                "control_units must be a sequence of unit-name strings, "
+                "not a single string."
+            )
+        donors = tuple(control_units)
+        if not donors:
+            raise ValueError("control_units must name at least one donor.")
+        if any(not isinstance(name, str) for name in donors):
+            raise TypeError("control_units must be a sequence of unit-name strings.")
+        if len(set(donors)) != len(donors):
+            raise ValueError("control_units contains a duplicate donor.")
+        if treated_unit in donors:
+            raise ValueError("treated_unit cannot also be a control unit.")
+        missing = [
+            name for name in (treated_unit, *donors) if name not in self.history.columns
+        ]
+        if missing:
+            raise ValueError(f"history is missing columns {missing}.")
+        if isinstance(random_seed, bool) or not isinstance(random_seed, int):
+            raise TypeError("random_seed must be an int or None.")
+        model = self.model._clone()
+        stripped = dict(model.sample_kwargs)
+        stripped.pop("random_seed", None)
+        model.sample_kwargs = stripped
+        child: SyntheticControlPlanner = object.__new__(type(self))
+        child.history = self.history.copy()
+        child.time_column = self.time_column
+        child.treated_unit = treated_unit
+        child.control_units = donors
+        child.random_seed = random_seed
+        child.decision = self.decision
+        child.estimator = self.estimator
+        child.model = model
+        child.relative_floor = self.relative_floor
+        child.min_donor_correlation = self.min_donor_correlation
+        child.auto_scale_sigma = self.auto_scale_sigma
+        return child
+
     def screen(
         self, *, periods: pd.Index | Sequence[Any] | None = None
     ) -> ScreenResult:

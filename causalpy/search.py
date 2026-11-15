@@ -1244,64 +1244,13 @@ def _origin_seed(master: int, candidate_id: str) -> Callable[[Any], int]:
     return seed
 
 
-def _constructor_history(
-    history: pd.DataFrame, columns: Sequence[str]
-) -> tuple[pd.DataFrame, bool]:
-    """Return a finite frame for construction, and whether it was replaced.
-
-    The public constructor rejects any non-finite value in the selected
-    units, including reserved audit rows the duration evaluator never fits.
-    A placeholder lets this candidate be constructed. The caller restores
-    the real frame before comparison so a gap stays visible to the evaluator
-    and only that candidate can fail.
-    """
-    outcomes = history.loc[:, list(columns)].to_numpy(dtype=float)
-    if np.isfinite(outcomes).all():
-        return history, False
-    placeholder = history.copy()
-    values = placeholder.loc[:, list(columns)].to_numpy(dtype=float).copy()
-    values[~np.isfinite(values)] = 0.0
-    placeholder.loc[:, list(columns)] = values
-    return placeholder, True
-
-
 def _child_planner(
     planner: SyntheticControlPlanner,
     candidate: ScreenedCandidate,
 ) -> SyntheticControlPlanner:
-    from causalpy.design import SyntheticControlPlanner
-
     if candidate.seed is None:
         raise RuntimeError("A screened candidate reached fitting without a seed.")
-    # The history index is already named. Passing time_column would look for a
-    # column the constructor has already consumed, so the attribute is copied
-    # after construction and the caller's column name is preserved on freeze.
-    # Drop the parent template seed. The constructor writes random_seed into
-    # the default model's sample_kwargs, and replay applies that dict after the
-    # explicit seed. A child must sample its own candidate seed on freeze.
-    model = planner.model._clone()
-    stripped = dict(model.sample_kwargs)
-    stripped.pop("random_seed", None)
-    model.sample_kwargs = stripped
-    selected = (candidate.treated_unit, *candidate.donors)
-    history, replaced = _constructor_history(planner.history, selected)
-    child = SyntheticControlPlanner(
-        history,
-        candidate.treated_unit,
-        candidate.donors,
-        planner.decision,
-        estimator=planner.estimator,
-        model=model,
-        relative_floor=planner.relative_floor,
-        min_donor_correlation=planner.min_donor_correlation,
-        auto_scale_sigma=planner.auto_scale_sigma,
-        random_seed=candidate.seed,
-        time_column=None,
-    )
-    if replaced:
-        child.history = planner.history.copy()
-    child.time_column = planner.time_column
-    return child
+    return planner._rebind(candidate.treated_unit, candidate.donors, candidate.seed)
 
 
 def _apply_evaluation(
