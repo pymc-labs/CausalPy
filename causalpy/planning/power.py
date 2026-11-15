@@ -242,7 +242,11 @@ class MinimumDetectableEffect:
 
 @dataclass(frozen=True)
 class StudyRecord:
-    """What the study conditioned on, what it generated, and how it seeded."""
+    """What the study conditioned on, what it generated, and how it seeded.
+
+    ``donor_weights`` is empty when the generator does not build the untreated
+    series from the donors. A nonempty tuple is the weight vector it applied.
+    """
 
     scenario_family: str
     conditional_on: str
@@ -431,6 +435,9 @@ def interpolate_minimum_detectable_effect(
 ) -> InterpolatedEffect:
     """Interpolate the MDE. Do not extrapolate past the evaluated grid.
 
+    A bracket whose lower endpoint is zero is not interpolated. The smallest
+    evaluated nonzero effect that already meets the target is the MDE.
+
     Parameters
     ----------
     effects : sequence of float
@@ -495,7 +502,7 @@ def interpolate_minimum_detectable_effect(
                 "The zero effect already meets the target power. That is a "
                 "null-control failure, not a minimum detectable effect.",
             )
-        if index == 0 or power == pairs[index - 1][1]:
+        if index == 0 or pairs[index - 1][0] == 0.0 or power == pairs[index - 1][1]:
             return InterpolatedEffect(
                 effect, "attained", effect, effect, power, power, MDE_CONVENTION
             )
@@ -1025,8 +1032,6 @@ class ReferencePowerEvaluator:
 
     def _panel(self, replicate: int, config: _PlanConfiguration) -> pd.DataFrame:
         donors = _donor_matrix(self._history, config.controls)
-        weights = np.full(donors.shape[1], 1.0 / donors.shape[1])
-        signal = donors @ weights
         rng = _replicate_rng(config.sampler_seed, replicate, self._scenario_family)
         noise_scale = _noise_scale(self._history, config.controls)
         n_rows = donors.shape[0]
@@ -1039,6 +1044,11 @@ class ReferencePowerEvaluator:
                 + noise_scale * rng.normal(0.0, 1.0, size=n_rows)
             )
         else:
+            weights = np.asarray(
+                _generator_donor_weights(self._scenario_family, donors.shape[1]),
+                dtype=float,
+            )
+            signal = donors @ weights
             noise: np.ndarray
             if self._scenario_family == "temporal_dependence":
                 noise = _ar1_noise(rng, n_rows, TEMPORAL_AR_COEFFICIENT)
@@ -1248,6 +1258,13 @@ def _draw_from(
     )
 
 
+def _generator_donor_weights(family: str, n_controls: int) -> tuple[float, ...]:
+    """Equal donor weights the generator applied, or empty when it did not."""
+    if family == "persistent_misfit":
+        return ()
+    return tuple(1.0 / n_controls for _ in range(n_controls))
+
+
 def _assemble(
     *,
     draws: dict[tuple[int, float], list[_Draw]],
@@ -1341,7 +1358,7 @@ def _assemble(
         for duration in horizons
     )
     n_controls = len(config.controls)
-    weights = tuple([1.0 / n_controls] * n_controls)
+    weights = _generator_donor_weights(family, n_controls)
     study = StudyRecord(
         scenario_family=family,
         conditional_on=CONDITIONAL_ON,

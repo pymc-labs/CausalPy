@@ -231,6 +231,25 @@ def test_interpolation_does_not_extrapolate() -> None:
     )
     assert exact.effect == 5.0
     assert exact.status == "attained"
+    first_grid = interpolate_minimum_detectable_effect(
+        [0.0, 4.0, 8.0],
+        [0.0, 1.0, 1.0],
+        target_power=0.8,
+        direction="positive",
+    )
+    assert first_grid.effect == 4.0
+    assert first_grid.status == "attained"
+    assert first_grid.lower_effect == 4.0
+    assert first_grid.upper_effect == 4.0
+    negative_first = interpolate_minimum_detectable_effect(
+        [0.0, -4.0, -8.0],
+        [0.0, 1.0, 1.0],
+        target_power=0.8,
+        direction="negative",
+    )
+    assert negative_first.effect == -4.0
+    assert negative_first.lower_effect == -4.0
+    assert negative_first.upper_effect == -4.0
     broken_null = interpolate_minimum_detectable_effect(
         [0.0, 4.0],
         [0.9, 1.0],
@@ -343,10 +362,12 @@ def test_translation_oracle_matches_the_unit_period_effect_and_fit_count(
             assert row["minimum_worthwhile_effect"] == 6.0
     assert result.false_positive_within_tolerance is True
     assert bool(frame["false_positive_within_tolerance"].iloc[0]) is True
-    mde = result.minimum_detectable_effects[0]
-    assert mde.status == "attained"
-    assert mde.effect == pytest.approx(4.0)
-    assert mde.minimum_worthwhile_effect == 6.0
+    for item in result.minimum_detectable_effects:
+        assert item.status == "attained"
+        assert item.effect == 5.0
+        assert item.lower_effect == 5.0
+        assert item.upper_effect == 5.0
+    assert result.minimum_detectable_effects[0].minimum_worthwhile_effect == 6.0
     worthwhile = minimum_detectable_effect(result, duration=4)
     assert worthwhile.worthwhile_comparison == "mde_at_or_below_worthwhile"
     zero = result.points[0]
@@ -761,6 +782,12 @@ def test_families_record_distinct_scopes_without_fitting(
         != records["correctly_specified_noisy_reference"].study.generated
     )
     assert records["persistent_misfit"].power_withheld is True
+    equal = tuple(1.0 / len(CONTROLS) for _ in CONTROLS)
+    assert records["persistent_misfit"].study.donor_weights == ()
+    for name in SCENARIO_FAMILIES:
+        if name == "persistent_misfit":
+            continue
+        assert records[name].study.donor_weights == equal
     assert records["correctly_specified_noisy_reference"].power_withheld is False
 
 
