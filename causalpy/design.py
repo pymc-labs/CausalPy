@@ -18,6 +18,7 @@ requested horizon, then translates that fitted counterfactual across an
 absolute and relative lift grid. Construction and :meth:`screen` do not
 sample. This is not a power curve, not a second probability engine, and not
 :class:`~causalpy.checks.placebo_in_time.PlaceboInTime`.
+:meth:`SyntheticControlPlanner.search` screens candidates before the duration comparison. It does not select a geo, a duration, or a launch.
 
 The draft design surface previously attached to
 :class:`~causalpy.experiments.synthetic_control.SyntheticControl`
@@ -34,7 +35,7 @@ bias. It does not correct it, and it does not change planner construction or
 sampling.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -73,6 +74,13 @@ from causalpy.historical_validation import (
 )
 from causalpy.input_data import to_pandas_with_time_index
 from causalpy.pymc_models import WeightedSumFitter
+from causalpy.search import (
+    SHORTLIST_SIZE,
+    EvaluatedDesign,
+    ParetoPoint,
+    ScreenedCandidate,
+    SearchResult,
+)
 from causalpy.utils import check_convex_hull_violation
 
 __all__ = [
@@ -87,6 +95,7 @@ __all__ = [
     "DurationRow",
     "DurationWindow",
     "EvidenceLevel",
+    "EvaluatedDesign",
     "HISTORICAL_REPLAY_ASSUMPTIONS",
     "HistoricalReplay",
     "HistoricalSchedule",
@@ -94,10 +103,14 @@ __all__ = [
     "LiftScore",
     "MAX_WINDOW_BYTES",
     "OriginEligibility",
+    "ParetoPoint",
     "PlannerResult",
     "ScheduleCounts",
     "ScheduleRequest",
     "ScreenResult",
+    "SHORTLIST_SIZE",
+    "ScreenedCandidate",
+    "SearchResult",
     "SyntheticControlPlanner",
     "WindowPlan",
     "WindowReplay",
@@ -488,6 +501,9 @@ class SyntheticControlPlanner:
     is the pre-origin prefix. They do not replace :meth:`evaluate`, and they
     do not select a duration or emit a launch recommendation. Prefix reuse
     stays disabled: a trailing-tail horizon is not a prefix of a longer one.
+    :meth:`search` screens single-target alternatives with a weighted-proportion
+    holdout proxy, then fits a shortlist through :meth:`compare_durations`. It
+    does not select a winner, a duration, or a launch.
 
     Parameters
     ----------
@@ -628,6 +644,54 @@ class SyntheticControlPlanner:
         self.time_column = time_column
         self.min_donor_correlation = min_donor_correlation
         self.auto_scale_sigma = auto_scale_sigma
+
+    def _rebind(
+        self,
+        treated_unit: str,
+        control_units: Sequence[str],
+        random_seed: int,
+    ) -> "SyntheticControlPlanner":
+        """Bind one candidate onto a copy of this planner's indexed history."""
+        if isinstance(control_units, (str, bytes)) or not isinstance(
+            control_units, Sequence
+        ):
+            raise TypeError(
+                "control_units must be a sequence of unit-name strings, "
+                "not a single string."
+            )
+        donors = tuple(control_units)
+        if not donors:
+            raise ValueError("control_units must name at least one donor.")
+        if any(not isinstance(name, str) for name in donors):
+            raise TypeError("control_units must be a sequence of unit-name strings.")
+        if len(set(donors)) != len(donors):
+            raise ValueError("control_units contains a duplicate donor.")
+        if treated_unit in donors:
+            raise ValueError("treated_unit cannot also be a control unit.")
+        missing = [
+            name for name in (treated_unit, *donors) if name not in self.history.columns
+        ]
+        if missing:
+            raise ValueError(f"history is missing columns {missing}.")
+        if isinstance(random_seed, bool) or not isinstance(random_seed, int):
+            raise TypeError("random_seed must be an int or None.")
+        model = self.model._clone()
+        stripped = dict(model.sample_kwargs)
+        stripped.pop("random_seed", None)
+        model.sample_kwargs = stripped
+        child: SyntheticControlPlanner = object.__new__(type(self))
+        child.history = self.history.copy()
+        child.time_column = self.time_column
+        child.treated_unit = treated_unit
+        child.control_units = donors
+        child.random_seed = random_seed
+        child.decision = self.decision
+        child.estimator = self.estimator
+        child.model = model
+        child.relative_floor = self.relative_floor
+        child.min_donor_correlation = self.min_donor_correlation
+        child.auto_scale_sigma = self.auto_scale_sigma
+        return child
 
     def screen(
         self, *, periods: pd.Index | Sequence[Any] | None = None
@@ -1008,6 +1072,189 @@ class SyntheticControlPlanner:
             self,
             durations,
             selection_origins=selection_origins,
+            audit_origins=audit_origins,
+            relative_lifts=relative_lifts,
+            absolute_lifts=absolute_lifts,
+            target_lift=target_lift,
+            target_scale=target_scale,
+            exclusions=exclusions,
+            cadence=cadence,
+            max_fits=max_fits,
+            fit_cost=fit_cost,
+            min_training_periods=min_training_periods,
+            sample_kwargs=sample_kwargs,
+        )
+
+    def search(
+        self,
+        durations: Sequence[int],
+        selection_origins: Sequence[Any],
+        *,
+        treated_unit: str | None = None,
+        eligible_units: Sequence[str] | None = None,
+        donor_pools: Sequence[Sequence[str]] | None = None,
+        include: Sequence[str] | None = None,
+        exclude: Sequence[str] = (),
+        spillover_exclude: Sequence[str] = (),
+        min_donors: int = 1,
+        costs: Mapping[str, float] | None = None,
+        max_cost: float | None = None,
+        outcome_share: tuple[float, float] | None = None,
+        representativeness: Mapping[str, float] | None = None,
+        min_representativeness: float | None = None,
+        group_size: int = 1,
+        shortlist_size: int = SHORTLIST_SIZE,
+        max_screened: int | None = None,
+        screen_holdout: int = 4,
+        audit_origins: Sequence[Any] = (),
+        relative_lifts: Sequence[float] | None = None,
+        absolute_lifts: Sequence[float] | None = None,
+        target_lift: float,
+        target_scale: str | None = None,
+        exclusions: Sequence[Any] = (),
+        cadence: Any = None,
+        max_fits: int = DEFAULT_MAX_FITS,
+        fit_cost: float | None = None,
+        min_training_periods: int = 2,
+        sample_kwargs: dict[str, Any] | None = None,
+    ) -> SearchResult:
+        """Screen a declared candidate space and fit the shortlist.
+
+        Fixed-target search is the default: the constructor's treated unit,
+        or ``treated_unit`` when passed, paired with ``donor_pools`` or the
+        planner's control units. Free-target search passes ``eligible_units``
+        and no treated unit. Passing both is an error. Group size must be 1.
+
+        Screening is a deterministic weighted-proportion holdout RMSE on rows
+        strictly before the earliest selection origin. Correlation, maximum
+        weight, and concentration are diagnostics, not vetoes. The shortlist
+        keeps boundary candidates (lowest cost, highest relevance, lowest and
+        highest outcome share, lowest proxy score), then fills by proxy rank.
+        Ties break on candidate id. Input order is not the policy. The
+        shortlist is fitted in candidate-id order, and budget exhaustion
+        follows that order. The default shortlist size is 8. A larger
+        screened set is not silently truncated to the first rows; set
+        ``max_screened`` to cap screening by a stable candidate-id hash,
+        which is disclosed.
+
+        Each shortlist member is fitted by :meth:`compare_durations` with a
+        seed keyed to the candidate, and each window fit uses a seed keyed to
+        that candidate and the origin. Both derive from the planner's
+        ``random_seed`` and do not depend on loop order. ``sample_kwargs``
+        must not contain ``random_seed``. Audit origins stay reserved. Budget
+        exhaustion stops the shortlist in candidate-id order and leaves the
+        remainder unfinished; it does not select a winner.
+
+        Parameters
+        ----------
+        durations : sequence of int
+            Same contract as :meth:`compare_durations`.
+        selection_origins : sequence
+            Same contract as :meth:`compare_durations`.
+        treated_unit : str, optional
+            Fixed-target unit. Defaults to the constructor target. A sequence
+            is a group request and raises.
+        eligible_units : sequence of str, optional
+            Free-target units. Each is paired with the other eligible units,
+            or with the single supplied donor pool, after exclusions.
+        donor_pools : sequence of sequences of str, optional
+            Fixed-target alternatives. One pool in free-target mode is applied
+            to every target. Pools are sorted and filtered; the target is
+            never its own donor.
+        include, exclude, spillover_exclude : sequence of str, optional
+            Inclusion and exclusion lists. Spillover buffers are removed from
+            both arms and cannot be targets. The lists must be disjoint and
+            name units in the history.
+        min_donors : int, default 1
+            Candidates with fewer donors after exclusions are skipped.
+        costs : mapping of str to float, optional
+            Supplied additive cost of the treated unit. Donors are not charged.
+            A missing key for a candidate target raises before fitting.
+        max_cost : float, optional
+            Skip a target whose supplied cost exceeds this value. Requires
+            ``costs``.
+        outcome_share : tuple of float, optional
+            ``(min, max)`` bounds on the target's share of selection-history
+            outcome across the eligible universe. A non-positive total raises.
+            This is not inferred from correlation.
+        representativeness : mapping of str to float, optional
+            Supplied score. It is not inferred. A missing candidate key raises.
+        min_representativeness : float, optional
+            Skip a target below this supplied score. Requires
+            ``representativeness``.
+        group_size : int, default 1
+            Must be 1. Any other value raises.
+        shortlist_size : int, default 8
+            Maximum number of screened candidates passed to the duration
+            comparison. Boundary candidates are reserved first.
+        max_screened : int, optional
+            Cap on how many candidates that already pass include, exclude,
+            spillover, donor, cost, share, and representativeness constraints
+            receive a proxy score. Infeasible candidates are removed before
+            the cap, so a hash-first failure cannot discard every feasible
+            design. The kept set is a stable hash order, not input order, and
+            the cap is disclosed.
+        screen_holdout : int, default 4
+            Trailing selection-history rows used for the proxy RMSE. At least
+            two earlier training rows are required; otherwise the candidate
+            is screen-failed.
+        audit_origins : sequence, optional
+            Same contract as :meth:`compare_durations`.
+        relative_lifts, absolute_lifts : sequence of float, optional
+            Same contract as :meth:`compare_durations`.
+        target_lift : float
+            Same contract as :meth:`compare_durations`.
+        target_scale : {'absolute', 'relative'}, optional
+            Same contract as :meth:`compare_durations`.
+        exclusions : sequence, optional
+            Same contract as :meth:`compare_durations`.
+        cadence : int, str, pandas offset, or None, optional
+            Same contract as :meth:`compare_durations`.
+        max_fits : int, default 24
+            Total inference budget for the shortlist, not a per-candidate
+            reset. The default of 24 can exhaust before a long shortlist
+            finishes; that result is partial evidence.
+        fit_cost : float, optional
+            Same contract as :meth:`compare_durations`.
+        min_training_periods : int, default 2
+            Same contract as :meth:`compare_durations`.
+        sample_kwargs : dict, optional
+            Same contract as :meth:`compare_durations`. Must not contain
+            ``random_seed``; candidate seeds are derived from the planner seed.
+
+        Returns
+        -------
+        SearchResult
+            Screened, skipped, failed, and unfinished candidates, the evaluated
+            comparisons, and the Pareto set across historical detection share
+            and any supplied cost or relevance axis. ``global_optimum`` is
+            false. ``recommendation`` withholds launch. ``freeze`` delegates
+            to one evaluated comparison and does not consult the others.
+            Recall and regret are present only when every screened candidate
+            was fitted.
+        """
+        from causalpy.search import _search_designs
+
+        return _search_designs(
+            self,
+            durations,
+            selection_origins,
+            treated_unit=treated_unit,
+            eligible_units=eligible_units,
+            donor_pools=donor_pools,
+            include=include,
+            exclude=exclude,
+            spillover_exclude=spillover_exclude,
+            min_donors=min_donors,
+            costs=costs,
+            max_cost=max_cost,
+            outcome_share=outcome_share,
+            representativeness=representativeness,
+            min_representativeness=min_representativeness,
+            group_size=group_size,
+            shortlist_size=shortlist_size,
+            max_screened=max_screened,
+            screen_holdout=screen_holdout,
             audit_origins=audit_origins,
             relative_lifts=relative_lifts,
             absolute_lifts=absolute_lifts,

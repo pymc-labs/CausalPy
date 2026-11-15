@@ -85,15 +85,26 @@ def test_protocol_withholds_null_tolerance_and_names_the_duration_gap() -> None:
     """The HDI and the tail probability are not a false-positive tolerance."""
     assert PROTOCOL.null_error_tolerance is None
     assert PROTOCOL.decision_probability != 1.0 - PROTOCOL.coverage_hdi_prob
-    assert "gap: no public duration-freeze API" in PROTOCOL.selected_duration_audit
+    assert "DurationComparison.freeze" in PROTOCOL.selected_duration_audit
+    assert "ae1ee700937dc2b16a0c3c8f7126d3bef9435783" in (
+        PROTOCOL.selected_duration_audit
+    )
+    assert "c4fa86726b040ba7164b9396eb5849c90d271b37" not in (
+        PROTOCOL.selected_duration_audit
+    )
+    assert "was not refit" in PROTOCOL.selected_duration_audit
     assert PROTOCOL.n_panels == 100
     assert PROTOCOL.max_claimed_detection_se == 0.04
 
 
-def test_planner_has_no_public_duration_freeze() -> None:
-    """The gap is unmet. A later freeze API must fail this until the audit exists."""
-    public = [name for name in dir(SyntheticControlPlanner) if not name.startswith("_")]
-    assert not any("freeze" in name or name == "select_duration" for name in public)
+def test_duration_freeze_is_on_the_comparison() -> None:
+    """The planner does not select a duration. Freeze and audit are public."""
+    from causalpy.design import AnalysisSpecification, DurationComparison
+
+    assert not hasattr(SyntheticControlPlanner, "select_duration")
+    assert not hasattr(SyntheticControlPlanner, "freeze")
+    assert callable(DurationComparison.freeze)
+    assert callable(AnalysisSpecification.audit)
 
 
 def test_reference_mean_is_the_declared_convex_combination() -> None:
@@ -367,7 +378,12 @@ def test_committed_report_matches_the_policy_and_the_panel_counts() -> None:
     assert report["n_panels_requested"] == PROTOCOL.n_panels
     assert report["launch_recommendation_qualified"] is False
     assert report["null_tolerance"] is None
-    assert "gap: no public duration-freeze API" in report["selected_duration_audit"]
+    assert "DurationComparison.freeze" in report["selected_duration_audit"]
+    assert (
+        "ae1ee700937dc2b16a0c3c8f7126d3bef9435783" in report["selected_duration_audit"]
+    )
+    assert "was not refit" in report["selected_duration_audit"]
+    assert report["source"]["git_sha"] == "c4fa86726b040ba7164b9396eb5849c90d271b37"
     assert "not a launch recommendation" in (REPORT_TEXT := _markdown())
     for phrase in _FORBIDDEN:
         assert phrase not in REPORT_TEXT

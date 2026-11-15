@@ -114,11 +114,11 @@ HISTORICAL_AUDIT_ORIGINS = (32,)
 HISTORICAL_MIN_TRAINING = 12
 
 SELECTED_DURATION_AUDIT = (
-    "gap: no public duration-freeze API. Inspected origin/main at "
-    "c4fa86726b040ba7164b9396eb5849c90d271b37 and open pull requests. "
-    "Issue #721 has no open pull request. SyntheticControlPlanner has no "
-    "freeze method. This delivery does not invent a private duration selector. "
-    "The selected-duration audit is unmet."
+    "DurationComparison.freeze and AnalysisSpecification.audit are public, "
+    "and SyntheticControlPlanner does not select a duration. Those methods "
+    "landed in ae1ee700937dc2b16a0c3c8f7126d3bef9435783. The stored 100-panel "
+    "study was not refit, so its selected-duration audit remains unmet and "
+    "launch remains withheld."
 )
 
 FOLD_SD_ASSESSMENT = (

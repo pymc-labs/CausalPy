@@ -33,7 +33,7 @@ import platform
 import resource
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -1333,7 +1333,10 @@ def _decision_rows(
 
 
 def _evaluate(
-    planner: SyntheticControlPlanner, prepared: _Prepared
+    planner: SyntheticControlPlanner,
+    prepared: _Prepared,
+    *,
+    window_seed: Callable[[Any], int] | None = None,
 ) -> DurationComparison:
     started = time.perf_counter()
     template = historical_validation._replay_template(
@@ -1369,6 +1372,13 @@ def _evaluate(
                     _translate_window(experiment, planner, prepared, window)
                 )
 
+            fit_template = template
+            if window_seed is not None:
+                fit_template = template._clone()
+                fit_template.sample_kwargs = {
+                    **template.sample_kwargs,
+                    "random_seed": window_seed(plan.origin),
+                }
             fit_started = time.perf_counter()
             replay, attempts = historical_validation._replay_window(
                 planner.history,
@@ -1376,7 +1386,7 @@ def _evaluate(
                 planner.control_units,
                 plan,
                 planner.decision,
-                template=template,
+                template=fit_template,
                 donor_correlation=planner.min_donor_correlation,
                 auto_scale_sigma=planner.auto_scale_sigma,
                 fit_audit=False,
@@ -1524,6 +1534,7 @@ def _compare_durations(
     fit_cost: float | None = None,
     min_training_periods: int = 2,
     sample_kwargs: dict[str, Any] | None = None,
+    window_seed: Callable[[Any], int] | None = None,
 ) -> DurationComparison:
     prepared = _prepare(
         planner,
@@ -1554,7 +1565,7 @@ def _compare_durations(
             "sample_kwargs must include 'draws' before a duration comparison "
             "fits. The default sampler is not a safe memory bound."
         )
-    return _evaluate(planner, prepared)
+    return _evaluate(planner, prepared, window_seed=window_seed)
 
 
 def _rss_bytes() -> int:
