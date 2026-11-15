@@ -19,12 +19,14 @@ eligible origin and duration, refusals before sampling, and no duration
 selection.
 """
 
+import dataclasses
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import pytest
 
+import causalpy.duration as duration
 from causalpy.custom_exceptions import DataException
 from causalpy.design import DecisionRule, SyntheticControlPlanner
 from causalpy.duration import DurationWindow
@@ -732,3 +734,351 @@ def test_freeze_ignores_planner_mutation_after_compare(monkeypatch):
     assert again.template is not spec.template
     spec.template.sample_kwargs["draws"] = 3
     assert again.template.sample_kwargs["draws"] == 8
+
+
+def test_invalid_comparison_requests_fail_before_fitting(monkeypatch):
+    monkeypatch.setattr(SyntheticControl, "fit", _reject_fit)
+    planner = _planner()
+    with pytest.raises(TypeError, match="sequence"):
+        planner.preview_durations("2", (2,), absolute_lifts=(1.0,), target_lift=0.0)
+    with pytest.raises(ValueError, match="at least one duration"):
+        planner.preview_durations((), (2,), absolute_lifts=(1.0,), target_lift=0.0)
+    with pytest.raises(ValueError, match="at least one origin"):
+        planner.preview_durations((2,), (), absolute_lifts=(1.0,), target_lift=0.0)
+    with pytest.raises(ValueError, match="at least 0"):
+        planner.preview_durations(
+            (2,), (2,), absolute_lifts=(1.0,), target_lift=0.0, max_fits=-1
+        )
+    with pytest.raises(TypeError, match="real number"):
+        planner.preview_durations(
+            (2,), (2,), absolute_lifts=(1.0,), target_lift=0.0, fit_cost="2"
+        )
+    with pytest.raises(TypeError, match="Python int"):
+        planner.preview_durations(
+            (2,),
+            (2,),
+            absolute_lifts=(1.0,),
+            target_lift=0.0,
+            min_training_periods=True,
+        )
+    with pytest.raises(ValueError, match="at least 1"):
+        planner.preview_durations(
+            (2,), (2,), absolute_lifts=(1.0,), target_lift=0.0, min_training_periods=0
+        )
+    with pytest.raises(ValueError, match="relative_lifts or absolute_lifts"):
+        planner.preview_durations((2,), (2,), target_lift=0.0)
+    with pytest.raises(ValueError, match="absolute"):
+        planner.preview_durations(
+            (2,),
+            (2,),
+            absolute_lifts=(1.0,),
+            target_lift=0.0,
+            target_scale="nope",
+        )
+    with pytest.raises(ValueError, match="not in the relative"):
+        planner.preview_durations(
+            (2,),
+            (2,),
+            absolute_lifts=(1.0,),
+            target_lift=0.0,
+            target_scale="relative",
+        )
+    with pytest.raises(TypeError, match="dict"):
+        planner.preview_durations(
+            (2,),
+            (2,),
+            absolute_lifts=(1.0,),
+            target_lift=0.0,
+            sample_kwargs=["draws"],
+        )
+    with pytest.raises(ValueError, match="draws"):
+        planner.preview_durations(
+            (2,),
+            (2,),
+            absolute_lifts=(1.0,),
+            target_lift=0.0,
+            sample_kwargs={"draws": 0},
+        )
+    with pytest.raises(ValueError, match="chains"):
+        planner.preview_durations(
+            (2,),
+            (2,),
+            absolute_lifts=(1.0,),
+            target_lift=0.0,
+            sample_kwargs={"draws": 4, "chains": 0},
+        )
+    planner.model = object()
+    with pytest.raises(TypeError, match="simplex"):
+        planner.preview_durations((2,), (2,), absolute_lifts=(1.0,), target_lift=0.0)
+
+
+def test_omitted_chains_default_to_four_and_an_unusable_series_is_not_fitted(
+    monkeypatch,
+):
+    monkeypatch.setattr(SyntheticControl, "fit", _reject_fit)
+    refused = _planner().compare_durations(
+        (2,),
+        (2,),
+        absolute_lifts=(1.0,),
+        target_lift=0.0,
+        sample_kwargs={"draws": 4},
+        max_fits=0,
+    )
+    assert refused.sample_kwargs["draws"] == 4
+    assert refused.sample_kwargs["chains"] == 4
+    assert refused.summary().empty
+    assert "duration" in refused.summary().columns
+    assert refused.detail().empty
+    with pytest.raises(ValueError, match="not a detection curve"):
+        refused.plot()
+
+    preview = _planner().preview_durations(
+        (8,), (0, 2, 4), absolute_lifts=(1.0,), target_lift=0.0
+    )
+    assert preview.status == "insufficient-history"
+    assert preview.eligible_origins == ()
+
+
+def _ready_comparison(monkeypatch, **overrides):
+    def fake_replay(*args, **kwargs):
+        window = args[3]
+        return (
+            WindowReplay(
+                plan=window,
+                status="scored",
+                reason=None,
+                bias_cumulative=0.2,
+                bias_average=0.1,
+                cumulative_mean=0.2,
+                average_mean=0.1,
+                n_inference_fits=1,
+                diagnostics_status="unavailable",
+            ),
+            1,
+        )
+
+    def fake_translate(experiment, planner, prepared, window):
+        return [
+            DurationWindow(
+                origin=window.origin,
+                duration=window.horizon,
+                status="scored",
+                reason=None,
+                training_index=tuple(window.training_index),
+                holdout_index=tuple(window.holdout_index),
+                estimand=estimand,
+                mean=1.0,
+                hdi_lower=0.0,
+                hdi_upper=2.0,
+                truth=1.0,
+                truth_covers=True,
+                detected=True,
+                tail_probability=0.9,
+            )
+            for estimand in ("cumulative", "average")
+        ]
+
+    monkeypatch.setattr("causalpy.historical_validation._replay_window", fake_replay)
+    monkeypatch.setattr("causalpy.duration._translate_window", fake_translate)
+    kwargs = {
+        "audit_origins": (),
+        "absolute_lifts": (1.0,),
+        "target_lift": 0.0,
+        "sample_kwargs": LIGHT,
+    }
+    kwargs.update(overrides)
+    return _planner().compare_durations((2,), (2, 4), **kwargs)
+
+
+def test_plot_freeze_and_recommendation_keep_the_recorded_choice(monkeypatch):
+    import matplotlib.pyplot as plt
+
+    comparison = _ready_comparison(monkeypatch)
+    blank = dataclasses.replace(comparison.windows[0], bias_cumulative=None)
+    skipped = dataclasses.replace(comparison, windows=(blank, *comparison.windows))
+    figure, axes = plt.subplots(1, 2)
+    try:
+        skipped.plot()
+        with pytest.raises(ValueError, match="pair"):
+            comparison.plot(axes=(axes[0],))
+        returned, used = comparison.plot(axes=(axes[0], axes[1]))
+    finally:
+        plt.close(figure)
+    assert used[0] is axes[0]
+    assert returned is figure
+    with pytest.raises(TypeError, match="Python int"):
+        comparison.freeze(True)
+    with pytest.raises(ValueError, match="was not evaluated"):
+        comparison.freeze(9)
+    spec = comparison.freeze(2)
+    assert "recorded duration is 2" in spec.recommendation()
+    biased = dataclasses.replace(comparison, persistent_bias=True)
+    assert "Persistent null bias is visible and is not corrected." in (
+        biased.recommendation()
+    )
+    audit = spec.audit(_frame())
+    assert audit.status == "inconclusive"
+    assert audit.n_inference_fits == 0
+    assert audit.reasons[0].startswith("No audit origins")
+
+
+def test_unscored_audit_is_inconclusive_and_a_failed_audit_is_a_limitation(
+    monkeypatch,
+):
+    phase = {"audit": False}
+
+    def fake_replay(*args, **kwargs):
+        window = args[3]
+        if phase["audit"] and window.origin == 6:
+            return (
+                WindowReplay(
+                    plan=window,
+                    status="fit-failed",
+                    reason="sampling failed",
+                    n_inference_fits=1,
+                    diagnostics_status="unavailable",
+                ),
+                1,
+            )
+        if phase["audit"] and window.origin == 4:
+            return (
+                WindowReplay(
+                    plan=window,
+                    status="not-run",
+                    reason="not scored",
+                    n_inference_fits=0,
+                ),
+                0,
+            )
+        return (
+            WindowReplay(
+                plan=window,
+                status="scored",
+                reason=None,
+                bias_cumulative=0.1,
+                bias_average=0.1,
+                cumulative_mean=0.1,
+                average_mean=0.1,
+                n_inference_fits=1,
+                diagnostics_status="unavailable",
+            ),
+            1,
+        )
+
+    def fake_translate(experiment, planner, prepared, window):
+        return [
+            DurationWindow(
+                origin=window.origin,
+                duration=window.horizon,
+                status="scored",
+                reason=None,
+                training_index=tuple(window.training_index),
+                holdout_index=tuple(window.holdout_index),
+                estimand="cumulative",
+                mean=1.0,
+                hdi_lower=0.0,
+                hdi_upper=2.0,
+                truth=1.0,
+                truth_covers=True,
+                detected=True,
+                tail_probability=0.2,
+            )
+        ]
+
+    monkeypatch.setattr("causalpy.historical_validation._replay_window", fake_replay)
+    monkeypatch.setattr("causalpy.duration._translate_window", fake_translate)
+    planner = _planner()
+    comparison = planner.compare_durations(
+        (2,),
+        (2,),
+        audit_origins=(4, 6),
+        absolute_lifts=(1.0,),
+        target_lift=0.0,
+        sample_kwargs=LIGHT,
+    )
+    spec = comparison.freeze(2)
+    phase["audit"] = True
+    audit = spec.audit(_frame())
+    assert audit.scored_count == 0
+    assert audit.status == "inconclusive"
+
+    def mixed_replay(*args, **kwargs):
+        window = args[3]
+        if window.origin == 6:
+            return (
+                WindowReplay(
+                    plan=window,
+                    status="fit-failed",
+                    reason="sampling failed",
+                    n_inference_fits=1,
+                    diagnostics_status="unavailable",
+                ),
+                1,
+            )
+        return (
+            WindowReplay(
+                plan=window,
+                status="scored",
+                reason=None,
+                bias_cumulative=0.1,
+                bias_average=0.1,
+                cumulative_mean=0.1,
+                average_mean=0.1,
+                n_inference_fits=1,
+                diagnostics_status="unavailable",
+            ),
+            1,
+        )
+
+    monkeypatch.setattr("causalpy.historical_validation._replay_window", mixed_replay)
+    limited = spec.audit(_frame())
+    assert limited.failed_count == 1
+    assert limited.scored_count == 1
+    assert limited.status == "limitation"
+    assert "not a historical description" in limited.recommendation()
+
+
+def test_profile_measures_two_runs_without_changing_the_request(monkeypatch):
+    calls = []
+
+    def fake_compare(*args, **kwargs):
+        calls.append((args[1], kwargs["selection_origins"], kwargs["sample_kwargs"]))
+        return SimpleNamespace(
+            fit_seconds=0.1,
+            score_seconds=0.2,
+            sample_kwargs={"draws": 8, "chains": 1},
+            n_inference_fits=2,
+            status="historical-descriptive",
+        )
+
+    monkeypatch.setattr("causalpy.duration._compare_durations", fake_compare)
+    profile = _planner().profile_durations(
+        (2,),
+        (2, 4),
+        absolute_lifts=(1.0,),
+        target_lift=0.0,
+        sample_kwargs=LIGHT,
+    )
+    assert calls == [
+        ((2,), (2, 4), LIGHT),
+        ((2,), (2, 4), LIGHT),
+    ]
+    assert profile.cold_fit_seconds == 0.1
+    assert profile.warm_score_seconds == 0.2
+    assert profile.n_inference_fits == 2
+    assert profile.status == "historical-descriptive"
+    assert profile.peak_rss_bytes >= 0
+    assert "not a" in profile.note
+    assert "recommendation" in profile.note
+
+
+def test_rss_high_water_mark_uses_platform_units(monkeypatch):
+    monkeypatch.setattr(
+        duration.resource,
+        "getrusage",
+        lambda who: SimpleNamespace(ru_maxrss=2048),
+    )
+    monkeypatch.setattr(duration.sys, "platform", "darwin")
+    assert duration._rss_bytes() == 2048
+    monkeypatch.setattr(duration.sys, "platform", "linux")
+    assert duration._rss_bytes() == 2048 * 1024
