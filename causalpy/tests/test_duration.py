@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from causalpy.custom_exceptions import DataException
 from causalpy.design import DecisionRule, SyntheticControlPlanner
 from causalpy.duration import DurationWindow
 from causalpy.experiments.synthetic_control import SyntheticControl
@@ -588,3 +589,64 @@ def test_execute_fits_only_the_frozen_holdout_and_keeps_the_comparison_seed(
     assert sample_kwargs["random_seed"] == 99
     with pytest.raises(ValueError, match="cannot be executed"):
         spec.execute(planner.history.iloc[:5], 4)
+
+
+def test_audit_and_execute_accept_the_planner_indexed_panel(monkeypatch):
+    captured: list[list[int]] = []
+
+    class _Recorder:
+        def __init__(self, data, treatment_time, **kwargs):
+            captured.append(list(data.index))
+
+        def fit(self):
+            return self
+
+    raw = _frame().reset_index()
+    planner = SyntheticControlPlanner(
+        raw,
+        "treated",
+        CONTROLS,
+        RULE,
+        model=WeightedSumFitter(sample_kwargs={}),
+        time_column="t",
+        random_seed=7,
+    )
+    assert "t" not in planner.history.columns
+    assert planner.history.index.name == "t"
+    monkeypatch.setattr(
+        "causalpy.historical_validation._replay_window",
+        lambda *args, **kwargs: (
+            WindowReplay(
+                plan=args[3],
+                status="scored",
+                reason=None,
+                bias_cumulative=0.0,
+                bias_average=0.0,
+                n_inference_fits=1,
+            ),
+            1,
+        ),
+    )
+    spec = planner.compare_durations(
+        (2,),
+        (4,),
+        audit_origins=(6,),
+        absolute_lifts=(1.0,),
+        target_lift=0.0,
+        sample_kwargs={"draws": 8, "chains": 1, "random_seed": 99},
+    ).freeze(2)
+    assert spec.time_column == "t"
+    audit = spec.audit(planner.history)
+    assert audit.selected_duration == 2
+    assert audit.requested_count == 1
+    assert audit.status == "historical-descriptive"
+    monkeypatch.setattr(
+        "causalpy.experiments.synthetic_control.SyntheticControl",
+        _Recorder,
+    )
+    spec.execute(planner.history, 4)
+    spec.execute(raw, 4)
+    assert captured == [[0, 1, 2, 3, 4, 5], [0, 1, 2, 3, 4, 5]]
+    renamed = planner.history.rename_axis("other")
+    with pytest.raises(DataException, match="is not a column"):
+        spec.execute(renamed, 4)

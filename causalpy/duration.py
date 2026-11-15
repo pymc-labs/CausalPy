@@ -556,9 +556,11 @@ class AnalysisSpecification:
         Parameters
         ----------
         history : pandas.DataFrame
-            Frame the audit schedule is validated against. Selection origins
-            are not refit. The selected duration is not an argument and is
-            not changed.
+            Frame the audit schedule is validated against. A raw frame that
+            still has ``time_column`` is indexed first. The planner's already
+            indexed history, whose index name is that column, is accepted.
+            Selection origins are not refit. The selected duration is not an
+            argument and is not changed.
 
         Returns
         -------
@@ -578,8 +580,10 @@ class AnalysisSpecification:
         ----------
         history : pandas.DataFrame
             Analysis frame. It is not required to be the comparison frame.
-            Training is every non-excluded row strictly before
-            ``treatment_time``. The post-period is the frozen holdout of
+            A raw frame that still has ``time_column`` is indexed first. The
+            planner's already indexed history, whose index name is that
+            column, is accepted. Training is every non-excluded row strictly
+            before ``treatment_time``. The post-period is the frozen holdout of
             ``selected_duration`` labels under the frozen cadence. Later
             rows, cadence gaps, and exclusions are not fit. An exclusion
             equal to ``treatment_time`` is refused rather than shifting the
@@ -1630,11 +1634,30 @@ def _remember(
     return comparison
 
 
+def _analysis_frame(history: pd.DataFrame, time_column: str | None) -> pd.DataFrame:
+    """Return history indexed by the frozen time column.
+
+    The planner moves ``time_column`` onto the index at construction and does
+    not keep it as a column. Audit and execute accept that panel. A raw frame
+    that still has the column is indexed by the existing converter. A missing
+    column whose index name does not match remains an error.
+    """
+    from causalpy.input_data import to_pandas_with_time_index
+
+    frame = history
+    if (
+        time_column is not None
+        and time_column not in history.columns
+        and history.index.name == time_column
+    ):
+        frame = history.reset_index()
+    return to_pandas_with_time_index(frame, time_column, argument_name="history")
+
+
 def _audit_specification(
     spec: AnalysisSpecification, history: pd.DataFrame
 ) -> DurationAudit:
     from causalpy.design import DecisionRule
-    from causalpy.input_data import to_pandas_with_time_index
 
     if not spec.audit_origins:
         return DurationAudit(
@@ -1657,9 +1680,7 @@ def _audit_specification(
                 selected_duration=spec.selected_duration,
             ),
         )
-    frame = to_pandas_with_time_index(
-        history, spec.time_column, argument_name="history"
-    )
+    frame = _analysis_frame(history, spec.time_column)
     request = historical_validation.ScheduleRequest(
         selection_origins=spec.audit_origins,
         horizons=(spec.selected_duration,),
@@ -1764,11 +1785,8 @@ def _execute_specification(
     spec: AnalysisSpecification, history: pd.DataFrame, treatment_time: Any
 ) -> SyntheticControl:
     from causalpy.experiments.synthetic_control import SyntheticControl
-    from causalpy.input_data import to_pandas_with_time_index
 
-    frame = to_pandas_with_time_index(
-        history, spec.time_column, argument_name="history"
-    )
+    frame = _analysis_frame(history, spec.time_column)
     if spec.exclusions:
         excluded = historical_validation._stored_labels(frame.index, spec.exclusions)
         position = historical_validation._label_position(frame.index, treatment_time)
