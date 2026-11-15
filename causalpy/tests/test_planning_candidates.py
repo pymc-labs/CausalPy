@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import warnings
 from itertools import combinations
 
 import pandas as pd
@@ -586,6 +587,54 @@ def test_nonfinite_proxy_score_is_unavailable(
 def test_generate_rejects_a_non_request() -> None:
     with pytest.raises(TypeError, match="CandidateRequest"):
         CandidateGenerator().generate(object())  # type: ignore[arg-type]
+
+
+def test_overflowed_reductions_filter_instead_of_raising() -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        cost = _generate(
+            units=("a", "b", "c"),
+            min_group_size=2,
+            max_group_size=2,
+            fixed_treated=("a", "b"),
+            unit_costs=(("a", 1e308), ("b", 1e308)),
+        )
+        budgeted = _generate(
+            units=("a", "b", "c"),
+            min_group_size=2,
+            max_group_size=2,
+            fixed_treated=("a", "b"),
+            unit_costs=(("a", -1e308), ("b", -1e308)),
+            budget=1.0,
+        )
+        frame = pd.DataFrame(
+            {"a": [1e308], "b": [1e308], "c": [1e308]},
+            index=pd.Index([1], name="time"),
+        )
+        share = _generate(
+            units=("a", "b", "c"),
+            min_group_size=1,
+            max_group_size=2,
+            history=frame,
+            selection_end=1,
+        )
+        balance = _generate(
+            units=("a", "b", "c"),
+            min_group_size=2,
+            max_group_size=2,
+            fixed_treated=("a", "b"),
+            unit_covariates=(("income", (("a", 1e308), ("b", 1e308), ("c", 1e308))),),
+            balance_constraints=(BalanceConstraint("income", 0.0),),
+        )
+    assert pd.isna(cost.frame.iloc[0].cost)
+    assert cost.frame.iloc[0].filter_reasons == ()
+    assert pd.isna(budgeted.frame.iloc[0].cost)
+    assert budgeted.frame.iloc[0].filter_reasons == ("cost_unknown",)
+    assert share.n_filtered == share.n_enumerated
+    assert share.n_shortlisted == 0
+    assert set(share.frame["filter_reasons"]) == {("outcome_share",)}
+    assert share.frame["outcome_share"].isna().all()
+    assert balance.frame.iloc[0].filter_reasons == ("representativeness",)
 
 
 def _unit_rmse(

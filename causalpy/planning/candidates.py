@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from itertools import combinations
 
@@ -202,6 +203,12 @@ def _population(request: CandidateRequest) -> tuple[str, ...]:
     return tuple(name for name in request.units if name not in excluded)
 
 
+def _finite(value: float) -> float | None:
+    if not math.isfinite(value):
+        return None
+    return value
+
+
 def _reasons_cost_share(
     request: CandidateRequest,
     identity: _Identity,
@@ -228,7 +235,7 @@ def _reasons_cost_share(
         matched["donor_depleted"] = True
     costs = dict(request.unit_costs)
     if all(name in costs for name in treated):
-        cost: float | None = float(sum(costs[name] for name in treated))
+        cost = _finite(float(sum(costs[name] for name in treated)))
     else:
         cost = None
     if request.budget is not None:
@@ -272,10 +279,15 @@ def _outcome_share(
     if not population:
         return _FILTERED_SHARE
     denominator = float(history.loc[:, list(population)].to_numpy(dtype=float).sum())
-    if denominator <= 0.0:
-        return _FILTERED_SHARE
     numerator = float(history.loc[:, list(treated)].to_numpy(dtype=float).sum())
-    return numerator / denominator
+    if not math.isfinite(denominator) or denominator <= 0.0:
+        return _FILTERED_SHARE
+    if not math.isfinite(numerator):
+        return _FILTERED_SHARE
+    share = numerator / denominator
+    if not math.isfinite(share):
+        return _FILTERED_SHARE
+    return share
 
 
 def _fails_balance(
@@ -295,7 +307,8 @@ def _fails_balance(
             return True
         treated_mean = sum(values[name] for name in treated) / len(treated)
         population_mean = sum(values[name] for name in population) / len(population)
-        if abs(treated_mean - population_mean) > constraint.max_abs_mean_gap:
+        gap = abs(treated_mean - population_mean)
+        if not math.isfinite(gap) or gap > constraint.max_abs_mean_gap:
             return True
     return False
 
