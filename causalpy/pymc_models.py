@@ -3767,7 +3767,7 @@ class StateSpaceTimeSeries(PyMCModel):
         return super().score(X, y, coords)
 
 
-class HierarchicalLaunchITS(PyMCModel):
+class HierarchicalITS(PyMCModel):
     r"""
     Hierarchical Bayesian interrupted time series model for multi-unit panels
     with unit-specific treatment (launch) times.
@@ -3888,7 +3888,7 @@ class HierarchicalLaunchITS(PyMCModel):
         """
         if self._built:
             raise RuntimeError(
-                "HierarchicalLaunchITS is already built; assign a fresh model "
+                "HierarchicalITS is already built; assign a fresh model "
                 "instance to change its design."
             )
         self._aux = aux
@@ -4020,7 +4020,7 @@ class HierarchicalLaunchITS(PyMCModel):
         """
         if self._aux is None:
             raise RuntimeError(
-                "HierarchicalLaunchITS needs its auxiliary design before build(); "
+                "HierarchicalITS needs its auxiliary design before build(); "
                 "call set_aux(aux) or fit(..., aux=...)."
             )
         super().build(X, y, coords)
@@ -4051,11 +4051,11 @@ class HierarchicalLaunchITS(PyMCModel):
         """
         if self._aux is None:
             raise RuntimeError(
-                "HierarchicalLaunchITS.build_model called without aux. "
+                "HierarchicalITS.build_model called without aux. "
                 "Use .fit(..., aux=...) rather than calling build_model directly."
             )
         if isinstance(X, dict) or isinstance(y, dict):
-            raise TypeError("HierarchicalLaunchITS does not support mapping inputs")
+            raise TypeError("HierarchicalITS does not support mapping inputs")
         aux = self._aux
         effect_type = aux["effect_type"]
         unit_idx_np = np.asarray(aux["unit_idx"], dtype=np.int64)
@@ -4328,7 +4328,7 @@ class HierarchicalLaunchITS(PyMCModel):
     def _data_setter(self, X: xr.DataArray) -> None:
         aux = self._pred_aux if self._pred_aux is not None else self._aux
         if aux is None:
-            raise RuntimeError("HierarchicalLaunchITS has no aux data set")
+            raise RuntimeError("HierarchicalITS has no aux data set")
         payload = self._data_payload(np.asarray(X), aux)
         with self:
             pm.set_data(payload, coords={"obs_ind": np.arange(X.shape[0])})

@@ -223,6 +223,13 @@ A quasi-experimental design that uses time series methods to generate counterfac
 :link: interrupted-time-series-placebo-in-time-analysis
 :link-type: doc
 :::
+
+:::{grid-item-card} Hierarchical Interrupted Time Series for staggered launches
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/hierarchical-interrupted-time-series-pymc.png
+:link: hierarchical-interrupted-time-series-pymc
+:link-type: doc
+:::
 ::::
 
 ## Comparative Interrupted Time Series
@@ -251,21 +258,6 @@ Piecewise interrupted time series (segmented regression) models the outcome with
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/piecewise-interrupted-time-series-pymc.png
 :link: piecewise-interrupted-time-series-pymc
-:link-type: doc
-:::
-::::
-
-## Hierarchical Interrupted Time Series
-
-Hierarchical ITS extends the design to multi-unit panels where each unit (e.g. a product) has its own treatment time, such as a staggered launch. Per-unit intercepts, trends, and lift are partially pooled toward shared population-level hyperparameters.
-
-::::{grid} 1 2 3 3
-:gutter: 3
-
-:::{grid-item-card} Hierarchical ITS for staggered launches (event-study)
-:class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/hierarchical_its_launch.png
-:link: hierarchical_its_launch
 :link-type: doc
 :::
 ::::
@@ -496,6 +488,7 @@ interrupted-time-series-post-intervention-analysis.ipynb
 interrupted-time-series-covid.ipynb
 interrupted-time-series-lift-test.ipynb
 interrupted-time-series-placebo-in-time-analysis.ipynb
+hierarchical-interrupted-time-series-pymc.ipynb
 :::
 
 :::{toctree}
@@ -512,14 +505,6 @@ interrupted-time-series-comparative-pymc.ipynb
 :maxdepth: 1
 
 piecewise-interrupted-time-series-pymc.ipynb
-:::
-
-:::{toctree}
-:hidden:
-:caption: Hierarchical Interrupted Time Series
-:maxdepth: 1
-
-hierarchical_its_launch.ipynb
 :::
 
 :::{toctree}

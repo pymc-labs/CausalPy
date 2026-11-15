@@ -31,7 +31,7 @@ from patsy import dmatrix
 
 from causalpy._arviz_compat import hdi
 from causalpy.constants import HDI_PROB
-from causalpy.pymc_models import HierarchicalLaunchITS, PyMCModel
+from causalpy.pymc_models import HierarchicalITS, PyMCModel
 from causalpy.reporting import (
     EffectSummary,
     _apply_prior_grouping,
@@ -113,7 +113,7 @@ class HierarchicalInterruptedTimeSeries(
     - ``effect_type="saturation"`` — the post-launch effect follows a Hill
       (logistic-type) saturation curve in event time, ramping up smoothly and
       asymptoting at a per-unit ceiling lift ``L``, rather than jumping
-      instantly to its final size. See :class:`~causalpy.pymc_models.HierarchicalLaunchITS`.
+      instantly to its final size. See :class:`~causalpy.pymc_models.HierarchicalITS`.
       ``L`` is log-normal, so this parameterization assumes the launch
       *raises* the outcome; use ``event_study`` if the effect may be negative
       (e.g. cannibalization). Its population summaries report the median
@@ -176,7 +176,7 @@ class HierarchicalInterruptedTimeSeries(
         linear trend and (if used) seasonal terms. A ``UserWarning`` is
         emitted when some calendar times have post-launch rows but no
         pre-launch units; see :meth:`launch_overlap`.
-    model : HierarchicalLaunchITS, optional
+    model : HierarchicalITS, optional
         A custom model instance. If ``None``, a default is constructed.
 
     Notes
@@ -219,7 +219,7 @@ class HierarchicalInterruptedTimeSeries(
 
     supports_ols = False
     supports_bayes = True
-    _default_model_class = HierarchicalLaunchITS
+    _default_model_class = HierarchicalITS
 
     expt_type = "Hierarchical ITS (staggered launch)"
 
@@ -241,10 +241,10 @@ class HierarchicalInterruptedTimeSeries(
         model: PyMCModel | None = None,
     ) -> None:
         super().__init__(model=model)
-        if not isinstance(self.model, HierarchicalLaunchITS):
+        if not isinstance(self.model, HierarchicalITS):
             raise TypeError(
                 "HierarchicalInterruptedTimeSeries requires a "
-                "HierarchicalLaunchITS model instance."
+                "HierarchicalITS model instance."
             )
 
         self.data = data
@@ -689,10 +689,10 @@ class HierarchicalInterruptedTimeSeries(
     # ------------------------------------------------------------------ fit
 
     @property
-    def _launch_model(self) -> HierarchicalLaunchITS:
+    def _launch_model(self) -> HierarchicalITS:
         """The backend model, typed as the hierarchical launch model."""
         model = self.model
-        assert isinstance(model, HierarchicalLaunchITS)
+        assert isinstance(model, HierarchicalITS)
         return model
 
     def build(self) -> Self:
@@ -1006,7 +1006,6 @@ class HierarchicalInterruptedTimeSeries(
         axes[1].set_xlabel(r"$\mu_{lift}$")
         axes[1].set_title(r"Population mean $\mu_{lift}$")
         axes[1].legend()
-        fig.tight_layout()
         return fig, axes
 
     def _plot_saturation(self, draws: xr.Dataset, *, ci_prob: float):
@@ -1041,7 +1040,6 @@ class HierarchicalInterruptedTimeSeries(
             "unit's L and k"
         )
         ax.legend()
-        fig.tight_layout()
         return fig, ax
 
     def _plot_event_study(self, draws: xr.Dataset, *, ci_prob: float):
@@ -1086,7 +1084,6 @@ class HierarchicalInterruptedTimeSeries(
         ax.set_xticklabels(labels, rotation=45, ha="right")
         ax.set_ylabel(r"$\mu_\delta$ (population effect)")
         ax.set_title(f"Dynamic launch effect ({self.effect_type})")
-        fig.tight_layout()
         return fig, ax
 
     def plot_unit(

@@ -11,7 +11,7 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Tests for HierarchicalInterruptedTimeSeries and HierarchicalLaunchITS."""
+"""Tests for HierarchicalInterruptedTimeSeries and HierarchicalITS."""
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,7 +19,7 @@ import pandas as pd
 import pytest
 
 import causalpy as cp
-from causalpy.pymc_models import HierarchicalLaunchITS
+from causalpy.pymc_models import HierarchicalITS
 
 SAMPLE_KWARGS = {"progressbar": False, "random_seed": 42}
 
@@ -63,7 +63,7 @@ def _fit(df, effect_type, **kwargs):
         time_col="week_idx",
         treatment_time_col="launch_week",
         effect_type=effect_type,
-        model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+        model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
         **kwargs,
     ).fit()
 
@@ -472,7 +472,7 @@ class TestSaturationRecovery:
             time_col="week_idx",
             treatment_time_col="launch_week",
             effect_type="saturation",
-            model=HierarchicalLaunchITS(
+            model=HierarchicalITS(
                 sample_kwargs={
                     "tune": 20,
                     "draws": 20,
@@ -509,7 +509,7 @@ class TestEdgeCases:
             time_col="week_idx",
             treatment_time_col="launch_week",
             effect_type="instant",
-            model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+            model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
         ).fit()
         assert result.X.sizes["coeffs"] == 0
 
@@ -522,7 +522,7 @@ class TestEdgeCases:
             time_col="week_idx",
             treatment_time_col="launch_week",
             effect_type="instant",
-            model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+            model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
         ).fit()
         assert "Intercept" not in result.labels
 
@@ -535,7 +535,7 @@ class TestEdgeCases:
             time_col="week_idx",
             treatment_time_col="launch_week",
             effect_type="instant",
-            model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+            model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
         ).fit()
         result.print_coefficients()
         out = capsys.readouterr().out
@@ -570,7 +570,7 @@ class TestEdgeCases:
             treatment_time_col="launch_week",
             effect_type="instant",
             ar_residuals=True,
-            model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+            model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
         ).fit()
         post = result.model.idata.posterior
         assert "rho" in post
@@ -595,7 +595,7 @@ class TestEdgeCases:
             time_col="week_idx",
             treatment_time_col="launch_week",
             effect_type="instant",
-            model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+            model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
         )
         assert not result.is_fitted
         with pytest.raises(cp.GroupNotSampledException, match="fit"):
@@ -618,7 +618,7 @@ class TestValidation:
                 unit_col="product",
                 time_col="week_idx",
                 treatment_time_col="launch_week",
-                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+                model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
             )
 
     def test_non_numeric_treatment_time_column(self, panel):
@@ -632,7 +632,7 @@ class TestValidation:
                 unit_col="product",
                 time_col="week_idx",
                 treatment_time_col="launch_week",
-                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+                model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
             )
 
     def test_invalid_effect_type(self, panel):
@@ -645,7 +645,7 @@ class TestValidation:
                 time_col="week_idx",
                 treatment_time_col="launch_week",
                 effect_type="bogus",
-                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+                model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
             )
 
     def test_unsorted_placebo_edges(self, panel):
@@ -660,7 +660,7 @@ class TestValidation:
                 effect_type="placebo",
                 bin_edges=[0, 4, 8],
                 placebo_edges=[0, -4, -8],
-                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+                model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
             )
 
     def test_outcome_not_in_data(self, panel):
@@ -672,7 +672,7 @@ class TestValidation:
                 unit_col="product",
                 time_col="week_idx",
                 treatment_time_col="launch_week",
-                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+                model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
             )
 
     def test_missing_column(self, panel):
@@ -684,7 +684,7 @@ class TestValidation:
                 unit_col="nope",
                 time_col="week_idx",
                 treatment_time_col="launch_week",
-                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+                model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
             )
 
     def test_event_study_requires_bins(self, panel):
@@ -697,7 +697,7 @@ class TestValidation:
                 time_col="week_idx",
                 treatment_time_col="launch_week",
                 effect_type="event_study",
-                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+                model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
             )
 
     def test_placebo_requires_placebo_edges(self, panel):
@@ -711,7 +711,7 @@ class TestValidation:
                 treatment_time_col="launch_week",
                 effect_type="placebo",
                 bin_edges=[0, 4, 8],
-                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+                model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
             )
 
     def test_unsorted_bins(self, panel):
@@ -725,7 +725,7 @@ class TestValidation:
                 treatment_time_col="launch_week",
                 effect_type="event_study",
                 bin_edges=[4, 0, 8],
-                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+                model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
             )
 
     @pytest.mark.parametrize(
@@ -758,7 +758,7 @@ class TestValidation:
                 treatment_time_col="launch_week",
                 effect_type="instant",
                 ar_residuals=True,
-                model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+                model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
             )
 
     def test_constant_time_column(self, mock_pymc_sample):
@@ -780,13 +780,13 @@ class TestValidation:
             time_col="week_idx",
             treatment_time_col="launch_week",
             effect_type="instant",
-            model=HierarchicalLaunchITS(sample_kwargs=SAMPLE_KWARGS),
+            model=HierarchicalITS(sample_kwargs=SAMPLE_KWARGS),
         ).fit()
         assert result._time_std == 1.0
 
     def test_rejects_non_hierarchical_model(self, panel):
-        """Raise TypeError when model is not HierarchicalLaunchITS."""
-        with pytest.raises(TypeError, match="HierarchicalLaunchITS"):
+        """Raise TypeError when model is not HierarchicalITS."""
+        with pytest.raises(TypeError, match="HierarchicalITS"):
             cp.HierarchicalInterruptedTimeSeries(
                 data=panel,
                 formula="sales ~ 0 + emails",
@@ -1004,7 +1004,7 @@ def _configure(df, effect_type="instant", **kwargs):
         time_col="week_idx",
         treatment_time_col="launch_week",
         effect_type=effect_type,
-        model=HierarchicalLaunchITS(
+        model=HierarchicalITS(
             sample_kwargs=SAMPLE_KWARGS,
             prior_sample_kwargs={"draws": 50, "random_seed": 42},
         ),
@@ -1117,7 +1117,7 @@ def test_ar_residuals_recover_lift(genuine_pymc_sampling, effect_type, extra):
         effect_type=effect_type,
         ar_residuals=True,
         **extra,
-        model=HierarchicalLaunchITS(
+        model=HierarchicalITS(
             sample_kwargs={
                 "tune": 500,
                 "draws": 500,
