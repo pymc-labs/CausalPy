@@ -1215,6 +1215,10 @@ class CandidateRequest(_ScreenValue):
     with reason ``outcome_share`` and is not compared against zero.
     Construction does not reject that combination. A computed share outside a
     set bound filters with ``outcome_share`` and the row stores that share.
+    That finite share is the relevance score. It is not the proxy score and
+    not the balance gap. A null share sorts after every finite share and
+    cannot win a relevance slot. If every share is null, skip both relevance
+    slots.
 
     ``history`` stores a copy of the rows whose labels are at or before the
     exact ``selection_end`` label, including that row. Reading ``history``
@@ -1260,20 +1264,22 @@ class CandidateRequest(_ScreenValue):
     grow the cap. Fill boundary slots in this order, skipping a candidate
     already kept and skipping a slot when no eligible row remains: lowest
     finite cost, highest finite cost, lowest finite proxy, highest finite
-    proxy, then one passing group of each integer size from
-    ``min_group_size`` to ``max_group_size``. Skip a proxy slot when every
-    score is null. Skip a cost slot when every cost is null. Skip a size
-    that has no passing group not already kept. When several rows tie for a
-    cost or proxy extreme, the lexicographically smaller ``candidate_id``
-    wins. The size slot keeps the lexicographically smallest
-    ``candidate_id`` among passing groups of that size not already kept.
-    Those rows have ``boundary=True``. Fill the remaining slots by proxy
-    ascending, then cost ascending, then ``candidate_id`` ascending. A null
-    proxy sorts after every finite proxy. A null cost sorts after every
-    finite cost. No history uses cost, then id, and skips both proxy slots.
-    A generator must not invent a different order for these slots. Group
-    size and proxy score are not relevance, and this order has no relevance
-    slot.
+    proxy, lowest finite ``outcome_share``, highest finite ``outcome_share``,
+    then one passing group of each integer size from ``min_group_size`` to
+    ``max_group_size``. Skip a proxy slot when every score is null. Skip a
+    cost slot when every cost is null. Skip both relevance slots when every
+    share is null. Skip a size that has no passing group not already kept.
+    When several rows tie for a cost, proxy, or relevance extreme, the
+    lexicographically smaller ``candidate_id`` wins. The size slot keeps the
+    lexicographically smallest ``candidate_id`` among passing groups of that
+    size not already kept. Those rows have ``boundary=True``. Fill the
+    remaining slots by proxy ascending, then ``outcome_share`` descending,
+    then cost ascending, then ``candidate_id`` ascending. A null proxy sorts
+    after every finite proxy. A null share sorts after every finite share.
+    A null cost sorts after every finite cost. Higher share is more relevant,
+    so the remaining-slot share key is descending. No history uses cost, then
+    id, and skips the proxy and relevance slots. A generator must not invent
+    a different order. Group size and proxy score are not relevance.
 
     Notes
     -----
