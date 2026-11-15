@@ -839,7 +839,7 @@ def test_handoff_refuses_a_short_realized_panel(
     calls = _forbid_fit(monkeypatch)
     history = _history()
     handoff = _plan().analysis_handoff(duration=4)
-    with pytest.raises(ValueError, match="shorter than the planned duration"):
+    with pytest.raises(ValueError, match="Planned holdout labels"):
         handoff.run(history.iloc[:-1])
     assert calls == []
 
@@ -1038,6 +1038,46 @@ def test_handoff_refuses_a_missing_planned_training_label(
     assert calls == []
 
 
+def test_handoff_drops_a_label_inserted_inside_the_planned_holdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class _Capture:
+        def __init__(self, data, treatment_time, **_kwargs: object) -> None:
+            seen["index"] = data.index.copy()
+            raise RuntimeError("captured")
+
+    monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _Capture)
+    history = _history()
+    handoff = _plan().analysis_handoff(duration=4)
+    holdout = list(handoff.holdout_index)
+    assert holdout == list(history.index[-4:])
+    assert handoff.treatment_time == holdout[0]
+    inserted = holdout[0] + (holdout[1] - holdout[0]) / 2
+    row = history.loc[[holdout[0]]].copy()
+    row.index = [inserted]
+    panel = pd.concat([history, row]).sort_index()
+    with pytest.raises(RuntimeError, match="captured"):
+        handoff.run(panel)
+    assert list(seen["index"]) == list(handoff.training_index) + holdout
+    assert inserted not in seen["index"]
+
+
+def test_handoff_refuses_a_replaced_planned_holdout_label(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _forbid_fit(monkeypatch)
+    history = _history()
+    handoff = _plan().analysis_handoff(duration=4)
+    last = handoff.holdout_index[-1]
+    step = history.index[-1] - history.index[-2]
+    replaced = history.rename(index={last: last + step})
+    with pytest.raises(ValueError, match="Planned holdout labels"):
+        handoff.run(replaced)
+    assert calls == []
+
+
 def test_handoff_refuses_a_one_row_training_window(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1054,6 +1094,7 @@ def test_handoff_refuses_a_one_row_training_window(
         sample_kwargs=tuple(LIGHT.items()),
         outcome_scale="outcome",
         training_index=(panel.index[0],),
+        holdout_index=tuple(panel.index[1:]),
         time_column=None,
     )
     with pytest.raises(ValueError, match="Planned training window"):

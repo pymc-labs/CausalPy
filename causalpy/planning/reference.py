@@ -409,9 +409,9 @@ class HistoryOnlyPlan:
         Parameters
         ----------
         duration : int
-            Holdout length. The treatment time is the first holdout label.
-            ``run`` fits the planned training labels plus that holdout and
-            drops every other row.
+            Holdout length. The treatment time is the first stored holdout
+            label. ``run`` selects those labels plus the planned training
+            labels and drops every other row.
         """
         if not isinstance(self._adapter, SyntheticControlAdapter):
             raise ValueError(
@@ -432,6 +432,7 @@ class HistoryOnlyPlan:
             sample_kwargs=tuple(template.sample_kwargs.items()),
             outcome_scale=self._outcome_scale,
             training_index=tuple(self._history.index[:-periods]),
+            holdout_index=tuple(self._history.index[-periods:]),
             time_column=self._time_column,
             model=template,
         )
@@ -602,13 +603,13 @@ class AnalysisHandoff:
 
     The planning evaluation does not call this. ``run`` is today's
     :class:`~causalpy.experiments.synthetic_control.SyntheticControl` analysis
-    on the planned training labels plus the planned holdout. Rows outside that
-    exact window are excluded. A missing planned training label, or fewer than
-    two training rows, is refused before sampling. It does not inject a planned
-    effect. The stored ``model`` is the fitter ``evaluate`` uses, including
-    custom priors, unless the caller passes a replacement. ``training_index``
-    and ``time_column`` are the planned training labels and the column that
-    produced them.
+    on the planned training labels plus the stored planned holdout labels.
+    Rows outside that exact window are excluded. A missing planned training
+    or holdout label, or fewer than two training rows, is refused before
+    sampling. It does not inject a planned effect. The stored ``model`` is
+    the fitter ``evaluate`` uses, including custom priors, unless the caller
+    passes a replacement. ``training_index``, ``holdout_index``, and
+    ``time_column`` are the planned labels and the column that produced them.
     """
 
     treated_units: tuple[str, ...]
@@ -620,6 +621,7 @@ class AnalysisHandoff:
     sample_kwargs: tuple[tuple[str, Any], ...]
     outcome_scale: str
     training_index: tuple[Any, ...]
+    holdout_index: tuple[Any, ...]
     time_column: str | None
     model: WeightedSumFitter | None = field(default=None, compare=False, hash=False)
 
@@ -638,8 +640,9 @@ class AnalysisHandoff:
         ----------
         data : pandas.DataFrame
             Realized outcomes. Rows outside the planned training labels and
-            holdout are excluded. This is not the planning history unless the
-            caller passes that frame on purpose.
+            stored holdout labels are excluded. A missing planned label is
+            refused before sampling. This is not the planning history unless
+            the caller passes that frame on purpose.
         model : WeightedSumFitter or None, optional
             Overrides the model stored on the handoff.
         sample_kwargs : mapping or None, optional
@@ -665,6 +668,7 @@ class AnalysisHandoff:
             self.treatment_time,
             self.duration,
             self.training_index,
+            self.holdout_index,
         )
         excluded = not prepared.index.isin(frame.index).all()
         if model is not None and sample_kwargs is not None:
@@ -693,7 +697,7 @@ class AnalysisHandoff:
             or result.predictions_post is None
         ):
             raise RuntimeError("SyntheticControl did not return a posterior impact.")
-        holdout = frame.loc[self.treatment_time :].index
+        holdout = frame.loc[list(self.holdout_index)].index
         impact = _label_window(result.impact_post, holdout, self.treated_units)
         counterfactual = _label_window(
             result.predictions_post,
@@ -867,24 +871,11 @@ def _planned_window(
     treatment_time: Any,
     duration: int,
     training_index: tuple[Any, ...],
+    holdout_index: tuple[Any, ...],
 ) -> pd.DataFrame:
     periods = require_positive_int(duration, "duration")
-    if treatment_time not in frame.index:
-        raise ValueError("treatment_time is not in the realized panel index.")
-    loc = frame.index.get_loc(treatment_time)
-    if isinstance(loc, slice) or not isinstance(loc, (int, np.integer)):
-        raise ValueError(
-            "treatment_time must match one row of the realized panel. "
-            "No fit was started."
-        )
-    start = int(loc)
-    available = len(frame) - start
-    if available < periods:
-        raise ValueError(
-            f"Realized panel has {available} rows at or after treatment_time, "
-            f"shorter than the planned duration {periods}. No fit was started."
-        )
     labels = tuple(training_index)
+    holdout_labels = tuple(holdout_index)
     if len(labels) < MIN_TRAINING_ROWS:
         raise ValueError(
             f"Planned training window has {len(labels)} rows. At least "
@@ -911,8 +902,45 @@ def _planned_window(
                 "Planned training labels must precede treatment_time. "
                 "No fit was started."
             )
+    if len(holdout_labels) != periods:
+        raise ValueError(
+            f"Planned holdout has {len(holdout_labels)} labels, not the "
+            f"requested duration {periods}. No fit was started."
+        )
+    if len(set(holdout_labels)) != len(holdout_labels):
+        raise ValueError("Planned holdout labels must be unique. No fit was started.")
+    if holdout_labels[0] != treatment_time:
+        raise ValueError(
+            "The first planned holdout label must be treatment_time. "
+            "No fit was started."
+        )
+    overlap = [label for label in holdout_labels if label in set(labels)]
+    if overlap:
+        raise ValueError(
+            "Planned holdout labels overlap the planned training labels. "
+            "No fit was started."
+        )
+    missing_holdout = [label for label in holdout_labels if label not in frame.index]
+    if missing_holdout:
+        raise ValueError(
+            "Planned holdout labels are missing from the realized panel. "
+            "No fit was started."
+        )
+    for earlier, later in zip(holdout_labels, holdout_labels[1:], strict=False):
+        try:
+            increases = earlier < later
+        except TypeError as exc:
+            raise ValueError(
+                "Planned holdout labels must be comparable with treatment_time. "
+                "No fit was started."
+            ) from exc
+        if not bool(increases):
+            raise ValueError(
+                "Planned holdout labels must start at treatment_time and "
+                "increase. No fit was started."
+            )
     training = frame.loc[list(labels)]
-    holdout = frame.iloc[start : start + periods]
+    holdout = frame.loc[list(holdout_labels)]
     return pd.concat([training, holdout])
 
 
