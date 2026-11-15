@@ -591,12 +591,20 @@ class InteractiveFixedEffectsAdapter(_RegisteredAdapter):
         control_units: tuple[str, ...],
         treated_units: tuple[str, ...],
     ) -> tuple[xr.DataArray, xr.DataArray, FitDiagnostics]:
-        # WidePanel turns a named index into an obs_ind coordinate dimension.
+        # WidePanel stores a named index as an obs_ind coordinate. A
+        # timezone-aware coordinate cannot be subtracted after sampling, so
+        # the experiment sees naive instants. Returned labels stay on the
+        # request index.
         frame = window.copy()
+        treatment = treatment_time
+        if isinstance(frame.index, pd.DatetimeIndex) and frame.index.tz is not None:
+            frame.index = frame.index.tz_localize(None)
+            if getattr(treatment, "tzinfo", None) is not None:
+                treatment = pd.Timestamp(treatment).tz_localize(None)
         frame.index = frame.index.rename(None)
         experiment = InteractiveFixedEffectsSyntheticControl(
             frame,
-            treatment_time,
+            treatment,
             control_units,
             treated_units,
             max_factors=self._max_factors if self._max_factors is not None else 4,
@@ -782,13 +790,14 @@ def _refuse_unsupported_group(
 
 
 def _window_frame(request: WindowRequest) -> tuple[pd.DataFrame, pd.Index, pd.Index]:
-    if len(request.history.index) < request.duration + MIN_TRAINING_ROWS:
+    periods = require_positive_int(request.duration, "duration")
+    if len(request.history.index) < periods + MIN_TRAINING_ROWS:
         raise ValueError(
             "The history has fewer than two training rows before the holdout. "
             "No fit was started."
         )
-    training = request.history.index[: -request.duration]
-    holdout = request.history.index[-request.duration :]
+    training = request.history.index[:-periods]
+    holdout = request.history.index[-periods:]
     if holdout[0] != request.treatment_time:
         raise ValueError(
             "treatment_time must be the first holdout label. "

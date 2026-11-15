@@ -306,6 +306,60 @@ def test_unsupported_inputs_fail_before_sampling(
         )
 
 
+@pytest.mark.parametrize("estimator", REGISTERED)
+@pytest.mark.parametrize(
+    ("duration", "message"),
+    [
+        (-1, "duration must be a positive integer"),
+        (0, "duration must be a positive integer"),
+        (1.5, "duration must be a positive integer"),
+        (True, "duration must be a real number, not a bool"),
+    ],
+)
+def test_fit_window_rejects_a_non_positive_duration(
+    estimator: str,
+    duration: object,
+    message: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _forbid_construction(monkeypatch)
+    frame = _panel()
+    treatment = frame.index[1] if duration == -1 else frame.index[-DURATION]
+    adapter = ADAPTERS[estimator](model=None, sample_kwargs=LIGHT)
+    with pytest.raises(TypeError, match=message):
+        adapter.fit_window(
+            WindowRequest(
+                history=frame,
+                treated_units=("t1",),
+                control_units=DONORS,
+                treatment_time=treatment,
+                duration=duration,  # type: ignore[arg-type]
+                outcome_scale="outcome",
+            )
+        )
+
+
+def test_interactive_fixed_effects_keeps_timezone_aware_holdout_labels() -> None:
+    frame = _panel()
+    frame.index = pd.date_range(
+        "2020-01-01", periods=len(frame), freq="D", tz="UTC", name="time"
+    )
+    result = analysis_handoff(
+        frame,
+        "t1",
+        DONORS,
+        _decision(),
+        estimator="interactive_fixed_effects",
+        duration=DURATION,
+        sample_kwargs=LIGHT,
+    ).run(frame)
+    holdout = frame.index[-DURATION:]
+    assert result.boundary.holdout_index.equals(holdout)
+    assert result.boundary.holdout_index.tz is not None
+    assert result.draws.unit_impact.sizes["obs_ind"] == DURATION
+    assert list(result.draws.unit_impact.coords["obs_ind"].values) == list(holdout)
+
+
 @pytest.mark.parametrize("estimator", METHODS)
 def test_contract_journey(estimator: str, monkeypatch: pytest.MonkeyPatch) -> None:
     frame = _panel()
