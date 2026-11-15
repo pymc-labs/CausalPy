@@ -845,6 +845,30 @@ def test_handoff_refuses_a_short_realized_panel(
     assert calls == []
 
 
+def test_handoff_refuses_a_partial_date_string_against_a_datetime_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _forbid_fit(monkeypatch)
+    index = ["2020-01", "2020-02", "2020-03", "2020-04"]
+    frame = pd.DataFrame(
+        {"actual": [1.0, 2.0, 3.0, 4.0], "donor": [1.1, 2.1, 3.1, 4.1]},
+        index=index,
+    )
+    plan = HistoryOnlyPlan(
+        frame,
+        "actual",
+        ["donor"],
+        _decision(),
+        estimator="synthetic_control",
+        sample_kwargs=LIGHT,
+    )
+    realized = frame.copy()
+    realized.index = pd.to_datetime(realized.index)
+    with pytest.raises(ValueError, match="Planned training labels are missing"):
+        plan.analysis_handoff(duration=2).run(realized)
+    assert calls == []
+
+
 def test_handoff_reuses_the_model_the_plan_fit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

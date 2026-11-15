@@ -858,7 +858,9 @@ def _planned_window(
         )
     if len(set(labels)) != len(labels):
         raise ValueError("Planned training labels must be unique. No fit was started.")
-    missing = [label for label in labels if label not in frame.index]
+    missing = [
+        label for label in labels if not _exact_index_matches(frame.index, label)
+    ]
     if missing:
         raise ValueError(
             "Planned training labels are missing from the realized panel. "
@@ -895,7 +897,11 @@ def _planned_window(
             "Planned holdout labels overlap the planned training labels. "
             "No fit was started."
         )
-    missing_holdout = [label for label in holdout_labels if label not in frame.index]
+    missing_holdout = [
+        label
+        for label in holdout_labels
+        if not _exact_index_matches(frame.index, label)
+    ]
     if missing_holdout:
         raise ValueError(
             "Planned holdout labels are missing from the realized panel. "
@@ -914,8 +920,8 @@ def _planned_window(
                 "Planned holdout labels must start at treatment_time and "
                 "increase. No fit was started."
             )
-    training = frame.loc[list(labels)]
-    holdout = frame.loc[list(holdout_labels)]
+    training = frame.loc[_realized_labels(frame.index, labels)]
+    holdout = frame.loc[_realized_labels(frame.index, holdout_labels)]
     window = pd.concat([training, holdout])
     values = list(window.index)
     for earlier, later in zip(values, values[1:], strict=False):
@@ -1015,6 +1021,50 @@ def _index_realized_panel(data: pd.DataFrame, time_column: str | None) -> pd.Dat
     return frame
 
 
+def _label_equal(left: object, right: object) -> bool:
+    """Scalar equality. Index membership is not label identity."""
+    try:
+        equal = left == right
+    except TypeError as exc:
+        raise ValueError(
+            "Planned labels are not comparable with the realized index. "
+            "No fit was started."
+        ) from exc
+    if not isinstance(equal, (bool, np.bool_)):
+        raise ValueError(
+            "Planned labels are not comparable with the realized index. "
+            "No fit was started."
+        )
+    return bool(equal)
+
+
+def _exact_index_matches(index: pd.Index, label: object) -> list[object]:
+    """Realized labels equal to ``label``.
+
+    ``in`` and ``isin`` are not exact. A ``DatetimeIndex`` treats
+    ``"2020-06"`` as June.
+    """
+    return [realized for realized in index if _label_equal(realized, label)]
+
+
+def _realized_labels(index: pd.Index, labels: tuple[Any, ...]) -> list[object]:
+    realized: list[object] = []
+    for label in labels:
+        matches = _exact_index_matches(index, label)
+        if len(matches) > 1:
+            raise ValueError(
+                f"Planned label {label!r} is duplicated in the realized panel. "
+                "No fit was started."
+            )
+        if not matches:
+            raise ValueError(
+                "Planned labels are missing from the realized panel. "
+                "No fit was started."
+            )
+        realized.append(matches[0])
+    return realized
+
+
 def _select_planned_rows(
     frame: pd.DataFrame,
     training_index: tuple[Any, ...],
@@ -1022,17 +1072,21 @@ def _select_planned_rows(
 ) -> tuple[pd.DataFrame, bool]:
     """Select stored labels by identity. Outside rows are dropped, not checked."""
     planned = tuple(training_index) + tuple(holdout_index)
-    duplicated = [label for label in planned if int((frame.index == label).sum()) > 1]
-    if duplicated:
-        raise ValueError(
-            f"Planned label {duplicated[0]!r} is duplicated in the realized panel. "
-            "No fit was started."
-        )
-    excluded = not bool(frame.index.isin(planned).all())
-    present = [label for label in planned if label in frame.index]
-    narrowed = frame.loc[frame.index.isin(planned)]
-    selected = narrowed.loc[present].copy() if present else narrowed.iloc[0:0].copy()
-    return selected, excluded
+    for label in planned:
+        if len(_exact_index_matches(frame.index, label)) > 1:
+            raise ValueError(
+                f"Planned label {label!r} is duplicated in the realized panel. "
+                "No fit was started."
+            )
+    keep = [
+        realized
+        for realized in frame.index
+        if any(_label_equal(realized, label) for label in planned)
+    ]
+    excluded = len(keep) != len(frame.index)
+    if not keep:
+        return frame.iloc[0:0].copy(), excluded
+    return frame.loc[keep].copy(), excluded
 
 
 def _require_columns(

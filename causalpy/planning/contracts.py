@@ -1360,8 +1360,8 @@ class CandidateRequest(_ScreenValue):
     shortlist_size : int, optional
         Cap after filters. At least 1.
     random_seed : int
-        Required keyword. Keys the hash sample and tie-breaks. Not iteration
-        order.
+        Required keyword. Keys the hash sample. Shortlist and digest ties
+        use ``candidate_id``. Not iteration order.
     """
 
     units: tuple[str, ...]
