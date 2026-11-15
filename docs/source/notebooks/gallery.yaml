@@ -32,6 +32,8 @@ groups:
         cards:
           - title: Synthetic control with `pymc` models
             notebook: synthetic-control-pymc
+          - title: Planning a synthetic-control intervention
+            notebook: synthetic-control-experiment-planning-pymc
           - title: The effects of Brexit
             notebook: synthetic-control-brexit-pymc
           - title: Synthetic Difference-in-Differences with `pymc` models
