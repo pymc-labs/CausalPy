@@ -283,7 +283,7 @@ def _outcome_share(
             history.loc[:, list(population)].to_numpy(dtype=float).sum()
         )
         numerator = float(history.loc[:, list(treated)].to_numpy(dtype=float).sum())
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return _FILTERED_SHARE
     if not math.isfinite(denominator) or denominator <= 0.0:
         return _FILTERED_SHARE

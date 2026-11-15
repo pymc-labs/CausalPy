@@ -638,7 +638,7 @@ def test_overflowed_reductions_filter_instead_of_raising() -> None:
 
 
 def test_unreadable_excluded_outcome_filters_without_dropping_siblings() -> None:
-    dirty = ("bad", pd.NA, [[1.0]])
+    dirty = ("bad", pd.NA, [[1.0]], 10**309)
     for value in dirty:
         frame = pd.DataFrame(
             {"a": [1.0], "b": [2.0], "c": [value]},
