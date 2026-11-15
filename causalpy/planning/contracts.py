@@ -862,6 +862,8 @@ class ValidationCell:
 # error of about 0.06 near one half. That can show whether a declared
 # decision fires. It is too coarse to treat as a launch study. Post-search
 # qualification is a separate budget owned by #319 and is not in this matrix.
+# The group cell uses the same ceiling: a size 2-3 proof is one joint fit
+# per horizon, not a search, so the ceiling does not grow with group size.
 VALIDATION_MATRIX: tuple[ValidationCell, ...] = (
     ValidationCell(
         name="correctly_specified_noisy_reference",
@@ -898,6 +900,18 @@ VALIDATION_MATRIX: tuple[ValidationCell, ...] = (
         max_fits=FIXED_DESIGN_FIT_CEILING,
         environment="nightly",
         purpose="Fixed-design power. Not a posterior tail probability.",
+    ),
+    ValidationCell(
+        name="group_draw_aligned_sum",
+        owner="#1440",
+        question=(
+            "Does a declared group of two or three preserve the draw-aligned "
+            "sum of unit impacts?"
+        ),
+        qualification_scope="fixed_design",
+        max_fits=FIXED_DESIGN_FIT_CEILING,
+        environment="nightly",
+        purpose="Group proof. One joint fit per horizon, not a search.",
     ),
 )
 

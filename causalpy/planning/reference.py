@@ -18,6 +18,8 @@ fits the selected adapter once per requested horizon, then translates that fit
 across effects. The reference adapter is ordinary synthetic control on one
 treated unit. A registered adapter, or one passed in, is called instead.
 Groups of two or three units belong to that adapter, not to a second entry point.
+The plan refuses a group or decision that adapter did not declare before
+``fit_window``.
 """
 
 from __future__ import annotations
@@ -315,9 +317,10 @@ class HistoryOnlyPlan:
         methods and does not build one. Mutually exclusive with ``model``,
         ``sample_kwargs``, and ``random_seed``.
     model : object or None, optional
-        Forwarded to the selected adapter. The reference adapter accepts
-        only :class:`WeightedSumFitter`. A registered adapter may accept
-        its own model.
+        Forwarded to the selected adapter. Mutually exclusive with
+        ``sample_kwargs``. The reference adapter accepts only
+        :class:`WeightedSumFitter`. A registered adapter may accept its own
+        model.
     sample_kwargs : mapping or None, optional
         Passed to a fresh fitter when ``model`` is omitted. Required on the
         reference path so a default-length sample cannot start by accident.
@@ -326,7 +329,8 @@ class HistoryOnlyPlan:
         have one.
     random_seed : int or None, optional
         Stored in ``sample_kwargs`` when that mapping has no seed. Rejected
-        when it disagrees with the seed already on ``model``.
+        when it disagrees with a seed already in ``sample_kwargs`` or on
+        ``model``. A registered adapter receives the resolved mapping.
     outcome_scale : str, optional
         Label for the outcome units. It does not convert values.
     """
@@ -351,6 +355,7 @@ class HistoryOnlyPlan:
         if not isinstance(outcome_scale, str) or not outcome_scale:
             raise TypeError("outcome_scale must be a non-empty string.")
         self._history = _prepare_history(history, time_column)
+        self._time_column = time_column
         self._treated_units = require_unit_names(
             treated_units,
             what="treated_units",
@@ -384,6 +389,9 @@ class HistoryOnlyPlan:
                 random_seed,
                 self._treated_units,
             )
+        _require_supported(
+            self._adapter, self._estimator, self._treated_units, decision
+        )
         self._decision = decision
         self._outcome_scale = outcome_scale
 
@@ -402,7 +410,8 @@ class HistoryOnlyPlan:
         ----------
         duration : int
             Holdout length. The treatment time is the first holdout label.
-            ``run`` fits that window and drops rows after it.
+            ``run`` fits the planned training labels plus that holdout and
+            drops every other row.
         """
         if not isinstance(self._adapter, SyntheticControlAdapter):
             raise ValueError(
@@ -422,6 +431,8 @@ class HistoryOnlyPlan:
             estimator=self._estimator,
             sample_kwargs=tuple(template.sample_kwargs.items()),
             outcome_scale=self._outcome_scale,
+            training_index=tuple(self._history.index[:-periods]),
+            time_column=self._time_column,
             model=template,
         )
 
@@ -462,6 +473,9 @@ class HistoryOnlyPlan:
             One evaluation per duration and effect. ``n_inference_fits`` is
             the sum of the adapter's reported fits, not the number of effects.
         """
+        _require_supported(
+            self._adapter, self._estimator, self._treated_units, self._decision
+        )
         requested = self._durations(durations)
         scenarios = self._scenarios(
             requested,
@@ -588,10 +602,13 @@ class AnalysisHandoff:
 
     The planning evaluation does not call this. ``run`` is today's
     :class:`~causalpy.experiments.synthetic_control.SyntheticControl` analysis
-    on the planned window, mapped onto the canonical result. It does not
-    inject a planned effect. Rows after ``treatment_time + duration`` are
-    excluded. The stored ``model`` is the fitter ``evaluate`` uses, including
-    custom priors, unless the caller passes a replacement.
+    on the planned training labels plus the planned holdout. Rows outside that
+    exact window are excluded. A missing planned training label, or fewer than
+    two training rows, is refused before sampling. It does not inject a planned
+    effect. The stored ``model`` is the fitter ``evaluate`` uses, including
+    custom priors, unless the caller passes a replacement. ``training_index``
+    and ``time_column`` are the planned training labels and the column that
+    produced them.
     """
 
     treated_units: tuple[str, ...]
@@ -602,6 +619,8 @@ class AnalysisHandoff:
     estimator: str
     sample_kwargs: tuple[tuple[str, Any], ...]
     outcome_scale: str
+    training_index: tuple[Any, ...]
+    time_column: str | None
     model: WeightedSumFitter | None = field(default=None, compare=False, hash=False)
 
     def run(
@@ -618,16 +637,17 @@ class AnalysisHandoff:
         Parameters
         ----------
         data : pandas.DataFrame
-            Realized outcomes. Rows after the planned duration are excluded.
-            This is not the planning history unless the caller passes that
-            frame on purpose.
+            Realized outcomes. Rows outside the planned training labels and
+            holdout are excluded. This is not the planning history unless the
+            caller passes that frame on purpose.
         model : WeightedSumFitter or None, optional
             Overrides the model stored on the handoff.
         sample_kwargs : mapping or None, optional
             Builds a fresh fitter and overrides the stored sampling settings.
             Not accepted together with ``model``.
         time_column : str or None, optional
-            Column to use as the time index.
+            Overrides the column stored on the handoff. Omitted uses that
+            stored column.
         random_seed : int or None, optional
             Used when the resolved sampling settings have no seed. Rejected
             when it disagrees with the seed already on the model.
@@ -637,10 +657,16 @@ class AnalysisHandoff:
                 "The reference handoff runs one-unit synthetic control only. "
                 "No fit was started."
             )
-        prepared = _prepare_history(data, time_column)
+        column = self.time_column if time_column is None else time_column
+        prepared = _prepare_history(data, column)
         _require_columns(prepared, self.treated_units, self.control_units)
-        frame = _planned_window(prepared, self.treatment_time, self.duration)
-        excluded = len(frame) < len(prepared)
+        frame = _planned_window(
+            prepared,
+            self.treatment_time,
+            self.duration,
+            self.training_index,
+        )
+        excluded = not prepared.index.isin(frame.index).all()
         if model is not None and sample_kwargs is not None:
             raise TypeError("Pass model or sample_kwargs, not both.")
         if model is not None:
@@ -693,7 +719,7 @@ class AnalysisHandoff:
             decision=decide(chosen, self.decision),
             diagnostics=_diagnostics(experiment),
             boundary=DataBoundary(
-                training_index=frame.index[frame.index < self.treatment_time].copy(),
+                training_index=pd.Index(self.training_index),
                 holdout_index=holdout.copy(),
                 treated_units=self.treated_units,
                 control_units=self.control_units,
@@ -735,6 +761,65 @@ def _adopt_adapter(
     return adapter
 
 
+def _fit_arguments(
+    model: object | None,
+    sample_kwargs: Mapping[str, Any] | None,
+    random_seed: int | None,
+) -> tuple[object | None, Mapping[str, Any] | None, int | None]:
+    """Resolve one seed and reject a model paired with sampling settings."""
+    if model is not None and sample_kwargs is not None:
+        raise TypeError("Pass model or sample_kwargs, not both. No fit was started.")
+    if model is not None:
+        existing = getattr(model, "sample_kwargs", None)
+        if existing is not None:
+            resolved = _resolve_sample_kwargs(existing, random_seed)
+            return model, None, resolved.get("random_seed")
+        if random_seed is not None:
+            resolved = _resolve_sample_kwargs(None, random_seed)
+            return model, None, resolved.get("random_seed")
+        return model, None, None
+    if sample_kwargs is None:
+        return None, None, random_seed
+    resolved = _resolve_sample_kwargs(sample_kwargs, random_seed)
+    return None, resolved, resolved.get("random_seed")
+
+
+def _require_supported(
+    adapter: EstimatorAdapter,
+    estimator: str,
+    treated: tuple[str, ...],
+    decision: DecisionRule,
+) -> None:
+    """Refuse a group or decision the adapter did not declare."""
+    try:
+        caps = adapter.capabilities()
+    except AttributeError as exc:
+        raise TypeError(
+            "adapter must implement EstimatorAdapter. No fit was started."
+        ) from exc
+    named = getattr(caps, "estimator", None)
+    if named != estimator:
+        raise ValueError(
+            f"adapter capabilities name {named!r}, not estimator={estimator!r}. "
+            "No fit was started."
+        )
+    max_group = getattr(caps, "max_group_size", None)
+    if isinstance(max_group, bool) or not isinstance(max_group, int):
+        raise TypeError("adapter capabilities max_group_size must be an int.")
+    group_support = bool(getattr(caps, "group_support", False))
+    if len(treated) > max_group or (len(treated) > 1 and not group_support):
+        raise ValueError(
+            f"{estimator} supports at most {max_group} treated units. "
+            f"Got {len(treated)}. No fit was started."
+        )
+    allowed = tuple(getattr(caps, "allowed_decision_rules", ()))
+    if decision.direction not in allowed:
+        raise ValueError(
+            f"{estimator} does not allow a {decision.direction} decision. "
+            f"Allowed: {allowed}. No fit was started."
+        )
+
+
 def _construct_adapter(
     estimator: str,
     model: object | None,
@@ -742,21 +827,21 @@ def _construct_adapter(
     random_seed: int | None,
     treated: tuple[str, ...],
 ) -> EstimatorAdapter:
+    model_arg, kwargs_arg, seed_arg = _fit_arguments(model, sample_kwargs, random_seed)
     if estimator == "synthetic_control":
         return SyntheticControlAdapter(
-            model=cast("WeightedSumFitter | None", model),
-            sample_kwargs=sample_kwargs,
-            random_seed=random_seed,
+            model=cast("WeightedSumFitter | None", model_arg),
+            sample_kwargs=kwargs_arg,
+            random_seed=seed_arg,
             treated_units=treated,
         )
     cls = _registered_adapters()[estimator]
     try:
-        built = cls(model=model, sample_kwargs=sample_kwargs, random_seed=random_seed)
+        return cls(model=model_arg, sample_kwargs=kwargs_arg, random_seed=seed_arg)
     except TypeError as exc:
         raise TypeError(
             f"{estimator} adapter construction failed: {exc}. No fit was started."
         ) from exc
-    return built
 
 
 def _fitter_from_model(
@@ -781,6 +866,7 @@ def _planned_window(
     frame: pd.DataFrame,
     treatment_time: Any,
     duration: int,
+    training_index: tuple[Any, ...],
 ) -> pd.DataFrame:
     periods = require_positive_int(duration, "duration")
     if treatment_time not in frame.index:
@@ -798,7 +884,36 @@ def _planned_window(
             f"Realized panel has {available} rows at or after treatment_time, "
             f"shorter than the planned duration {periods}. No fit was started."
         )
-    return frame.iloc[: start + periods]
+    labels = tuple(training_index)
+    if len(labels) < MIN_TRAINING_ROWS:
+        raise ValueError(
+            f"Planned training window has {len(labels)} rows. At least "
+            f"{MIN_TRAINING_ROWS} are required. No fit was started."
+        )
+    if len(set(labels)) != len(labels):
+        raise ValueError("Planned training labels must be unique. No fit was started.")
+    missing = [label for label in labels if label not in frame.index]
+    if missing:
+        raise ValueError(
+            "Planned training labels are missing from the realized panel. "
+            "No fit was started."
+        )
+    for label in labels:
+        try:
+            precedes = label < treatment_time
+        except TypeError as exc:
+            raise ValueError(
+                "Planned training labels must be comparable with treatment_time. "
+                "No fit was started."
+            ) from exc
+        if not bool(precedes):
+            raise ValueError(
+                "Planned training labels must precede treatment_time. "
+                "No fit was started."
+            )
+    training = frame.loc[list(labels)]
+    holdout = frame.iloc[start : start + periods]
+    return pd.concat([training, holdout])
 
 
 def _require_estimator(estimator: str) -> str:

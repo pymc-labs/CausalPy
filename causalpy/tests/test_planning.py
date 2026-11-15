@@ -574,7 +574,9 @@ def test_validation_matrix_and_ownership() -> None:
         "temporal_dependence",
         "persistent_misfit",
         "fixed_design_qualification",
+        "group_draw_aligned_sum",
     ]
+    assert VALIDATION_MATRIX[-1].owner == "#1440"
     assert all(cell.max_fits <= FIXED_DESIGN_FIT_CEILING for cell in VALIDATION_MATRIX)
     assert all(cell.qualification_scope == "fixed_design" for cell in VALIDATION_MATRIX)
     assert all(cell.environment == "nightly" for cell in VALIDATION_MATRIX)
@@ -731,20 +733,21 @@ def test_registered_adapter_is_constructed_and_called(
         lambda: {"augmented_synthetic_control": _Registered},
     )
     calls = _forbid_fit(monkeypatch)
+    seedless = {key: value for key, value in LIGHT.items() if key != "random_seed"}
     plan = HistoryOnlyPlan(
         _geo_panel(),
         ["austin", "boston"],
         ["chicago", "denver"],
         _decision(),
         estimator="augmented_synthetic_control",
-        sample_kwargs=LIGHT,
+        sample_kwargs=seedless,
         random_seed=7,
     )
     result = plan.evaluate((4, 6), absolute_effects=[0.0])
     assert calls == []
     assert constructed[0][0] is None
     assert constructed[0][1]["draws"] == 20
-    assert constructed[0][1]["random_seed"] == 42
+    assert constructed[0][1]["random_seed"] == 7
     assert constructed[0][2] == 7
     assert fits == [("austin", "boston"), ("austin", "boston")]
     assert result.n_inference_fits == 4
@@ -910,3 +913,180 @@ def test_zero_preperiod_scale_rejects_a_relative_effect(
     with pytest.raises(ValueError, match="not positive"):
         plan.evaluate(4, relative_effects=[0.1], relative_baseline=1.0)
     assert calls == []
+
+
+def test_registered_adapter_rejects_a_conflicting_seed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    constructed: list[object] = []
+
+    class _Registered:
+        def __init__(self, *, model, sample_kwargs, random_seed) -> None:
+            constructed.append(random_seed)
+
+        def capabilities(self):
+            return _fake_capabilities()
+
+    monkeypatch.setattr(
+        "causalpy.planning.reference._registered_adapters",
+        lambda: {"augmented_synthetic_control": _Registered},
+    )
+    calls = _forbid_fit(monkeypatch)
+    with pytest.raises(ValueError, match="random_seed"):
+        HistoryOnlyPlan(
+            _geo_panel(),
+            ["austin", "boston"],
+            ["chicago", "denver"],
+            _decision(),
+            estimator="augmented_synthetic_control",
+            sample_kwargs=LIGHT,
+            random_seed=7,
+        )
+    assert constructed == []
+    assert calls == []
+
+
+def test_passed_adapter_refuses_an_unsupported_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+
+    calls = _forbid_fit(monkeypatch)
+
+    class _Small(_PairAdapter):
+        def capabilities(self):
+            return replace(_fake_capabilities(), group_support=False, max_group_size=1)
+
+    with pytest.raises(ValueError, match="at most 1"):
+        HistoryOnlyPlan(
+            _geo_panel(),
+            ["austin", "boston"],
+            ["chicago", "denver"],
+            _decision(),
+            estimator="augmented_synthetic_control",
+            adapter=_Small(),
+        )
+    assert calls == []
+
+
+def test_passed_adapter_refuses_an_undeclared_decision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _forbid_fit(monkeypatch)
+    with pytest.raises(ValueError, match="does not allow a negative"):
+        HistoryOnlyPlan(
+            _geo_panel(),
+            "austin",
+            ["boston", "chicago"],
+            DecisionRule("negative", "cumulative_total", 0.0, 0.95),
+            estimator="augmented_synthetic_control",
+            adapter=_PairAdapter(),
+        )
+    assert calls == []
+
+
+def test_model_and_sample_kwargs_are_rejected_together(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _forbid_fit(monkeypatch)
+    model = WeightedSumFitter(sample_kwargs=LIGHT)
+    with pytest.raises(TypeError, match="not both"):
+        HistoryOnlyPlan(
+            _history(),
+            TREATED,
+            CONTROLS,
+            _decision(),
+            model=model,
+            sample_kwargs=LIGHT,
+        )
+    assert calls == []
+
+
+def test_handoff_drops_rows_before_the_planned_training_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class _Capture:
+        def __init__(self, data, treatment_time, **_kwargs: object) -> None:
+            seen["index"] = data.index.copy()
+            seen["rows"] = len(data)
+            raise RuntimeError("captured")
+
+    monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _Capture)
+    history = _history()
+    handoff = _plan().analysis_handoff(duration=4)
+    step = history.index[1] - history.index[0]
+    prefix = history.iloc[:2].copy()
+    prefix.index = [history.index[0] - step * (2 - i) for i in range(2)]
+    longer = pd.concat([prefix, history])
+    with pytest.raises(RuntimeError, match="captured"):
+        handoff.run(longer)
+    assert seen["index"][0] == history.index[0]
+    assert seen["rows"] == len(history)
+    assert prefix.index[0] not in seen["index"]
+
+
+def test_handoff_refuses_a_missing_planned_training_label(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _forbid_fit(monkeypatch)
+    history = _history()
+    handoff = _plan().analysis_handoff(duration=4)
+    with pytest.raises(ValueError, match="Planned training labels"):
+        handoff.run(history.iloc[3:])
+    assert calls == []
+
+
+def test_handoff_refuses_a_one_row_training_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _forbid_fit(monkeypatch)
+    history = _history()
+    panel = history.iloc[-5:]
+    handoff = AnalysisHandoff(
+        treated_units=(TREATED,),
+        control_units=tuple(CONTROLS),
+        treatment_time=panel.index[1],
+        duration=4,
+        decision=_decision(),
+        estimator="synthetic_control",
+        sample_kwargs=tuple(LIGHT.items()),
+        outcome_scale="outcome",
+        training_index=(panel.index[0],),
+        time_column=None,
+    )
+    with pytest.raises(ValueError, match="Planned training window"):
+        handoff.run(panel)
+    assert calls == []
+
+
+def test_handoff_uses_the_stored_time_column(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class _Capture:
+        def __init__(self, data, treatment_time, **_kwargs: object) -> None:
+            seen["rows"] = len(data)
+            seen["time"] = data.index[0]
+            raise RuntimeError("captured")
+
+    monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _Capture)
+    frame = _history().copy()
+    frame["week"] = pd.date_range("2020-01-01", periods=len(frame), freq="W")
+    frame = frame.reset_index(drop=True)
+    plan = HistoryOnlyPlan(
+        frame,
+        TREATED,
+        CONTROLS,
+        _decision(),
+        sample_kwargs=LIGHT,
+        time_column="week",
+    )
+    handoff = plan.analysis_handoff(duration=4)
+    assert handoff.time_column == "week"
+    with pytest.raises(RuntimeError, match="captured"):
+        handoff.run(frame)
+    assert seen["rows"] == len(frame)
+    assert seen["time"] == frame["week"].iloc[0]
