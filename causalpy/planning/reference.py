@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import importlib
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
 import numpy as np
@@ -683,67 +683,47 @@ class AnalysisHandoff:
         if model is not None and sample_kwargs is not None:
             raise TypeError("Pass model or sample_kwargs, not both.")
         if model is not None:
-            fitter, kwargs = _fitter_from_model(model, random_seed)
+            resolved_model: WeightedSumFitter | None = model
+            resolved_kwargs: Mapping[str, Any] | None = None
         elif sample_kwargs is not None or self.model is None:
-            kwargs = _resolve_sample_kwargs(
-                dict(self.sample_kwargs) if sample_kwargs is None else sample_kwargs,
-                random_seed,
+            resolved_model = None
+            resolved_kwargs = (
+                dict(self.sample_kwargs) if sample_kwargs is None else sample_kwargs
             )
-            fitter = WeightedSumFitter(sample_kwargs=dict(kwargs))
         else:
-            fitter, kwargs = _fitter_from_model(self.model, random_seed)
-        experiment = SyntheticControl(
-            frame,
-            self.treatment_time,
-            control_units=list(self.control_units),
-            treated_units=list(self.treated_units),
-            model=fitter,
-        ).fit()
-        result = experiment.result
-        if (
-            result is None
-            or result.impact_post is None
-            or result.predictions_post is None
-        ):
-            raise RuntimeError("SyntheticControl did not return a posterior impact.")
-        holdout = frame.loc[list(self.holdout_index)].index
-        impact = _label_window(result.impact_post, holdout, self.treated_units)
-        counterfactual = _label_window(
-            result.predictions_post,
-            holdout,
-            self.treated_units,
+            resolved_model = self.model
+            resolved_kwargs = None
+        adapter = SyntheticControlAdapter(
+            model=resolved_model,
+            sample_kwargs=resolved_kwargs,
+            random_seed=random_seed,
+            treated_units=self.treated_units,
         )
-        scenario = EffectScenario("absolute", 0.0)
-        draws = estimand_draws(impact, counterfactual=counterfactual, baseline=None)
-        chosen = _estimand(draws, self.decision.estimand)
-        return CanonicalEvaluation(
-            estimator=self.estimator,
-            duration=int(impact.sizes["obs_ind"]),
-            scenario=scenario,
-            draws=draws,
-            summary=summarize_draws(
-                draws,
-                baseline=None,
-                baseline_convention=None,
-                treated_count=1,
-                duration=int(impact.sizes["obs_ind"]),
-                outcome_scale=self.outcome_scale,
-            ),
-            decision=decide(chosen, self.decision),
-            diagnostics=_diagnostics(experiment),
-            boundary=DataBoundary(
-                training_index=pd.Index(self.training_index),
-                holdout_index=holdout.copy(),
+        fit = adapter.fit_window(
+            WindowRequest(
+                history=frame,
                 treated_units=self.treated_units,
                 control_units=self.control_units,
-                post_period_treated_in_fit=False,
-                post_period_donors_in_prediction=True,
-                horizon_policy="separate-fits",
-                rows_outside_window_excluded=excluded,
-            ),
-            provenance=_provenance(kwargs, translation="observed"),
+                treatment_time=self.treatment_time,
+                duration=self.duration,
+                outcome_scale=self.outcome_scale,
+            )
+        )
+        evaluation = adapter.translate(
+            fit,
+            EffectScenario("absolute", 0.0),
+            self.decision,
             fit_index=0,
             outcome_scale=self.outcome_scale,
+        )
+        return replace(
+            evaluation,
+            boundary=replace(
+                evaluation.boundary,
+                training_index=pd.Index(self.training_index),
+                rows_outside_window_excluded=excluded,
+            ),
+            provenance=replace(evaluation.provenance, translation="observed"),
         )
 
 
@@ -855,24 +835,6 @@ def _construct_adapter(
         raise TypeError(
             f"{estimator} adapter construction failed: {exc}. No fit was started."
         ) from exc
-
-
-def _fitter_from_model(
-    model: WeightedSumFitter,
-    random_seed: int | None,
-) -> tuple[WeightedSumFitter, dict[str, Any]]:
-    if type(model) is not WeightedSumFitter:
-        raise TypeError(
-            "The synthetic_control reference adapter fits WeightedSumFitter "
-            f"only. Got {type(model).__name__}. Other estimators are the "
-            "#1440 seam. No fit was started."
-        )
-    cloned = model._clone()
-    if not isinstance(cloned, WeightedSumFitter):
-        raise TypeError("Cloning the reference model did not return WeightedSumFitter.")
-    kwargs = _resolve_sample_kwargs(dict(cloned.sample_kwargs), random_seed)
-    cloned.sample_kwargs = dict(kwargs)
-    return cloned, kwargs
 
 
 def _planned_window(

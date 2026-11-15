@@ -1273,3 +1273,62 @@ def test_handoff_uses_the_stored_time_column(
         handoff.run(frame)
     assert seen["rows"] == len(frame)
     assert seen["time"] == frame["week"].iloc[0]
+
+
+def test_handoff_stamps_the_observed_boundary_from_the_adapter_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reused adapter fit must not overwrite the handoff's own facts."""
+    duration = 4
+
+    class _Backend:
+        def sampling_diagnostics(self) -> dict[str, object]:
+            return {
+                "divergences": 0,
+                "max_rhat": 1.0,
+                "min_bulk_ess": 100.0,
+                "diagnostics_status": "available",
+                "diagnostics_reason": None,
+            }
+
+    class _Result:
+        def __init__(self, impact: xr.DataArray) -> None:
+            self.impact_post = impact
+            self.predictions_post = impact
+
+    class _FakeFit:
+        def __init__(
+            self,
+            data: pd.DataFrame,
+            treatment_time: object,
+            **_kwargs: object,
+        ) -> None:
+            del treatment_time
+            holdout = data.index[-duration:]
+            impact = xr.DataArray(
+                np.ones((1, 2, len(holdout), 1)),
+                dims=("chain", "draw", "obs_ind", "treated_units"),
+            )
+            self.result = _Result(impact)
+            self._model_backend = _Backend()
+
+        def fit(self) -> _FakeFit:
+            return self
+
+    monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _FakeFit)
+    history = _history()
+    handoff = _plan().analysis_handoff(duration=duration)
+    exact = handoff.run(history)
+    assert exact.provenance.translation == "observed"
+    assert exact.boundary.rows_outside_window_excluded is False
+    assert exact.boundary.training_index.equals(pd.Index(handoff.training_index))
+    assert list(exact.boundary.holdout_index) == list(handoff.holdout_index)
+    np.testing.assert_allclose(exact.draws.unit_impact.values, 1.0)
+
+    step = history.index[1] - history.index[0]
+    extra = history.iloc[[0]].copy()
+    extra.index = [history.index[0] - step]
+    dropped = handoff.run(pd.concat([extra, history]))
+    assert dropped.provenance.translation == "observed"
+    assert dropped.boundary.rows_outside_window_excluded is True
+    assert dropped.boundary.training_index.equals(pd.Index(handoff.training_index))
