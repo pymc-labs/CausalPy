@@ -1,0 +1,655 @@
+# Copyright 2022 - 2026 The PyMC Labs Developers
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""Public planning contract: size-1 reference path, refusals, and seams."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import numpy as np
+import pandas as pd
+import pytest
+import xarray as xr
+from sklearn.linear_model import LinearRegression
+
+import causalpy as cp
+from causalpy.constants import HDI_PROB
+from causalpy.planning import (
+    FIXED_DESIGN_FIT_CEILING,
+    OWNERSHIP,
+    REFERENCE_CAPABILITIES,
+    VALIDATION_MATRIX,
+    AnalysisHandoff,
+    DecisionRule,
+    EffectScenario,
+    HistoryOnlyPlan,
+    PlanningResult,
+    aggregate_unit_impacts,
+    decide,
+    evaluation_table,
+    plot_evaluation,
+    require_relative_baseline,
+    unit_period_effect,
+)
+from causalpy.planning.contracts import REJECTED_ESTIMATOR_MAPPINGS
+from causalpy.pymc_models import SoftmaxWeightedSumFitter, WeightedSumFitter
+
+LIGHT = {
+    "draws": 20,
+    "tune": 20,
+    "chains": 1,
+    "cores": 1,
+    "progressbar": False,
+    "random_seed": 42,
+}
+TREATED = "actual"
+CONTROLS = ["a", "b", "c", "d", "e", "f", "g"]
+DURATION = 8
+
+
+def _history() -> pd.DataFrame:
+    return cp.load_data("sc").iloc[:48][CONTROLS + [TREATED]]
+
+
+def _decision() -> DecisionRule:
+    return DecisionRule("positive", "cumulative_total", 0.0, 0.95)
+
+
+def _plan(**kwargs: object) -> HistoryOnlyPlan:
+    args: dict[str, Any] = {
+        "model": None,
+        "sample_kwargs": LIGHT,
+        "outcome_scale": "outcome",
+    }
+    args.update(kwargs)
+    return HistoryOnlyPlan(
+        _history(),
+        TREATED,
+        CONTROLS,
+        _decision(),
+        estimator="synthetic_control",
+        sample_kwargs=args["sample_kwargs"],
+        outcome_scale=args["outcome_scale"],
+        model=args["model"],
+    )
+
+
+def _forbid_fit(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    calls: list[str] = []
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        calls.append("fit")
+        raise AssertionError("SyntheticControl was called")
+
+    monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _boom)
+    return calls
+
+
+def _row(result: PlanningResult, scale: str, magnitude: float):
+    matches = [
+        row
+        for row in result.evaluations
+        if row.scenario.scale == scale and row.scenario.magnitude == magnitude
+    ]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _geo_panel() -> pd.DataFrame:
+    rng = np.random.default_rng(0)
+    index = pd.date_range("2024-01-01", periods=36, freq="W")
+    factor = rng.normal(0, 1, size=len(index)).cumsum()
+    frame = pd.DataFrame(index=index)
+    for shift, name in enumerate(("austin", "boston", "chicago", "denver", "seattle")):
+        frame[name] = 100 + 0.4 * factor + rng.normal(0, 1, size=len(index)) + shift
+    return frame
+
+
+def test_construction_and_handoff_do_not_sample(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _forbid_fit(monkeypatch)
+    plan = _plan()
+    handoff = plan.analysis_handoff(duration=DURATION)
+    assert calls == []
+    assert isinstance(handoff, AnalysisHandoff)
+    assert handoff.treatment_time == _history().index[-DURATION]
+    assert plan.capabilities.group_support is False
+    assert plan.capabilities.deterministic_effect_reuse is True
+    assert plan.capabilities.horizon_reuse is False
+    assert plan.capabilities.post_period_donor_data is True
+
+
+def test_general_journey_valid_example() -> None:
+    """Domain-neutral size-1 plan reduces to today's synthetic control."""
+    history = _history()
+    plan = _plan()
+    result = plan.evaluate(
+        DURATION,
+        absolute_effects=[0.0, 1.0],
+        relative_effects=[0.1],
+        relative_baseline=100.0,
+    )
+    assert result.n_inference_fits == 1
+    assert result.repeated_experiment_power is None
+    assert result.historical_detection_share is None
+    assert result.power_status == "not_computed"
+    assert {row.fit_index for row in result.evaluations} == {0}
+    zero = _row(result, "absolute", 0.0)
+    shifted = _row(result, "absolute", 1.0)
+    relative = _row(result, "relative", 0.1)
+    np.testing.assert_array_equal(
+        zero.draws.counterfactual.values,
+        shifted.draws.counterfactual.values,
+    )
+    np.testing.assert_allclose(
+        shifted.draws.unit_impact.values,
+        zero.draws.unit_impact.values + 1.0,
+    )
+    np.testing.assert_allclose(
+        relative.draws.unit_impact.values,
+        zero.draws.unit_impact.values + 1.25,
+    )
+    np.testing.assert_allclose(
+        relative.draws.cumulative_total.values,
+        zero.draws.cumulative_total.values + 10.0,
+    )
+    np.testing.assert_allclose(
+        relative.draws.relative_total.values,
+        relative.draws.cumulative_total.values / 100.0,
+    )
+    assert relative.summary.relative_baseline == 100.0
+    assert relative.summary.relative_baseline_convention is not None
+    np.testing.assert_allclose(
+        zero.draws.average_per_period.values,
+        zero.draws.cumulative_total.values / DURATION,
+    )
+    np.testing.assert_allclose(
+        zero.draws.average_per_treated_unit.values,
+        zero.draws.cumulative_total.values,
+    )
+    assert zero.boundary.post_period_treated_in_fit is False
+    assert zero.boundary.post_period_donors_in_prediction is True
+    assert zero.provenance.translation == "deterministic_additive"
+    assert zero.provenance.uncertainty == "posterior_conditional_mean"
+    assert zero.draws.uncertainty == "posterior_conditional_mean"
+    assert tuple(zero.draws.unit_impact.dims) == (
+        "chain",
+        "draw",
+        "obs_ind",
+        "treated_units",
+    )
+    direct = cp.SyntheticControl(
+        history,
+        history.index[-DURATION],
+        control_units=CONTROLS,
+        treated_units=[TREATED],
+        model=WeightedSumFitter(sample_kwargs=LIGHT),
+    ).fit()
+    expected = direct.result.impact_post
+    expected_total = direct.result.impact_post_cumulative.isel(obs_ind=-1)
+    if "treated_units" in expected.dims:
+        expected = expected.sel(treated_units=TREATED)
+        expected_total = expected_total.sel(treated_units=TREATED)
+    np.testing.assert_allclose(
+        zero.draws.unit_impact.sel(treated_units=TREATED).values,
+        expected.values,
+    )
+    np.testing.assert_allclose(
+        zero.draws.cumulative_total.values, expected_total.values
+    )
+    observed = plan.analysis_handoff(duration=DURATION).run(history)
+    np.testing.assert_allclose(
+        observed.draws.cumulative_total.values,
+        zero.draws.cumulative_total.values,
+    )
+    assert observed.provenance.translation == "observed"
+    table = evaluation_table(result)
+    assert table["repeated_experiment_power"].isna().all()
+    assert table["posterior_tail_probability"].notna().all()
+    assert "power" not in table.columns
+    figure = plot_evaluation(zero)
+    assert figure.axes
+    figure.clear()
+    import matplotlib.pyplot as plt
+
+    plt.close(figure)
+
+
+def test_general_journey_refuses_signed_relative_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _forbid_fit(monkeypatch)
+    plan = _plan()
+    with pytest.raises(ValueError, match="No fit was started"):
+        plan.evaluate(DURATION, relative_effects=[0.1], relative_baseline=-1.0)
+    with pytest.raises(ValueError, match="No fit was started"):
+        plan.evaluate(DURATION, relative_effects=[0.1], relative_baseline=1e-12)
+    with pytest.raises(ValueError, match="relative_baseline"):
+        plan.evaluate(DURATION, relative_effects=[0.1])
+    assert calls == []
+
+
+def test_geo_journey_valid_example() -> None:
+    """One media geo, an absolute sales effect, and a reduction to today's fit."""
+    panel = _geo_panel()
+    treated = "austin"
+    controls = ["boston", "chicago", "denver", "seattle"]
+    plan = HistoryOnlyPlan(
+        panel,
+        treated,
+        controls,
+        _decision(),
+        sample_kwargs=LIGHT,
+        outcome_scale="sales",
+    )
+    result = plan.evaluate(6, absolute_effects=[5.0])
+    evaluation = result.evaluations[0]
+    assert result.n_inference_fits == 1
+    assert evaluation.outcome_scale == "sales"
+    assert evaluation.summary.outcome_scale == "sales"
+    assert evaluation.decision.posterior_tail_probability == pytest.approx(
+        float(np.mean(evaluation.draws.cumulative_total.values > 0.0))
+    )
+    assert result.repeated_experiment_power is None
+    direct = cp.SyntheticControl(
+        panel,
+        panel.index[-6],
+        control_units=controls,
+        treated_units=[treated],
+        model=WeightedSumFitter(sample_kwargs=LIGHT),
+    ).fit()
+    expected = direct.result.impact_post_cumulative.isel(obs_ind=-1)
+    if "treated_units" in expected.dims:
+        expected = expected.sel(treated_units=treated)
+    np.testing.assert_allclose(
+        evaluation.draws.cumulative_total.values, expected.values + 5.0 * 6
+    )
+    handoff = plan.analysis_handoff(duration=6)
+    assert handoff.treated_units == (treated,)
+    assert handoff.estimator == "synthetic_control"
+
+
+def test_geo_journey_refuses_pair_before_sampling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _forbid_fit(monkeypatch)
+    with pytest.raises(ValueError, match="#1440"):
+        HistoryOnlyPlan(
+            _geo_panel(),
+            ["austin", "boston"],
+            ["chicago", "denver", "seattle"],
+            _decision(),
+            sample_kwargs=LIGHT,
+            outcome_scale="sales",
+        )
+    assert calls == []
+
+
+def test_horizons_are_separate_fits(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[object] = []
+    original = cp.SyntheticControl
+
+    class _Counting(original):  # type: ignore[misc, valid-type]
+        def fit(self, *args: object, **kwargs: object):
+            calls.append(self.treatment_time)
+            return original.fit(self, *args, **kwargs)
+
+    monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _Counting)
+    result = _plan().evaluate((4, 8), absolute_effects=[0.0])
+    assert result.n_inference_fits == 2
+    assert len(calls) == 2
+    assert calls[0] != calls[1]
+    short, long = result.evaluations
+    assert short.duration == 4
+    assert long.duration == 8
+    assert short.fit_index == 0
+    assert long.fit_index == 1
+    assert short.boundary.training_index.size == len(_history()) - 4
+    assert long.boundary.training_index.size == len(_history()) - 8
+
+
+def test_post_period_donor_boundary() -> None:
+    history = _history()
+    baseline = _plan().evaluate(DURATION, absolute_effects=[0.0]).evaluations[0]
+    treated = history.copy()
+    treated.iloc[-DURATION:, treated.columns.get_loc(TREATED)] = (
+        treated.iloc[-DURATION:, treated.columns.get_loc(TREATED)] + 25
+    )
+    treated_fit = (
+        HistoryOnlyPlan(
+            treated,
+            TREATED,
+            CONTROLS,
+            _decision(),
+            sample_kwargs=LIGHT,
+        )
+        .evaluate(DURATION, absolute_effects=[0.0])
+        .evaluations[0]
+    )
+    np.testing.assert_allclose(
+        treated_fit.draws.counterfactual.values,
+        baseline.draws.counterfactual.values,
+    )
+    assert not np.allclose(
+        treated_fit.draws.unit_impact.values,
+        baseline.draws.unit_impact.values,
+    )
+    donors = history.copy()
+    donors.iloc[-DURATION:, donors.columns.get_loc("a")] = (
+        donors.iloc[-DURATION:, donors.columns.get_loc("a")] + 25
+    )
+    donor_fit = (
+        HistoryOnlyPlan(
+            donors,
+            TREATED,
+            CONTROLS,
+            _decision(),
+            sample_kwargs=LIGHT,
+        )
+        .evaluate(DURATION, absolute_effects=[0.0])
+        .evaluations[0]
+    )
+    assert not np.allclose(
+        donor_fit.draws.counterfactual.values,
+        baseline.draws.counterfactual.values,
+    )
+
+
+def test_decision_fields_are_not_power() -> None:
+    draws = xr.DataArray([[0.0, 1.0, 2.0]], dims=("chain", "draw"))
+    rule = DecisionRule("positive", "cumulative_total", 1.0, 0.5)
+    decision = decide(draws, rule)
+    assert decision.posterior_tail_probability == pytest.approx(1 / 3)
+    assert decision.decided is False
+    assert decision.required_probability == 0.5
+    assert decision.hdi_probability == HDI_PROB
+    assert "power" not in decision.__dataclass_fields__
+    negative = decide(draws, DecisionRule("negative", "cumulative_total", 1.0, 0.5))
+    assert negative.posterior_tail_probability == pytest.approx(1 / 3)
+    assert negative.decided is False
+
+
+def test_two_sided_and_sequential_decisions_are_rejected() -> None:
+    with pytest.raises(ValueError, match="Two-sided"):
+        DecisionRule("two-sided", "cumulative_total", 0.0, 0.95)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="sequential"):
+        DecisionRule("sequential", "cumulative_total", 0.0, 0.95)  # type: ignore[arg-type]
+
+
+def test_draw_aligned_sum_is_not_a_marginal_interval_sum() -> None:
+    unit = xr.DataArray(
+        np.array([[[[0.0, 10.0]], [[10.0, 0.0]]]]),
+        dims=("chain", "draw", "obs_ind", "treated_units"),
+        coords={
+            "chain": [0],
+            "draw": [0, 1],
+            "obs_ind": [0],
+            "treated_units": ["a", "b"],
+        },
+    )
+    total, per_period, per_unit = aggregate_unit_impacts(unit)
+    np.testing.assert_allclose(total.values, [[10.0, 10.0]])
+    np.testing.assert_allclose(per_period.values, total.values)
+    np.testing.assert_allclose(per_unit.values, [[5.0, 5.0]])
+    from causalpy._arviz_compat import hdi_bounds
+
+    group_low, group_high = hdi_bounds(total, prob=HDI_PROB, dim=("chain", "draw"))
+    unit_bounds = [
+        hdi_bounds(
+            unit.isel(treated_units=i).sum("obs_ind"),
+            prob=HDI_PROB,
+            dim=("chain", "draw"),
+        )
+        for i in range(2)
+    ]
+    summed_low = unit_bounds[0][0] + unit_bounds[1][0]
+    summed_high = unit_bounds[0][1] + unit_bounds[1][1]
+    assert (summed_low, summed_high) != pytest.approx((group_low, group_high))
+    names = [name for name, _reason in REJECTED_ESTIMATOR_MAPPINGS]
+    assert "marginal_interval_sum" in names
+    assert "raw_sum_versus_simplex" in names
+    assert "aggregate_first_shared_weights" in names
+    assert "average_of_relative_percentages" in names
+
+
+def test_relative_group_effect_is_not_the_average_of_ratios() -> None:
+    total = xr.DataArray([[10.0]], dims=("chain", "draw"))
+    group_relative = float((total / 110.0).item())
+    average_of_ratios = (10.0 / 10.0 + 0.0 / 100.0) / 2.0
+    assert group_relative == pytest.approx(10.0 / 110.0)
+    assert group_relative != pytest.approx(average_of_ratios)
+    assert unit_period_effect(
+        scale="absolute",
+        magnitude=100.0,
+        duration=4,
+        n_treated=2,
+    ) == pytest.approx(50.0)
+    assert unit_period_effect(
+        scale="relative",
+        magnitude=0.1,
+        duration=4,
+        n_treated=2,
+        baseline=100.0,
+    ) == pytest.approx(1.25)
+    with pytest.raises(ValueError, match="strictly positive"):
+        require_relative_baseline(-1.0, floor=1e-8)
+    assert require_relative_baseline(1e-12, floor=0.0) == pytest.approx(1e-12)
+
+
+def test_reporting_consumes_canonical_results_only() -> None:
+    import causalpy.planning.report as report
+
+    assert not hasattr(report, "SyntheticControl")
+    draws = xr.DataArray(
+        np.zeros((1, 4, 2, 1)),
+        dims=("chain", "draw", "obs_ind", "treated_units"),
+        coords={"treated_units": ["austin"]},
+    )
+    from causalpy.planning.contracts import (
+        CanonicalEvaluation,
+        DataBoundary,
+        EstimandDraws,
+        EstimandSummary,
+        FitDiagnostics,
+        PlanningResult,
+        Provenance,
+        summarize_draws,
+    )
+    from causalpy.planning.contracts import estimand_draws as build_draws
+
+    built: EstimandDraws = build_draws(draws, counterfactual=draws, baseline=None)
+    summary: EstimandSummary = summarize_draws(
+        built,
+        baseline=None,
+        baseline_convention=None,
+        treated_count=1,
+        duration=2,
+        outcome_scale="sales",
+    )
+    evaluation = CanonicalEvaluation(
+        estimator="synthetic_control",
+        duration=2,
+        scenario=EffectScenario("absolute", 0.0),
+        draws=built,
+        summary=summary,
+        decision=decide(built.cumulative_total, _decision()),
+        diagnostics=FitDiagnostics(0, None, None, "unavailable", None),
+        boundary=DataBoundary(
+            training_index=pd.Index([0, 1]),
+            holdout_index=pd.Index([2, 3]),
+            treated_units=("austin",),
+            control_units=("boston",),
+            post_period_treated_in_fit=False,
+            post_period_donors_in_prediction=True,
+            horizon_policy="separate-fits",
+            rows_outside_window_excluded=True,
+        ),
+        provenance=Provenance(
+            estimator="synthetic_control",
+            adapter="SyntheticControlAdapter",
+            model_class="WeightedSumFitter",
+            random_seed=1,
+            sample_kwargs=(("draws", 20),),
+            horizon_policy="separate-fits",
+            translation="deterministic_additive",
+            uncertainty="posterior_conditional_mean",
+        ),
+        fit_index=0,
+        outcome_scale="sales",
+    )
+    result = PlanningResult(
+        evaluations=(evaluation,),
+        n_inference_fits=1,
+        capabilities=REFERENCE_CAPABILITIES,
+    )
+    table = evaluation_table(result)
+    assert list(table.columns) == list(report.EVALUATION_COLUMNS)
+    assert table.loc[0, "repeated_experiment_power"] is None
+    figure = plot_evaluation(evaluation)
+    figure.clear()
+    import matplotlib.pyplot as plt
+
+    plt.close(figure)
+
+
+def test_unimplemented_estimators_fail_before_sampling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _forbid_fit(monkeypatch)
+    for estimator in ("augmented_synthetic_control", "interactive_fixed_effects"):
+        with pytest.raises(ValueError, match="#1440"):
+            HistoryOnlyPlan(
+                _history(),
+                TREATED,
+                CONTROLS,
+                _decision(),
+                estimator=estimator,
+                sample_kwargs=LIGHT,
+            )
+    with pytest.raises(ValueError, match="Unknown estimator"):
+        HistoryOnlyPlan(
+            _history(),
+            TREATED,
+            CONTROLS,
+            _decision(),
+            estimator="not_an_estimator",
+            sample_kwargs=LIGHT,
+        )
+    with pytest.raises(TypeError, match="WeightedSumFitter"):
+        HistoryOnlyPlan(
+            _history(),
+            TREATED,
+            CONTROLS,
+            _decision(),
+            model=LinearRegression(),
+        )
+    with pytest.raises(TypeError, match="WeightedSumFitter"):
+        HistoryOnlyPlan(
+            _history(),
+            TREATED,
+            CONTROLS,
+            _decision(),
+            model=SoftmaxWeightedSumFitter(sample_kwargs=LIGHT),
+        )
+    assert calls == []
+
+
+def test_validation_matrix_and_ownership() -> None:
+    assert FIXED_DESIGN_FIT_CEILING == 64
+    names = [cell.name for cell in VALIDATION_MATRIX]
+    assert names == [
+        "correctly_specified_noisy_reference",
+        "temporal_dependence",
+        "persistent_misfit",
+        "fixed_design_qualification",
+    ]
+    assert all(cell.max_fits <= FIXED_DESIGN_FIT_CEILING for cell in VALIDATION_MATRIX)
+    assert all(cell.qualification_scope == "fixed_design" for cell in VALIDATION_MATRIX)
+    assert all(cell.environment == "nightly" for cell in VALIDATION_MATRIX)
+    assert "screening" not in names
+    assert "post_search_qualification" not in names
+    owners = dict(OWNERSHIP)
+    assert owners["causalpy/planning/reference.py"].startswith("#1438")
+    assert owners["causalpy/planning/adapters.py"].startswith("#1440")
+    assert owners["causalpy/planning/power.py"].startswith("#1439")
+    assert owners["causalpy/planning/candidates.py"].startswith("#1441")
+
+
+def test_group_size_and_input_refusals(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = _forbid_fit(monkeypatch)
+    with pytest.raises(ValueError, match="at most 3"):
+        HistoryOnlyPlan(
+            _history(),
+            ["actual", "a", "b", "c"],
+            ["d", "e"],
+            _decision(),
+            sample_kwargs=LIGHT,
+        )
+    with pytest.raises(ValueError, match="overlap"):
+        HistoryOnlyPlan(
+            _history(),
+            TREATED,
+            [TREATED, "a"],
+            _decision(),
+            sample_kwargs=LIGHT,
+        )
+    plan = _plan()
+    with pytest.raises(TypeError, match="positive integer"):
+        plan.evaluate(True, absolute_effects=[0.0])
+    with pytest.raises(ValueError, match="training rows"):
+        plan.evaluate(len(_history()) - 1, absolute_effects=[0.0])
+    assert calls == []
+
+
+def test_unsorted_history_is_rejected_before_sampling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _forbid_fit(monkeypatch)
+    history = _history().iloc[::-1]
+    with pytest.raises(ValueError, match="must increase"):
+        HistoryOnlyPlan(
+            history,
+            TREATED,
+            CONTROLS,
+            _decision(),
+            sample_kwargs=LIGHT,
+        )
+    assert calls == []
+
+
+def test_handoff_run_applies_a_missing_seed_before_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class _Capture:
+        def __init__(
+            self, *_args: object, model: WeightedSumFitter, **_kwargs: object
+        ) -> None:
+            seen.update(model.sample_kwargs)
+            raise RuntimeError("captured")
+
+    monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _Capture)
+    plan = HistoryOnlyPlan(
+        _history(),
+        TREATED,
+        CONTROLS,
+        _decision(),
+        sample_kwargs={"draws": 20, "tune": 20, "chains": 1},
+    )
+    handoff = plan.analysis_handoff(duration=DURATION)
+    with pytest.raises(RuntimeError, match="captured"):
+        handoff.run(_history(), random_seed=7)
+    assert seen["random_seed"] == 7
