@@ -36,6 +36,7 @@ from causalpy.tests.qualification_policy import (
     binomial_rate,
     decide,
     operating_input_from_summary,
+    recovery_input_from_summary,
 )
 from causalpy.tests.qualification_protocol import (
     DONORS,
@@ -263,6 +264,41 @@ def test_serial_recovery_is_not_labeled_as_the_level_trend_misfit() -> None:
     assert "unbiasedness-withheld-misfit" not in decision.withheld
 
 
+def test_reference_recovery_withholds_unbiasedness_without_a_tolerance() -> None:
+    """Covering zero is not support when no bias tolerance was predeclared."""
+    decision = decide(
+        _input(
+            kind="recovery-summary",
+            scenario=REFERENCE_SCENARIO,
+            bias_interval_covers_zero=True,
+            hull_warnings=0,
+        )
+    )
+    assert decision.status == "descriptive"
+    assert decision.permitted_claim is not None
+    assert "covers zero" in decision.permitted_claim
+    assert "Unbiasedness is withheld" in decision.permitted_claim
+    assert "approximate unbiasedness" not in decision.permitted_claim
+    assert "unbiasedness-withheld-no-tolerance" in decision.withheld
+
+
+def test_hull_warnings_block_a_correctly_specified_recovery_diagnostic() -> None:
+    """The reference label is confounded while hull warnings are recorded."""
+    decision = decide(
+        _input(
+            kind="recovery-summary",
+            scenario=REFERENCE_SCENARIO,
+            bias_interval_covers_zero=True,
+            hull_warnings=95,
+        )
+    )
+    assert decision.status == "descriptive"
+    claim = decision.permitted_claim or ""
+    assert "approximate unbiasedness" not in claim
+    assert "not a correctly specified recovery diagnostic" in claim
+    assert "hull-warnings-confound-reference" in decision.withheld
+
+
 def test_plug_in_error_below_the_bound_is_not_qualified_precision() -> None:
     """A zero or sub-0.04 plug-in error is not a precision achievement."""
     certain = binomial_rate(PROTOCOL.n_panels, PROTOCOL.n_panels, independent=True)
@@ -363,9 +399,22 @@ def test_committed_report_matches_the_policy_and_the_panel_counts() -> None:
             decision = decide(operating_input_from_summary(lift))
             assert decision.status == lift["eligibility"]["status"]
             assert decision.permitted_claim == lift["eligibility"]["permitted_claim"]
+            recovery = decide(
+                recovery_input_from_summary(
+                    lift, hull_warnings=int(scenario["hull_warnings"])
+                )
+            )
+            assert recovery.status == lift["recovery"]["status"]
+            assert recovery.permitted_claim == lift["recovery"]["permitted_claim"]
+            assert recovery.status != "supported"
+            assert "approximate unbiasedness" not in (
+                lift["recovery"]["permitted_claim"] or ""
+            )
     assert "Hull warnings" in REPORT_TEXT
     assert "not a qualified precision claim" in REPORT_TEXT
     assert "95 of 100" in REPORT_TEXT
+    assert "approximate unbiasedness" not in REPORT_TEXT
+    assert "not a correctly specified recovery diagnostic" in REPORT_TEXT
 
 
 @pytest.mark.nightly

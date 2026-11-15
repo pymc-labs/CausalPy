@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from causalpy.tests.qualification_protocol import PROTOCOL
+from causalpy.tests.qualification_protocol import PROTOCOL, REFERENCE_SCENARIO
 
 
 def render_markdown(report: dict[str, Any]) -> str:
@@ -97,13 +97,7 @@ def render_markdown(report: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
-            (
-                "The predeclared donor amplitude did not keep observed "
-                "pre-period points inside the donor range on the correctly "
-                "specified scenario. That label is therefore confounded by "
-                "convex-hull warnings. The amplitude was not changed after "
-                "the counts were seen."
-            ),
+            _reference_hull_sentence(report),
             "",
             "## Comparison",
             "",
@@ -212,6 +206,29 @@ def render_markdown(report: dict[str, Any]) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def _reference_hull_sentence(report: dict[str, Any]) -> str:
+    """Name the reference hull count. Do not hardcode the confounding claim."""
+    reference = next(
+        scenario
+        for scenario in report["scenarios"]
+        if scenario["scenario"] == REFERENCE_SCENARIO
+    )
+    count = int(reference["hull_warnings"])
+    requested = int(report["n_panels_requested"])
+    if count:
+        return (
+            f"The reference scenario recorded {count} of {requested} "
+            "convex-hull warnings. That count confounds the label, so it is "
+            "not a correctly specified recovery diagnostic. The amplitude was "
+            "not changed after the counts were seen."
+        )
+    return (
+        f"The reference scenario recorded {count} of {requested} "
+        "convex-hull warnings. The amplitude was not changed after the "
+        "counts were seen."
+    )
 
 
 def _fmt_optional(value: Any) -> str:

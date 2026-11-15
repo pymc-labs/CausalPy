@@ -15,7 +15,7 @@
       "arviz": "1.3.0",
       "causalpy": "1.0.0rc1"
     },
-    "label_note": "Eligibility labels were re-derived from these stored counts after a policy correction. The panel draws were not refit."
+    "label_note": "Eligibility labels were re-derived from these stored counts after a policy correction. Recovery claims withhold unbiasedness: no bias tolerance was predeclared, and the reference hull-warning count confounds that label. The panel draws were not refit."
   },
   "sample_kwargs": {
     "tune": 40,
@@ -5198,15 +5198,18 @@
             ]
           },
           "recovery": {
-            "status": "supported",
-            "permitted_claim": "Under the correctly specified scenario, the Monte Carlo bias interval for the cumulative estimand covers zero, with no fit failures in the protocol panel count. This is a statistical diagnostic of approximate unbiasedness, not a theorem and not a launch recommendation.",
+            "status": "descriptive",
+            "permitted_claim": "The Monte Carlo bias interval covers zero. Unbiasedness is withheld. No bias tolerance was predeclared. 95 convex-hull warnings are recorded, so this is not a correctly specified recovery diagnostic. This is not a launch recommendation.",
             "withheld": [
               "launch-not-qualified",
               "prospective-power-withheld",
-              "duration-audit-gap"
+              "duration-audit-gap",
+              "unbiasedness-withheld-no-tolerance",
+              "hull-warnings-confound-reference"
             ],
             "reasons": [
-              "Bias interval covers zero on the correctly specified scenario."
+              "unbiasedness-withheld-no-tolerance",
+              "hull-warnings-confound-reference"
             ]
           }
         },
@@ -5263,15 +5266,18 @@
             ]
           },
           "recovery": {
-            "status": "supported",
-            "permitted_claim": "Under the correctly specified scenario, the Monte Carlo bias interval for the cumulative estimand covers zero, with no fit failures in the protocol panel count. This is a statistical diagnostic of approximate unbiasedness, not a theorem and not a launch recommendation.",
+            "status": "descriptive",
+            "permitted_claim": "The Monte Carlo bias interval covers zero. Unbiasedness is withheld. No bias tolerance was predeclared. 95 convex-hull warnings are recorded, so this is not a correctly specified recovery diagnostic. This is not a launch recommendation.",
             "withheld": [
               "launch-not-qualified",
               "prospective-power-withheld",
-              "duration-audit-gap"
+              "duration-audit-gap",
+              "unbiasedness-withheld-no-tolerance",
+              "hull-warnings-confound-reference"
             ],
             "reasons": [
-              "Bias interval covers zero on the correctly specified scenario."
+              "unbiasedness-withheld-no-tolerance",
+              "hull-warnings-confound-reference"
             ]
           }
         },
@@ -5328,15 +5334,18 @@
             ]
           },
           "recovery": {
-            "status": "supported",
-            "permitted_claim": "Under the correctly specified scenario, the Monte Carlo bias interval for the cumulative estimand covers zero, with no fit failures in the protocol panel count. This is a statistical diagnostic of approximate unbiasedness, not a theorem and not a launch recommendation.",
+            "status": "descriptive",
+            "permitted_claim": "The Monte Carlo bias interval covers zero. Unbiasedness is withheld. No bias tolerance was predeclared. 95 convex-hull warnings are recorded, so this is not a correctly specified recovery diagnostic. This is not a launch recommendation.",
             "withheld": [
               "launch-not-qualified",
               "prospective-power-withheld",
-              "duration-audit-gap"
+              "duration-audit-gap",
+              "unbiasedness-withheld-no-tolerance",
+              "hull-warnings-confound-reference"
             ],
             "reasons": [
-              "Bias interval covers zero on the correctly specified scenario."
+              "unbiasedness-withheld-no-tolerance",
+              "hull-warnings-confound-reference"
             ]
           }
         }
@@ -10583,15 +10592,17 @@
           },
           "recovery": {
             "status": "descriptive",
-            "permitted_claim": "Recovery is reported as a Monte Carlo bias interval. Approximate unbiasedness is withheld. This scenario is the persistent level and trend misfit, so the interval is not a recovery diagnostic. This is not a launch recommendation.",
+            "permitted_claim": "The Monte Carlo bias interval does not cover zero. Unbiasedness is withheld. No bias tolerance was predeclared. This scenario is the persistent level and trend misfit, so the interval is not a recovery diagnostic. This is not a launch recommendation.",
             "withheld": [
               "launch-not-qualified",
               "prospective-power-withheld",
               "duration-audit-gap",
+              "unbiasedness-withheld-no-tolerance",
               "unbiasedness-withheld-misfit",
               "unbiasedness-withheld-bias-interval"
             ],
             "reasons": [
+              "unbiasedness-withheld-no-tolerance",
               "unbiasedness-withheld-misfit",
               "unbiasedness-withheld-bias-interval"
             ]
@@ -10652,15 +10663,17 @@
           },
           "recovery": {
             "status": "descriptive",
-            "permitted_claim": "Recovery is reported as a Monte Carlo bias interval. Approximate unbiasedness is withheld. This scenario is the persistent level and trend misfit, so the interval is not a recovery diagnostic. This is not a launch recommendation.",
+            "permitted_claim": "The Monte Carlo bias interval does not cover zero. Unbiasedness is withheld. No bias tolerance was predeclared. This scenario is the persistent level and trend misfit, so the interval is not a recovery diagnostic. This is not a launch recommendation.",
             "withheld": [
               "launch-not-qualified",
               "prospective-power-withheld",
               "duration-audit-gap",
+              "unbiasedness-withheld-no-tolerance",
               "unbiasedness-withheld-misfit",
               "unbiasedness-withheld-bias-interval"
             ],
             "reasons": [
+              "unbiasedness-withheld-no-tolerance",
               "unbiasedness-withheld-misfit",
               "unbiasedness-withheld-bias-interval"
             ]
@@ -10721,15 +10734,17 @@
           },
           "recovery": {
             "status": "descriptive",
-            "permitted_claim": "Recovery is reported as a Monte Carlo bias interval. Approximate unbiasedness is withheld. This scenario is the persistent level and trend misfit, so the interval is not a recovery diagnostic. This is not a launch recommendation.",
+            "permitted_claim": "The Monte Carlo bias interval does not cover zero. Unbiasedness is withheld. No bias tolerance was predeclared. This scenario is the persistent level and trend misfit, so the interval is not a recovery diagnostic. This is not a launch recommendation.",
             "withheld": [
               "launch-not-qualified",
               "prospective-power-withheld",
               "duration-audit-gap",
+              "unbiasedness-withheld-no-tolerance",
               "unbiasedness-withheld-misfit",
               "unbiasedness-withheld-bias-interval"
             ],
             "reasons": [
+              "unbiasedness-withheld-no-tolerance",
               "unbiasedness-withheld-misfit",
               "unbiasedness-withheld-bias-interval"
             ]
@@ -15977,14 +15992,16 @@
           },
           "recovery": {
             "status": "descriptive",
-            "permitted_claim": "Recovery is reported as a Monte Carlo bias interval. Approximate unbiasedness is withheld. This scenario is not the correctly specified reference, so the interval is not a recovery diagnostic. This is not a launch recommendation.",
+            "permitted_claim": "The Monte Carlo bias interval covers zero. Unbiasedness is withheld. No bias tolerance was predeclared. This scenario is not the reference scenario, so the interval is not a recovery diagnostic. This is not a launch recommendation.",
             "withheld": [
               "launch-not-qualified",
               "prospective-power-withheld",
               "duration-audit-gap",
+              "unbiasedness-withheld-no-tolerance",
               "unbiasedness-withheld-not-reference"
             ],
             "reasons": [
+              "unbiasedness-withheld-no-tolerance",
               "unbiasedness-withheld-not-reference"
             ]
           }
@@ -16043,14 +16060,16 @@
           },
           "recovery": {
             "status": "descriptive",
-            "permitted_claim": "Recovery is reported as a Monte Carlo bias interval. Approximate unbiasedness is withheld. This scenario is not the correctly specified reference, so the interval is not a recovery diagnostic. This is not a launch recommendation.",
+            "permitted_claim": "The Monte Carlo bias interval covers zero. Unbiasedness is withheld. No bias tolerance was predeclared. This scenario is not the reference scenario, so the interval is not a recovery diagnostic. This is not a launch recommendation.",
             "withheld": [
               "launch-not-qualified",
               "prospective-power-withheld",
               "duration-audit-gap",
+              "unbiasedness-withheld-no-tolerance",
               "unbiasedness-withheld-not-reference"
             ],
             "reasons": [
+              "unbiasedness-withheld-no-tolerance",
               "unbiasedness-withheld-not-reference"
             ]
           }
@@ -16109,14 +16128,16 @@
           },
           "recovery": {
             "status": "descriptive",
-            "permitted_claim": "Recovery is reported as a Monte Carlo bias interval. Approximate unbiasedness is withheld. This scenario is not the correctly specified reference, so the interval is not a recovery diagnostic. This is not a launch recommendation.",
+            "permitted_claim": "The Monte Carlo bias interval covers zero. Unbiasedness is withheld. No bias tolerance was predeclared. This scenario is not the reference scenario, so the interval is not a recovery diagnostic. This is not a launch recommendation.",
             "withheld": [
               "launch-not-qualified",
               "prospective-power-withheld",
               "duration-audit-gap",
+              "unbiasedness-withheld-no-tolerance",
               "unbiasedness-withheld-not-reference"
             ],
             "reasons": [
+              "unbiasedness-withheld-no-tolerance",
               "unbiasedness-withheld-not-reference"
             ]
           }

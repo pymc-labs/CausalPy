@@ -17,9 +17,9 @@ Supported means the protocol conditions for stating the observed count were met.
 
 | Scenario | Lift | Detected | Wrong sign | Null negative tail | Failed | Truth covered | Bias mean | Bias covers zero | Plug-in SE | SE qualified | Operating | Recovery |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| correctly_specified_noisy | 0.00 | 38 | 0 | 34 | 0 | 33/100 | 0.208 | True | 0.0485 | True | supported | supported |
-| correctly_specified_noisy | 0.25 | 60 | 14 | 0 | 0 | 33/100 | 0.208 | True | 0.0490 | True | supported | supported |
-| correctly_specified_noisy | 1.00 | 97 | 1 | 0 | 0 | 33/100 | 0.208 | True | 0.0171 | False | supported | supported |
+| correctly_specified_noisy | 0.00 | 38 | 0 | 34 | 0 | 33/100 | 0.208 | True | 0.0485 | True | supported | descriptive |
+| correctly_specified_noisy | 0.25 | 60 | 14 | 0 | 0 | 33/100 | 0.208 | True | 0.0490 | True | supported | descriptive |
+| correctly_specified_noisy | 1.00 | 97 | 1 | 0 | 0 | 33/100 | 0.208 | True | 0.0171 | False | supported | descriptive |
 | persistent_level_trend_misfit | 0.00 | 100 | 0 | 0 | 0 | 0/100 | 66.668 | False | 0.0000 | False | descriptive | descriptive |
 | persistent_level_trend_misfit | 0.25 | 100 | 0 | 0 | 0 | 0/100 | 66.668 | False | 0.0000 | False | descriptive | descriptive |
 | persistent_level_trend_misfit | 1.00 | 100 | 0 | 0 | 0 | 0/100 | 66.668 | False | 0.0000 | False | descriptive | descriptive |
@@ -33,7 +33,7 @@ correctly_specified_noisy: 95 of 100 panels warned that a pre-period point was o
 persistent_level_trend_misfit: 100 of 100 panels warned that a pre-period point was outside the donor range. Panels were not dropped.
 serially_correlated_errors: 97 of 100 panels warned that a pre-period point was outside the donor range. Panels were not dropped.
 
-The predeclared donor amplitude did not keep observed pre-period points inside the donor range on the correctly specified scenario. That label is therefore confounded by convex-hull warnings. The amplitude was not changed after the counts were seen.
+The reference scenario recorded 95 of 100 convex-hull warnings. That count confounds the label, so it is not a correctly specified recovery diagnostic. The amplitude was not changed after the counts were seen.
 
 ## Comparison
 
@@ -60,43 +60,43 @@ Evidence level: historical-descriptive. Selection windows detected 2 of 3 scored
 
 Lift 0.00. Under protocol issue-914-qualification-v1, scenario 'correctly_specified_noisy', estimator 'synthetic_control', and the shipped positive cumulative decision rule, the study reports the observed detection count with failures included in the denominator of 100 requested panels. 0 fit failures are non-detections, not omitted panels. This is not a launch recommendation, and it is not a claim that the detection target of 0.8 was achieved.
 
-Recovery at lift 0.00. Under the correctly specified scenario, the Monte Carlo bias interval for the cumulative estimand covers zero, with no fit failures in the protocol panel count. This is a statistical diagnostic of approximate unbiasedness, not a theorem and not a launch recommendation.
+Recovery at lift 0.00. The Monte Carlo bias interval covers zero. Unbiasedness is withheld. No bias tolerance was predeclared. 95 convex-hull warnings are recorded, so this is not a correctly specified recovery diagnostic. This is not a launch recommendation.
 
 Lift 0.25. Under protocol issue-914-qualification-v1, scenario 'correctly_specified_noisy', estimator 'synthetic_control', and the shipped positive cumulative decision rule, the study reports the observed detection count with failures included in the denominator of 100 requested panels. 0 fit failures are non-detections, not omitted panels. This is not a launch recommendation, and it is not a claim that the detection target of 0.8 was achieved.
 
-Recovery at lift 0.25. Under the correctly specified scenario, the Monte Carlo bias interval for the cumulative estimand covers zero, with no fit failures in the protocol panel count. This is a statistical diagnostic of approximate unbiasedness, not a theorem and not a launch recommendation.
+Recovery at lift 0.25. The Monte Carlo bias interval covers zero. Unbiasedness is withheld. No bias tolerance was predeclared. 95 convex-hull warnings are recorded, so this is not a correctly specified recovery diagnostic. This is not a launch recommendation.
 
 Lift 1.00. Under protocol issue-914-qualification-v1, scenario 'correctly_specified_noisy', estimator 'synthetic_control', and the shipped positive cumulative decision rule, the study reports the observed detection count with failures included in the denominator of 100 requested panels. 0 fit failures are non-detections, not omitted panels. This is not a launch recommendation, and it is not a claim that the detection target of 0.8 was achieved.
 
-Recovery at lift 1.00. Under the correctly specified scenario, the Monte Carlo bias interval for the cumulative estimand covers zero, with no fit failures in the protocol panel count. This is a statistical diagnostic of approximate unbiasedness, not a theorem and not a launch recommendation.
+Recovery at lift 1.00. The Monte Carlo bias interval covers zero. Unbiasedness is withheld. No bias tolerance was predeclared. 95 convex-hull warnings are recorded, so this is not a correctly specified recovery diagnostic. This is not a launch recommendation.
 
 Model-conditional comparison under the named assumptions: rope_half_width=0 so the engine positive rule matches the shipped tail rule, threshold is the 0.95 tail probability, not the effect threshold of 0, fold SDs are posterior SDs of cumulative impact, not residual SDs, the engine crosses every null draw with every fold SD, a calibration curve does not transport by itself, the learned-null fitter floors fold SDs below 1e-6 internally; the record stores raw SDs. Numerical agreement is not validation, and this is not a launch recommendation.
 
 Lift 0.00. Under protocol issue-914-qualification-v1, scenario 'persistent_level_trend_misfit', estimator 'synthetic_control', and the shipped positive cumulative decision rule, the study reports the observed detection count with failures included in the denominator of 100 requested panels. 0 fit failures are non-detections, not omitted panels. This is not a launch recommendation, and it is not a claim that the detection target of 0.8 was achieved. This scenario is the persistent level and trend misfit. The count describes that biased process. It is not evidence that the estimator recovered an effect.
 
-Recovery at lift 0.00. Recovery is reported as a Monte Carlo bias interval. Approximate unbiasedness is withheld. This scenario is the persistent level and trend misfit, so the interval is not a recovery diagnostic. This is not a launch recommendation.
+Recovery at lift 0.00. The Monte Carlo bias interval does not cover zero. Unbiasedness is withheld. No bias tolerance was predeclared. This scenario is the persistent level and trend misfit, so the interval is not a recovery diagnostic. This is not a launch recommendation.
 
 Lift 0.25. Under protocol issue-914-qualification-v1, scenario 'persistent_level_trend_misfit', estimator 'synthetic_control', and the shipped positive cumulative decision rule, the study reports the observed detection count with failures included in the denominator of 100 requested panels. 0 fit failures are non-detections, not omitted panels. This is not a launch recommendation, and it is not a claim that the detection target of 0.8 was achieved. This scenario is the persistent level and trend misfit. The count describes that biased process. It is not evidence that the estimator recovered an effect.
 
-Recovery at lift 0.25. Recovery is reported as a Monte Carlo bias interval. Approximate unbiasedness is withheld. This scenario is the persistent level and trend misfit, so the interval is not a recovery diagnostic. This is not a launch recommendation.
+Recovery at lift 0.25. The Monte Carlo bias interval does not cover zero. Unbiasedness is withheld. No bias tolerance was predeclared. This scenario is the persistent level and trend misfit, so the interval is not a recovery diagnostic. This is not a launch recommendation.
 
 Lift 1.00. Under protocol issue-914-qualification-v1, scenario 'persistent_level_trend_misfit', estimator 'synthetic_control', and the shipped positive cumulative decision rule, the study reports the observed detection count with failures included in the denominator of 100 requested panels. 0 fit failures are non-detections, not omitted panels. This is not a launch recommendation, and it is not a claim that the detection target of 0.8 was achieved. This scenario is the persistent level and trend misfit. The count describes that biased process. It is not evidence that the estimator recovered an effect.
 
-Recovery at lift 1.00. Recovery is reported as a Monte Carlo bias interval. Approximate unbiasedness is withheld. This scenario is the persistent level and trend misfit, so the interval is not a recovery diagnostic. This is not a launch recommendation.
+Recovery at lift 1.00. The Monte Carlo bias interval does not cover zero. Unbiasedness is withheld. No bias tolerance was predeclared. This scenario is the persistent level and trend misfit, so the interval is not a recovery diagnostic. This is not a launch recommendation.
 
 Model-conditional comparison under the named assumptions: rope_half_width=0 so the engine positive rule matches the shipped tail rule, threshold is the 0.95 tail probability, not the effect threshold of 0, fold SDs are posterior SDs of cumulative impact, not residual SDs, the engine crosses every null draw with every fold SD, a calibration curve does not transport by itself, the learned-null fitter floors fold SDs below 1e-6 internally; the record stores raw SDs. Numerical agreement is not validation, and this is not a launch recommendation.
 
 Lift 0.00. Under protocol issue-914-qualification-v1, scenario 'serially_correlated_errors', estimator 'synthetic_control', and the shipped positive cumulative decision rule, the study reports the observed detection count with failures included in the denominator of 100 requested panels. 0 fit failures are non-detections, not omitted panels. This is not a launch recommendation, and it is not a claim that the detection target of 0.8 was achieved.
 
-Recovery at lift 0.00. Recovery is reported as a Monte Carlo bias interval. Approximate unbiasedness is withheld. This scenario is not the correctly specified reference, so the interval is not a recovery diagnostic. This is not a launch recommendation.
+Recovery at lift 0.00. The Monte Carlo bias interval covers zero. Unbiasedness is withheld. No bias tolerance was predeclared. This scenario is not the reference scenario, so the interval is not a recovery diagnostic. This is not a launch recommendation.
 
 Lift 0.25. Under protocol issue-914-qualification-v1, scenario 'serially_correlated_errors', estimator 'synthetic_control', and the shipped positive cumulative decision rule, the study reports the observed detection count with failures included in the denominator of 100 requested panels. 0 fit failures are non-detections, not omitted panels. This is not a launch recommendation, and it is not a claim that the detection target of 0.8 was achieved.
 
-Recovery at lift 0.25. Recovery is reported as a Monte Carlo bias interval. Approximate unbiasedness is withheld. This scenario is not the correctly specified reference, so the interval is not a recovery diagnostic. This is not a launch recommendation.
+Recovery at lift 0.25. The Monte Carlo bias interval covers zero. Unbiasedness is withheld. No bias tolerance was predeclared. This scenario is not the reference scenario, so the interval is not a recovery diagnostic. This is not a launch recommendation.
 
 Lift 1.00. Under protocol issue-914-qualification-v1, scenario 'serially_correlated_errors', estimator 'synthetic_control', and the shipped positive cumulative decision rule, the study reports the observed detection count with failures included in the denominator of 100 requested panels. 0 fit failures are non-detections, not omitted panels. This is not a launch recommendation, and it is not a claim that the detection target of 0.8 was achieved.
 
-Recovery at lift 1.00. Recovery is reported as a Monte Carlo bias interval. Approximate unbiasedness is withheld. This scenario is not the correctly specified reference, so the interval is not a recovery diagnostic. This is not a launch recommendation.
+Recovery at lift 1.00. The Monte Carlo bias interval covers zero. Unbiasedness is withheld. No bias tolerance was predeclared. This scenario is not the reference scenario, so the interval is not a recovery diagnostic. This is not a launch recommendation.
 
 Model-conditional comparison under the named assumptions: rope_half_width=0 so the engine positive rule matches the shipped tail rule, threshold is the 0.95 tail probability, not the effect threshold of 0, fold SDs are posterior SDs of cumulative impact, not residual SDs, the engine crosses every null draw with every fold SD, a calibration curve does not transport by itself, the learned-null fitter floors fold SDs below 1e-6 internally; the record stores raw SDs. Numerical agreement is not validation, and this is not a launch recommendation.
 
@@ -115,4 +115,4 @@ Product modules were at that commit. Qualification modules were untracked when t
 ?? causalpy/tests/test_qualification.py
 ```
 
-Eligibility labels were re-derived from these stored counts after a policy correction. The panel draws were not refit.
+Eligibility labels were re-derived from these stored counts after a policy correction. Recovery claims withhold unbiasedness: no bias tolerance was predeclared, and the reference hull-warning count confounds that label. The panel draws were not refit.

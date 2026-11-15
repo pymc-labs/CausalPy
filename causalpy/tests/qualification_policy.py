@@ -53,6 +53,8 @@ UNBIASEDNESS_WITHHELD_NOT_REFERENCE = "unbiasedness-withheld-not-reference"
 MISFIT_OPERATING_DESCRIPTIVE = "misfit-operating-descriptive"
 UNBIASEDNESS_WITHHELD_BIAS = "unbiasedness-withheld-bias-interval"
 UNBIASEDNESS_WITHHELD_FAILURES = "unbiasedness-withheld-failures"
+UNBIASEDNESS_WITHHELD_NO_TOLERANCE = "unbiasedness-withheld-no-tolerance"
+HULL_WARNINGS_CONFOUND_LABEL = "hull-warnings-confound-reference"
 CURVE_INAPPLICABLE = "curve-inapplicable"
 NUMERIC_MATCH_NOT_VALIDATION = "numeric-match-not-validation"
 ESTIMATOR_MISMATCH = "estimator-mismatch"
@@ -97,6 +99,7 @@ class EligibilityInput:
     detection_target_applies: bool
     bias_interval_covers_zero: bool
     assumptions_named: tuple[str, ...] = ()
+    hull_warnings: int = 0
 
 
 @dataclass(frozen=True)
@@ -223,7 +226,13 @@ def _operating_claim(item: EligibilityInput) -> str:
 
 
 def _recovery_blockers(item: EligibilityInput) -> list[str]:
-    blockers: list[str] = []
+    """Unbiasedness is withheld unless a bias tolerance was predeclared.
+
+    The protocol has no such tolerance. An interval that covers zero is a
+    count, not support. Hull warnings on the reference also block calling
+    that scenario a correctly specified recovery diagnostic.
+    """
+    blockers = [UNBIASEDNESS_WITHHELD_NO_TOLERANCE]
     if item.scenario == MISFIT_SCENARIO:
         blockers.append(UNBIASEDNESS_WITHHELD_MISFIT)
     elif item.scenario != REFERENCE_SCENARIO:
@@ -238,6 +247,8 @@ def _recovery_blockers(item: EligibilityInput) -> list[str]:
         blockers.append(UNBIASEDNESS_WITHHELD_BIAS)
     if item.estimator != ESTIMATOR:
         blockers.append(ESTIMATOR_MISMATCH)
+    if item.scenario == REFERENCE_SCENARIO and item.hull_warnings > 0:
+        blockers.append(HULL_WARNINGS_CONFOUND_LABEL)
     return blockers
 
 
@@ -252,24 +263,33 @@ def _comparison_blockers(item: EligibilityInput) -> list[str]:
     return blockers
 
 
-def _withheld_recovery_claim(blockers: list[str]) -> str:
-    """Name the structural reason. Do not reuse the misfit sentence elsewhere."""
+def _recovery_claim(item: EligibilityInput, blockers: list[str]) -> str:
+    """State the interval. Do not call covering zero approximate unbiasedness."""
+    if item.bias_interval_covers_zero:
+        interval = "The Monte Carlo bias interval covers zero. "
+    else:
+        interval = "The Monte Carlo bias interval does not cover zero. "
+    parts = [
+        interval,
+        "Unbiasedness is withheld. No bias tolerance was predeclared. ",
+    ]
     if UNBIASEDNESS_WITHHELD_MISFIT in blockers:
-        reason = (
+        parts.append(
             "This scenario is the persistent level and trend misfit, so the "
             "interval is not a recovery diagnostic. "
         )
     elif UNBIASEDNESS_WITHHELD_NOT_REFERENCE in blockers:
-        reason = (
-            "This scenario is not the correctly specified reference, so the "
-            "interval is not a recovery diagnostic. "
+        parts.append(
+            "This scenario is not the reference scenario, so the interval is "
+            "not a recovery diagnostic. "
         )
-    else:
-        reason = ""
-    return (
-        "Recovery is reported as a Monte Carlo bias interval. Approximate "
-        "unbiasedness is withheld. " + reason + "This is not a launch recommendation."
-    )
+    if HULL_WARNINGS_CONFOUND_LABEL in blockers:
+        parts.append(
+            f"{item.hull_warnings} convex-hull warnings are recorded, so this "
+            "is not a correctly specified recovery diagnostic. "
+        )
+    parts.append("This is not a launch recommendation.")
+    return "".join(parts)
 
 
 def decide(item: EligibilityInput) -> EligibilityDecision:
@@ -355,24 +375,11 @@ def decide(item: EligibilityInput) -> EligibilityDecision:
         )
     if item.kind == "recovery-summary":
         blockers = _recovery_blockers(item)
-        if blockers:
-            return EligibilityDecision(
-                status="descriptive",
-                permitted_claim=_withheld_recovery_claim(blockers),
-                withheld=tuple(dict.fromkeys([*withheld, *blockers])),
-                reasons=tuple(blockers),
-            )
         return EligibilityDecision(
-            status="supported",
-            permitted_claim=(
-                "Under the correctly specified scenario, the Monte Carlo bias "
-                "interval for the cumulative estimand covers zero, with no fit "
-                "failures in the protocol panel count. This is a statistical "
-                "diagnostic of approximate unbiasedness, not a theorem and not "
-                "a launch recommendation."
-            ),
-            withheld=withheld,
-            reasons=("Bias interval covers zero on the correctly specified scenario.",),
+            status="descriptive",
+            permitted_claim=_recovery_claim(item, blockers),
+            withheld=tuple(dict.fromkeys([*withheld, *blockers])),
+            reasons=tuple(blockers),
         )
     if item.kind != "operating-summary":
         raise ValueError(f"Unknown eligibility kind {item.kind!r}.")
@@ -441,4 +448,34 @@ def operating_input_from_summary(summary: Mapping[str, object]) -> EligibilityIn
         calibration_applicable=bool(summary["calibration_applicable"]),
         detection_target_applies=bool(summary["detection_target_applies"]),
         bias_interval_covers_zero=bool(summary["bias_interval_covers_zero"]),
+    )
+
+
+def recovery_input_from_summary(
+    summary: Mapping[str, object], *, hull_warnings: int
+) -> EligibilityInput:
+    """Build the recovery claim from a stored lift and its scenario hull count.
+
+    The ordinary CI test uses this so a stored ``supported`` label cannot
+    outlive the policy. The hull count is the scenario total, not a lift field.
+    """
+    return EligibilityInput(
+        kind="recovery-summary",
+        scenario=str(summary["scenario"]),
+        estimator=str(summary["estimator"]),
+        n_requested=int(summary["n_requested"]),
+        n_failed=int(summary["n_failed"]),
+        failures_in_denominator=True,
+        windows_independent=True,
+        null_tolerance_requested=None,
+        claimed_detection_se=None,
+        launch_requested=False,
+        prospective_power_requested=False,
+        numeric_match_is_validation=False,
+        depends_on_translation=False,
+        translation_identity_ok=True,
+        calibration_applicable=False,
+        detection_target_applies=False,
+        bias_interval_covers_zero=bool(summary["bias_interval_covers_zero"]),
+        hull_warnings=hull_warnings,
     )

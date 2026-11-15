@@ -57,6 +57,7 @@ from causalpy.tests.qualification_policy import (
     binomial_rate,
     decide,
     operating_input_from_summary,
+    recovery_input_from_summary,
 )
 from causalpy.tests.qualification_protocol import (
     ABSOLUTE_LIFTS,
@@ -716,28 +717,10 @@ def _label(value: Any) -> Any:
     return value
 
 
-def _recovery_decision(summary: dict[str, Any]) -> dict[str, Any]:
-    decision = decide(
-        EligibilityInput(
-            kind="recovery-summary",
-            scenario=str(summary["scenario"]),
-            estimator=PROTOCOL.estimator,
-            n_requested=int(summary["n_requested"]),
-            n_failed=int(summary["n_failed"]),
-            failures_in_denominator=True,
-            windows_independent=True,
-            null_tolerance_requested=None,
-            claimed_detection_se=None,
-            launch_requested=False,
-            prospective_power_requested=False,
-            numeric_match_is_validation=False,
-            depends_on_translation=False,
-            translation_identity_ok=True,
-            calibration_applicable=False,
-            detection_target_applies=False,
-            bias_interval_covers_zero=bool(summary["bias_interval_covers_zero"]),
-        )
-    )
+def _recovery_decision(
+    summary: dict[str, Any], *, hull_warnings: int
+) -> dict[str, Any]:
+    decision = decide(recovery_input_from_summary(summary, hull_warnings=hull_warnings))
     return {
         "status": decision.status,
         "permitted_claim": decision.permitted_claim,
@@ -774,8 +757,11 @@ def run_qualification(
             )
             for lift in (0.0, *ABSOLUTE_LIFTS)
         ]
+        hull_warnings = sum(panel["hull_warnings"] for panel in panels)
         for lift_summary in lifts:
-            lift_summary["recovery"] = _recovery_decision(lift_summary)
+            lift_summary["recovery"] = _recovery_decision(
+                lift_summary, hull_warnings=hull_warnings
+            )
         comparison = None
         if requested == PROTOCOL.n_panels:
             comparison = _operating_comparison(
