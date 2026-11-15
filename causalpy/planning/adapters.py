@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Literal
 
 import pandas as pd
 import xarray as xr
@@ -71,7 +71,7 @@ from causalpy.planning.reference import (
 )
 
 _IMPACT_DIMS = ("chain", "draw", "obs_ind", "treated_units")
-_TRAINING_POLICY = "separate-fits"
+_TRAINING_POLICY: Literal["separate-fits"] = "separate-fits"
 
 AUGMENTED_WEIGHT_POLICY = "per_unit_dirichlet_then_draw_aligned_sum"
 INTERACTIVE_FIXED_EFFECTS_WEIGHT_POLICY = "shared_factors_then_draw_aligned_sum"
@@ -630,8 +630,8 @@ def _build_registered(
     max_factors: int | None,
 ) -> _RegisteredAdapter:
     cls = ADAPTERS[estimator]
-    if estimator == "interactive_fixed_effects":
-        return cls(
+    if cls is InteractiveFixedEffectsAdapter:
+        return InteractiveFixedEffectsAdapter(
             model=None,
             sample_kwargs=sample_kwargs,
             random_seed=random_seed,
