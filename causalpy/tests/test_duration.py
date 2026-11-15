@@ -376,3 +376,145 @@ def test_shared_engine_fits_each_eligible_window_once(monkeypatch):
     assert comparison.n_inference_fits >= 4
     assert all(row.recommendation == "not-supported" for row in comparison.rows)
     assert comparison.summary()["zero_lift_bias_cumulative"].notna().all()
+
+
+def test_fit_failed_score_is_not_kept_as_a_detection(monkeypatch):
+    translated = []
+
+    def fake_fit(self, *args, **kwargs):
+        return self
+
+    def fake_score(experiment, window, decision):
+        return WindowReplay(
+            plan=window,
+            status="fit-failed",
+            reason=(
+                "non-finite impact; a missing period was not dropped from the score."
+            ),
+            n_inference_fits=1,
+        )
+
+    def fake_translate(experiment, planner, prepared, window):
+        translated.append(window.origin)
+        return [
+            DurationWindow(
+                origin=window.origin,
+                duration=window.horizon,
+                status="scored",
+                reason=None,
+                training_index=tuple(window.training_index),
+                holdout_index=tuple(window.holdout_index),
+                bias_cumulative=0.0,
+                bias_average=0.0,
+                estimand="cumulative",
+                mean=1.0,
+                hdi_lower=0.5,
+                hdi_upper=1.5,
+                truth=0.0,
+                truth_covers=False,
+                detected=True,
+                tail_probability=1.0,
+            )
+        ]
+
+    monkeypatch.setattr(SyntheticControl, "fit", fake_fit)
+    monkeypatch.setattr("causalpy.historical_validation._score_window", fake_score)
+    monkeypatch.setattr("causalpy.duration._translate_window", fake_translate)
+    monkeypatch.setattr(
+        "causalpy.historical_validation._calibration_from_windows",
+        lambda *args, **kwargs: (SimpleNamespace(evidence_level="inapplicable"), 0),
+    )
+    comparison = _planner().compare_durations(
+        (2,),
+        (2,),
+        absolute_lifts=(1.0,),
+        target_lift=0.0,
+        sample_kwargs=LIGHT,
+    )
+    summary = comparison.summary()
+    detail = comparison.detail()
+    assert translated == []
+    assert int(summary["failed_count"].sum()) == 1
+    assert int(summary["historical_detection_count"].fillna(0).sum()) == 0
+    assert set(detail["status"]) == {"fit-failed"}
+    assert not detail["detected"].fillna(False).any()
+
+
+def test_partial_audit_is_not_a_complete_historical_description(monkeypatch):
+    def fake_replay(*args, **kwargs):
+        window = args[3]
+        return (
+            WindowReplay(
+                plan=window,
+                status="scored",
+                reason=None,
+                bias_cumulative=0.0,
+                bias_average=0.0,
+                n_inference_fits=1,
+            ),
+            1,
+        )
+
+    monkeypatch.setattr("causalpy.historical_validation._replay_window", fake_replay)
+    planner = _planner()
+    comparison = planner.compare_durations(
+        (2,),
+        (2,),
+        audit_origins=(4, 6),
+        exclusions=(5,),
+        absolute_lifts=(1.0,),
+        target_lift=0.0,
+        sample_kwargs=LIGHT,
+    )
+    audit = comparison.freeze(2).audit(planner.history)
+    assert audit.selected_duration == 2
+    assert audit.requested_count == 2
+    assert audit.scored_count == 1
+    assert audit.failed_count == 0
+    assert audit.status == "inconclusive"
+    assert audit.recommendation().startswith("No supported recommendation")
+
+
+def test_execute_drops_excluded_labels_and_refuses_the_excluded_split(monkeypatch):
+    captured: list[tuple[list[int], object]] = []
+
+    class _Recorder:
+        def __init__(self, data, treatment_time, **kwargs):
+            captured.append((list(data.index), treatment_time))
+
+        def fit(self):
+            return self
+
+    monkeypatch.setattr(
+        "causalpy.historical_validation._replay_window",
+        lambda *args, **kwargs: (
+            WindowReplay(
+                plan=args[3],
+                status="scored",
+                reason=None,
+                bias_cumulative=0.0,
+                bias_average=0.0,
+                n_inference_fits=1,
+            ),
+            1,
+        ),
+    )
+    planner = _planner()
+    spec = planner.compare_durations(
+        (2,),
+        (4,),
+        exclusions=(1, 6),
+        absolute_lifts=(1.0,),
+        target_lift=0.0,
+        sample_kwargs={"draws": 8, "chains": 1},
+    ).freeze(2)
+    monkeypatch.setattr(
+        "causalpy.experiments.synthetic_control.SyntheticControl",
+        _Recorder,
+    )
+    spec.execute(planner.history, 4)
+    assert captured == [([0, 2, 3, 4, 5, 7], 4)]
+    with pytest.raises(ValueError, match="treatment_time"):
+        spec.execute(planner.history, 1)
+    with pytest.raises(ValueError, match="not in the history index"):
+        spec.execute(planner.history.drop(index=[1]), 4)

@@ -576,12 +576,16 @@ class AnalysisSpecification:
         ----------
         history : pandas.DataFrame
             Analysis frame. It is not required to be the comparison frame.
-            Training is every row strictly before ``treatment_time``, which
-            matches a comparison window when ``treatment_time`` is that
-            window's origin and the frame starts at the same first label.
+            Training is every non-excluded row strictly before
+            ``treatment_time``. That matches a comparison window when
+            ``treatment_time`` is that window's origin, the frame starts at
+            the same first label, and the frozen exclusions are removed from
+            training and holdout. An exclusion equal to ``treatment_time``
+            is refused rather than shifting the split.
         treatment_time : index label
             Post-period start. The frozen duration is the planned holdout
             length; rows at and after this label are the analysis post-period.
+            Frozen exclusions are removed before the fit.
 
         Returns
         -------
@@ -1314,9 +1318,10 @@ def _evaluate(
             else:
                 fit_seconds += fit_finished - fit_started
             replays.append(replay)
-            batch = captured[0] if captured else []
+            batch = captured[0] if captured and replay.status == "scored" else []
             translated.extend(_attach_bias(batch, replay))
         evidence = historical_validation._replay_evidence(replays)
+        null_started = time.perf_counter()
         calibration, null_fits = historical_validation._calibration_from_windows(
             replays,
             rope_half_width=0.0,
@@ -1325,6 +1330,7 @@ def _evaluate(
             sample_kwargs=dict(template.sample_kwargs),
             random_seed=planner.random_seed,
         )
+        fit_seconds += time.perf_counter() - null_started
         duration_fits += null_fits
         total_fits += duration_fits
         evidence_levels.append(evidence[0])
@@ -1660,11 +1666,8 @@ def _audit_specification(
         spec.control_units,
         request,
     )
-    usable = [
-        window
-        for window in schedule.windows
-        if window.role == "selection" and window.status == "usable"
-    ]
+    planned = [window for window in schedule.windows if window.role == "selection"]
+    usable = [window for window in planned if window.status == "usable"]
     if not usable:
         return DurationAudit(
             status="inconclusive",
@@ -1674,7 +1677,7 @@ def _audit_specification(
             n_inference_fits=0,
             scored_count=0,
             failed_count=0,
-            requested_count=len(schedule.windows),
+            requested_count=len(planned),
             reasons=(
                 "The frozen duration has no usable audit window. "
                 "The selected duration was not changed.",
@@ -1697,7 +1700,16 @@ def _audit_specification(
     )
     replays: list[WindowReplay] = []
     fits = 0
-    for window in usable:
+    for window in planned:
+        if window.status != "usable":
+            replays.append(
+                historical_validation.WindowReplay(
+                    plan=window,
+                    status="not-run",
+                    reason=window.reason,
+                )
+            )
+            continue
         replay, attempts = historical_validation._replay_window(
             frame,
             spec.treated_unit,
@@ -1720,8 +1732,10 @@ def _audit_specification(
         status: AuditStatus = "inconclusive"
     elif persistent or failed or level == "fit-failed":
         status = "limitation"
-    else:
+    elif scored == len(planned):
         status = "historical-descriptive"
+    else:
+        status = "inconclusive"
     text = _recommendation_text(
         status, level, persistent, selected_duration=spec.selected_duration
     )
@@ -1748,6 +1762,14 @@ def _execute_specification(
     frame = to_pandas_with_time_index(
         history, spec.time_column, argument_name="history"
     )
+    if spec.exclusions:
+        excluded = historical_validation._stored_labels(frame.index, spec.exclusions)
+        position = historical_validation._label_position(frame.index, treatment_time)
+        if position is not None and frame.index[position] in excluded:
+            raise ValueError(
+                "treatment_time is an excluded label; refusing to shift the split."
+            )
+        frame = frame.drop(index=list(excluded))
     template = historical_validation._replay_template(
         spec.template, None, spec.random_seed
     )

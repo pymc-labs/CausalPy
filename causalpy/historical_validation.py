@@ -1729,8 +1729,9 @@ def _replay_window(
 ) -> tuple[WindowReplay, int]:
     """Fit one window, or record why it was not fitted.
 
-    ``on_scored`` runs only after a successful fit, before the experiment is
-    dropped. It is the duration workflow's translation hook. Callers must copy
+    ``on_scored`` runs only when the replay status is ``scored``, before the
+    experiment is dropped. A fit whose impact is non-finite is not scored.
+    It is the duration workflow's translation hook. Callers must copy
     the scalars they need and must not retain the experiment or its draws.
     """
     if window.status != "usable":
@@ -1812,7 +1813,7 @@ def _replay_window(
             1,
         )
     replay = _score_window(experiment, window, decision)
-    if on_scored is not None:
+    if on_scored is not None and replay.status == "scored":
         on_scored(experiment, window)
     return replay, 1
 
