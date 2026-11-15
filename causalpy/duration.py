@@ -346,8 +346,10 @@ class DurationComparison:
         Returns
         -------
         str
-            States the evidence level and that no duration was selected.
-            Persistent bias, when present, is named and not corrected.
+            States the status when the result is not a historical
+            description, and states the evidence level. No duration was
+            selected. Persistent bias, when present, is named and not
+            corrected.
         """
         return _recommendation_text(
             self.status,
@@ -577,15 +579,15 @@ class AnalysisSpecification:
         history : pandas.DataFrame
             Analysis frame. It is not required to be the comparison frame.
             Training is every non-excluded row strictly before
-            ``treatment_time``. That matches a comparison window when
-            ``treatment_time`` is that window's origin, the frame starts at
-            the same first label, and the frozen exclusions are removed from
-            training and holdout. An exclusion equal to ``treatment_time``
-            is refused rather than shifting the split.
+            ``treatment_time``. The post-period is the frozen holdout of
+            ``selected_duration`` labels under the frozen cadence. Later
+            rows, cadence gaps, and exclusions are not fit. An exclusion
+            equal to ``treatment_time`` is refused rather than shifting the
+            split. If the frame cannot supply that holdout, ``execute``
+            raises rather than fitting a shorter or different window.
         treatment_time : index label
             Post-period start. The frozen duration is the planned holdout
-            length; rows at and after this label are the analysis post-period.
-            Frozen exclusions are removed before the fit.
+            length, not every row at and after this label.
 
         Returns
         -------
@@ -684,12 +686,17 @@ def _recommendation_text(
             f"The recorded duration is {selected_duration}. "
             "Recording a duration is the caller's choice, not a recommendation."
         )
-    if evidence_level is None:
-        parts.append(f"Status: {status}. No replay evidence is available.")
-    else:
+    if status == "historical-descriptive" and evidence_level is not None:
         parts.append(
             f"Evidence level: {evidence_level}. "
             "This is a historical description, not a power curve and not a launch claim."
+        )
+    elif evidence_level is None:
+        parts.append(f"Status: {status}. No replay evidence is available.")
+    else:
+        parts.append(
+            f"Status: {status}. Evidence level: {evidence_level}. "
+            "This is not a historical description, not a power curve, and not a launch claim."
         )
     if persistent_bias:
         parts.append(
@@ -1769,13 +1776,35 @@ def _execute_specification(
             raise ValueError(
                 "treatment_time is an excluded label; refusing to shift the split."
             )
-        frame = frame.drop(index=list(excluded))
+    request = historical_validation.ScheduleRequest(
+        selection_origins=(treatment_time,),
+        horizons=(spec.selected_duration,),
+        exclusions=spec.exclusions,
+        cadence=spec.cadence,
+        min_training_periods=spec.min_training_periods,
+    )
+    schedule = historical_validation.validate_schedule(
+        frame,
+        spec.treated_unit,
+        spec.control_units,
+        request,
+    )
+    planned = [window for window in schedule.windows if window.role == "selection"]
+    window = planned[0]
+    if window.status != "usable":
+        raise ValueError(
+            "The frozen duration cannot be executed at "
+            f"{treatment_time!r}: {window.reason}"
+        )
+    analysis = frame.loc[
+        list(window.analysis_index), [spec.treated_unit, *spec.control_units]
+    ]
     template = historical_validation._replay_template(
-        spec.template, None, spec.random_seed
+        spec.template, spec.sample_kwargs, spec.random_seed
     )
     experiment = SyntheticControl(
-        frame,
-        treatment_time,
+        analysis.copy(),
+        window.origin,
         control_units=list(spec.control_units),
         treated_units=[spec.treated_unit],
         model=template,

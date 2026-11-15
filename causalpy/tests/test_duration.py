@@ -286,9 +286,13 @@ def test_one_translation_per_window_and_freeze_audits_only_that_duration(monkeyp
     assert audit.selected_duration == 2
     assert calls == [(6, 2, "selection")]
     assert "No supported recommendation." in audit.recommendation()
+    assert "This is a historical description," in audit.recommendation()
     failed = spec.audit(planner.history.iloc[:4])
     assert failed.status == "inconclusive"
     assert failed.selected_duration == 2
+    failed_text = failed.recommendation()
+    assert "Status: inconclusive." in failed_text
+    assert "This is a historical description," not in failed_text
 
 
 def test_execute_uses_the_stored_units_without_resampling_the_comparison(monkeypatch):
@@ -438,6 +442,9 @@ def test_fit_failed_score_is_not_kept_as_a_detection(monkeypatch):
     assert int(summary["historical_detection_count"].fillna(0).sum()) == 0
     assert set(detail["status"]) == {"fit-failed"}
     assert not detail["detected"].fillna(False).any()
+    failed_text = comparison.recommendation()
+    assert "Status: fit-failed." in failed_text
+    assert "This is a historical description," not in failed_text
 
 
 def test_partial_audit_is_not_a_complete_historical_description(monkeypatch):
@@ -473,6 +480,9 @@ def test_partial_audit_is_not_a_complete_historical_description(monkeypatch):
     assert audit.failed_count == 0
     assert audit.status == "inconclusive"
     assert audit.recommendation().startswith("No supported recommendation")
+    partial_text = audit.recommendation()
+    assert "Status: inconclusive." in partial_text
+    assert "This is a historical description," not in partial_text
 
 
 def test_execute_drops_excluded_labels_and_refuses_the_excluded_split(monkeypatch):
@@ -513,8 +523,68 @@ def test_execute_drops_excluded_labels_and_refuses_the_excluded_split(monkeypatc
         _Recorder,
     )
     spec.execute(planner.history, 4)
-    assert captured == [([0, 2, 3, 4, 5, 7], 4)]
+    assert captured == [([0, 2, 3, 4, 5], 4)]
     with pytest.raises(ValueError, match="treatment_time"):
         spec.execute(planner.history, 1)
     with pytest.raises(ValueError, match="not in the history index"):
         spec.execute(planner.history.drop(index=[1]), 4)
+
+
+def test_execute_fits_only_the_frozen_holdout_and_keeps_the_comparison_seed(
+    monkeypatch,
+):
+    captured: list[tuple[list[int], object, dict[str, object]]] = []
+
+    class _Recorder:
+        def __init__(self, data, treatment_time, **kwargs):
+            captured.append(
+                (
+                    list(data.index),
+                    treatment_time,
+                    dict(kwargs["model"].sample_kwargs),
+                )
+            )
+
+        def fit(self):
+            return self
+
+    monkeypatch.setattr(
+        "causalpy.historical_validation._replay_window",
+        lambda *args, **kwargs: (
+            WindowReplay(
+                plan=args[3],
+                status="scored",
+                reason=None,
+                bias_cumulative=0.0,
+                bias_average=0.0,
+                n_inference_fits=1,
+            ),
+            1,
+        ),
+    )
+    planner = _planner()
+    spec = planner.compare_durations(
+        (2,),
+        (4,),
+        cadence=2,
+        absolute_lifts=(1.0,),
+        target_lift=0.0,
+        sample_kwargs={"draws": 8, "chains": 1, "random_seed": 99},
+    ).freeze(2)
+    assert spec.random_seed == 7
+    assert spec.sample_kwargs["random_seed"] == 99
+    monkeypatch.setattr(
+        "causalpy.experiments.synthetic_control.SyntheticControl",
+        _Recorder,
+    )
+    spec.execute(planner.history, 4)
+    assert len(captured) == 1
+    index, treatment_time, sample_kwargs = captured[0]
+    assert index == [0, 1, 2, 3, 4, 6]
+    assert 5 not in index
+    assert 7 not in index
+    assert treatment_time == 4
+    assert sample_kwargs["draws"] == 8
+    assert sample_kwargs["random_seed"] == 99
+    with pytest.raises(ValueError, match="cannot be executed"):
+        spec.execute(planner.history.iloc[:5], 4)
