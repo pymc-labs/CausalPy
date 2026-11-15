@@ -45,6 +45,18 @@ import xarray as xr
 
 from causalpy._arviz_compat import hdi_bounds
 from causalpy.constants import HDI_PROB
+from causalpy.duration import (
+    DEFAULT_MAX_FITS,
+    MAX_WINDOW_BYTES,
+    AnalysisSpecification,
+    DurationAudit,
+    DurationComparison,
+    DurationPreview,
+    DurationProfile,
+    DurationRow,
+    DurationWindow,
+    OriginEligibility,
+)
 from causalpy.experiments.synthetic_control import SyntheticControl
 from causalpy.historical_validation import (
     HISTORICAL_REPLAY_ASSUMPTIONS,
@@ -64,14 +76,24 @@ from causalpy.pymc_models import WeightedSumFitter
 from causalpy.utils import check_convex_hull_violation
 
 __all__ = [
+    "AnalysisSpecification",
     "CalibrationRecord",
+    "DEFAULT_MAX_FITS",
     "DecisionRule",
+    "DurationAudit",
+    "DurationComparison",
+    "DurationPreview",
+    "DurationProfile",
+    "DurationRow",
+    "DurationWindow",
     "EvidenceLevel",
     "HISTORICAL_REPLAY_ASSUMPTIONS",
     "HistoricalReplay",
     "HistoricalSchedule",
     "HorizonEvaluation",
     "LiftScore",
+    "MAX_WINDOW_BYTES",
+    "OriginEligibility",
     "PlannerResult",
     "ScheduleCounts",
     "ScheduleRequest",
@@ -461,12 +483,11 @@ class SyntheticControlPlanner:
     translates that fit. :meth:`screen` reports donor correlation and convex-hull
     coverage without fitting.
 
-    Each duration holds out its own tail and is fitted separately. A shorter
-    duration is not a prefix of a longer one: it trains on rows the longer
-    horizon holds out. Prefix reuse is not enabled. Enabling it would require
-    an equivalence test against these separate fits and a data-boundary test
-    showing the reused fit does not see donor outcomes past the shorter
-    horizon.
+    :meth:`preview_durations` and :meth:`compare_durations` compare common
+    historical origins. Each duration is its own fit, and the training window
+    is the pre-origin prefix. They do not replace :meth:`evaluate`, and they
+    do not select a duration or emit a launch recommendation. Prefix reuse
+    stays disabled: a trailing-tail horizon is not a prefix of a longer one.
 
     Parameters
     ----------
@@ -763,6 +784,241 @@ class SyntheticControlPlanner:
             random_seed=self.random_seed,
             n_inference_fits=sum(horizon.n_inference_fits for horizon in horizons),
             horizons=tuple(horizons),
+        )
+
+    def preview_durations(
+        self,
+        durations: Sequence[int],
+        selection_origins: Sequence[Any],
+        *,
+        audit_origins: Sequence[Any] = (),
+        relative_lifts: Sequence[float] | None = None,
+        absolute_lifts: Sequence[float] | None = None,
+        target_lift: float,
+        target_scale: str | None = None,
+        exclusions: Sequence[Any] = (),
+        cadence: Any = None,
+        max_fits: int = DEFAULT_MAX_FITS,
+        fit_cost: float | None = None,
+        min_training_periods: int = 2,
+        sample_kwargs: dict[str, Any] | None = None,
+    ) -> DurationPreview:
+        """Preview common-origin duration cost without sampling.
+
+        This is not :meth:`evaluate`. An origin is eligible only when every
+        requested duration has a usable pre-origin window there. The expected
+        fit count is eligible origins times durations, plus at most one
+        learned-null fit per duration. Nothing is sampled, and no duration
+        is selected.
+
+        Parameters
+        ----------
+        durations : sequence of int
+            Positive unique Python ints. Each is a separate fit.
+        selection_origins : sequence
+            Origins that must support every requested duration to be eligible.
+        audit_origins : sequence, optional
+            Reserved for :meth:`AnalysisSpecification.audit`. Not fitted here.
+        relative_lifts, absolute_lifts : sequence of float, optional
+            Lift grids. Zero is added as the paired null. At least one scale
+            is required. Pass the scale explicitly when the target is in both.
+        target_lift : float
+            Lift whose historical detections are reported. Must be in the
+            requested grid, including the auto-added zero.
+        target_scale : {'absolute', 'relative'}, optional
+            Required when ``target_lift`` is in both grids.
+        exclusions : sequence, optional
+            Labels removed from training and holdout. Unknown labels raise.
+        cadence : int, str, pandas offset, or None, optional
+            Forward holdout cadence. None uses successive index labels.
+        max_fits : int, default 24
+            Counterfactual fits plus the learned-null upper bound. Zero is a
+            valid refusal. Exceeding it returns ``budget-exhausted``.
+        fit_cost : float, optional
+            Optional non-negative cost per inference fit. Absent means the
+            preview reports the fit count and leaves cost empty.
+        min_training_periods : int, default 2
+            Minimum pre-origin rows. A shorter prefix is ineligible.
+        sample_kwargs : dict, optional
+            Merged over the planner template. ``draws`` lets the preview
+            estimate one window's arrays. Omitted ``chains`` counts as 4,
+            matching the comparison's injected default. The template is not
+            mutated.
+
+        Returns
+        -------
+        DurationPreview
+            Eligibility, expected fits, and a status of ``ready``,
+            ``insufficient-history``, ``budget-exhausted``, or
+            ``memory-exhausted``.
+        """
+        from causalpy.duration import _preview_durations
+
+        return _preview_durations(
+            self,
+            durations,
+            selection_origins=selection_origins,
+            audit_origins=audit_origins,
+            relative_lifts=relative_lifts,
+            absolute_lifts=absolute_lifts,
+            target_lift=target_lift,
+            target_scale=target_scale,
+            exclusions=exclusions,
+            cadence=cadence,
+            max_fits=max_fits,
+            fit_cost=fit_cost,
+            min_training_periods=min_training_periods,
+            sample_kwargs=sample_kwargs,
+        )
+
+    def compare_durations(
+        self,
+        durations: Sequence[int],
+        selection_origins: Sequence[Any],
+        *,
+        audit_origins: Sequence[Any] = (),
+        relative_lifts: Sequence[float] | None = None,
+        absolute_lifts: Sequence[float] | None = None,
+        target_lift: float,
+        target_scale: str | None = None,
+        exclusions: Sequence[Any] = (),
+        cadence: Any = None,
+        max_fits: int = DEFAULT_MAX_FITS,
+        fit_cost: float | None = None,
+        min_training_periods: int = 2,
+        sample_kwargs: dict[str, Any] | None = None,
+    ) -> DurationComparison:
+        """Compare durations on common origins. Does not select one.
+
+        Each eligible origin and duration is fitted once through the shared
+        historical-replay engine. Lifts are translated from that fit and the
+        draws are dropped. A refused preview is returned without fitting, and
+        the sampler settings are not reduced.
+
+        Parameters
+        ----------
+        durations : sequence of int
+            Same contract as :meth:`preview_durations`.
+        selection_origins : sequence
+            Same contract as :meth:`preview_durations`.
+        audit_origins : sequence, optional
+            Same contract as :meth:`preview_durations`.
+        relative_lifts, absolute_lifts : sequence of float, optional
+            Same contract as :meth:`preview_durations`.
+        target_lift : float
+            Same contract as :meth:`preview_durations`.
+        target_scale : {'absolute', 'relative'}, optional
+            Same contract as :meth:`preview_durations`.
+        exclusions : sequence, optional
+            Same contract as :meth:`preview_durations`.
+        cadence : int, str, pandas offset, or None, optional
+            Same contract as :meth:`preview_durations`.
+        max_fits : int, default 24
+            Same contract as :meth:`preview_durations`.
+        fit_cost : float, optional
+            Same contract as :meth:`preview_durations`.
+        min_training_periods : int, default 2
+            Same contract as :meth:`preview_durations`.
+        sample_kwargs : dict, optional
+            Same contract as :meth:`preview_durations`. Must include
+            ``draws`` before any fit starts.
+
+        Returns
+        -------
+        DurationComparison
+            Per-duration evidence, zero-lift bias, and historical detection
+            counts. ``recommendation`` is unsupported. ``freeze`` records a
+            caller-chosen duration; it does not pick one.
+        """
+        from causalpy.duration import _compare_durations
+
+        return _compare_durations(
+            self,
+            durations,
+            selection_origins=selection_origins,
+            audit_origins=audit_origins,
+            relative_lifts=relative_lifts,
+            absolute_lifts=absolute_lifts,
+            target_lift=target_lift,
+            target_scale=target_scale,
+            exclusions=exclusions,
+            cadence=cadence,
+            max_fits=max_fits,
+            fit_cost=fit_cost,
+            min_training_periods=min_training_periods,
+            sample_kwargs=sample_kwargs,
+        )
+
+    def profile_durations(
+        self,
+        durations: Sequence[int],
+        selection_origins: Sequence[Any],
+        *,
+        audit_origins: Sequence[Any] = (),
+        relative_lifts: Sequence[float] | None = None,
+        absolute_lifts: Sequence[float] | None = None,
+        target_lift: float,
+        target_scale: str | None = None,
+        exclusions: Sequence[Any] = (),
+        cadence: Any = None,
+        max_fits: int = DEFAULT_MAX_FITS,
+        fit_cost: float | None = None,
+        min_training_periods: int = 2,
+        sample_kwargs: dict[str, Any] | None = None,
+    ) -> DurationProfile:
+        """Run the comparison twice and record cold and warm wall time.
+
+        Parameters
+        ----------
+        durations : sequence of int
+            Same contract as :meth:`compare_durations`.
+        selection_origins : sequence
+            Same contract as :meth:`compare_durations`.
+        audit_origins : sequence, optional
+            Same contract as :meth:`compare_durations`.
+        relative_lifts, absolute_lifts : sequence of float, optional
+            Same contract as :meth:`compare_durations`.
+        target_lift : float
+            Same contract as :meth:`compare_durations`.
+        target_scale : {'absolute', 'relative'}, optional
+            Same contract as :meth:`compare_durations`.
+        exclusions : sequence, optional
+            Same contract as :meth:`compare_durations`.
+        cadence : int, str, pandas offset, or None, optional
+            Same contract as :meth:`compare_durations`.
+        max_fits : int, default 24
+            Same contract as :meth:`compare_durations`.
+        fit_cost : float, optional
+            Same contract as :meth:`compare_durations`.
+        min_training_periods : int, default 2
+            Same contract as :meth:`compare_durations`.
+        sample_kwargs : dict, optional
+            Same contract as :meth:`compare_durations`.
+
+        Returns
+        -------
+        DurationProfile
+            Cold and warm seconds, the fit-versus-score split, and the
+            process peak RSS. The peak includes the PyTensor cache. It is
+            not a launch recommendation.
+        """
+        from causalpy.duration import _profile_durations
+
+        return _profile_durations(
+            self,
+            durations,
+            selection_origins=selection_origins,
+            audit_origins=audit_origins,
+            relative_lifts=relative_lifts,
+            absolute_lifts=absolute_lifts,
+            target_lift=target_lift,
+            target_scale=target_scale,
+            exclusions=exclusions,
+            cadence=cadence,
+            max_fits=max_fits,
+            fit_cost=fit_cost,
+            min_training_periods=min_training_periods,
+            sample_kwargs=sample_kwargs,
         )
 
     def _fit_horizon(
