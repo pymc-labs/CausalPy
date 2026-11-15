@@ -63,15 +63,12 @@ CANDIDATE_COLUMNS: tuple[str, ...] = (
 CANDIDATE_FILTER_REASONS: tuple[str, ...] = (
     "excluded_unit",
     "not_treatment_eligible",
-    "not_donor_eligible",
     "missing_required",
     "donor_depleted",
-    "spillover_donor",
     "over_budget",
     "cost_unknown",
     "outcome_share",
     "representativeness",
-    "duplicate",
     "group_size",
 )
 _PROXY_ROLES: tuple[str, ...] = (
@@ -1203,8 +1200,11 @@ class CandidateRequest(_ScreenValue):
     group of size ``k``, not a fitted simplex.
 
     Identity is the sorted treated tuple, plus the sorted donor tuple when
-    pools vary. Duplicates and permutations collapse. That collapse is
-    #1441's job. This object stores the inputs only.
+    pools vary. Duplicates and permutations collapse before the table. The
+    table refuses a second identity. There is no ``duplicate`` reason.
+    Ineligible donor pools are rejected at construction. There is no
+    ``not_donor_eligible`` reason. That collapse is #1441's job. This object
+    stores the inputs only.
 
     Outcome share, when history is set, is the sum of selected-window values
     over the treated units divided by the sum of selected-window values over
@@ -1221,42 +1221,59 @@ class CandidateRequest(_ScreenValue):
     returns another copy. A partial date string such as ``"2020-06"`` is not
     a label. Selected outcomes must be finite reals, so ``None`` and
     non-finite values are refused. Later rows are not part of the request.
-    An always-control unit is donor-eligible unless a spillover removes it
-    from one candidate. When ``donor_eligible`` is set, every
-    ``always_control`` name is in it.
+    The included ``selection_end`` label must be strictly before every
+    ``HistoryOnlyPlan`` treatment time and holdout label on the same panel.
+    Do not pass this ``history`` to ``HistoryOnlyPlan``. The plan's frame
+    must end at the last period the plan may use, and its holdout is the
+    tail of that frame. A cutoff equal to the treatment time includes the
+    first holdout row. An always-control unit is donor-eligible unless a
+    spillover removes it from one candidate. When ``donor_eligible`` is
+    set, every ``always_control`` name is in it.
 
     The proxy is not implemented here. The score is the equal-weight mean of
     per-unit RMSE from ``WeightedProportion.fit`` on the selected window.
     ``WeightedProportion.mse`` is that RMSE. Fit each treated unit against
     that candidate's donors. Do not fit the summed series. Lower is better.
-    Rank 1 is the lowest score. If history is missing, a selected outcome is
-    missing, a unit has no donors, or the fit fails, the role is
-    ``unavailable``, the score is null, and rank falls back to cost, then
-    ``candidate_id``. If every score is null, skip both proxy slots and fill
-    the remaining slots by cost, then ``candidate_id``. Missing cost sorts
-    after every known cost and cannot win a cost slot. If every cost is
-    missing, skip both cost slots. The stable labels are
-    ``preperiod_weighted_proportion`` and ``unavailable``.
+    If history is missing, a selected outcome is missing, a unit has no
+    donors, or the fit fails, the role is ``unavailable`` and the score is
+    null. A null score sorts after every finite score and cannot win a proxy
+    slot. If every score is null, skip both proxy slots. A null cost sorts
+    after every finite cost and cannot win a cost slot. If every cost is
+    null, skip both cost slots. The stable labels are
+    ``preperiod_weighted_proportion`` and ``unavailable``. Proxy score is
+    not relevance.
 
-    A space at or below ``exact_ceiling`` is enumerated in full. Above that
+    A space at or below ``exact_ceiling`` is enumerated in full. The stored
+    table is ``enumeration_policy="exact"`` and ``partial=False``. Above that
     ceiling, #1441 ranks identities by the SHA-256 lowercase hex digest of
     the UTF-8 JSON ``[random_seed, sorted treated, sorted donors or null]``
     with separators ``,`` and ``:`` and ``ensure_ascii`` true. Donors are in
     the key only when ``donor_pools`` is set; otherwise the third element is
     ``null``. Lowest means lexicographic order of that digest. Equal digests
     keep the lexicographically smaller ``candidate_id``. It keeps the lowest
-    ``max_generated``, reports ``n_space`` as the full count, and sets
-    ``partial=True``. It raises if ``max_generated`` is ``None``.
+    ``max_generated``. If that kept count is the full space, including when
+    ``max_generated`` is at least ``n_space``, the stored table is exact and
+    ``partial=False``. ``partial=True`` only when ``n_enumerated`` is below
+    ``n_space``. It raises if ``max_generated`` is ``None``.
 
     The shortlist keeps at most ``shortlist_size`` passing rows and does not
     grow the cap. Fill boundary slots in this order, skipping a candidate
-    already kept and stopping when the cap is full: lowest cost, highest
-    cost, lowest proxy, highest proxy, then one passing group of each integer
-    size from ``min_group_size`` to ``max_group_size``. Skip a proxy slot
-    when every score is null. Skip a size that has no passing group. Those
-    rows have ``boundary=True``. Fill the remaining slots by proxy ascending,
-    then cost ascending, then ``candidate_id``. No history, and an all-null
-    proxy, use cost, then id. A generator must not invent a different policy.
+    already kept and skipping a slot when no eligible row remains: lowest
+    finite cost, highest finite cost, lowest finite proxy, highest finite
+    proxy, then one passing group of each integer size from
+    ``min_group_size`` to ``max_group_size``. Skip a proxy slot when every
+    score is null. Skip a cost slot when every cost is null. Skip a size
+    that has no passing group not already kept. When several rows tie for a
+    cost or proxy extreme, the lexicographically smaller ``candidate_id``
+    wins. The size slot keeps the lexicographically smallest
+    ``candidate_id`` among passing groups of that size not already kept.
+    Those rows have ``boundary=True``. Fill the remaining slots by proxy
+    ascending, then cost ascending, then ``candidate_id`` ascending. A null
+    proxy sorts after every finite proxy. A null cost sorts after every
+    finite cost. No history uses cost, then id, and skips both proxy slots.
+    A generator must not invent a different order for these slots. Group
+    size and proxy score are not relevance, and this order has no relevance
+    slot.
 
     Notes
     -----
@@ -1298,10 +1315,14 @@ class CandidateRequest(_ScreenValue):
     spillover_exclusions : tuple of tuple of str, optional
         Directed ``(source, contaminated)`` pairs. If source is treated,
         contaminated cannot donate to that candidate. Not inferred, and does
-        not forbid co-treatment.
+        not forbid co-treatment. Removing that donor does not by itself
+        filter the candidate. The only donor-count filter is
+        ``donor_depleted``, when donors left after treated-member and
+        spillover removal are below ``min_remaining_donors``.
     min_remaining_donors : int, optional
         After removing treated members and spillover-forbidden donors. A
-        treated unit never counts. At least 1.
+        treated unit never counts. At least 1. Below this count filters with
+        ``donor_depleted`` only.
     history : DataFrame or None, optional
         Time-indexed outcomes. ``None`` means outcome share and the proxy are
         unavailable, not zero.
@@ -1314,6 +1335,9 @@ class CandidateRequest(_ScreenValue):
         Closed upper bound in ``[0, 1]``. ``None`` means unbounded.
     unit_costs : tuple of tuple, optional
         Supplied ``(unit, cost)`` pairs. A missing unit is unknown, not zero.
+        The stored row cost is the sum of the treated units' supplied costs,
+        or null if any treated cost is unknown. The table rejects any other
+        value. It is not an estimator.
     budget : float or None, optional
         Reject a treated-cost sum above it. Unknown cost with a budget set is
         a filter, not a zero.
@@ -1627,6 +1651,7 @@ def _require_candidate_rows(
             f"frame has columns outside CANDIDATE_COLUMNS. Got {extra[0]!r}."
         )
     copied = frame.loc[:, list(CANDIDATE_COLUMNS)].copy()
+    copied.attrs = {}
     filtered = 0
     ranks: list[int] = []
     seen: set[tuple[tuple[str, ...], tuple[str, ...]]] = set()
@@ -1666,6 +1691,13 @@ def _require_candidate_rows(
             or not np.isfinite(float(share))
         ):
             raise ValueError("outcome_share must be null or finite.")
+        cost = row["cost"]
+        if not _is_missing(cost) and (
+            isinstance(cost, bool)
+            or not isinstance(cost, (int, float, np.integer, np.floating))
+            or not np.isfinite(float(cost))
+        ):
+            raise ValueError("cost must be null or finite.")
         raw_reasons = row["filter_reasons"]
         if isinstance(raw_reasons, str) or not isinstance(raw_reasons, Sequence):
             raise TypeError("filter_reasons must be a sequence of reason codes.")
@@ -1725,7 +1757,10 @@ class CandidateTable(_ScreenValue):
     ``frame`` returns another copy. Its length equals ``n_enumerated``.
     ``candidate_id`` is the JSON ``[sorted treated, sorted donors]`` with
     separators ``,`` and ``:``. Duplicate identities are refused.
-    ``outcome_share`` is null or finite. Rows with a
+    ``outcome_share`` is null or finite. ``cost`` is null or a finite
+    treated-cost sum, not an estimator. The stored frame has no columns
+    outside ``CANDIDATE_COLUMNS`` and no ``attrs``. Reading ``frame``
+    returns a copy with empty ``attrs``. Rows with a
     reason equal ``n_filtered`` and have status ``filtered``, a null rank,
     and ``boundary=False``. Ranked rows equal ``n_shortlisted``, have status
     ``shortlisted``, and use ranks ``1..n_shortlisted`` once each, including
@@ -1770,7 +1805,9 @@ class CandidateTable(_ScreenValue):
     def __getattribute__(self, name: str) -> object:
         value = object.__getattribute__(self, name)
         if name == "frame" and isinstance(value, pd.DataFrame):
-            return value.copy()
+            copied = value.copy()
+            copied.attrs = {}
+            return copied
         return value
 
     def __post_init__(self) -> None:

@@ -823,15 +823,12 @@ def test_candidate_constants_are_the_screen_contract() -> None:
     assert CANDIDATE_FILTER_REASONS == (
         "excluded_unit",
         "not_treatment_eligible",
-        "not_donor_eligible",
         "missing_required",
         "donor_depleted",
-        "spillover_donor",
         "over_budget",
         "cost_unknown",
         "outcome_share",
         "representativeness",
-        "duplicate",
         "group_size",
     )
 
@@ -1278,6 +1275,49 @@ def test_candidate_table_rejects_a_smuggled_or_inconsistent_row() -> None:
             n_space=1,
             n_enumerated=1,
             n_shortlisted=1,
+        )
+    with pytest.raises(ValueError, match="cost must be null or finite"):
+        _table(
+            frame=pd.DataFrame([_candidate_row(cost="fitted")]),
+            n_space=1,
+            n_enumerated=1,
+            n_shortlisted=1,
+        )
+    with pytest.raises(ValueError, match="cost must be null or finite"):
+        _table(
+            frame=pd.DataFrame([_candidate_row(cost=float("inf"))]),
+            n_space=1,
+            n_enumerated=1,
+            n_shortlisted=1,
+        )
+    with pytest.raises(ValueError, match="cost must be null or finite"):
+        _table(
+            frame=pd.DataFrame([_candidate_row(cost=True)]),
+            n_space=1,
+            n_enumerated=1,
+            n_shortlisted=1,
+        )
+    negative = _candidate_row(cost=-1.5)
+    attributed = pd.DataFrame([negative])
+    attributed.attrs["model"] = object()
+    stored_cost = _table(frame=attributed, n_space=1, n_enumerated=1, n_shortlisted=1)
+    assert stored_cost.frame.attrs == {}
+    assert stored_cost.frame["cost"].iloc[0] == -1.5
+    with pytest.raises(ValueError, match="CANDIDATE_FILTER_REASONS"):
+        _table(
+            frame=pd.DataFrame(
+                [
+                    _candidate_row(
+                        filter_reasons=("duplicate",),
+                        shortlist_rank=pd.NA,
+                        status="filtered",
+                    )
+                ]
+            ),
+            n_space=1,
+            n_enumerated=1,
+            n_filtered=1,
+            n_shortlisted=0,
         )
     disagreed = _candidate_row(
         filter_reasons=("group_size",),

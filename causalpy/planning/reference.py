@@ -294,6 +294,10 @@ class SyntheticControlAdapter:
 class HistoryOnlyPlan:
     """Plan an intervention from history. Construction does not sample.
 
+    A candidate screen's ``selection_end`` is included in that screen and
+    must be strictly before this plan's treatment time and every holdout
+    label on the same panel. Do not pass ``CandidateRequest.history`` here.
+
     Parameters
     ----------
     history : pandas.DataFrame
