@@ -278,8 +278,13 @@ def _outcome_share(
         return _FILTERED_SHARE
     if not population:
         return _FILTERED_SHARE
-    denominator = float(history.loc[:, list(population)].to_numpy(dtype=float).sum())
-    numerator = float(history.loc[:, list(treated)].to_numpy(dtype=float).sum())
+    try:
+        denominator = float(
+            history.loc[:, list(population)].to_numpy(dtype=float).sum()
+        )
+        numerator = float(history.loc[:, list(treated)].to_numpy(dtype=float).sum())
+    except (TypeError, ValueError):
+        return _FILTERED_SHARE
     if not math.isfinite(denominator) or denominator <= 0.0:
         return _FILTERED_SHARE
     if not math.isfinite(numerator):
@@ -322,18 +327,18 @@ def _proxy(
     needed = (*identity.treated, *identity.donors)
     if any(name not in history.columns for name in needed):
         return "unavailable", None
-    predictors = history.loc[:, list(identity.donors)].to_numpy(dtype=float)
     scores: list[float] = []
-    for unit in identity.treated:
-        outcome = history.loc[:, unit].to_numpy(dtype=float)
-        try:
+    try:
+        predictors = history.loc[:, list(identity.donors)].to_numpy(dtype=float)
+        for unit in identity.treated:
+            outcome = history.loc[:, unit].to_numpy(dtype=float)
             fitted = WeightedProportion().fit(predictors, outcome)
             score = float(fitted.mse)
-        except Exception:
-            return "unavailable", None
-        if score != score or score in (float("inf"), float("-inf")):
-            return "unavailable", None
-        scores.append(score)
+            if score != score or score in (float("inf"), float("-inf")):
+                return "unavailable", None
+            scores.append(score)
+    except Exception:
+        return "unavailable", None
     return "preperiod_weighted_proportion", sum(scores) / len(scores)
 
 

@@ -637,6 +637,39 @@ def test_overflowed_reductions_filter_instead_of_raising() -> None:
     assert balance.frame.iloc[0].filter_reasons == ("representativeness",)
 
 
+def test_unreadable_excluded_outcome_filters_without_dropping_siblings() -> None:
+    dirty = ("bad", pd.NA, [[1.0]])
+    for value in dirty:
+        frame = pd.DataFrame(
+            {"a": [1.0], "b": [2.0], "c": [value]},
+            index=pd.Index([1], name="time"),
+        )
+        table = _generate(
+            excluded_units=("c",),
+            supplied_groups=(("a",), ("c",)),
+            history=frame,
+            selection_end=1,
+        )
+        rows = _by_treated(table)
+        assert table.n_enumerated == 2
+        assert rows[("a",)].filter_reasons == ()
+        assert rows[("c",)].filter_reasons == ("excluded_unit", "outcome_share")
+        assert pd.isna(rows[("c",)].outcome_share)
+        assert rows[("c",)].proxy_role == "unavailable"
+    numeric = _generate(
+        excluded_units=("c",),
+        supplied_groups=(("c",),),
+        history=pd.DataFrame(
+            {"a": [1.0], "b": [2.0], "c": [3.0]},
+            index=pd.Index([1], name="time"),
+        ),
+        selection_end=1,
+    )
+    row = numeric.frame.iloc[0]
+    assert row.filter_reasons == ("excluded_unit",)
+    assert row.outcome_share == pytest.approx(1.0)
+
+
 def _unit_rmse(
     frame: pd.DataFrame,
     unit: str,
