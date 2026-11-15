@@ -24,7 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -1071,22 +1071,7 @@ def _keyed_seed(master: int, *parts: object) -> int:
 
 
 def _replace(candidate: ScreenedCandidate, **changes: Any) -> ScreenedCandidate:
-    data = {
-        "candidate_id": candidate.candidate_id,
-        "treated_unit": candidate.treated_unit,
-        "donors": candidate.donors,
-        "status": candidate.status,
-        "reason": candidate.reason,
-        "proxy_score": candidate.proxy_score,
-        "correlation_min": candidate.correlation_min,
-        "max_weight": candidate.max_weight,
-        "outcome_share": candidate.outcome_share,
-        "cost": candidate.cost,
-        "relevance": candidate.relevance,
-        "seed": candidate.seed,
-    }
-    data.update(changes)
-    return ScreenedCandidate(**data)
+    return replace(candidate, **changes)
 
 
 _EVALUATION_ORDER = "The shortlist is fitted in candidate-id order, not input order."
