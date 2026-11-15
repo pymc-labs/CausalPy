@@ -708,7 +708,7 @@ class AnalysisHandoff:
                 history=frame,
                 treated_units=self.treated_units,
                 control_units=self.control_units,
-                treatment_time=self.treatment_time,
+                treatment_time=frame.index[-self.duration],
                 duration=self.duration,
                 outcome_scale=self.outcome_scale,
             )
@@ -920,9 +920,9 @@ def _planned_window(
                 "Planned holdout labels must start at treatment_time and "
                 "increase. No fit was started."
             )
-    training = frame.loc[_realized_labels(frame.index, labels)]
-    holdout = frame.loc[_realized_labels(frame.index, holdout_labels)]
-    window = pd.concat([training, holdout])
+    realized_training = _realized_labels(frame.index, labels)
+    realized_holdout = _realized_labels(frame.index, holdout_labels)
+    window = frame.loc[realized_training + realized_holdout]
     values = list(window.index)
     for earlier, later in zip(values, values[1:], strict=False):
         try:
@@ -1070,7 +1070,7 @@ def _select_planned_rows(
     training_index: tuple[Any, ...],
     holdout_index: tuple[Any, ...],
 ) -> tuple[pd.DataFrame, bool]:
-    """Select stored labels by identity. Outside rows are dropped, not checked."""
+    """Select stored labels by scalar equality. Outside rows are dropped, not checked."""
     planned = tuple(training_index) + tuple(holdout_index)
     for label in planned:
         if len(_exact_index_matches(frame.index, label)) > 1:

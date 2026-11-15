@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime
 from typing import Any
 
 import numpy as np
@@ -95,6 +96,24 @@ def _forbid_fit(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 
     monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _boom)
     return calls
+
+
+def _capture_index_pair(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+    seen: dict[str, object] = {}
+
+    class _Capture:
+        def __init__(
+            self, data: pd.DataFrame, treatment_time: object, **_kwargs: object
+        ) -> None:
+            from causalpy.date_utils import validate_treatment_time_against_index
+
+            validate_treatment_time_against_index(data.index, treatment_time)
+            seen["index"] = data.index
+            seen["treatment_time"] = treatment_time
+            raise RuntimeError("captured")
+
+    monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _Capture)
+    return seen
 
 
 def _row(result: PlanningResult, scale: str, magnitude: float):
@@ -867,6 +886,57 @@ def test_handoff_refuses_a_partial_date_string_against_a_datetime_index(
     with pytest.raises(ValueError, match="Planned training labels are missing"):
         plan.analysis_handoff(duration=2).run(realized)
     assert calls == []
+
+
+def test_handoff_keeps_an_object_datetime_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _capture_index_pair(monkeypatch)
+    labels = [datetime(2020, month, 1) for month in range(1, 5)]
+    frame = pd.DataFrame(
+        {"actual": [1.0, 2.0, 3.0, 4.0], "donor": [1.1, 2.1, 3.1, 4.1]},
+        index=pd.Index(labels, dtype=object),
+    )
+    handoff = HistoryOnlyPlan(
+        frame,
+        "actual",
+        ["donor"],
+        _decision(),
+        estimator="synthetic_control",
+        sample_kwargs=LIGHT,
+    ).analysis_handoff(duration=2)
+    with pytest.raises(RuntimeError, match="captured"):
+        handoff.run(frame)
+    assert not isinstance(seen["index"], pd.DatetimeIndex)
+    assert isinstance(seen["treatment_time"], datetime)
+    assert seen["treatment_time"] == datetime(2020, 3, 1)
+    assert len(seen["index"]) == 4
+
+
+def test_handoff_uses_the_realized_timestamp_for_a_datetime_plan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _capture_index_pair(monkeypatch)
+    labels = [datetime(2020, month, 1) for month in range(1, 5)]
+    frame = pd.DataFrame(
+        {"actual": [1.0, 2.0, 3.0, 4.0], "donor": [1.1, 2.1, 3.1, 4.1]},
+        index=pd.Index(labels, dtype=object),
+    )
+    realized = frame.copy()
+    realized.index = pd.to_datetime(labels)
+    handoff = HistoryOnlyPlan(
+        frame,
+        "actual",
+        ["donor"],
+        _decision(),
+        estimator="synthetic_control",
+        sample_kwargs=LIGHT,
+    ).analysis_handoff(duration=2)
+    with pytest.raises(RuntimeError, match="captured"):
+        handoff.run(realized)
+    assert isinstance(seen["index"], pd.DatetimeIndex)
+    assert isinstance(seen["treatment_time"], pd.Timestamp)
+    assert seen["treatment_time"] == pd.Timestamp(datetime(2020, 3, 1))
 
 
 def test_handoff_reuses_the_model_the_plan_fit(
