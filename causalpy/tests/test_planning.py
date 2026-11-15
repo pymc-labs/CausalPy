@@ -544,20 +544,23 @@ def test_reporting_consumes_canonical_results_only() -> None:
     plt.close(figure)
 
 
-def test_unimplemented_estimators_fail_before_sampling(
+def test_registered_estimators_construct_without_sampling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls = _forbid_fit(monkeypatch)
     for estimator in ("augmented_synthetic_control", "interactive_fixed_effects"):
-        with pytest.raises(ValueError, match="#1440"):
-            HistoryOnlyPlan(
-                _history(),
-                TREATED,
-                CONTROLS,
-                _decision(),
-                estimator=estimator,
-                sample_kwargs=LIGHT,
-            )
+        plan = HistoryOnlyPlan(
+            _history(),
+            TREATED,
+            CONTROLS,
+            _decision(),
+            estimator=estimator,
+            sample_kwargs=LIGHT,
+        )
+        assert plan.capabilities.estimator == estimator
+        assert plan.capabilities.group_support is True
+        assert plan.capabilities.max_group_size == 3
+    assert calls == []
     with pytest.raises(ValueError, match="Unknown estimator"):
         HistoryOnlyPlan(
             _history(),
