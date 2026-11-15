@@ -637,6 +637,43 @@ def test_overflowed_reductions_filter_instead_of_raising() -> None:
     assert balance.frame.iloc[0].filter_reasons == ("representativeness",)
 
 
+def test_overflow_boundary_filters_ignore_unit_order() -> None:
+    frame = pd.DataFrame(
+        {"a": [1e308], "b": [1e308], "c": [-1e308]},
+        index=pd.Index([1], name="time"),
+    )
+    covariates = (("income", (("a", 1e308), ("b", 1e308), ("c", -1e308))),)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        shares = [
+            _generate(
+                units=units,
+                min_group_size=1,
+                max_group_size=1,
+                history=frame,
+                selection_end=1,
+            )
+            for units in (("a", "b", "c"), ("a", "c", "b"))
+        ]
+        balances = [
+            _generate(
+                units=units,
+                min_group_size=1,
+                max_group_size=1,
+                unit_covariates=covariates,
+                balance_constraints=(BalanceConstraint("income", 1e308),),
+            )
+            for units in (("a", "b", "c"), ("a", "c", "b"))
+        ]
+    for table in shares:
+        assert table.n_filtered == table.n_enumerated == 3
+        assert set(table.frame["filter_reasons"]) == {("outcome_share",)}
+        assert table.frame["outcome_share"].isna().all()
+    for table in balances:
+        assert table.n_filtered == table.n_enumerated == 3
+        assert set(table.frame["filter_reasons"]) == {("representativeness",)}
+
+
 def test_unreadable_excluded_outcome_filters_without_dropping_siblings() -> None:
     dirty = ("bad", pd.NA, [[1.0]], 10**309)
     for value in dirty:

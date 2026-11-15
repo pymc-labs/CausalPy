@@ -200,7 +200,7 @@ def _select(
 
 def _population(request: CandidateRequest) -> tuple[str, ...]:
     excluded = set(request.excluded_units)
-    return tuple(name for name in request.units if name not in excluded)
+    return tuple(sorted(name for name in request.units if name not in excluded))
 
 
 def _finite(value: float) -> float | None:
