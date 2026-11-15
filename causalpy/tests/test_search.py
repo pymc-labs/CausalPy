@@ -32,13 +32,19 @@ from causalpy.design import (
     DurationAudit,
     SyntheticControlPlanner,
 )
+from causalpy.duration import DurationRow
 from causalpy.historical_validation import WindowReplay
 from causalpy.pymc_models import WeightedSumFitter
 from causalpy.search import (
     EvaluatedDesign,
     ParetoPoint,
     ScreenedCandidate,
+    SearchResult,
+    _best_sensitivity,
+    _pareto,
     _recall_regret,
+    _selection_frame,
+    _shortlist,
     _with_dominance,
 )
 
@@ -307,8 +313,8 @@ def test_pareto_keeps_non_dominated_points_and_withholds_a_winner() -> None:
 
 def test_recall_is_one_only_when_the_proxy_best_is_evaluated() -> None:
     """Recall and regret compare the proxy best with the evaluated best."""
-    low = SimpleNamespace(rows=(SimpleNamespace(historical_detection_share=0.4),))
-    high = SimpleNamespace(rows=(SimpleNamespace(historical_detection_share=0.9),))
+    low = SimpleNamespace(rows=(_duration_row("historical-descriptive", 0.4),))
+    high = SimpleNamespace(rows=(_duration_row("historical-descriptive", 0.9),))
     evaluated = (
         EvaluatedDesign("precise", "precise", (), 1, low),
         EvaluatedDesign("relevant", "relevant", (), 2, high),
@@ -427,3 +433,174 @@ def test_frozen_audit_samples_the_candidate_seed_not_the_parent(monkeypatch) -> 
         sampled.append(specification.random_seed)
     assert len(set(sampled)) == 2
     assert captured == sampled
+
+
+def _duration_row(
+    level: str,
+    share: float,
+    *,
+    duration: int = 4,
+    scored: int = 1,
+) -> DurationRow:
+    return DurationRow(
+        duration=duration,
+        target_lift=1.0,
+        target_scale="absolute",
+        evidence_level=level,
+        calibration_evidence_level=None,
+        persistent_bias=None,
+        zero_lift_bias_cumulative=None,
+        zero_lift_bias_average=None,
+        zero_lift_mean_absolute_error=None,
+        historical_detection_count=0,
+        historical_detection_share=share,
+        scored_count=scored,
+        failed_count=0 if scored else 1,
+        requested_count=1,
+        not_run_count=0,
+        n_inference_fits=scored,
+        cost=None,
+        recovery_mean_error=None,
+        truth_covers_share=None,
+    )
+
+
+def _search_result(comparison: object, candidate_id: str = "id") -> SearchResult:
+    design = EvaluatedDesign(candidate_id, "precise", ("donor_0",), 7, comparison)
+    candidate = ScreenedCandidate(
+        candidate_id,
+        "precise",
+        ("donor_0",),
+        "evaluated",
+        "",
+        proxy_score=1.0,
+        seed=7,
+    )
+    return SearchResult(
+        status="mixed",
+        mode="fixed-target",
+        candidates=(candidate,),
+        evaluated=(design,),
+        pareto=_pareto((design,), (candidate,), False, False),
+        n_screened=1,
+        n_evaluated=1,
+        n_skipped=0,
+        n_failed=0,
+        n_unfinished=0,
+        n_inference_fits=1,
+        budget_exhausted=False,
+        evaluation_exhaustive=True,
+        proxy_recall=None,
+        proxy_regret=None,
+        partial_reason=None,
+        selection_policy="",
+        disclosure="",
+        recommendation_text="",
+        sample_kwargs={},
+        random_seed=7,
+    )
+
+
+def test_shortlist_fits_in_candidate_id_order() -> None:
+    """A shortlist that fits is fitted by candidate id, not generation order."""
+    later = ScreenedCandidate(
+        "zzz", "zzz", ("donor_0",), "screened", "", proxy_score=0.1, seed=1
+    )
+    earlier = ScreenedCandidate(
+        "aaa", "aaa", ("donor_0",), "screened", "", proxy_score=9.0, seed=2
+    )
+    kept, note = _shortlist((later, earlier), 8)
+    assert [item.candidate_id for item in kept] == ["aaa", "zzz"]
+    assert "candidate-id order" in note
+
+
+def test_budget_stop_discloses_candidate_id_order() -> None:
+    """Budget exhaustion names the candidate-id order it actually follows."""
+    result = _search(
+        _planner(_panel(), treated="other"),
+        eligible_units=("precise", "relevant"),
+    )
+    assert "candidate-id order" in result.disclosure
+    assert "not input order" in result.disclosure
+
+
+def test_selection_frame_resolves_exclusion_aliases() -> None:
+    """Screening drops the same labels the duration evaluator drops."""
+    index = pd.date_range("2020-01-01", periods=12, freq="D")
+    frame = pd.DataFrame({"precise": np.arange(12, dtype=float)}, index=index)
+    screened = _selection_frame(frame, (index[8],), ("2020-01-03",))
+    assert index[2] not in screened.index
+    assert len(screened) == 7
+    dropped = _selection_frame(_panel(), (8,), (np.int64(2),))
+    assert 2 not in dropped.index
+    with pytest.raises(ValueError, match="not in the history index"):
+        _selection_frame(frame, (index[8],), ("not-a-label",))
+    with pytest.raises(TypeError, match="not a single string"):
+        _selection_frame(frame, (index[8],), "2020-01-03")
+
+
+def test_audit_nan_does_not_abort_the_other_candidate(monkeypatch) -> None:
+    """A reserved-audit NaN fails only its candidate, and the real gap remains."""
+    frame = _panel()
+    frame.loc[16, "precise"] = np.nan
+    seen: list[str] = []
+
+    def _fake(child, durations, **kwargs):
+        seen.append(child.treated_unit)
+        if child.treated_unit == "precise":
+            assert np.isnan(child.history.loc[16, "precise"])
+        return SimpleNamespace(
+            status="historical-descriptive",
+            rows=(_duration_row("historical-descriptive", 0.5),),
+            n_inference_fits=1,
+            recommendation=lambda: "No supported recommendation",
+        )
+
+    monkeypatch.setattr("causalpy.search._compare_durations", _fake)
+    result = _search(
+        _planner(frame, treated="other"),
+        eligible_units=("precise", "relevant"),
+        audit_origins=(16,),
+        max_fits=4,
+    )
+    assert seen == ["precise", "relevant"]
+    assert result.n_evaluated == 2
+    assert np.isnan(frame.loc[16, "precise"])
+
+
+def test_failed_fit_is_not_a_pareto_point_or_a_handoff() -> None:
+    """A zero share from a failed fit is not a sensitivity and cannot be frozen."""
+    failed = _duration_row("fit-failed", 0.0, scored=0)
+    scored = _duration_row("historical-descriptive", 0.0, duration=8)
+    comparison = SimpleNamespace(
+        rows=(failed, scored),
+        status="mixed",
+        freeze=lambda duration: duration,
+    )
+    result = _search_result(comparison)
+    assert [point.duration for point in result.pareto] == [8]
+    assert result.pareto[0].sensitivity == 0.0
+    with pytest.raises(ValueError, match="not an assessed design"):
+        result.freeze("id", 4)
+    assert result.freeze("id", 8) == 8
+    only_failed = SimpleNamespace(rows=(failed,), status="fit-failed")
+    assert (
+        _pareto(
+            (EvaluatedDesign("id", "precise", ("donor_0",), 7, only_failed),),
+            (
+                ScreenedCandidate(
+                    "id",
+                    "precise",
+                    ("donor_0",),
+                    "fit-failed",
+                    "",
+                    proxy_score=1.0,
+                    seed=7,
+                ),
+            ),
+            False,
+            False,
+        )
+        == ()
+    )
+    assert _best_sensitivity(only_failed) is None

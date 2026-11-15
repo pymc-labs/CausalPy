@@ -14,8 +14,9 @@
 """Constrained single-target search for a fixed synthetic-control planner.
 
 Screening uses a deterministic weighted-proportion holdout fit. The shortlist
-is fitted by the existing duration comparison, then frozen and audited by the
-caller. Nothing here selects a launch, a duration, or a global optimum.
+is fitted by the existing duration comparison in candidate-id order, then
+frozen and audited by the caller. A failed or unscored fit is not a handoff.
+Nothing here selects a launch, a duration, or a global optimum.
 """
 
 from __future__ import annotations
@@ -33,8 +34,10 @@ from causalpy.duration import (
     DEFAULT_MAX_FITS,
     AnalysisSpecification,
     DurationComparison,
+    DurationRow,
     _compare_durations,
 )
+from causalpy.historical_validation import _stored_labels
 from causalpy.skl_models import WeightedProportion
 
 if TYPE_CHECKING:
@@ -134,7 +137,8 @@ class ParetoPoint:
     ----------
     sensitivity : float
         Historical detection share at the target lift. Higher is better.
-        A missing share is not a point.
+        A missing share is not a point. A failed or unscored row is not a
+        point, even when its recorded share is zero.
     cost, relevance : float, optional
         Present only when the caller supplied that axis. Lower cost is better.
         Higher relevance is better.
@@ -262,8 +266,8 @@ class SearchResult:
         candidate_id : str
             An evaluated design. A skipped, failed, or unfinished id raises.
         duration : int
-            Passed to :meth:`DurationComparison.freeze`. This method does not
-            choose a duration.
+            A scored duration on that design. A failed or unscored duration
+            raises. This method does not choose a duration.
 
         Returns
         -------
@@ -279,6 +283,16 @@ class SearchResult:
             raise ValueError(
                 f"Candidate {candidate_id!r} has no evaluated comparison to freeze. "
                 "Search does not select a replacement winner."
+            )
+        row = next(
+            (item for item in match.comparison.rows if item.duration == duration),
+            None,
+        )
+        if row is None or row.evidence_level != "historical-descriptive":
+            raise ValueError(
+                f"Candidate {candidate_id!r} duration {duration} is not an assessed "
+                "design. A failed or unscored fit is not a handoff, and search does "
+                "not select a replacement."
             )
         return match.comparison.freeze(duration)
 
@@ -696,6 +710,10 @@ def _selection_frame(
         raise ValueError(
             "selection_origins must be a non-empty sequence of index labels."
         )
+    if isinstance(exclusions, (str, bytes)) or not isinstance(exclusions, Sequence):
+        raise TypeError(
+            "exclusions must be a sequence of index labels, not a single string."
+        )
     positions = history.index.get_indexer(list(origins))
     if (positions < 0).any():
         missing = [
@@ -705,7 +723,9 @@ def _selection_frame(
         ]
         raise ValueError(f"Unknown selection origins {missing}.")
     earliest = int(positions.min())
-    excluded = set(exclusions)
+    # The evaluator resolves aliases through the index. Raw set membership
+    # keeps a timestamp string in the screening holdout that validation drops.
+    excluded = set(_stored_labels(history.index, tuple(exclusions)))
     labels = [label for label in history.index[:earliest] if label not in excluded]
     return history.loc[labels]
 
@@ -1069,12 +1089,18 @@ def _replace(candidate: ScreenedCandidate, **changes: Any) -> ScreenedCandidate:
     return ScreenedCandidate(**data)
 
 
+_EVALUATION_ORDER = "The shortlist is fitted in candidate-id order, not input order."
+
+
 def _shortlist(
     screened: Sequence[ScreenedCandidate],
     size: int,
 ) -> tuple[tuple[ScreenedCandidate, ...], str]:
+    if not screened:
+        return (), ""
     if len(screened) <= size:
-        return tuple(screened), ""
+        ordered = tuple(sorted(screened, key=lambda item: item.candidate_id))
+        return ordered, _EVALUATION_ORDER
     chosen: dict[str, ScreenedCandidate] = {}
     boundaries = _boundary_candidates(screened)
     for candidate in boundaries:
@@ -1094,6 +1120,7 @@ def _shortlist(
         f"Shortlist size is {size} of {len(screened)} screened candidates. "
         "Boundary candidates are kept first, then the lowest proxy scores. "
         "Ties break on candidate id. Input order is not the policy. "
+        f"{_EVALUATION_ORDER} "
         "Candidates outside the shortlist were screened and not evaluated."
     )
     if len(boundaries) > size:
@@ -1159,8 +1186,9 @@ def _evaluate_shortlist(
             stop_status = "budget-exhausted"
             stop_note = (
                 "The fit budget was exhausted before the shortlist finished. "
-                "Unfitted shortlist members are unfinished evidence, not "
-                "rejections, and no winner was selected."
+                "Unfitted members follow candidate-id order, not input order. "
+                "They are unfinished evidence, not rejections, and no winner "
+                "was selected."
             )
             break
         if candidate.seed is None:
@@ -1216,6 +1244,27 @@ def _origin_seed(master: int, candidate_id: str) -> Callable[[Any], int]:
     return seed
 
 
+def _constructor_history(
+    history: pd.DataFrame, columns: Sequence[str]
+) -> tuple[pd.DataFrame, bool]:
+    """Return a finite frame for construction, and whether it was replaced.
+
+    The public constructor rejects any non-finite value in the selected
+    units, including reserved audit rows the duration evaluator never fits.
+    A placeholder lets this candidate be constructed. The caller restores
+    the real frame before comparison so a gap stays visible to the evaluator
+    and only that candidate can fail.
+    """
+    outcomes = history.loc[:, list(columns)].to_numpy(dtype=float)
+    if np.isfinite(outcomes).all():
+        return history, False
+    placeholder = history.copy()
+    values = placeholder.loc[:, list(columns)].to_numpy(dtype=float).copy()
+    values[~np.isfinite(values)] = 0.0
+    placeholder.loc[:, list(columns)] = values
+    return placeholder, True
+
+
 def _child_planner(
     planner: SyntheticControlPlanner,
     candidate: ScreenedCandidate,
@@ -1234,8 +1283,10 @@ def _child_planner(
     stripped = dict(model.sample_kwargs)
     stripped.pop("random_seed", None)
     model.sample_kwargs = stripped
+    selected = (candidate.treated_unit, *candidate.donors)
+    history, replaced = _constructor_history(planner.history, selected)
     child = SyntheticControlPlanner(
-        planner.history,
+        history,
         candidate.treated_unit,
         candidate.donors,
         planner.decision,
@@ -1247,6 +1298,8 @@ def _child_planner(
         random_seed=candidate.seed,
         time_column=None,
     )
+    if replaced:
+        child.history = planner.history.copy()
     child.time_column = planner.time_column
     return child
 
@@ -1429,11 +1482,19 @@ def _recall_regret(
     return recall, regret, None
 
 
+def _assessed_share(row: DurationRow) -> float | None:
+    """Return a scored detection share, or None when the row was not assessed."""
+    if row.evidence_level != "historical-descriptive":
+        return None
+    share = row.historical_detection_share
+    if share is None or not np.isfinite(share):
+        return None
+    return float(share)
+
+
 def _best_sensitivity(comparison: DurationComparison) -> float | None:
     shares = [
-        row.historical_detection_share
-        for row in comparison.rows
-        if row.historical_detection_share is not None
+        share for row in comparison.rows if (share := _assessed_share(row)) is not None
     ]
     if not shares:
         return None
@@ -1451,8 +1512,8 @@ def _pareto(
     for design in evaluated:
         source = by_id[design.candidate_id]
         for row in design.comparison.rows:
-            share = row.historical_detection_share
-            if share is None or not np.isfinite(share):
+            share = _assessed_share(row)
+            if share is None:
                 continue
             points.append(
                 ParetoPoint(

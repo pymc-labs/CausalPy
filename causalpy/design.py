@@ -1082,18 +1082,20 @@ class SyntheticControlPlanner:
         weight, and concentration are diagnostics, not vetoes. The shortlist
         keeps boundary candidates (lowest cost, highest relevance, lowest and
         highest outcome share, lowest proxy score), then fills by proxy rank.
-        Ties break on candidate id. Input order is not the policy. The default
-        shortlist size is 8. A larger screened set is not silently truncated
-        to the first rows; set ``max_screened`` to cap screening by a stable
-        candidate-id hash, which is disclosed.
+        Ties break on candidate id. Input order is not the policy. The
+        shortlist is fitted in candidate-id order, and budget exhaustion
+        follows that order. The default shortlist size is 8. A larger
+        screened set is not silently truncated to the first rows; set
+        ``max_screened`` to cap screening by a stable candidate-id hash,
+        which is disclosed.
 
         Each shortlist member is fitted by :meth:`compare_durations` with a
         seed keyed to the candidate, and each window fit uses a seed keyed to
         that candidate and the origin. Both derive from the planner's
         ``random_seed`` and do not depend on loop order. ``sample_kwargs``
         must not contain ``random_seed``. Audit origins stay reserved. Budget
-        exhaustion stops the shortlist and leaves the remainder unfinished; it
-        does not select a winner.
+        exhaustion stops the shortlist in candidate-id order and leaves the
+        remainder unfinished; it does not select a winner.
 
         Parameters
         ----------
