@@ -34,7 +34,7 @@ import resource
 import sys
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
@@ -233,8 +233,40 @@ class DurationWindow:
 
 
 @dataclass(frozen=True, eq=False)
+class _FreezeSeed:
+    """Planner and request values captured when a comparison is built.
+
+    ``freeze`` reads this seed. It does not read the live planner. ``template``
+    is an unfitted clone. Each freeze call clones it again.
+    """
+
+    treated_unit: str
+    control_units: tuple[str, ...]
+    estimator: str
+    decision_direction: Literal["positive", "negative"]
+    decision_estimand: Literal["cumulative", "average"]
+    decision_threshold: float
+    decision_probability: float
+    relative_floor: float | None
+    time_column: str | None
+    min_donor_correlation: float
+    auto_scale_sigma: bool
+    selection_origins: tuple[Any, ...]
+    audit_origins: tuple[Any, ...]
+    exclusions: tuple[Any, ...]
+    cadence: Any
+    min_training_periods: int
+    priors: dict[str, Any]
+    template: Any
+
+
+@dataclass(frozen=True, eq=False)
 class DurationComparison:
     """Historical comparison across durations. It does not select one.
+
+    ``freeze`` copies the units, decision, priors, and unfitted template
+    captured when this comparison was built. A later change to the planner
+    does not change that record.
 
     Attributes
     ----------
@@ -269,6 +301,7 @@ class DurationComparison:
     sample_kwargs: dict[str, Any]
     random_seed: int | None
     history_fingerprint: str
+    _freeze_seed: _FreezeSeed = field(repr=False)
 
     def summary(self) -> pd.DataFrame:
         """Return one row per duration.
@@ -469,7 +502,9 @@ class DurationComparison:
         -------
         AnalysisSpecification
             Frozen units, cadence, estimator, priors, and this duration.
-            The comparison's own result is unchanged.
+            Those values come from the comparison's captured seed, not from
+            the planner at freeze time. The comparison's own result is
+            unchanged. Each call clones the captured template.
 
         Raises
         ------
@@ -1050,8 +1085,33 @@ def _prepare(
     )
 
 
+def _capture_freeze_seed(
+    planner: SyntheticControlPlanner, prepared: _Prepared
+) -> _FreezeSeed:
+    return _FreezeSeed(
+        treated_unit=planner.treated_unit,
+        control_units=tuple(planner.control_units),
+        estimator=planner.estimator,
+        decision_direction=planner.decision.direction,
+        decision_estimand=planner.decision.estimand,
+        decision_threshold=planner.decision.threshold,
+        decision_probability=planner.decision.probability,
+        relative_floor=planner.relative_floor,
+        time_column=planner.time_column,
+        min_donor_correlation=planner.min_donor_correlation,
+        auto_scale_sigma=planner.auto_scale_sigma,
+        selection_origins=prepared.selection_origins,
+        audit_origins=prepared.audit_origins,
+        exclusions=prepared.exclusions,
+        cadence=prepared.cadence,
+        min_training_periods=prepared.min_training_periods,
+        priors=dict(planner.model._user_priors or {}),
+        template=planner.model._clone(),
+    )
+
+
 def _empty_comparison(
-    prepared: _Prepared, random_seed: int | None
+    planner: SyntheticControlPlanner, prepared: _Prepared
 ) -> DurationComparison:
     return DurationComparison(
         status=prepared.preview.status,
@@ -1066,8 +1126,9 @@ def _empty_comparison(
         fit_seconds=0.0,
         score_seconds=0.0,
         sample_kwargs=dict(prepared.merged_kwargs),
-        random_seed=random_seed,
+        random_seed=planner.random_seed,
         history_fingerprint=prepared.fingerprint,
+        _freeze_seed=_capture_freeze_seed(planner, prepared),
     )
 
 
@@ -1392,6 +1453,7 @@ def _evaluate(
         sample_kwargs=dict(template.sample_kwargs),
         random_seed=planner.random_seed,
         history_fingerprint=prepared.fingerprint,
+        _freeze_seed=_capture_freeze_seed(planner, prepared),
     )
 
 
@@ -1480,9 +1542,7 @@ def _compare_durations(
         sample_kwargs=sample_kwargs,
     )
     if prepared.preview.status != "ready":
-        return _remember(
-            _empty_comparison(prepared, planner.random_seed), planner, prepared
-        )
+        return _empty_comparison(planner, prepared)
     _check_relative_baselines(
         planner,
         prepared.preview.windows,
@@ -1494,7 +1554,7 @@ def _compare_durations(
             "sample_kwargs must include 'draws' before a duration comparison "
             "fits. The default sampler is not a safe memory bound."
         )
-    return _remember(_evaluate(planner, prepared), planner, prepared)
+    return _evaluate(planner, prepared)
 
 
 def _rss_bytes() -> int:
@@ -1574,14 +1634,8 @@ def _profile_durations(
 def _freeze_specification(
     comparison: DurationComparison, duration: int
 ) -> AnalysisSpecification:
-    planner = getattr(comparison, "_duration_planner", None)
-    prepared = getattr(comparison, "_duration_prepared", None)
-    if planner is None or prepared is None:
-        raise RuntimeError(
-            "freeze lost the planner context. Call it on the comparison "
-            "returned by SyntheticControlPlanner.compare_durations."
-        )
-    template = planner.model._clone()
+    seed = comparison._freeze_seed
+    template = seed.template._clone()
     template.sample_kwargs = dict(comparison.sample_kwargs)
     text = _recommendation_text(
         comparison.status,
@@ -1594,44 +1648,34 @@ def _freeze_specification(
         status_at_freeze=comparison.status,
         evidence_level_at_freeze=comparison.evidence_level,
         persistent_bias_at_freeze=comparison.persistent_bias,
-        treated_unit=planner.treated_unit,
-        control_units=planner.control_units,
-        estimator=planner.estimator,
-        decision_direction=planner.decision.direction,
-        decision_estimand=planner.decision.estimand,
-        decision_threshold=planner.decision.threshold,
-        decision_probability=planner.decision.probability,
-        relative_floor=planner.relative_floor,
-        time_column=planner.time_column,
-        min_donor_correlation=planner.min_donor_correlation,
-        auto_scale_sigma=planner.auto_scale_sigma,
-        selection_origins=prepared.selection_origins,
-        audit_origins=prepared.audit_origins,
-        exclusions=prepared.exclusions,
-        cadence=prepared.cadence,
-        min_training_periods=prepared.min_training_periods,
-        durations=prepared.preview.durations,
-        target_lift=prepared.preview.target_lift,
-        target_scale=prepared.preview.target_scale,
-        fit_cost=prepared.preview.fit_cost,
+        treated_unit=seed.treated_unit,
+        control_units=seed.control_units,
+        estimator=seed.estimator,
+        decision_direction=seed.decision_direction,
+        decision_estimand=seed.decision_estimand,
+        decision_threshold=seed.decision_threshold,
+        decision_probability=seed.decision_probability,
+        relative_floor=seed.relative_floor,
+        time_column=seed.time_column,
+        min_donor_correlation=seed.min_donor_correlation,
+        auto_scale_sigma=seed.auto_scale_sigma,
+        selection_origins=seed.selection_origins,
+        audit_origins=seed.audit_origins,
+        exclusions=seed.exclusions,
+        cadence=seed.cadence,
+        min_training_periods=seed.min_training_periods,
+        durations=comparison.preview.durations,
+        target_lift=comparison.preview.target_lift,
+        target_scale=comparison.preview.target_scale,
+        fit_cost=comparison.preview.fit_cost,
         sample_kwargs=dict(comparison.sample_kwargs),
-        priors=dict(planner.model._user_priors or {}),
-        random_seed=planner.random_seed,
+        priors=dict(seed.priors),
+        random_seed=comparison.random_seed,
         history_fingerprint=comparison.history_fingerprint,
         causalpy_version=__version__,
         template=template,
         recommendation_text=text,
     )
-
-
-def _remember(
-    comparison: DurationComparison,
-    planner: SyntheticControlPlanner,
-    prepared: _Prepared,
-) -> DurationComparison:
-    object.__setattr__(comparison, "_duration_planner", planner)
-    object.__setattr__(comparison, "_duration_prepared", prepared)
-    return comparison
 
 
 def _analysis_frame(history: pd.DataFrame, time_column: str | None) -> pd.DataFrame:

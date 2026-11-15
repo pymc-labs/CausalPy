@@ -650,3 +650,85 @@ def test_audit_and_execute_accept_the_planner_indexed_panel(monkeypatch):
     renamed = planner.history.rename_axis("other")
     with pytest.raises(DataException, match="is not a column"):
         spec.execute(renamed, 4)
+
+
+def test_freeze_ignores_planner_mutation_after_compare(monkeypatch):
+    def fake_replay(*args, **kwargs):
+        window = args[3]
+        on_scored = kwargs.get("on_scored")
+        if on_scored is not None:
+            on_scored(
+                SimpleNamespace(draws=np.zeros((1, 2, window.horizon))),
+                window,
+            )
+        return (
+            WindowReplay(
+                plan=window,
+                status="scored",
+                reason=None,
+                bias_cumulative=0.0,
+                bias_average=0.0,
+                cumulative_mean=0.0,
+                average_mean=0.0,
+                n_inference_fits=1,
+                diagnostics_status="unavailable",
+            ),
+            1,
+        )
+
+    def fake_translate(experiment, planner, prepared, window):
+        return [
+            DurationWindow(
+                origin=window.origin,
+                duration=window.horizon,
+                status="scored",
+                reason=None,
+                training_index=tuple(window.training_index),
+                holdout_index=tuple(window.holdout_index),
+                bias_cumulative=0.0,
+                bias_average=0.0,
+            )
+        ]
+
+    monkeypatch.setattr("causalpy.historical_validation._replay_window", fake_replay)
+    monkeypatch.setattr("causalpy.duration._translate_window", fake_translate)
+    planner = _planner()
+    comparison = planner.compare_durations(
+        (2,),
+        (2,),
+        audit_origins=(6,),
+        absolute_lifts=(1.0,),
+        target_lift=1.0,
+        sample_kwargs={"draws": 8, "chains": 1},
+    )
+    planner.treated_unit = "mutated"
+    planner.control_units = ("x",)
+    planner.estimator = "other"
+    planner.decision = DecisionRule("negative", "average", 3.0, 0.8)
+    planner.relative_floor = 9.0
+    planner.time_column = "mutated"
+    planner.min_donor_correlation = 0.5
+    planner.auto_scale_sigma = False
+    planner.random_seed = 99
+    planner.model = WeightedSumFitter(sample_kwargs={"draws": 1})
+    spec = comparison.freeze(2)
+    assert spec.treated_unit == "treated"
+    assert spec.control_units == CONTROLS
+    assert spec.estimator == "synthetic_control"
+    assert spec.decision_direction == "positive"
+    assert spec.decision_estimand == "cumulative"
+    assert spec.decision_threshold == 0.0
+    assert spec.decision_probability == 0.95
+    assert spec.relative_floor is None
+    assert spec.time_column is None
+    assert spec.min_donor_correlation == 0.0
+    assert spec.auto_scale_sigma is True
+    assert spec.random_seed == 7
+    assert spec.audit_origins == (6,)
+    assert spec.exclusions == ()
+    assert spec.sample_kwargs["draws"] == 8
+    assert spec.priors == {}
+    again = comparison.freeze(2)
+    assert again.template is not spec.template
+    spec.template.sample_kwargs["draws"] = 3
+    assert again.template.sample_kwargs["draws"] == 8
