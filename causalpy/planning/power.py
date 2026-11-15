@@ -98,7 +98,9 @@ MDE_CONVENTION = (
     "Linear interpolation in the decision direction between the last evaluated "
     "effect whose estimated power is below the target and the first whose "
     "estimated power is at least the target. Zero is always evaluated. If the "
-    "smallest evaluated directional effect already meets the target, that "
+    "zero effect already meets the target, the status is null_control_failure: "
+    "that rate is a broken null, not a minimum detectable effect of zero. If the "
+    "smallest evaluated nonzero directional effect already meets the target, that "
     "effect is the minimum detectable effect and a smaller effect is not "
     "inferred. If the largest evaluated directional effect is still below the "
     "target, the status is out_of_range. The grid does not extrapolate."
@@ -129,7 +131,7 @@ _GENERATED: dict[str, str] = {
         "that series is not power."
     ),
 }
-MdeStatus = Literal["attained", "out_of_range"]
+MdeStatus = Literal["attained", "out_of_range", "null_control_failure"]
 FRAME_COLUMNS: tuple[str, ...] = (
     "duration",
     "effect",
@@ -175,7 +177,8 @@ class PowerPoint:
     posterior tail and is not power. ``monte_carlo_error`` is uncertainty in
     the decision rate. ``interval_width`` is effect-estimation uncertainty.
     ``false_positive_rate`` is the decision rate at the zero effect translated
-    from the same fits, not this effect's own rate.
+    from the same fits, not this effect's own rate. ``wrong_sign_rate`` is
+    undefined, and therefore NaN, when the translated effect is zero.
     """
 
     duration: int
@@ -259,9 +262,11 @@ class EffectByDuration:
 
     ``precision_target`` is the caller's maximum acceptable mean HDI width on
     the decision estimand, or ``None`` when no precision target was declared.
-    It is not ``criterion.monte_carlo_error_tolerance``. When power is
-    withheld, ``decision_rate_not_power`` is the mean decision rate at the
-    nonzero effects, or at zero when that was the only effect. It is not power.
+    It is not ``criterion.monte_carlo_error_tolerance``.
+    ``false_positive_within_tolerance`` compares each duration's zero-effect
+    decision rate with ``criterion.false_positive_tolerance``. It is not power.
+    When power is withheld, ``decision_rate_not_power`` is the mean decision
+    rate at the nonzero effects, or at zero when that was the only effect.
     """
 
     points: tuple[PowerPoint, ...]
@@ -277,6 +282,7 @@ class EffectByDuration:
     decision_rate_not_power: float | None
     minimum_worthwhile_effect: float | None
     precision_target: float | None
+    false_positive_within_tolerance: bool | None
     decision: DecisionRule
     criterion: PowerCriterion
     estimator: str
@@ -316,6 +322,8 @@ class EffectByDuration:
         Constant study fields are repeated so a notebook can plot without
         joining back to this object. ``minimum_worthwhile_effect`` is that
         repeated caller threshold, not the row's ``effect``.
+        ``false_positive_within_tolerance`` is the study-level comparison, not
+        a per-effect rate.
         """
         rows = [
             {column: getattr(item, column) for column in FRAME_COLUMNS}
@@ -326,6 +334,7 @@ class EffectByDuration:
         frame["scenario_family"] = self.study.scenario_family
         frame["power_withheld"] = self.power_withheld
         frame["baseline"] = self.baseline
+        frame["false_positive_within_tolerance"] = self.false_positive_within_tolerance
         return frame
 
 
@@ -339,6 +348,7 @@ class _PlanConfiguration:
     outcome_scale: str
     time_column: str | None
     planned_index: tuple[Any, ...]
+    model: Any
 
 
 @dataclass
@@ -348,7 +358,7 @@ class _Draw:
     tail: float
     width: float
     covers: bool
-    wrong_sign: bool
+    wrong_sign: bool | None
     divergences: int
     max_rhat: float | None
 
@@ -437,6 +447,8 @@ def interpolate_minimum_detectable_effect(
     -------
     InterpolatedEffect
         ``out_of_range`` when the target is outside the evaluated powers.
+        ``null_control_failure`` when the zero effect already meets the target.
+        That is not an attained minimum detectable effect.
     """
     target = require_probability(target_power, "target_power")
     if direction not in ("positive", "negative"):
@@ -471,6 +483,18 @@ def interpolate_minimum_detectable_effect(
     for index, (effect, power) in enumerate(pairs):
         if power < target:
             continue
+        if effect == 0.0:
+            return InterpolatedEffect(
+                None,
+                "null_control_failure",
+                effect,
+                effect,
+                power,
+                power,
+                MDE_CONVENTION,
+                "The zero effect already meets the target power. That is a "
+                "null-control failure, not a minimum detectable effect.",
+            )
         if index == 0 or power == pairs[index - 1][1]:
             return InterpolatedEffect(
                 effect, "attained", effect, effect, power, power, MDE_CONVENTION
@@ -626,20 +650,29 @@ def _true_estimand(
     raise ValueError(f"Unsupported estimand {estimand!r}.")
 
 
-def _is_wrong_sign(
-    mean: float,
-    truth: float,
-    *,
-    direction: str,
-    threshold: float,
-) -> bool:
+def _is_wrong_sign(mean: float, truth: float) -> bool | None:
+    """Return whether the estimate's sign disagrees with a nonzero truth.
+
+    A zero effect has no sign to miss. A posterior mean that fails the decision
+    threshold is not a sign error, so the rate is undefined there.
+    """
     if truth > 0.0:
         return mean < 0.0
     if truth < 0.0:
         return mean > 0.0
-    if direction == "positive":
-        return mean < threshold
-    return mean > threshold
+    return None
+
+
+def _wrong_sign_rate(flags: Sequence[bool | None]) -> float:
+    if not flags:
+        raise ValueError("A rate needs at least one successful replicate.")
+    if all(flag is None for flag in flags):
+        return float("nan")
+    if any(flag is None for flag in flags):
+        raise RuntimeError(
+            "Wrong-sign is undefined for a mix of zero and nonzero effects."
+        )
+    return _rate([bool(flag) for flag in flags])
 
 
 def _worthwhile_comparison(mde: float | None, worthwhile: float | None) -> str | None:
@@ -881,6 +914,11 @@ class ReferencePowerEvaluator:
                 "Grouped qualification is not this issue. The reference power "
                 "path needs one treated unit. No fit was started."
             )
+        if handoff.model is None:
+            raise RuntimeError(
+                "The closed-over plan did not hand off its model. Power must "
+                "fit that model, not a default fitter. No fit was started."
+            )
         planned = tuple(handoff.training_index) + tuple(handoff.holdout_index)
         self._config = _PlanConfiguration(
             treated=handoff.treated_units[0],
@@ -891,6 +929,7 @@ class ReferencePowerEvaluator:
             outcome_scale=handoff.outcome_scale,
             time_column=handoff.time_column,
             planned_index=planned,
+            model=handoff.model,
         )
         return self._config
 
@@ -901,6 +940,17 @@ class ReferencePowerEvaluator:
                 "history must be the frame the plan was built from, in the same "
                 "order. A different donor path is a different study. No fit was "
                 "started."
+            )
+        # This issue cannot add a public donor accessor to reference.py.
+        prepared = self._plan._history
+        observed_donors = _donor_matrix(self._history, config.controls)
+        planned_donors = _donor_matrix(prepared, config.controls)
+        if observed_donors.shape != planned_donors.shape or not np.array_equal(
+            observed_donors, planned_donors
+        ):
+            raise ValueError(
+                "Donor columns do not match the plan's prepared history. "
+                "A different donor path is a different study. No fit was started."
             )
 
     def _require_units(self, config: _PlanConfiguration) -> None:
@@ -1022,7 +1072,7 @@ class ReferencePowerEvaluator:
                     config.controls,
                     decision,
                     estimator=config.estimator,
-                    sample_kwargs=dict(config.sample_kwargs),
+                    model=config.model._clone(),
                     time_column=config.time_column,
                     outcome_scale=config.outcome_scale,
                 )
@@ -1192,12 +1242,7 @@ def _draw_from(
         tail=float(evaluation.decision.posterior_tail_probability),
         width=float(upper - lower),
         covers=bool(lower <= truth <= upper),
-        wrong_sign=_is_wrong_sign(
-            float(mean),
-            truth,
-            direction=decision.direction,
-            threshold=decision.threshold,
-        ),
+        wrong_sign=_is_wrong_sign(float(mean), truth),
         divergences=int(evaluation.diagnostics.divergences or 0),
         max_rhat=None if rhat is None else float(rhat),
     )
@@ -1225,6 +1270,7 @@ def _assemble(
 ) -> EffectByDuration:
     points: list[PowerPoint] = []
     withheld_rates: list[float] = []
+    null_rates: list[float] = []
     nonzero_rates: list[float] = []
     rhats: list[float] = []
     divergences = 0
@@ -1237,6 +1283,7 @@ def _assemble(
             rate = _rate(decided)
             if effect == 0.0:
                 withheld_rates.append(rate)
+                null_rates.append(rate)
             else:
                 nonzero_rates.append(rate)
             probability = float("nan") if withhold else rate
@@ -1276,7 +1323,9 @@ def _assemble(
                     ),
                     coverage=_rate([item.covers for item in sample]),
                     false_positive_rate=false_positive_rate,
-                    wrong_sign_rate=_rate([item.wrong_sign for item in sample]),
+                    wrong_sign_rate=_wrong_sign_rate(
+                        [item.wrong_sign for item in sample]
+                    ),
                     detection=detection,
                     failed_runs=len(failures),
                     precision_met=precision_met,
@@ -1309,6 +1358,11 @@ def _assemble(
     )
     chosen = nonzero_rates or withheld_rates
     decision_rate = float(np.mean(chosen)) if withhold and chosen else None
+    within_tolerance = (
+        all(item <= criterion.false_positive_tolerance for item in null_rates)
+        if null_rates
+        else None
+    )
     return EffectByDuration(
         points=tuple(points),
         minimum_detectable_effects=mdes,
@@ -1323,6 +1377,7 @@ def _assemble(
         decision_rate_not_power=decision_rate,
         minimum_worthwhile_effect=worthwhile,
         precision_target=criterion.precision_target,
+        false_positive_within_tolerance=within_tolerance,
         decision=decision,
         criterion=criterion,
         estimator=config.estimator,

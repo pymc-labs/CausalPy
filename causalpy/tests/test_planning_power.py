@@ -231,6 +231,14 @@ def test_interpolation_does_not_extrapolate() -> None:
     )
     assert exact.effect == 5.0
     assert exact.status == "attained"
+    broken_null = interpolate_minimum_detectable_effect(
+        [0.0, 4.0],
+        [0.9, 1.0],
+        target_power=0.8,
+        direction="positive",
+    )
+    assert broken_null.status == "null_control_failure"
+    assert broken_null.effect is None
 
 
 def test_preperiod_screen_passes_a_convex_combination_and_fails_a_trend() -> None:
@@ -322,7 +330,10 @@ def test_translation_oracle_matches_the_unit_period_effect_and_fit_count(
             )
             assert row["probability"] == (0.0 if effect == 0.0 else 1.0)
             assert row["false_positive_rate"] == 0.0
-            assert row["wrong_sign_rate"] == 0.0
+            if effect == 0.0:
+                assert np.isnan(row["wrong_sign_rate"])
+            else:
+                assert row["wrong_sign_rate"] == 0.0
             assert row["coverage"] == 1.0
             assert row["bias"] == pytest.approx(0.0, abs=1e-8)
             assert row["posterior_mean"] == pytest.approx(increment * duration)
@@ -330,6 +341,8 @@ def test_translation_oracle_matches_the_unit_period_effect_and_fit_count(
             assert row["failed_runs"] == 0
             assert row["precision_met"] == np.True_
             assert row["minimum_worthwhile_effect"] == 6.0
+    assert result.false_positive_within_tolerance is True
+    assert bool(frame["false_positive_within_tolerance"].iloc[0]) is True
     mde = result.minimum_detectable_effects[0]
     assert mde.status == "attained"
     assert mde.effect == pytest.approx(4.0)
@@ -379,6 +392,9 @@ def test_relative_oracle_uses_the_baseline_and_a_negative_rule_can_be_wrong_sign
     )
     assert row["posterior_mean"] == pytest.approx(5.0 * 4 + increment * 4)
     assert row["wrong_sign_rate"] == 0.0
+    zero = result.frame()
+    zero = zero[zero["effect"] == 0.0].iloc[0]
+    assert np.isnan(zero["wrong_sign_rate"])
     assert row["probability"] == 0.0
     large = evaluator.effect_by_duration(
         (4,),
@@ -402,6 +418,98 @@ def test_relative_oracle_uses_the_baseline_and_a_negative_rule_can_be_wrong_sign
     biased_row = biased_row[biased_row["effect"] == -1.0].iloc[0]
     assert biased_row["posterior_mean"] > 0.0
     assert biased_row["wrong_sign_rate"] == 1.0
+
+
+def test_zero_effect_meeting_the_target_is_a_null_control_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_fit(monkeypatch, offset=5.0)
+    result = _evaluator(_history()).effect_by_duration(
+        (4,),
+        (10.0,),
+        decision=_decision(),
+        criterion=_criterion(),
+    )
+    mde = result.minimum_detectable_effects[0]
+    assert mde.status == "null_control_failure"
+    assert mde.effect is None
+    assert result.point(4, 0.0).probability == 1.0
+    assert np.isnan(result.point(4, 0.0).wrong_sign_rate)
+    assert result.false_positive_within_tolerance is False
+
+
+def test_each_replica_receives_the_planned_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from causalpy.pymc_models import WeightedSumFitter
+
+    model = WeightedSumFitter(
+        priors={"beta": 3.0},
+        sample_kwargs={
+            "draws": 20,
+            "tune": 20,
+            "chains": 1,
+            "progressbar": False,
+            "random_seed": 13,
+        },
+    )
+    history = _history()
+    plan = HistoryOnlyPlan(
+        history,
+        TREATED,
+        CONTROLS,
+        _decision(),
+        estimator="synthetic_control",
+        model=model,
+    )
+    seen: list[dict[str, object]] = []
+    original = HistoryOnlyPlan.__init__
+
+    def record(self: HistoryOnlyPlan, *args: object, **kwargs: object) -> None:
+        seen.append(kwargs)
+        original(self, *args, **kwargs)
+
+    monkeypatch.setattr(HistoryOnlyPlan, "__init__", record)
+    _patch_fit(monkeypatch)
+    ReferencePowerEvaluator(
+        plan,
+        history=history,
+        scenario_family="correctly_specified_noisy_reference",
+    ).effect_by_duration(
+        (4,),
+        (10.0,),
+        decision=_decision(),
+        criterion=_criterion(),
+    )
+    replicas = [item["model"] for item in seen]
+    assert len(replicas) == 2
+    assert all("sample_kwargs" not in item for item in seen)
+    assert all(isinstance(item, WeightedSumFitter) for item in replicas)
+    assert all(item is not model for item in replicas)
+    assert len({id(item) for item in replicas}) == 2
+    assert all(item._user_priors == {"beta": 3.0} for item in replicas)
+
+
+def test_shifted_donors_are_refused_before_fitting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _patch_fit(monkeypatch)
+    history = _history()
+    shifted = history.copy()
+    shifted["austin"] = shifted["austin"] + 1.0
+    evaluator = ReferencePowerEvaluator(
+        _plan(history),
+        history=shifted,
+        scenario_family="correctly_specified_noisy_reference",
+    )
+    with pytest.raises(ValueError, match="Donor columns do not match"):
+        evaluator.effect_by_duration(
+            (4,),
+            (10.0,),
+            decision=_decision(),
+            criterion=_criterion(),
+        )
+    assert calls == []
 
 
 def test_failures_are_counted_and_do_not_invent_a_rate(
