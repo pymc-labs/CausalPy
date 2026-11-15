@@ -17,6 +17,9 @@ Issue #1440 adds ``causalpy.planning.adapters`` with an ``ADAPTERS`` dict
 mapping estimator names to adapter classes. Those classes accept ``model``,
 ``sample_kwargs``, and ``random_seed`` as keyword arguments and implement
 :class:`EstimatorAdapter`. They must not edit ``reference.py``.
+:class:`~causalpy.planning.reference.HistoryOnlyPlan` also accepts an
+adapter instance and calls its protocol methods, so a caller can pass one
+without waiting for that registry.
 
 Issue #1439 adds power and precision against :class:`PowerEvaluator`.
 Issue #1441 adds candidate generation against :class:`CandidateGenerator`.

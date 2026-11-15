@@ -14,18 +14,18 @@
 """History-only planning entry point and the synthetic-control reference path.
 
 Construction validates inputs and does not sample. :meth:`HistoryOnlyPlan.evaluate`
-fits ordinary :class:`~causalpy.experiments.synthetic_control.SyntheticControl`
-once per requested horizon, on pre-period outcomes only, then translates that
-fit across effects. A group of two or more units is rejected before sampling.
-That group fit belongs to issue #1440.
+fits the selected adapter once per requested horizon, then translates that fit
+across effects. The reference adapter is ordinary synthetic control on one
+treated unit. A registered adapter, or one passed in, is called instead.
+Groups of two or three units belong to that adapter, not to a second entry point.
 """
 
 from __future__ import annotations
 
 import importlib
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from typing import Any
+from dataclasses import dataclass, field
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -60,6 +60,7 @@ from causalpy.planning.contracts import (
     summarize_draws,
     unit_period_effect,
 )
+from causalpy.planning.seams import EstimatorAdapter
 from causalpy.pymc_models import WeightedSumFitter
 
 _ADAPTER_MODULE = "causalpy.planning.adapters"
@@ -101,6 +102,9 @@ class SyntheticControlAdapter:
         omitted.
     random_seed : int or None
         Seed applied when the resolved settings do not already contain one.
+    treated_units : tuple of str
+        The one treated unit this reference adapter accepts. A longer group
+        is refused here, before sampling.
     """
 
     def __init__(
@@ -109,7 +113,10 @@ class SyntheticControlAdapter:
         model: WeightedSumFitter | None,
         sample_kwargs: Mapping[str, Any] | None,
         random_seed: int | None,
+        treated_units: tuple[str, ...],
     ) -> None:
+        if len(treated_units) != 1:
+            raise ValueError(_group_message(treated_units))
         if model is not None and type(model) is not WeightedSumFitter:
             raise TypeError(
                 "The synthetic_control reference adapter fits WeightedSumFitter "
@@ -124,7 +131,14 @@ class SyntheticControlAdapter:
                 "does not start a default-length PyMC sample."
             )
         self._model = model
-        self._sample_kwargs = _resolve_sample_kwargs(sample_kwargs, random_seed)
+        if model is None:
+            self._fit_kwargs = _resolve_sample_kwargs(sample_kwargs, random_seed)
+        else:
+            self._fit_kwargs = _resolve_sample_kwargs(
+                dict(model.sample_kwargs),
+                random_seed,
+            )
+        self._sample_kwargs = self._fit_kwargs
 
     def capabilities(self) -> Capabilities:
         """Return the evidence-backed capability flags for this adapter."""
@@ -193,7 +207,7 @@ class SyntheticControlAdapter:
                 rows_outside_window_excluded=True,
             ),
             provenance=_provenance(
-                self._sample_kwargs,
+                self._fit_kwargs,
                 translation="deterministic_additive",
             ),
             n_inference_fits=1,
@@ -264,12 +278,13 @@ class SyntheticControlAdapter:
 
     def _fresh_model(self) -> WeightedSumFitter:
         if self._model is None:
-            return WeightedSumFitter(sample_kwargs=dict(self._sample_kwargs))
+            return WeightedSumFitter(sample_kwargs=dict(self._fit_kwargs))
         cloned = self._model._clone()
         if not isinstance(cloned, WeightedSumFitter):
             raise TypeError(
                 "Cloning the reference model did not return WeightedSumFitter."
             )
+        cloned.sample_kwargs = dict(self._fit_kwargs)
         return cloned
 
 
@@ -291,18 +306,27 @@ class HistoryOnlyPlan:
     decision : DecisionRule
         One-sided rule on an absolute estimand.
     estimator : str, optional
-        ``"synthetic_control"`` is implemented. Augmented synthetic control
-        and interactive fixed effects are declared seams for issue #1440.
-    model : WeightedSumFitter or None, optional
-        Bayesian simplex model. A non-Bayesian model is rejected before sampling.
+        ``"synthetic_control"`` is the reference path. A name registered in
+        ``causalpy.planning.adapters.ADAPTERS`` is constructed and called.
+        Augmented synthetic control and interactive fixed effects stay
+        declared seams for issue #1440 until that registry exists.
+    adapter : EstimatorAdapter or None, optional
+        A constructed adapter. When given, the plan calls its protocol
+        methods and does not build one. Mutually exclusive with ``model``,
+        ``sample_kwargs``, and ``random_seed``.
+    model : object or None, optional
+        Forwarded to the selected adapter. The reference adapter accepts
+        only :class:`WeightedSumFitter`. A registered adapter may accept
+        its own model.
     sample_kwargs : mapping or None, optional
-        Passed to a fresh :class:`WeightedSumFitter` when ``model`` is omitted.
-        Required in that case so a default-length sample cannot start by accident.
+        Passed to a fresh fitter when ``model`` is omitted. Required on the
+        reference path so a default-length sample cannot start by accident.
     time_column : str or None, optional
         Column to use as the time index when ``history`` does not already
         have one.
     random_seed : int or None, optional
-        Stored in ``sample_kwargs`` when that mapping has no seed.
+        Stored in ``sample_kwargs`` when that mapping has no seed. Rejected
+        when it disagrees with the seed already on ``model``.
     outcome_scale : str, optional
         Label for the outcome units. It does not convert values.
     """
@@ -315,7 +339,8 @@ class HistoryOnlyPlan:
         decision: DecisionRule,
         *,
         estimator: str = "synthetic_control",
-        model: WeightedSumFitter | None = None,
+        adapter: EstimatorAdapter | None = None,
+        model: object | None = None,
         sample_kwargs: Mapping[str, Any] | None = None,
         time_column: str | None = None,
         random_seed: int | None = None,
@@ -325,7 +350,6 @@ class HistoryOnlyPlan:
             raise TypeError("decision must be a DecisionRule.")
         if not isinstance(outcome_scale, str) or not outcome_scale:
             raise TypeError("outcome_scale must be a non-empty string.")
-        self._estimator = _require_estimator(estimator)
         self._history = _prepare_history(history, time_column)
         self._treated_units = require_unit_names(
             treated_units,
@@ -340,14 +364,27 @@ class HistoryOnlyPlan:
             max_count=None,
         )
         _require_columns(self._history, self._treated_units, self._control_units)
-        if self._estimator == "synthetic_control" and len(self._treated_units) != 1:
-            raise ValueError(_group_message(self._treated_units))
+        if adapter is not None:
+            if not isinstance(estimator, str) or not estimator:
+                raise TypeError("estimator must be a string.")
+            self._estimator = estimator
+            self._adapter = _adopt_adapter(
+                adapter,
+                estimator,
+                model,
+                sample_kwargs,
+                random_seed,
+            )
+        else:
+            self._estimator = _require_estimator(estimator)
+            self._adapter = _construct_adapter(
+                self._estimator,
+                model,
+                sample_kwargs,
+                random_seed,
+                self._treated_units,
+            )
         self._decision = decision
-        self._adapter = SyntheticControlAdapter(
-            model=model,
-            sample_kwargs=sample_kwargs,
-            random_seed=random_seed,
-        )
         self._outcome_scale = outcome_scale
 
     @property
@@ -358,21 +395,34 @@ class HistoryOnlyPlan:
     def analysis_handoff(self, *, duration: int) -> AnalysisHandoff:
         """Return an executable analysis spec. Does not sample.
 
+        The reference path stores the model and sampling settings that
+        ``evaluate`` fits, including a caller-supplied model's priors.
+
         Parameters
         ----------
         duration : int
             Holdout length. The treatment time is the first holdout label.
+            ``run`` fits that window and drops rows after it.
         """
+        if not isinstance(self._adapter, SyntheticControlAdapter):
+            raise ValueError(
+                "analysis_handoff reproduces the synthetic_control reference "
+                f"fit. {self._estimator} must supply its own analysis path. "
+                "No fit was started."
+            )
         periods = require_positive_int(duration, "duration")
         self._require_duration(periods)
+        template = self._adapter._fresh_model()
         return AnalysisHandoff(
             treated_units=self._treated_units,
             control_units=self._control_units,
             treatment_time=self._history.index[-periods],
+            duration=periods,
             decision=self._decision,
             estimator=self._estimator,
-            sample_kwargs=tuple(self._adapter._sample_kwargs.items()),
+            sample_kwargs=tuple(template.sample_kwargs.items()),
             outcome_scale=self._outcome_scale,
+            model=template,
         )
 
     def evaluate(
@@ -409,14 +459,9 @@ class HistoryOnlyPlan:
         Returns
         -------
         PlanningResult
-            One evaluation per duration and effect. ``n_inference_fits`` counts
-            horizons, not effects.
+            One evaluation per duration and effect. ``n_inference_fits`` is
+            the sum of the adapter's reported fits, not the number of effects.
         """
-        if self._estimator != "synthetic_control":
-            raise ValueError(
-                f"{self._estimator} is registered but this reference plan only "
-                "runs the synthetic_control adapter. No fit was started."
-            )
         requested = self._durations(durations)
         scenarios = self._scenarios(
             requested,
@@ -426,13 +471,18 @@ class HistoryOnlyPlan:
             relative_floor=relative_floor,
         )
         evaluations: list[CanonicalEvaluation] = []
+        fits = 0
         for fit_index, duration in enumerate(requested):
             fit = self._adapter.fit_window(self._window(duration))
-            if fit.n_inference_fits != 1:
+            if (
+                isinstance(self._adapter, SyntheticControlAdapter)
+                and fit.n_inference_fits != 1
+            ):
                 raise RuntimeError(
                     "The reference adapter must use one fit per horizon, "
                     f"got {fit.n_inference_fits}."
                 )
+            fits += int(fit.n_inference_fits)
             for scenario in scenarios:
                 evaluations.append(
                     self._adapter.translate(
@@ -445,7 +495,7 @@ class HistoryOnlyPlan:
                 )
         return PlanningResult(
             evaluations=tuple(evaluations),
-            n_inference_fits=len(requested),
+            n_inference_fits=fits,
             capabilities=self.capabilities,
         )
 
@@ -538,17 +588,21 @@ class AnalysisHandoff:
 
     The planning evaluation does not call this. ``run`` is today's
     :class:`~causalpy.experiments.synthetic_control.SyntheticControl` analysis
-    at ``treatment_time``, mapped onto the canonical result. It does not inject
-    a planned effect.
+    on the planned window, mapped onto the canonical result. It does not
+    inject a planned effect. Rows after ``treatment_time + duration`` are
+    excluded. The stored ``model`` is the fitter ``evaluate`` uses, including
+    custom priors, unless the caller passes a replacement.
     """
 
     treated_units: tuple[str, ...]
     control_units: tuple[str, ...]
     treatment_time: Any
+    duration: int
     decision: DecisionRule
     estimator: str
     sample_kwargs: tuple[tuple[str, Any], ...]
     outcome_scale: str
+    model: WeightedSumFitter | None = field(default=None, compare=False, hash=False)
 
     def run(
         self,
@@ -559,49 +613,46 @@ class AnalysisHandoff:
         time_column: str | None = None,
         random_seed: int | None = None,
     ) -> CanonicalEvaluation:
-        """Fit the realized panel and return the observed impact.
+        """Fit the planned window and return the observed impact.
 
         Parameters
         ----------
         data : pandas.DataFrame
-            Realized outcomes, including the post-period. This is not the
-            planning history unless the caller passes that frame on purpose.
+            Realized outcomes. Rows after the planned duration are excluded.
+            This is not the planning history unless the caller passes that
+            frame on purpose.
         model : WeightedSumFitter or None, optional
-            Overrides the model settings stored on the handoff.
+            Overrides the model stored on the handoff.
         sample_kwargs : mapping or None, optional
-            Overrides the stored sampling settings. Not accepted together
-            with ``model``.
+            Builds a fresh fitter and overrides the stored sampling settings.
+            Not accepted together with ``model``.
         time_column : str or None, optional
             Column to use as the time index.
         random_seed : int or None, optional
-            Used when the resolved sampling settings have no seed.
+            Used when the resolved sampling settings have no seed. Rejected
+            when it disagrees with the seed already on the model.
         """
         if self.estimator != "synthetic_control" or len(self.treated_units) != 1:
             raise ValueError(
                 "The reference handoff runs one-unit synthetic control only. "
                 "No fit was started."
             )
-        frame = _prepare_history(data, time_column)
-        _require_columns(frame, self.treated_units, self.control_units)
-        if self.treatment_time not in frame.index:
-            raise ValueError("treatment_time is not in the realized panel index.")
+        prepared = _prepare_history(data, time_column)
+        _require_columns(prepared, self.treated_units, self.control_units)
+        frame = _planned_window(prepared, self.treatment_time, self.duration)
+        excluded = len(frame) < len(prepared)
         if model is not None and sample_kwargs is not None:
             raise TypeError("Pass model or sample_kwargs, not both.")
         if model is not None:
-            fitter = model._clone()
-            if not isinstance(fitter, WeightedSumFitter):
-                raise TypeError("The reference handoff fits WeightedSumFitter only.")
-            model_kwargs = getattr(fitter, "sample_kwargs", None)
-            if not isinstance(model_kwargs, Mapping):
-                raise TypeError("The reference model must expose sample_kwargs.")
-            kwargs = _resolve_sample_kwargs(model_kwargs, random_seed)
-            fitter.sample_kwargs = dict(kwargs)
-        else:
+            fitter, kwargs = _fitter_from_model(model, random_seed)
+        elif sample_kwargs is not None or self.model is None:
             kwargs = _resolve_sample_kwargs(
                 dict(self.sample_kwargs) if sample_kwargs is None else sample_kwargs,
                 random_seed,
             )
             fitter = WeightedSumFitter(sample_kwargs=dict(kwargs))
+        else:
+            fitter, kwargs = _fitter_from_model(self.model, random_seed)
         experiment = SyntheticControl(
             frame,
             self.treatment_time,
@@ -649,12 +700,105 @@ class AnalysisHandoff:
                 post_period_treated_in_fit=False,
                 post_period_donors_in_prediction=True,
                 horizon_policy="separate-fits",
-                rows_outside_window_excluded=True,
+                rows_outside_window_excluded=excluded,
             ),
             provenance=_provenance(kwargs, translation="observed"),
             fit_index=0,
             outcome_scale=self.outcome_scale,
         )
+
+
+def _adopt_adapter(
+    adapter: EstimatorAdapter,
+    estimator: str,
+    model: object | None,
+    sample_kwargs: Mapping[str, Any] | None,
+    random_seed: int | None,
+) -> EstimatorAdapter:
+    if model is not None or sample_kwargs is not None or random_seed is not None:
+        raise TypeError(
+            "Pass an adapter or model/sample_kwargs/random_seed, not both. "
+            "The adapter already carries its fit settings. No fit was started."
+        )
+    try:
+        caps = adapter.capabilities()
+    except AttributeError as exc:
+        raise TypeError(
+            "adapter must implement EstimatorAdapter. No fit was started."
+        ) from exc
+    named = getattr(caps, "estimator", None)
+    if named != estimator:
+        raise ValueError(
+            f"adapter capabilities name {named!r}, not estimator={estimator!r}. "
+            "No fit was started."
+        )
+    return adapter
+
+
+def _construct_adapter(
+    estimator: str,
+    model: object | None,
+    sample_kwargs: Mapping[str, Any] | None,
+    random_seed: int | None,
+    treated: tuple[str, ...],
+) -> EstimatorAdapter:
+    if estimator == "synthetic_control":
+        return SyntheticControlAdapter(
+            model=cast("WeightedSumFitter | None", model),
+            sample_kwargs=sample_kwargs,
+            random_seed=random_seed,
+            treated_units=treated,
+        )
+    cls = _registered_adapters()[estimator]
+    try:
+        built = cls(model=model, sample_kwargs=sample_kwargs, random_seed=random_seed)
+    except TypeError as exc:
+        raise TypeError(
+            f"{estimator} adapter construction failed: {exc}. No fit was started."
+        ) from exc
+    return built
+
+
+def _fitter_from_model(
+    model: WeightedSumFitter,
+    random_seed: int | None,
+) -> tuple[WeightedSumFitter, dict[str, Any]]:
+    if type(model) is not WeightedSumFitter:
+        raise TypeError(
+            "The synthetic_control reference adapter fits WeightedSumFitter "
+            f"only. Got {type(model).__name__}. Other estimators are the "
+            "#1440 seam. No fit was started."
+        )
+    cloned = model._clone()
+    if not isinstance(cloned, WeightedSumFitter):
+        raise TypeError("Cloning the reference model did not return WeightedSumFitter.")
+    kwargs = _resolve_sample_kwargs(dict(cloned.sample_kwargs), random_seed)
+    cloned.sample_kwargs = dict(kwargs)
+    return cloned, kwargs
+
+
+def _planned_window(
+    frame: pd.DataFrame,
+    treatment_time: Any,
+    duration: int,
+) -> pd.DataFrame:
+    periods = require_positive_int(duration, "duration")
+    if treatment_time not in frame.index:
+        raise ValueError("treatment_time is not in the realized panel index.")
+    loc = frame.index.get_loc(treatment_time)
+    if isinstance(loc, slice) or not isinstance(loc, (int, np.integer)):
+        raise ValueError(
+            "treatment_time must match one row of the realized panel. "
+            "No fit was started."
+        )
+    start = int(loc)
+    available = len(frame) - start
+    if available < periods:
+        raise ValueError(
+            f"Realized panel has {available} rows at or after treatment_time, "
+            f"shorter than the planned duration {periods}. No fit was started."
+        )
+    return frame.iloc[: start + periods]
 
 
 def _require_estimator(estimator: str) -> str:

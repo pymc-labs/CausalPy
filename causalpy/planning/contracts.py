@@ -199,15 +199,31 @@ def require_unit_names(
 def default_relative_floor(pre_treated: np.ndarray) -> float:
     """Return ``1e-8`` times the median absolute pre-period treated outcome.
 
+    A non-positive scale is undefined. The floor must not collapse to zero
+    and then accept a near-zero baseline.
+
     Parameters
     ----------
     pre_treated : ndarray
         Pre-period treated outcomes on the outcome scale.
+
+    Raises
+    ------
+    ValueError
+        If the outcomes are empty, non-finite, or have a non-positive
+        median absolute value.
     """
     values = np.asarray(pre_treated, dtype=float)
     if values.size == 0 or not np.isfinite(values).all():
         raise ValueError("Pre-period treated outcomes must be non-empty and finite.")
-    return RELATIVE_FLOOR_SCALE * float(np.median(np.abs(values)))
+    scale = float(np.median(np.abs(values)))
+    if not np.isfinite(scale) or scale <= 0.0:
+        raise ValueError(
+            "Relative effects need a strictly positive pre-period treated "
+            "scale. The median absolute pre-period outcome is not positive, "
+            "so no baseline convention is defined. No fit was started."
+        )
+    return RELATIVE_FLOOR_SCALE * scale
 
 
 def require_relative_baseline(
@@ -260,12 +276,13 @@ def unit_period_effect(
 
     An absolute magnitude is the group-total per-period increment on the
     outcome scale, split equally across treated units. A singleton receives
-    the whole increment.
+    the whole increment. A scenario of 100 therefore means 100 on the group
+    total, not 100 on each unit.
 
     A relative magnitude is a fraction of the cumulative baseline. The
     cumulative group increment is ``magnitude * baseline``, spread evenly
-    across periods and then across treated units. A scenario of 100 therefore
-    means 100 on the group total, not 100 on each unit.
+    across periods and then across treated units. A relative scenario of
+    100 is ``100 * baseline`` on the group total, not 100 on the outcome scale.
 
     Parameters
     ----------

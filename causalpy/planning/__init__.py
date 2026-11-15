@@ -21,8 +21,9 @@ inference. An aggregate-first shared-weight model is a different estimator
 and is not implemented here.
 
 :class:`HistoryOnlyPlan` fits the ordinary synthetic-control analysis once
-per horizon and translates effects without refitting. Construction does not
-sample. Repeated-experiment power is not computed.
+per horizon and translates effects without refitting. A registered adapter,
+or one passed in, is called instead. Construction does not sample.
+Repeated-experiment power is not computed.
 
 Group fitting, augmented synthetic control, and interactive fixed effects
 are the issue #1440 seam. Power is the issue #1439 seam. Candidate screening
