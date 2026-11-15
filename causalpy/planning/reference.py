@@ -33,6 +33,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from causalpy.custom_exceptions import DataException
 from causalpy.experiments.synthetic_control import SyntheticControl
 from causalpy.input_data import to_pandas_with_time_index
 from causalpy.planning.contracts import (
@@ -604,12 +605,14 @@ class AnalysisHandoff:
     The planning evaluation does not call this. ``run`` is today's
     :class:`~causalpy.experiments.synthetic_control.SyntheticControl` analysis
     on the planned training labels plus the stored planned holdout labels.
-    Rows outside that exact window are excluded. A missing planned training
-    or holdout label, or fewer than two training rows, is refused before
-    sampling. It does not inject a planned effect. The stored ``model`` is
-    the fitter ``evaluate`` uses, including custom priors, unless the caller
-    passes a replacement. ``training_index``, ``holdout_index``, and
-    ``time_column`` are the planned labels and the column that produced them.
+    Rows outside that exact window are dropped, including an out-of-order or
+    duplicated row. A missing planned label, a duplicated planned label, fewer
+    than two training rows, or a selected window that is not strictly
+    increasing is refused before sampling. It does not inject a planned effect.
+    The stored ``model`` is the fitter ``evaluate`` uses, including custom
+    priors, unless the caller passes a replacement. ``training_index``,
+    ``holdout_index``, and ``time_column`` are the planned labels and the
+    column that produced them.
     """
 
     treated_units: tuple[str, ...]
@@ -640,9 +643,11 @@ class AnalysisHandoff:
         ----------
         data : pandas.DataFrame
             Realized outcomes. Rows outside the planned training labels and
-            stored holdout labels are excluded. A missing planned label is
-            refused before sampling. This is not the planning history unless
-            the caller passes that frame on purpose.
+            stored holdout labels are dropped, including an out-of-order or
+            duplicated row. A missing planned label, a duplicated planned
+            label, fewer than two training rows, or a selected window that is
+            not strictly increasing is refused before sampling. This is not
+            the planning history unless the caller passes that frame on purpose.
         model : WeightedSumFitter or None, optional
             Overrides the model stored on the handoff.
         sample_kwargs : mapping or None, optional
@@ -661,16 +666,20 @@ class AnalysisHandoff:
                 "No fit was started."
             )
         column = self.time_column if time_column is None else time_column
-        prepared = _prepare_history(data, column)
-        _require_columns(prepared, self.treated_units, self.control_units)
+        indexed = _index_realized_panel(data, column)
+        selected, excluded = _select_planned_rows(
+            indexed,
+            self.training_index,
+            self.holdout_index,
+        )
+        _require_columns(selected, self.treated_units, self.control_units)
         frame = _planned_window(
-            prepared,
+            selected,
             self.treatment_time,
             self.duration,
             self.training_index,
             self.holdout_index,
         )
-        excluded = not prepared.index.isin(frame.index).all()
         if model is not None and sample_kwargs is not None:
             raise TypeError("Pass model or sample_kwargs, not both.")
         if model is not None:
@@ -941,7 +950,20 @@ def _planned_window(
             )
     training = frame.loc[list(labels)]
     holdout = frame.loc[list(holdout_labels)]
-    return pd.concat([training, holdout])
+    window = pd.concat([training, holdout])
+    values = list(window.index)
+    for earlier, later in zip(values, values[1:], strict=False):
+        try:
+            increases = earlier < later
+        except TypeError as exc:
+            raise ValueError(
+                "The planned window is not strictly increasing. No fit was started."
+            ) from exc
+        if not bool(increases):
+            raise ValueError(
+                "The planned window is not strictly increasing. No fit was started."
+            )
+    return window
 
 
 def _require_estimator(estimator: str) -> str:
@@ -998,6 +1020,53 @@ def _prepare_history(history: pd.DataFrame, time_column: str | None) -> pd.DataF
             "of 1 still leaves two training rows. No fit was started."
         )
     return frame
+
+
+def _index_realized_panel(data: pd.DataFrame, time_column: str | None) -> pd.DataFrame:
+    """Index a realized panel without requiring a unique, increasing tail."""
+    if not isinstance(data, pd.DataFrame):
+        raise TypeError("history must be a pandas DataFrame.")
+    if time_column is None:
+        frame = data.copy()
+    else:
+        if time_column not in data.columns:
+            raise DataException(
+                f"`time_column` '{time_column}' is not a column of `data`. "
+                f"Available columns: {list(data.columns)}."
+            )
+        if not (isinstance(data.index, pd.RangeIndex) and data.index.name is None):
+            raise DataException(
+                f"`data` already has a meaningful index "
+                f"({data.index.name or 'unnamed'}, {type(data.index).__name__}), and "
+                f"`time_column` '{time_column}' was also given. Setting the column as "
+                "the index would drop the existing one, which would silently change the "
+                "time axis. Pass only one: drop `time_column` to keep the index, or "
+                "call `.reset_index(drop=True)` on the data to discard the index."
+            )
+        frame = data.set_index(time_column)
+    if not all(isinstance(column, str) for column in frame.columns):
+        raise TypeError("History columns must be string unit names.")
+    return frame
+
+
+def _select_planned_rows(
+    frame: pd.DataFrame,
+    training_index: tuple[Any, ...],
+    holdout_index: tuple[Any, ...],
+) -> tuple[pd.DataFrame, bool]:
+    """Select stored labels by identity. Outside rows are dropped, not checked."""
+    planned = tuple(training_index) + tuple(holdout_index)
+    duplicated = [label for label in planned if int((frame.index == label).sum()) > 1]
+    if duplicated:
+        raise ValueError(
+            f"Planned label {duplicated[0]!r} is duplicated in the realized panel. "
+            "No fit was started."
+        )
+    excluded = not bool(frame.index.isin(planned).all())
+    present = [label for label in planned if label in frame.index]
+    narrowed = frame.loc[frame.index.isin(planned)]
+    selected = narrowed.loc[present].copy() if present else narrowed.iloc[0:0].copy()
+    return selected, excluded
 
 
 def _require_columns(

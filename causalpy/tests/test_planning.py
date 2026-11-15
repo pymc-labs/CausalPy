@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
@@ -1100,6 +1101,147 @@ def test_handoff_refuses_a_one_row_training_window(
     with pytest.raises(ValueError, match="Planned training window"):
         handoff.run(panel)
     assert calls == []
+
+
+def test_handoff_drops_an_out_of_order_row_outside_the_planned_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class _Capture:
+        def __init__(self, data, treatment_time, **_kwargs: object) -> None:
+            seen["index"] = data.index.copy()
+            raise RuntimeError("captured")
+
+    monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _Capture)
+    history = _history()
+    handoff = _plan().analysis_handoff(duration=4)
+    step = history.index[1] - history.index[0]
+    extra = history.iloc[[0]].copy()
+    extra.index = [history.index[0] - step]
+    panel = pd.concat([history, extra])
+    with pytest.raises(RuntimeError, match="captured"):
+        handoff.run(panel)
+    planned = list(handoff.training_index) + list(handoff.holdout_index)
+    assert list(seen["index"]) == planned
+    assert extra.index[0] not in seen["index"]
+
+
+def test_handoff_drops_a_duplicated_label_outside_the_planned_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class _Capture:
+        def __init__(self, data, treatment_time, **_kwargs: object) -> None:
+            seen["index"] = data.index.copy()
+            raise RuntimeError("captured")
+
+    monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _Capture)
+    history = _history()
+    handoff = _plan().analysis_handoff(duration=4)
+    step = history.index[1] - history.index[0]
+    duplicate = history.iloc[[0]].copy()
+    duplicate.index = [history.index[-1] + step * 3]
+    panel = pd.concat([history, duplicate, duplicate])
+    with pytest.raises(RuntimeError, match="captured"):
+        handoff.run(panel)
+    planned = list(handoff.training_index) + list(handoff.holdout_index)
+    assert list(seen["index"]) == planned
+    assert duplicate.index[0] not in seen["index"]
+
+
+def test_handoff_refuses_a_duplicated_planned_label(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _forbid_fit(monkeypatch)
+    history = _history()
+    handoff = _plan().analysis_handoff(duration=4)
+    label = handoff.training_index[0]
+    panel = pd.concat([history, history.loc[[label]]])
+    with pytest.raises(ValueError, match="duplicated") as exc:
+        handoff.run(panel)
+    assert "tail" not in str(exc.value)
+    assert calls == []
+
+
+def test_handoff_refuses_a_non_increasing_planned_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _forbid_fit(monkeypatch)
+    history = _history()
+    handoff = _plan().analysis_handoff(duration=4)
+    training = list(handoff.training_index)
+    broken = replace(handoff, training_index=(training[1], training[0], *training[2:]))
+    with pytest.raises(ValueError, match="not strictly increasing"):
+        broken.run(history)
+    assert calls == []
+
+
+def test_handoff_drops_an_unsorted_time_column_row_outside_the_planned_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class _Capture:
+        def __init__(self, data, treatment_time, **_kwargs: object) -> None:
+            seen["index"] = data.index.copy()
+            raise RuntimeError("captured")
+
+    monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _Capture)
+    frame = _history().copy()
+    frame["week"] = pd.date_range("2020-01-01", periods=len(frame), freq="W")
+    frame = frame.reset_index(drop=True)
+    plan = HistoryOnlyPlan(
+        frame,
+        TREATED,
+        CONTROLS,
+        _decision(),
+        sample_kwargs=LIGHT,
+        time_column="week",
+    )
+    handoff = plan.analysis_handoff(duration=4)
+    late = frame.iloc[[0]].copy()
+    late["week"] = frame["week"].iloc[0] - pd.Timedelta(weeks=3)
+    unsorted = pd.concat([frame, late], ignore_index=True)
+    with pytest.raises(RuntimeError, match="captured"):
+        handoff.run(unsorted)
+    planned = list(handoff.training_index) + list(handoff.holdout_index)
+    assert list(seen["index"]) == planned
+    assert late["week"].iloc[0] not in list(seen["index"])
+
+
+def test_handoff_drops_a_duplicated_time_value_outside_the_planned_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: dict[str, object] = {}
+
+    class _Capture:
+        def __init__(self, data, treatment_time, **_kwargs: object) -> None:
+            seen["index"] = data.index.copy()
+            raise RuntimeError("captured")
+
+    monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _Capture)
+    frame = _history().copy()
+    frame["week"] = pd.date_range("2020-01-01", periods=len(frame), freq="W")
+    frame = frame.reset_index(drop=True)
+    plan = HistoryOnlyPlan(
+        frame,
+        TREATED,
+        CONTROLS,
+        _decision(),
+        sample_kwargs=LIGHT,
+        time_column="week",
+    )
+    handoff = plan.analysis_handoff(duration=4)
+    extra = frame.iloc[[0]].copy()
+    extra["week"] = frame["week"].iloc[-1] + pd.Timedelta(weeks=5)
+    panel = pd.concat([frame, extra, extra], ignore_index=True)
+    with pytest.raises(RuntimeError, match="captured"):
+        handoff.run(panel)
+    planned = list(handoff.training_index) + list(handoff.holdout_index)
+    assert list(seen["index"]) == planned
+    assert extra["week"].iloc[0] not in list(seen["index"])
 
 
 def test_handoff_uses_the_stored_time_column(
