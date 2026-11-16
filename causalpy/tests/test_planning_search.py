@@ -303,6 +303,76 @@ def test_zero_budget_skips_without_calling_the_engine(
     assert result.status == "inconclusive"
     assert set(result.frame["evaluation_status"]) == {"skipped"}
     assert result.optimality == "budget_partial"
+    assert result.reason is not None
+    assert "fit budget" in result.reason
+
+
+def test_zero_budget_rejects_a_free_refusal_before_skipping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _spy_engine(monkeypatch)
+    result = _run(budget=_budget(0), min_group_size=1, max_group_size=2)
+    studied = result.frame.loc[
+        ~result.frame["evaluation_status"].isin(["not_shortlisted", "filtered"])
+    ]
+    groups = studied.loc[studied["group_size"] > 1]
+    singles = studied.loc[studied["group_size"] == 1]
+    assert calls == []
+    assert not groups.empty
+    assert not singles.empty
+    assert set(groups["evaluation_status"]) == {"rejected"}
+    assert groups["n_fits"].sum() == 0
+    assert groups["reason"].str.contains("one treated unit").all()
+    assert set(singles["evaluation_status"]) == {"skipped"}
+    assert result.n_inference_fits == 0
+    assert result.optimality == "budget_partial"
+    assert result.reason is not None
+    assert "fit budget" in result.reason
+
+
+def test_grouped_short_window_is_a_recorded_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fits = _install_group_adapter(monkeypatch)
+    result = _run(
+        durations=(15,),
+        selection_end=0,
+        estimator="augmented_synthetic_control",
+        min_group_size=2,
+        max_group_size=2,
+        shortlist_size=2,
+        budget=_budget(50),
+    )
+    rejected = result.frame.loc[result.frame["evaluation_status"] == "rejected"]
+    assert fits == []
+    assert len(rejected) == 2
+    assert rejected["reason"].str.contains("fewer than 2 training rows").all()
+    assert rejected["n_fits"].sum() == 0
+    assert result.frozen is None
+    assert result.n_inference_fits == 0
+
+
+def test_grouped_constant_donors_are_rejected_without_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fits = _install_group_adapter(monkeypatch)
+    frame = _panel()
+    frame[["c", "d"]] = 1.0
+    result = _run(
+        history=frame,
+        estimator="augmented_synthetic_control",
+        min_group_size=2,
+        max_group_size=2,
+        fixed_treated=("a", "b"),
+        shortlist_size=1,
+        budget=_budget(50),
+    )
+    rejected = result.frame.loc[result.frame["evaluation_status"] == "rejected"]
+    assert fits == []
+    assert not rejected.empty
+    assert rejected["reason"].str.contains("positive finite variation").all()
+    assert result.n_inference_fits == 0
+    assert result.frozen is None
 
 
 def test_size_one_routes_through_the_published_engine(

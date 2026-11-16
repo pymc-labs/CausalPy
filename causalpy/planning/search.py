@@ -25,9 +25,10 @@ among rows that meet the caller's power, false-positive, and precision
 criteria, choose the minimum finite cost, then higher power, then the
 smaller ``candidate_id``, then the shorter duration. A shortlist, a hash
 sample, or a fit budget is not a global optimum. If no row qualifies, the
-result is inconclusive and no design is frozen. ``n_fits`` is repeated on
-every duration row of one study. ``SearchResult.n_inference_fits`` is the
-study total, so summing the column double-counts a multi-duration search.
+result is inconclusive and no design is frozen. A shortlist stopped by the
+fit cap says so, rather than claiming those rows failed the power criteria.
+``n_fits`` is repeated on every duration row of one study.
+``SearchResult.n_inference_fits`` is the study total, so summing the column double-counts a multi-duration search.
 """
 
 from __future__ import annotations
@@ -50,6 +51,7 @@ from causalpy.planning.adapters import (
 )
 from causalpy.planning.candidates import CandidateGenerator
 from causalpy.planning.contracts import (
+    MIN_TRAINING_ROWS,
     BalanceConstraint,
     CandidateRequest,
     DecisionRule,
@@ -147,7 +149,8 @@ class ComputationalBudget:
 
     ``max_inference_fits`` counts inference fits only. Screening and
     translation are free. A candidate whose planned fits would pass the cap
-    is skipped and recorded. Replicates are never reduced to squeeze under
+    is skipped and recorded. A refusal that starts no fit is rejected and
+    is not a budget skip. Replicates are never reduced to squeeze under
     the cap.
     """
 
@@ -485,6 +488,7 @@ def search(
         Caller seed. Candidate seeds do not depend on evaluation order.
     budget : ComputationalBudget
         Maximum inference fits. A study that would exceed it is skipped.
+        A refusal that starts no fit is rejected and does not consume the cap.
     estimator : str, optional
         ``synthetic_control``, ``augmented_synthetic_control``, or
         ``interactive_fixed_effects``.
@@ -614,6 +618,20 @@ def search(
     inner = _fixed_design_criterion(criterion)
     for row in ordered:
         identity = str(row["candidate_id"])
+        refusal = _free_refusal(
+            frame,
+            row,
+            horizons,
+            decision,
+            estimator,
+            settings,
+            caller_seed,
+            outcome_scale,
+            time_column,
+        )
+        if refusal is not None:
+            evaluations[identity] = refusal
+            continue
         planned_fits = planned * len(horizons)
         if fits_used + planned_fits > budget.max_inference_fits:
             evaluations[identity] = _CandidateEvaluation(
@@ -1082,6 +1100,64 @@ class _CandidateEvaluation:
     unit_scale: float | None = None
 
 
+def _free_refusal(
+    frame: pd.DataFrame,
+    row: pd.Series,
+    horizons: tuple[int, ...],
+    decision: DecisionRule,
+    estimator: str,
+    sample_kwargs: Mapping[str, object],
+    caller_seed: int,
+    outcome_scale: str,
+    time_column: str | None,
+) -> _CandidateEvaluation | None:
+    """Return a zero-fit refusal, or None when the study would sample."""
+    treated = tuple(row["treated"])
+    donors = tuple(row["donors"])
+    if not (estimator == "synthetic_control" and len(treated) == 1):
+        seed = sampler_seed(caller_seed, str(row["candidate_id"]), horizons)
+        settings = dict(sample_kwargs)
+        settings["random_seed"] = seed
+        try:
+            HistoryOnlyPlan(
+                frame,
+                treated,
+                donors,
+                decision,
+                estimator=estimator,
+                sample_kwargs=settings,
+                time_column=time_column,
+                outcome_scale=outcome_scale,
+            )
+        except (TypeError, ValueError) as exc:
+            return _CandidateEvaluation(None, "rejected", str(exc), 0)
+    return _setup_refusal(frame, donors, horizons)
+
+
+def _setup_refusal(
+    frame: pd.DataFrame,
+    donors: tuple[str, ...],
+    horizons: tuple[int, ...],
+) -> _CandidateEvaluation | None:
+    """Reject a window or donor pool that cannot start a fit."""
+    longest = max(horizons)
+    if len(frame) - longest < MIN_TRAINING_ROWS:
+        return _CandidateEvaluation(
+            None,
+            "rejected",
+            (
+                f"history has {len(frame)} rows. Duration {longest} leaves "
+                f"fewer than {MIN_TRAINING_ROWS} training rows. No fit was started."
+            ),
+            0,
+        )
+    try:
+        _noise_scale(frame, donors)
+    except ValueError as exc:
+        return _CandidateEvaluation(None, "rejected", str(exc), 0)
+    return None
+
+
 def _evaluate_candidate(
     frame: pd.DataFrame,
     row: pd.Series,
@@ -1228,29 +1304,35 @@ def _grouped_study(
         )
     except (TypeError, ValueError) as exc:
         return _CandidateEvaluation(None, "rejected", str(exc), 0)
-    replicates = replicates_for_tolerance(
-        criterion.monte_carlo_error_tolerance, n_durations=len(horizons)
-    )
-    translated = _with_zero(effects)
-    noise = _noise_scale(frame, donors)
-    donor_sd = float(np.std(frame.loc[:, list(donors)].to_numpy(dtype=float)))
-    unit_scale = max(
-        _unit_scale(frame, name, selection_end, donor_sd) for name in treated
-    )
-    panels = [
-        _grouped_panel(
-            frame,
-            treated,
-            donors,
-            family,
-            seed,
-            replicate,
-            noise,
-            selection_end,
+    setup = _setup_refusal(frame, donors, horizons)
+    if setup is not None:
+        return setup
+    try:
+        replicates = replicates_for_tolerance(
+            criterion.monte_carlo_error_tolerance, n_durations=len(horizons)
         )
-        for replicate in range(replicates)
-    ]
-    ratio = _grouped_rmse_ratio(panels, treated, donors, horizons, noise)
+        translated = _with_zero(effects)
+        noise = _noise_scale(frame, donors)
+        donor_sd = float(np.std(frame.loc[:, list(donors)].to_numpy(dtype=float)))
+        unit_scale = max(
+            _unit_scale(frame, name, selection_end, donor_sd) for name in treated
+        )
+        panels = [
+            _grouped_panel(
+                frame,
+                treated,
+                donors,
+                family,
+                seed,
+                replicate,
+                noise,
+                selection_end,
+            )
+            for replicate in range(replicates)
+        ]
+        ratio = _grouped_rmse_ratio(panels, treated, donors, horizons, noise)
+    except ValueError as exc:
+        return _CandidateEvaluation(None, "rejected", str(exc), 0)
     draws: dict[tuple[int, float], list[object]] = {
         (duration, effect): [] for duration in horizons for effect in translated
     }
@@ -2099,6 +2181,11 @@ def _redesign_reason(rows: list[dict[str, object]], criterion: PowerCriterion) -
         return (
             "No passing candidate. Widen eligibility or the donor pool. "
             "No design was frozen."
+        )
+    if any(row["evaluation_status"] == "skipped" for row in rows):
+        return (
+            "The fit budget stopped evaluation before every shortlisted "
+            "design was studied. No design was frozen."
         )
     if "rejected" in statuses and not any(
         row["evaluation_status"] in {"completed", "withheld", "failed"} for row in rows
