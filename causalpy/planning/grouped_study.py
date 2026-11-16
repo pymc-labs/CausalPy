@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 
 from causalpy.planning.contracts import (
+    MIN_TRAINING_ROWS,
     CanonicalEvaluation,
     DecisionRule,
     PowerCriterion,
@@ -145,7 +146,7 @@ def _grouped_study(
             dict.fromkeys(treated, 1.0) if family == "persistent_misfit" else scales
         )
         ratio = _grouped_rmse_ratio(
-            panels, treated, donors, horizons, noise, ratio_scales
+            panels, treated, donors, selection_end, noise, ratio_scales
         )
     except ValueError as exc:
         return _CandidateEvaluation(None, "rejected", str(exc), 0)
@@ -622,11 +623,17 @@ def _grouped_rmse_ratio(
     panels: Sequence[pd.DataFrame],
     treated: tuple[str, ...],
     donors: tuple[str, ...],
-    horizons: tuple[int, ...],
+    selection_end: object,
     noise_scale: float,
     scales: Mapping[str, float],
 ) -> float:
-    pre_rows = len(panels[0]) - min(horizons)
+    labels = list(panels[0].index)
+    pre_rows = labels.index(selection_end) + 1
+    if pre_rows < MIN_TRAINING_ROWS:
+        raise ValueError(
+            "The pre-period screen needs at least "
+            f"{MIN_TRAINING_ROWS} training rows. No fit was started."
+        )
     ratios: list[float] = []
     for panel in panels:
         donor_matrix = panel.loc[:, list(donors)].to_numpy(dtype=float)[:pre_rows]

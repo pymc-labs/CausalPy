@@ -369,7 +369,11 @@ class SearchResult:
     ``closest_candidate_id`` is the nearest completed row for a redesign note. It is not a selection.
     ``optimality`` is never ``global``. ``runtime_seconds`` is wall time for
     this call. ``peak_traced_bytes`` is the tracemalloc peak of Python
-    allocations during the call, not process RSS.
+    allocations during the call, not process RSS. ``n_rejected``,
+    ``n_failed``, and ``n_completed`` count each candidate once, not once
+    per duration. A withheld study is not completed. ``fit_budget`` is
+    ``ComputationalBudget.max_inference_fits``, the cap that constrained
+    the search, not the number of fits used.
     """
 
     frame: pd.DataFrame
@@ -381,6 +385,10 @@ class SearchResult:
     closest_candidate_id: str | None
     n_inference_fits: int
     n_skipped: int
+    n_rejected: int
+    n_failed: int
+    n_completed: int
+    fit_budget: int
     partial: bool
     optimality: str
     enumeration_policy: str
@@ -548,8 +556,9 @@ def search(
     ``history`` is the planning frame. Its tail is the holdout. Do not include
     an audit window; pass that only to :meth:`FrozenDesign.audit`. The screen
     sees rows at or before ``selection_end`` and that label must sit strictly
-    before every requested holdout. The plan is not built on the truncated
-    screen copy.
+    before every requested holdout. Size-one and grouped screens use that
+    same window for both the noise scale and the reconstruction ratio. The
+    plan is not built on the truncated screen copy.
 
     Size-one ``synthetic_control`` uses :class:`ReferencePowerEvaluator`.
     A larger vanilla group is refused by that plan before sampling and is
@@ -666,7 +675,9 @@ def search(
     SearchResult
         The screen, one row per candidate and duration, and at most one
         frozen design. ``runtime_seconds`` and ``peak_traced_bytes`` cover
-        this call.
+        this call. ``n_rejected``, ``n_failed``, and ``n_completed`` count
+        each candidate once. ``fit_budget`` is the inference-fit cap, not
+        the number of fits used.
     """
     trace = _SearchTrace()
     try:
@@ -944,6 +955,7 @@ def _search_screen(
         )
     optimality = _optimality(table.partial, skipped, screen, evaluations)
     elapsed, peak = trace.finish()
+    n_rejected, n_failed, n_completed = _candidate_status_counts(rows)
     return SearchResult(
         frame=pd.DataFrame([asdict(row) for row in rows], columns=list(SEARCH_COLUMNS)),
         candidates=table,
@@ -954,6 +966,10 @@ def _search_screen(
         closest_candidate_id=closest,
         n_inference_fits=fits_used,
         n_skipped=skipped,
+        n_rejected=n_rejected,
+        n_failed=n_failed,
+        n_completed=n_completed,
+        fit_budget=budget.max_inference_fits,
         partial=bool(table.partial or skipped),
         optimality=optimality,
         enumeration_policy=str(table.enumeration_policy),
@@ -1658,6 +1674,7 @@ def _evaluate_candidate(
             settings,
             outcome_scale,
             time_column,
+            selection_end,
         )
     return _grouped_study(
         frame,
@@ -1766,6 +1783,7 @@ def _reference_study(
     sample_kwargs: Mapping[str, object],
     outcome_scale: str,
     time_column: str | None,
+    selection_end: object,
 ) -> _CandidateEvaluation:
     plan = HistoryOnlyPlan(
         frame,
@@ -1778,7 +1796,12 @@ def _reference_study(
         outcome_scale=outcome_scale,
     )
     try:
-        evaluator = ReferencePowerEvaluator(plan, history=frame, scenario_family=family)
+        evaluator = ReferencePowerEvaluator(
+            plan,
+            history=frame,
+            scenario_family=family,
+            selection_end=selection_end,
+        )
         # The engine refuses post_search. This module applies that scope
         # to the returned curve; the engine only computes the fixed design.
         engine_criterion = replace(criterion, qualification_scope="fixed_design")
@@ -2207,6 +2230,7 @@ def _reference_column(
     caller_seed: int,
     sample_kwargs: Mapping[str, object],
     replicate: int,
+    selection_end: object,
 ) -> pd.Series:
     """Draw one non-control column from the published size-one generator."""
     evaluator = cache.get(name)
@@ -2223,7 +2247,10 @@ def _reference_column(
             sample_kwargs=settings,
         )
         evaluator = ReferencePowerEvaluator(
-            plan, history=history, scenario_family=family
+            plan,
+            history=history,
+            scenario_family=family,
+            selection_end=selection_end,
         )
         cache[name] = evaluator
     return evaluator.untreated_panel(replicate)[name]
@@ -2264,6 +2291,7 @@ def _validation_panel(
                 caller_seed,
                 sample_kwargs,
                 replicate,
+                selection_end,
             )
         return panel
     seed = sampler_seed(caller_seed, json.dumps(list(treated)), (replicate,))
@@ -2349,6 +2377,26 @@ def _mde_or_none(
     if len(matches) != 1:
         return None
     return matches[0]
+
+
+def _candidate_status_counts(rows: Sequence[_SearchRow]) -> tuple[int, int, int]:
+    """Count rejected, failed, and completed candidates once each."""
+    seen: dict[str, str] = {}
+    for row in rows:
+        previous = seen.get(row.candidate_id)
+        if previous is None:
+            seen[row.candidate_id] = row.evaluation_status
+        elif previous != row.evaluation_status:
+            raise RuntimeError(
+                f"Candidate {row.candidate_id} has statuses {previous!r} and "
+                f"{row.evaluation_status!r}. A count is once per candidate."
+            )
+    values = tuple(seen.values())
+    return (
+        sum(item == "rejected" for item in values),
+        sum(item == "failed" for item in values),
+        sum(item == "completed" for item in values),
+    )
 
 
 def _row_status(

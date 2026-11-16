@@ -710,6 +710,11 @@ class ReferencePowerEvaluator:
     scenario_family : str
         Which declared generator to run. Recorded on the result. This is not
         a field of ``PowerRequest``.
+    selection_end : label or None, optional
+        When set, the pre-period screen and the generation noise scale use
+        rows at or before this label. The fit still uses the full history,
+        including the holdout. ``None`` keeps the full-history noise scale
+        and the shortest-holdout screen window. Existing callers stay valid.
     """
 
     def __init__(
@@ -718,6 +723,7 @@ class ReferencePowerEvaluator:
         *,
         history: pd.DataFrame,
         scenario_family: str,
+        selection_end: object = None,
     ) -> None:
         if not isinstance(plan, HistoryOnlyPlan):
             raise TypeError("plan must be a HistoryOnlyPlan. No fit was started.")
@@ -727,7 +733,10 @@ class ReferencePowerEvaluator:
         self._plan = plan
         self._history = history.copy()
         self._scenario_family = scenario_family
+        self._selection_end = selection_end
         self._config: _PlanConfiguration | None = None
+        if selection_end is not None:
+            self._require_screen_label()
 
     @property
     def scenario_family(self) -> str:
@@ -736,9 +745,13 @@ class ReferencePowerEvaluator:
 
     @property
     def noise_scale(self) -> float:
-        """Declared noise scale. Reading it does not sample."""
+        """Declared noise scale. Reading it does not sample.
+
+        When ``selection_end`` is set, this is the donor scale on rows at or
+        before that label. Otherwise it is the full-history scale.
+        """
         config = self._configuration()
-        return _noise_scale(self._history, config.controls)
+        return _noise_scale(self._screen_frame(), config.controls)
 
     def untreated_panel(self, replicate: int) -> pd.DataFrame:
         """Return one generated untreated panel. Does not fit or inject treatment.
@@ -842,6 +855,9 @@ class ReferencePowerEvaluator:
             fails, power fields are withheld and the decision rate is stored
             as ``decision_rate_not_power``. A replicate that raises is counted
             as one fit per duration so a failed run is not under-reported.
+            When the constructor was given ``selection_end``, the screen and
+            the recorded noise scale use rows at or before that label. The
+            fit still uses the full frame.
         """
         horizons = _require_durations(durations)
         grid = _require_effects(effects)
@@ -862,13 +878,20 @@ class ReferencePowerEvaluator:
                 f"history has {len(self._history)} rows. Duration {longest} leaves "
                 f"fewer than {MIN_TRAINING_ROWS} training rows. No fit was started."
             )
-        noise_scale = _noise_scale(self._history, config.controls)
+        self._reject_selection_end(horizons)
+        noise_scale = _noise_scale(self._screen_frame(), config.controls)
         n_replicates = replicates_for_tolerance(
             criterion.monte_carlo_error_tolerance,
             n_durations=len(horizons),
         )
         panels = [self._panel(index, config) for index in range(n_replicates)]
-        ratio = _median_rmse_ratio(panels, config, horizons, noise_scale)
+        ratio = _median_rmse_ratio(
+            panels,
+            config,
+            horizons,
+            noise_scale,
+            selection_end=self._selection_end,
+        )
         withhold, reason = _screen_decision(ratio)
         if self._scenario_family == "persistent_misfit" and not withhold:
             raise RuntimeError(
@@ -1030,15 +1053,49 @@ class ReferencePowerEvaluator:
         if worthwhile is not None:
             require_finite(worthwhile, "minimum_worthwhile_effect")
 
+    def _screen_frame(self) -> pd.DataFrame:
+        """Return the rows the screen and the generation noise scale share."""
+        if self._selection_end is None:
+            return self._history
+        labels = list(self._history.index)
+        return self._history.iloc[: labels.index(self._selection_end) + 1]
+
+    def _require_screen_label(self) -> None:
+        labels = list(self._history.index)
+        if self._selection_end not in labels:
+            raise ValueError(
+                "selection_end is not an exact planning label. A partial date "
+                "string is not a label. No fit was started."
+            )
+        if labels.index(self._selection_end) + 1 < MIN_TRAINING_ROWS:
+            raise ValueError(
+                "The pre-period screen needs at least "
+                f"{MIN_TRAINING_ROWS} training rows. No fit was started."
+            )
+
+    def _reject_selection_end(self, horizons: tuple[int, ...]) -> None:
+        if self._selection_end is None:
+            return
+        labels = list(self._history.index)
+        earliest = labels[-max(horizons)]
+        if labels.index(self._selection_end) >= labels.index(earliest):
+            raise ValueError(
+                "selection_end must be strictly before every requested holdout. "
+                "Do not pass the truncated screen to the plan, and do not let the "
+                "screen see the holdout. No fit was started."
+            )
+
     def _panel(self, replicate: int, config: _PlanConfiguration) -> pd.DataFrame:
         donors = _donor_matrix(self._history, config.controls)
+        screen = self._screen_frame()
+        screen_donors = _donor_matrix(screen, config.controls)
         rng = _replicate_rng(config.sampler_seed, replicate, self._scenario_family)
-        noise_scale = _noise_scale(self._history, config.controls)
+        noise_scale = _noise_scale(screen, config.controls)
         n_rows = donors.shape[0]
         if self._scenario_family == "persistent_misfit":
             centered = np.arange(n_rows, dtype=float)
             centered = centered - float(centered.mean())
-            donor_sd = float(np.std(donors))
+            donor_sd = float(np.std(screen_donors))
             treated = (
                 MISFIT_TREND_PER_DONOR_SD * donor_sd * centered
                 + noise_scale * rng.normal(0.0, 1.0, size=n_rows)
@@ -1203,8 +1260,14 @@ def _median_rmse_ratio(
     config: _PlanConfiguration,
     horizons: Sequence[int],
     noise_scale: float,
+    *,
+    selection_end: object = None,
 ) -> float:
-    pre_rows = len(panels[0]) - min(horizons)
+    if selection_end is None:
+        pre_rows = len(panels[0]) - min(horizons)
+    else:
+        labels = list(panels[0].index)
+        pre_rows = labels.index(selection_end) + 1
     if pre_rows < MIN_TRAINING_ROWS:
         raise ValueError(
             "The pre-period screen needs at least "

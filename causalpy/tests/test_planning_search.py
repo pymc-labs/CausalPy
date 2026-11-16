@@ -1948,6 +1948,7 @@ def test_size_one_validation_draws_the_reference_panel(
     plans: list[tuple[str, ...]] = []
     draws: list[tuple[str, int]] = []
     panels: list[pd.DataFrame] = []
+    screen_ends: list[object] = []
 
     class _Plan:
         def __init__(self, history, treated, donors, decision, **kwargs) -> None:
@@ -1958,9 +1959,12 @@ def test_size_one_validation_draws_the_reference_panel(
             plans.append(self.treated_units)
 
     class _Evaluator:
-        def __init__(self, plan, *, history, scenario_family) -> None:
+        def __init__(
+            self, plan, *, history, scenario_family, selection_end=None
+        ) -> None:
             del history, scenario_family
             self.plan = plan
+            screen_ends.append(selection_end)
 
         def untreated_panel(self, replicate: int) -> pd.DataFrame:
             name = self.plan.treated_units[0]
@@ -1979,6 +1983,7 @@ def test_size_one_validation_draws_the_reference_panel(
     monkeypatch.setattr(module, "ReferencePowerEvaluator", _Evaluator)
     monkeypatch.setattr(module, "search", _fake_search)
     frame = _panel()
+    end = _selection_end(frame)
     report = validate_selection(
         frame,
         UNITS,
@@ -1990,12 +1995,13 @@ def test_size_one_validation_draws_the_reference_panel(
         random_seed=11,
         budget=_budget(),
         sample_kwargs=LIGHT,
-        selection_end=_selection_end(frame),
+        selection_end=end,
         always_control=("c", "d"),
         unit_costs=_costs(),
     )
     assert report.n_frozen == 0
     assert plans == [("a",), ("b",)]
+    assert screen_ends == [end, end]
     assert draws == [("a", 0), ("b", 0), ("a", 1), ("b", 1)]
     assert len(panels) == 2
     for replicate, panel in enumerate(panels):
@@ -2412,3 +2418,200 @@ def test_boolean_duration_is_rejected_before_a_fit(
     with pytest.raises(TypeError, match="not a bool"):
         _run(durations=(True,))
     assert calls == []
+
+
+def _patch_size_one_fit(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    import xarray as xr
+
+    from causalpy.planning.contracts import (
+        CanonicalFit,
+        DataBoundary,
+        FitDiagnostics,
+        Provenance,
+    )
+    from causalpy.planning.reference import SyntheticControlAdapter
+
+    seen: list[int] = []
+
+    def fake(self: SyntheticControlAdapter, request: object) -> CanonicalFit:
+        del self
+        duration = request.duration
+        treated = request.treated_units
+        seen.append(len(request.history))
+        values = np.full((1, 4, duration, len(treated)), 20.0)
+        impact = xr.DataArray(
+            values,
+            dims=("chain", "draw", "obs_ind", "treated_units"),
+            coords={
+                "obs_ind": np.arange(duration),
+                "treated_units": list(treated),
+            },
+        )
+        return CanonicalFit(
+            unit_impact=impact,
+            counterfactual=impact.copy(),
+            diagnostics=FitDiagnostics(0, 1.01, 100.0, "available", None),
+            boundary=DataBoundary(
+                training_index=request.history.index[:-duration],
+                holdout_index=request.history.index[-duration:],
+                treated_units=tuple(treated),
+                control_units=tuple(request.control_units),
+                post_period_treated_in_fit=False,
+                post_period_donors_in_prediction=True,
+                horizon_policy="separate-fits",
+                rows_outside_window_excluded=True,
+            ),
+            provenance=Provenance(
+                estimator="synthetic_control",
+                adapter="SyntheticControlAdapter",
+                model_class="WeightedSumFitter",
+                random_seed=7,
+                sample_kwargs=(("random_seed", 7),),
+                horizon_policy="separate-fits",
+                translation="deterministic_additive",
+                uncertainty="posterior_conditional_mean",
+            ),
+            n_inference_fits=1,
+        )
+
+    monkeypatch.setattr(SyntheticControlAdapter, "fit_window", fake)
+    return seen
+
+
+def _spiked_panel(n_rows: int = 24, jump_at: int = 20) -> pd.DataFrame:
+    frame = _panel(n_rows)
+    spiked = frame.copy()
+    spiked.iloc[jump_at:] += 80.0
+    return spiked
+
+
+def test_candidate_counts_are_once_across_duration_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two duration rows for one candidate are one completed count."""
+    _spy_engine(monkeypatch)
+    frame = _panel(20)
+    result = _run(
+        history=frame,
+        durations=(4, 6),
+        selection_end=int(frame.index[-7]),
+        shortlist_size=1,
+        max_group_size=1,
+        budget=_budget(12),
+    )
+    studied = result.frame[result.frame["screen_status"] == "shortlisted"]
+    assert studied["candidate_id"].nunique() == 1
+    assert len(studied) == 2
+    assert result.n_completed == 1
+    assert result.n_rejected == 0
+    assert result.n_failed == 0
+    assert result.fit_budget == 12
+    assert result.n_inference_fits == 4
+
+
+def test_rejected_candidates_are_counted_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_group_adapter(monkeypatch)
+    frame = _panel(20)
+    frame[["c", "d"]] = 1.0
+    result = _run(
+        history=frame,
+        durations=(4, 6),
+        selection_end=int(frame.index[-7]),
+        estimator="augmented_synthetic_control",
+        min_group_size=2,
+        max_group_size=2,
+        fixed_treated=("a", "b"),
+        shortlist_size=1,
+        budget=_budget(40),
+    )
+    rejected = result.frame[result.frame["evaluation_status"] == "rejected"]
+    assert len(rejected) == 2
+    assert rejected["candidate_id"].nunique() == 1
+    assert result.n_rejected == 1
+    assert result.n_completed == 0
+    assert result.n_failed == 0
+    assert result.fit_budget == 40
+
+
+def test_holdout_shock_does_not_split_size_one_and_grouped_screens(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both screens withhold a misfit when the shock is after selection_end."""
+    from causalpy.planning.power import MISFIT_RMSE_TO_NOISE
+
+    seen = _patch_size_one_fit(monkeypatch)
+    _install_group_adapter(monkeypatch)
+    frame = _spiked_panel()
+    end = int(frame.index[13])
+    common = {
+        "history": frame,
+        "selection_end": end,
+        "durations": (4,),
+        "shortlist_size": 1,
+        "scenario_family": "persistent_misfit",
+    }
+    size_one = _run(
+        **common,
+        estimator="synthetic_control",
+        min_group_size=1,
+        max_group_size=1,
+        fixed_treated=("a",),
+    )
+    grouped = _run(
+        **common,
+        estimator="augmented_synthetic_control",
+        min_group_size=2,
+        max_group_size=2,
+        fixed_treated=("a", "b"),
+    )
+    assert seen
+    assert set(seen) == {len(frame)}
+    for result in (size_one, grouped):
+        studied = result.frame[result.frame["screen_status"] == "shortlisted"]
+        assert set(studied["evaluation_status"]) == {"withheld"}
+        assert result.n_completed == 0
+        assert result.n_rejected == 0
+        study = next(iter(result.studies.values()))
+        assert study.power_withheld
+        assert study.preperiod_rmse_ratio > MISFIT_RMSE_TO_NOISE
+
+
+def test_holdout_shock_does_not_flip_a_keep_on_either_screen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A post-cutoff donor jump must not withhold a pre-cutoff match."""
+    seen = _patch_size_one_fit(monkeypatch)
+    _install_group_adapter(monkeypatch)
+    frame = _spiked_panel()
+    end = int(frame.index[13])
+    common = {
+        "history": frame,
+        "selection_end": end,
+        "durations": (4,),
+        "shortlist_size": 1,
+        "scenario_family": "correctly_specified_noisy_reference",
+    }
+    size_one = _run(
+        **common,
+        estimator="synthetic_control",
+        min_group_size=1,
+        max_group_size=1,
+        fixed_treated=("a",),
+    )
+    grouped = _run(
+        **common,
+        estimator="augmented_synthetic_control",
+        min_group_size=2,
+        max_group_size=2,
+        fixed_treated=("a", "b"),
+    )
+    assert seen
+    assert set(seen) == {len(frame)}
+    for result in (size_one, grouped):
+        studied = result.frame[result.frame["screen_status"] == "shortlisted"]
+        assert set(studied["evaluation_status"]) == {"completed"}
+        assert result.n_completed == 1
+        assert result.fit_budget == 500
+        assert next(iter(result.studies.values())).power_withheld is False
