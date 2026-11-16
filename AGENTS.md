@@ -96,16 +96,16 @@ Renamed or deleted how-to pages must keep a **permanent** entry in `rediraffe_re
 
 - **Before committing**: Use `uv run prek run` during iterative edits and run `uv run prek run --all-files` before committing to ensure all checks pass (linting, formatting)
 - **Type checking**: `mypy` is intentionally **not** in `prek` — it only says anything useful when the project dependencies are importable, and a hook environment does not have them (issue #1127). Run `uv run make typecheck` (or `$CONDA_EXE run -n CausalPy make typecheck` on the conda fallback); CI runs the same target from the test job. Scope and the per-module allowlist live in `[tool.mypy]` in `pyproject.toml`.
-- **Patch coverage (milestones, not every commit)**: `uv run make test-patch-cov` is intentionally **not** in `prek` — it runs the full test suite (~90s+) and needs the conda env. Run it at meaningful checkpoints when Python source or tests under `causalpy/` changed, not on every small commit:
+- **Patch coverage (milestones, not every commit)**: `uv run make test-patch-cov` is intentionally **not** in `prek` — it runs the full test suite (~90s+) and requires the project environment. Run it at meaningful checkpoints when Python source or tests under `causalpy/` changed, not on every small commit:
   - A PR is ready for review, or you are about to push for CI
   - You finished a large or multi-file task touching production code
   - You are handing off to another person or agent
   - During iterative work, rely on `prek` and targeted `pytest` instead
   - Command: `uv run make test-patch-cov` (or `$CONDA_EXE run -n CausalPy make test-patch-cov` on the conda fallback)
   - The gate measures **production code only** (`causalpy/tests/*` excluded) at **96%**, approximating the remote Codecov patch check against `upstream/main` when available, falling back to `origin/main`. Override `DIFF_COVER_COMPARE_BRANCH`, `DIFF_COVER_FAIL_UNDER`, or `DIFF_COVER_EXCLUDE` only when the PR deliberately targets a different base or threshold.
-- **Quick check**: Run `ruff check causalpy/` for fast linting feedback during development
-- **Auto-fix**: Run `ruff check --fix causalpy/` to automatically fix many linting issues
-- **Format**: Run `ruff format causalpy/` to format code according to project standards
+- **Quick check**: Run `uv run ruff check causalpy/` for fast linting feedback during development
+- **Auto-fix**: Run `uv run ruff check --fix causalpy/` to automatically fix many linting issues
+- **Format**: Run `uv run ruff format causalpy/` to format code according to project standards
 - **Linting rules**: Project uses strict linting (F, B, UP, C4, SIM, I) to catch bugs and enforce modern Python patterns
 - **Note**: Documentation notebooks in `docs/` are excluded from strict linting rules
 
