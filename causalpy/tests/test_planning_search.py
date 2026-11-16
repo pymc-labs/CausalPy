@@ -41,6 +41,7 @@ from causalpy.planning.search import (
     ComputationalBudget,
     FrozenDesign,
     _pareto,
+    _SearchRow,
     compare_screening,
     plot_search,
     sampler_seed,
@@ -240,7 +241,13 @@ def _install_group_adapter(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, .
                     average_per_period_mean=float(scenario.magnitude),
                     average_per_treated_unit_mean=float(scenario.magnitude),
                 ),
-                diagnostics=SimpleNamespace(divergences=0, max_rhat=1.0),
+                diagnostics=SimpleNamespace(
+                    divergences=0,
+                    max_rhat=1.0,
+                    min_bulk_ess=None,
+                    diagnostics_status="available",
+                    diagnostics_reason=None,
+                ),
             )
 
     monkeypatch.setattr(
@@ -722,17 +729,44 @@ def _completed_row(
     width: float = 1.0,
     cost: float = 1.0,
     share: float = 0.2,
-) -> dict[str, object]:
-    return {
-        "candidate_id": candidate_id,
-        "duration": DURATION,
-        "evaluation_status": "completed",
-        "power_withheld": False,
-        "power": power,
-        "interval_width": width,
-        "cost": cost,
-        "outcome_share": share,
-    }
+) -> _SearchRow:
+    return _SearchRow(
+        candidate_id=candidate_id,
+        treated=(),
+        donors=(),
+        n_donors=0,
+        group_size=1,
+        duration=DURATION,
+        estimator="synthetic_control",
+        cost=cost,
+        outcome_share=share,
+        proxy_score=None,
+        proxy_role=None,
+        shortlist_rank=None,
+        boundary=False,
+        screen_status="shortlisted",
+        evaluation_status="completed",
+        reason=None,
+        power=power,
+        power_withheld=False,
+        false_positive_rate=None,
+        precision_met=None,
+        interval_width=width,
+        monte_carlo_error=None,
+        mde=None,
+        mde_status=None,
+        n_fits=0,
+        failed_runs=0,
+        divergences=None,
+        max_rhat=None,
+        min_bulk_ess=None,
+        diagnostics_status=None,
+        diagnostics_reason=None,
+        unit_scale=None,
+        eligible=False,
+        pareto=False,
+        selected=False,
+    )
 
 
 def test_pareto_treats_lower_cost_and_width_as_better() -> None:
@@ -810,7 +844,13 @@ def _grouped_success(monkeypatch: pytest.MonkeyPatch) -> list[int]:
                     hdi_upper=1.0,
                     posterior_tail_probability=0.01,
                 ),
-                diagnostics=SimpleNamespace(divergences=0, max_rhat=1.0),
+                diagnostics=SimpleNamespace(
+                    divergences=0,
+                    max_rhat=1.0,
+                    min_bulk_ess=None,
+                    diagnostics_status="available",
+                    diagnostics_reason=None,
+                ),
             )
             for duration in horizons
             for effect in (0.0, *effects)
@@ -874,7 +914,13 @@ def test_grouped_misfit_uses_injected_noise_not_unit_scale(
                     hdi_upper=1.0,
                     posterior_tail_probability=0.01,
                 ),
-                diagnostics=SimpleNamespace(divergences=0, max_rhat=1.0),
+                diagnostics=SimpleNamespace(
+                    divergences=0,
+                    max_rhat=1.0,
+                    min_bulk_ess=None,
+                    diagnostics_status="available",
+                    diagnostics_reason=None,
+                ),
             )
             for duration in horizons
             for effect in (0.0, *effects)
@@ -975,11 +1021,17 @@ def test_quiet_unit_keeps_its_own_noise_scale(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A treated unit quieter than its donors is not floored to their scale."""
-    from causalpy.planning.search import _unit_scale
+    from causalpy.planning.grouped_study import _unit_scale
 
     _install_decisive_evaluate(
         monkeypatch,
-        SimpleNamespace(divergences=0, max_rhat=1.0, min_bulk_ess=100.0),
+        SimpleNamespace(
+            divergences=0,
+            max_rhat=1.0,
+            min_bulk_ess=100.0,
+            diagnostics_status="available",
+            diagnostics_reason=None,
+        ),
     )
     frame = _panel()
     donors = ["b", "c", "d"]
@@ -1073,7 +1125,7 @@ def test_unavailable_diagnostics_stay_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A missing divergence count stays null; it is not stored as zero."""
-    from causalpy.planning.search import _summarize_diagnostics
+    from causalpy.planning.grouped_study import _summarize_diagnostics
 
     mixed = _summarize_diagnostics(
         [
@@ -1196,7 +1248,13 @@ def test_validate_selection_injects_only_the_grouped_holdout(
                     hdi_upper=1.0,
                     posterior_tail_probability=0.01,
                 ),
-                diagnostics=SimpleNamespace(divergences=0, max_rhat=1.0),
+                diagnostics=SimpleNamespace(
+                    divergences=0,
+                    max_rhat=1.0,
+                    min_bulk_ess=None,
+                    diagnostics_status="available",
+                    diagnostics_reason=None,
+                ),
             )
             for duration in horizons
             for effect in (0.0, *effects)
@@ -1651,7 +1709,13 @@ def test_validators_replay_a_constrained_grouped_procedure(
                     average_per_period_mean=0.0,
                     average_per_treated_unit_mean=0.0,
                 ),
-                diagnostics=SimpleNamespace(divergences=0, max_rhat=1.0),
+                diagnostics=SimpleNamespace(
+                    divergences=0,
+                    max_rhat=1.0,
+                    min_bulk_ess=None,
+                    diagnostics_status="available",
+                    diagnostics_reason=None,
+                ),
             )
 
     monkeypatch.setattr(
@@ -1659,7 +1723,7 @@ def test_validators_replay_a_constrained_grouped_procedure(
         lambda: {"augmented_synthetic_control": _Adapter},
     )
     monkeypatch.setattr(
-        sys.modules["causalpy.planning.search"], "_grouped_rmse_ratio", _ratio
+        sys.modules["causalpy.planning.grouped_study"], "_grouped_rmse_ratio", _ratio
     )
     frame = _panel()
     shared = {
@@ -2042,9 +2106,7 @@ def test_holdout_shift_keeps_the_largest_injection(
         )
         return SimpleNamespace(frozen=frozen, reason=None)
 
-    monkeypatch.setattr(
-        sys.modules["causalpy.planning.search"], "_replay_search", replay
-    )
+    monkeypatch.setattr(sys.modules["causalpy.planning.search"], "search", replay)
     monkeypatch.setattr(
         FrozenDesign,
         "analysis_handoff",
@@ -2083,7 +2145,14 @@ def test_large_unit_persistent_misfit_still_withholds(
     from causalpy.planning.power import MISFIT_RMSE_TO_NOISE
 
     _install_decisive_evaluate(
-        monkeypatch, SimpleNamespace(divergences=0, max_rhat=1.0)
+        monkeypatch,
+        SimpleNamespace(
+            divergences=0,
+            max_rhat=1.0,
+            min_bulk_ess=None,
+            diagnostics_status="available",
+            diagnostics_reason=None,
+        ),
     )
     frame = _panel()
     frame["a"] = frame["a"] * 100
@@ -2118,7 +2187,7 @@ def test_absent_persistent_misfit_rejects_before_fit(
     monkeypatch.setattr(HistoryOnlyPlan, "evaluate", evaluate)
 
     monkeypatch.setattr(
-        sys.modules["causalpy.planning.search"],
+        sys.modules["causalpy.planning.grouped_study"],
         "_grouped_rmse_ratio",
         lambda *args, **kwargs: 0.1,
     )
@@ -2173,7 +2242,7 @@ def test_audit_refuses_a_panel_outside_the_frozen_label_domain(
 
 def test_grouped_holdout_spike_does_not_change_pre_cutoff_scale() -> None:
     """A holdout shock must not rescale the pre-cutoff grouped series."""
-    from causalpy.planning.search import _grouped_panel, _noise_scale
+    from causalpy.planning.grouped_study import _grouped_panel, _noise_scale
 
     history = _panel(20)
     end = history.index[-DURATION - 1]

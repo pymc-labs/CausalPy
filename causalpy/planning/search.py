@@ -19,6 +19,7 @@ Size-one synthetic control is
 designs are translated :class:`causalpy.planning.reference.HistoryOnlyPlan`
 fits. The generator's proxy is recorded and is not a power claim. There is
 no second ranking implementation.
+Grouped designs are simulated in ``causalpy.planning.grouped_study``.
 
 The declared selection objective is lexicographic, not a weighted score:
 among rows that meet the caller's power, false-positive, and precision
@@ -37,11 +38,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import time
 import tracemalloc
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -58,28 +58,33 @@ from causalpy.planning.contracts import (
     MIN_TRAINING_ROWS,
     BalanceConstraint,
     CandidateRequest,
+    CandidateTable,
+    CanonicalEvaluation,
     DecisionRule,
     PowerCriterion,
     require_positive_int,
     unit_period_effect,
 )
+from causalpy.planning.grouped_study import (
+    GROUPED_DATA_SEED_SCHEME as GROUPED_DATA_SEED_SCHEME,
+)
+from causalpy.planning.grouped_study import (
+    GROUPED_MECHANISM as GROUPED_MECHANISM,
+)
+from causalpy.planning.grouped_study import (
+    _DiagnosticRecord,
+    _grouped_panel,
+    _grouped_study,
+    _noise_scale,
+)
 from causalpy.planning.power import (
-    CONDITIONAL_ON,
-    MDE_CONVENTION,
-    MISFIT_RMSE_TO_NOISE,
-    MISFIT_TREND_PER_DONOR_SD,
-    NOISE_TO_DONOR_SD,
     SCENARIO_FAMILIES,
-    TEMPORAL_AR_COEFFICIENT,
     EffectByDuration,
     MinimumDetectableEffect,
     MisfitNotPower,
     PowerPoint,
     ReferencePowerEvaluator,
-    StudyRecord,
-    interpolate_minimum_detectable_effect,
     monte_carlo_error,
-    preperiod_simplex_rmse,
     replicates_for_tolerance,
 )
 from causalpy.planning.reference import AnalysisHandoff, HistoryOnlyPlan
@@ -97,23 +102,7 @@ EVALUATION_ORDER = (
     "candidate_id order. The sampler seed is keyed to the caller seed, "
     "candidate_id, and durations, not to the loop index."
 )
-GROUPED_DATA_SEED_SCHEME = (
-    "numpy.random.SeedSequence([sampler_seed, replicate_index, family_code])"
-    ".spawn(1 + n_treated). Child 0 is the common shock. Later children are "
-    "unit shocks in sorted treated-name order. family_code is the index in "
-    "SCENARIO_FAMILIES. This is not the size-one engine stream."
-)
-GROUPED_MECHANISM = (
-    "Each replicate replaces every treated column and leaves donor columns "
-    "at their observed values. HistoryOnlyPlan.evaluate fits the selected "
-    "adapter once per duration and translates the effect grid without "
-    "refitting. Treatment is not in the series that is fit. The decision "
-    "rate is the share of replicates whose AnalysisDecision.decided is true. "
-    "ReferencePowerEvaluator rejects groups, so this extension calls the "
-    "plan and the published aggregation helpers instead. It does not rank "
-    "candidates and it does not refit the power engine's private assembly."
-)
-COMMON_SHOCK_SHARE = 0.5
+
 SEARCH_COLUMNS = (
     "candidate_id",
     "treated",
@@ -332,7 +321,7 @@ class AuditReport:
     decided: bool
     posterior_tail_probability: float
     holdout_index: tuple[object, ...]
-    evaluation: object
+    evaluation: CanonicalEvaluation
     reason: str | None
 
 
@@ -371,7 +360,7 @@ class SearchResult:
     """
 
     frame: pd.DataFrame
-    candidates: object
+    candidates: CandidateTable
     studies: Mapping[str, EffectByDuration]
     frozen: FrozenDesign | None
     status: str
@@ -800,29 +789,35 @@ def _search_screen(
             f"({budget.max_inference_fits} fits). Replicates were not reduced. "
             "No fit was started."
         )
-    request = _candidate_request(
-        frame=frame,
-        units=units,
+    request = CandidateRequest(
+        units=tuple(units),
         min_group_size=min_group_size,
         max_group_size=max_group_size,
+        history=frame,
         selection_end=selection_end,
         random_seed=caller_seed,
-        treatment_eligible=treatment_eligible,
-        donor_eligible=donor_eligible,
-        always_control=always_control,
-        excluded_units=excluded_units,
-        required_treated=required_treated,
-        supplied_groups=supplied_groups,
-        fixed_treated=fixed_treated,
-        donor_pools=donor_pools,
-        spillover_exclusions=spillover_exclusions,
+        treatment_eligible=None
+        if treatment_eligible is None
+        else tuple(treatment_eligible),
+        donor_eligible=None if donor_eligible is None else tuple(donor_eligible),
+        always_control=tuple(always_control),
+        excluded_units=tuple(excluded_units),
+        required_treated=tuple(required_treated),
+        supplied_groups=None
+        if supplied_groups is None
+        else tuple(tuple(group) for group in supplied_groups),
+        fixed_treated=None if fixed_treated is None else tuple(fixed_treated),
+        donor_pools=None
+        if donor_pools is None
+        else tuple(tuple(pool) for pool in donor_pools),
+        spillover_exclusions=tuple(spillover_exclusions),
         min_remaining_donors=min_remaining_donors,
         min_outcome_share=min_outcome_share,
         max_outcome_share=max_outcome_share,
-        unit_costs=unit_costs,
-        cost_budget=cost_budget,
-        unit_covariates=unit_covariates,
-        balance_constraints=balance_constraints,
+        unit_costs=tuple(unit_costs),
+        budget=cost_budget,
+        unit_covariates=tuple(unit_covariates),
+        balance_constraints=tuple(balance_constraints),
         exact_ceiling=exact_ceiling,
         max_generated=max_generated,
         shortlist_size=shortlist_size,
@@ -897,21 +892,26 @@ def _search_screen(
         screen,
         horizons,
         evaluations,
-        decision,
         criterion,
         worthwhile,
         estimator,
     )
     selected, status, reason, closest = _select(rows, criterion)
-    for row in rows:
-        row["selected"] = (
-            selected is not None
-            and row["candidate_id"] == selected["candidate_id"]
-            and row["duration"] == selected["duration"]
+    rows = [
+        replace(
+            row,
+            selected=(
+                selected is not None
+                and row.candidate_id == selected.candidate_id
+                and row.duration == selected.duration
+            ),
         )
+        for row in rows
+    ]
     pareto = _pareto(rows)
-    for row in rows:
-        row["pareto"] = (row["candidate_id"], row["duration"]) in pareto
+    rows = [
+        replace(row, pareto=(row.candidate_id, row.duration) in pareto) for row in rows
+    ]
     frozen = None
     if selected is not None:
         frozen = _freeze(
@@ -929,7 +929,7 @@ def _search_screen(
     optimality = _optimality(table.partial, skipped, screen, evaluations)
     elapsed, peak = trace.finish()
     return SearchResult(
-        frame=pd.DataFrame(rows, columns=list(SEARCH_COLUMNS)),
+        frame=pd.DataFrame([asdict(row) for row in rows], columns=list(SEARCH_COLUMNS)),
         candidates=table,
         studies=studies,
         frozen=frozen,
@@ -946,90 +946,6 @@ def _search_screen(
         pareto_ids=tuple(sorted({item[0] for item in pareto})),
         runtime_seconds=elapsed,
         peak_traced_bytes=peak,
-    )
-
-
-def _replay_search(
-    history: pd.DataFrame,
-    units: Sequence[str],
-    decision: DecisionRule,
-    criterion: PowerCriterion,
-    worthwhile_effect: float,
-    durations: Sequence[int],
-    *,
-    estimator: str,
-    min_group_size: int,
-    max_group_size: int,
-    selection_end: object,
-    sample_kwargs: Mapping[str, object],
-    random_seed: int,
-    budget: ComputationalBudget,
-    scale: str,
-    baseline: float | None,
-    outcome_scale: str,
-    time_column: str | None,
-    always_control: Sequence[str],
-    unit_costs: Sequence[tuple[str, float]],
-    shortlist_size: int,
-    scenario_family: str,
-    treatment_eligible: Sequence[str] | None,
-    donor_eligible: Sequence[str] | None,
-    excluded_units: Sequence[str],
-    required_treated: Sequence[str],
-    supplied_groups: Sequence[Sequence[str]] | None,
-    fixed_treated: Sequence[str] | None,
-    donor_pools: Sequence[Sequence[str]] | None,
-    spillover_exclusions: Sequence[tuple[str, str]],
-    min_remaining_donors: int,
-    min_outcome_share: float | None,
-    max_outcome_share: float | None,
-    cost_budget: float | None,
-    unit_covariates: Sequence[tuple[str, Sequence[tuple[str, float]]]],
-    balance_constraints: Sequence[BalanceConstraint],
-    exact_ceiling: int,
-    max_generated: int | None,
-    effect_grid: Sequence[float] | None,
-) -> SearchResult:
-    """Run one inner search with the caller's operational constraints."""
-    return search(
-        history,
-        units,
-        decision,
-        criterion,
-        worthwhile_effect,
-        durations,
-        estimator=estimator,
-        min_group_size=min_group_size,
-        max_group_size=max_group_size,
-        selection_end=selection_end,
-        sample_kwargs=sample_kwargs,
-        random_seed=random_seed,
-        budget=budget,
-        scale=scale,
-        baseline=baseline,
-        outcome_scale=outcome_scale,
-        time_column=time_column,
-        treatment_eligible=treatment_eligible,
-        donor_eligible=donor_eligible,
-        always_control=always_control,
-        excluded_units=excluded_units,
-        required_treated=required_treated,
-        supplied_groups=supplied_groups,
-        fixed_treated=fixed_treated,
-        donor_pools=donor_pools,
-        spillover_exclusions=spillover_exclusions,
-        min_remaining_donors=min_remaining_donors,
-        min_outcome_share=min_outcome_share,
-        max_outcome_share=max_outcome_share,
-        unit_costs=unit_costs,
-        cost_budget=cost_budget,
-        unit_covariates=unit_covariates,
-        balance_constraints=balance_constraints,
-        exact_ceiling=exact_ceiling,
-        max_generated=max_generated,
-        shortlist_size=shortlist_size,
-        scenario_family=scenario_family,
-        effect_grid=effect_grid,
     )
 
 
@@ -1221,7 +1137,7 @@ def validate_selection(
             reference=reference,
             panel_cache=panel_cache,
         )
-        result = _replay_search(
+        result = search(
             panel,
             units,
             decision,
@@ -1452,7 +1368,7 @@ def compare_screening(
     """
 
     def _pass(shortlist: int) -> SearchResult:
-        return _replay_search(
+        return search(
             history,
             units,
             decision,
@@ -1494,23 +1410,21 @@ def compare_screening(
         )
 
     capped = _pass(shortlist_size)
-    passing = int(
-        (capped.candidates.frame["status"] != "filtered").sum()  # type: ignore[attr-defined]
-    )
+    passing = int((capped.candidates.frame["status"] != "filtered").sum())
     exhaustive = _pass(max(passing, shortlist_size))
     shortlist_ids = tuple(
         sorted(
             str(item)
-            for item in capped.candidates.frame.loc[  # type: ignore[attr-defined]
-                capped.candidates.frame["status"] == "shortlisted", "candidate_id"  # type: ignore[attr-defined]
+            for item in capped.candidates.frame.loc[
+                capped.candidates.frame["status"] == "shortlisted", "candidate_id"
             ]
         )
     )
     exhaustive_ids = tuple(
         sorted(
             str(item)
-            for item in exhaustive.candidates.frame.loc[  # type: ignore[attr-defined]
-                exhaustive.candidates.frame["status"] == "shortlisted", "candidate_id"  # type: ignore[attr-defined]
+            for item in exhaustive.candidates.frame.loc[
+                exhaustive.candidates.frame["status"] == "shortlisted", "candidate_id"
             ]
         )
     )
@@ -1576,21 +1490,6 @@ def plot_search(result: SearchResult) -> Figure:
     ax.set_ylabel("power at the worthwhile effect")
     ax.set_title(result.status)
     return fig
-
-
-@dataclass(frozen=True)
-class _DiagnosticRecord:
-    """Grouped sampling diagnostics for one search row.
-
-    ``divergences`` is null when any replicate count is missing. It is not
-    the power curve's required integer.
-    """
-
-    divergences: int | None
-    max_rhat: float | None
-    min_bulk_ess: float | None
-    status: str | None
-    reason: str | None
 
 
 @dataclass
@@ -1831,19 +1730,16 @@ def _reference_study(
     outcome_scale: str,
     time_column: str | None,
 ) -> _CandidateEvaluation:
-    try:
-        plan = HistoryOnlyPlan(
-            frame,
-            treated,
-            donors,
-            decision,
-            estimator="synthetic_control",
-            sample_kwargs=sample_kwargs,
-            time_column=time_column,
-            outcome_scale=outcome_scale,
-        )
-    except (TypeError, ValueError) as exc:
-        return _CandidateEvaluation(None, "rejected", str(exc), 0)
+    plan = HistoryOnlyPlan(
+        frame,
+        treated,
+        donors,
+        decision,
+        estimator="synthetic_control",
+        sample_kwargs=sample_kwargs,
+        time_column=time_column,
+        outcome_scale=outcome_scale,
+    )
     try:
         evaluator = ReferencePowerEvaluator(plan, history=frame, scenario_family=family)
         # The engine refuses post_search. This module applies that scope
@@ -1892,459 +1788,59 @@ def _reference_study(
     return _finished_evaluation(study, study.n_fits)
 
 
-def _grouped_study(
-    frame: pd.DataFrame,
-    treated: tuple[str, ...],
-    donors: tuple[str, ...],
-    horizons: tuple[int, ...],
-    effects: tuple[float, ...],
-    decision: DecisionRule,
-    criterion: PowerCriterion,
-    worthwhile: float,
-    estimator: str,
-    family: str,
-    scale: str,
-    baseline: float | None,
-    sample_kwargs: Mapping[str, object],
-    outcome_scale: str,
-    time_column: str | None,
-    selection_end: object,
-    seed: int,
-    fit_ceiling: int,
-) -> _CandidateEvaluation:
-    try:
-        HistoryOnlyPlan(
-            frame,
-            treated,
-            donors,
-            decision,
-            estimator=estimator,
-            sample_kwargs=sample_kwargs,
-            time_column=time_column,
-            outcome_scale=outcome_scale,
-        )
-    except (TypeError, ValueError) as exc:
-        return _CandidateEvaluation(None, "rejected", str(exc), 0)
-    setup = _setup_refusal(frame, donors, horizons, selection_end)
-    if setup is not None:
-        return setup
-    try:
-        replicates = replicates_for_tolerance(
-            criterion.monte_carlo_error_tolerance,
-            n_durations=len(horizons),
-            ceiling=fit_ceiling,
-        )
-        translated = _with_zero(effects)
-        noise = _noise_scale(frame, donors, selection_end)
-        donor_sd = _donor_sd(frame, donors, selection_end)
-        scales = {
-            name: _unit_scale(frame, name, selection_end, donor_sd) for name in treated
-        }
-        unit_scale = max(scales.values())
-        panels = [
-            _grouped_panel(
-                frame,
-                treated,
-                donors,
-                family,
-                seed,
-                replicate,
-                noise,
-                selection_end,
-            )
-            for replicate in range(replicates)
-        ]
-        ratio_scales = (
-            dict.fromkeys(treated, 1.0) if family == "persistent_misfit" else scales
-        )
-        ratio = _grouped_rmse_ratio(
-            panels, treated, donors, horizons, noise, ratio_scales
-        )
-    except ValueError as exc:
-        return _CandidateEvaluation(None, "rejected", str(exc), 0)
-    if family == "persistent_misfit" and ratio <= MISFIT_RMSE_TO_NOISE:
-        return _CandidateEvaluation(
-            None,
-            "rejected",
-            (
-                "Declared persistent_misfit was not present: median pre-period "
-                f"RMSE / noise_scale was {ratio}, below {MISFIT_RMSE_TO_NOISE}. "
-                "Power was not reported. No fit was started."
-            ),
-            0,
-        )
-    draws: dict[tuple[int, float], list[object]] = {
-        (duration, effect): [] for duration in horizons for effect in translated
-    }
-    failures: list[str] = []
-    n_fits = 0
-    for panel in panels:
-        try:
-            plan = HistoryOnlyPlan(
-                panel,
-                treated,
-                donors,
-                decision,
-                estimator=estimator,
-                sample_kwargs=sample_kwargs,
-                time_column=time_column,
-                outcome_scale=outcome_scale,
-            )
-            if scale == "absolute":
-                planning = plan.evaluate(horizons, absolute_effects=translated)
-            else:
-                planning = plan.evaluate(
-                    horizons,
-                    relative_effects=translated,
-                    relative_baseline=baseline,
-                )
-        except ValueError as exc:
-            message = str(exc)
-            failures.append(f"ValueError: {message}")
-            if "No fit was started" not in message:
-                n_fits += len(horizons)
-            continue
-        except Exception as exc:
-            failures.append(f"{type(exc).__name__}: {exc}")
-            n_fits += len(horizons)
-            continue
-        n_fits += int(planning.n_inference_fits)
-        for evaluation in planning.evaluations:
-            key = (evaluation.duration, evaluation.scenario.magnitude)
-            if key not in draws:
-                failures.append(
-                    "Translation returned an effect that was not requested."
-                )
-                continue
-            draws[key].append(evaluation)
-    if not any(draws.values()):
-        detail = failures[0] if failures else "no successful replicate"
-        if n_fits == 0:
-            return _CandidateEvaluation(None, "rejected", detail, 0)
-        return _CandidateEvaluation(
-            None, "failed", f"Every replicate failed ({detail}).", n_fits
-        )
-    shortest = min(len(sample) for sample in draws.values())
-    if shortest < replicates:
-        return _CandidateEvaluation(
-            None,
-            "failed",
-            (
-                f"Only {shortest} of {replicates} replicates completed. "
-                "The declared tolerance sample was not reached. No design "
-                "was frozen from this study."
-            ),
-            n_fits,
-        )
-    study, diagnostics = _assemble_grouped(
-        draws=draws,
-        failures=tuple(failures),
-        n_fits=n_fits,
-        horizons=horizons,
-        translated=translated,
-        decision=decision,
-        criterion=criterion,
-        scale=scale,
-        baseline=baseline,
-        worthwhile=worthwhile,
-        ratio=ratio,
-        family=family,
-        noise_scale=noise,
-        n_replicates=replicates,
-        estimator=estimator,
-        donors=donors,
-        treated=treated,
-        seed=seed,
-        frame=frame,
-        selection_end=selection_end,
-    )
-    return _finished_evaluation(
-        study,
-        n_fits,
-        unit_scale=unit_scale,
-        diagnostics=diagnostics,
-    )
+@dataclass(frozen=True)
+class _SearchRow:
+    """One candidate at one duration.
 
+    Selection copies the row instead of writing flags back into a dict.
+    """
 
-def _grouped_panel(
-    history: pd.DataFrame,
-    treated: tuple[str, ...],
-    donors: tuple[str, ...],
-    family: str,
-    sampler_seed_value: int,
-    replicate: int,
-    noise_scale: float,
-    selection_end: object,
-) -> pd.DataFrame:
-    """Replace treated columns. Donor columns stay observed."""
-    children = np.random.SeedSequence(
-        [sampler_seed_value, replicate, SCENARIO_FAMILIES.index(family)]
-    ).spawn(1 + len(treated))
-    panel = history.copy()
-    donor_matrix = history.loc[:, list(donors)].to_numpy(dtype=float)
-    n_rows = donor_matrix.shape[0]
-    weights = np.full(len(donors), 1.0 / len(donors))
-    combo = donor_matrix @ weights
-    rho = TEMPORAL_AR_COEFFICIENT if family == "temporal_dependence" else 0.0
-    common = _ar1_noise(np.random.default_rng(children[0]), n_rows, rho)
-    donor_sd = _donor_sd(history, donors, selection_end)
-    share = math.sqrt(COMMON_SHOCK_SHARE)
-    for index, name in enumerate(sorted(treated)):
-        rng = np.random.default_rng(children[index + 1])
-        scale = _unit_scale(history, name, selection_end, donor_sd)
-        if family == "persistent_misfit":
-            centered = np.arange(n_rows, dtype=float)
-            centered = centered - float(centered.mean())
-            series = (
-                MISFIT_TREND_PER_DONOR_SD * donor_sd * centered
-                + noise_scale * rng.normal(0.0, 1.0, size=n_rows)
-            )
-        else:
-            unit = _ar1_noise(rng, n_rows, rho)
-            noise = share * common + math.sqrt(1.0 - COMMON_SHOCK_SHARE) * unit
-            series = combo + noise_scale * scale * noise
-        panel[name] = pd.Series(series, index=history.index)
-    return panel
-
-
-def _summarize_diagnostics(items: Sequence[object]) -> _DiagnosticRecord:
-    """Record adapter diagnostics without turning a missing count into zero."""
-    if not items:
-        return _DiagnosticRecord(None, None, None, None, None)
-    counts: list[int | None] = []
-    rhats: list[float] = []
-    ess_values: list[float] = []
-    statuses: list[str] = []
-    reasons: list[str] = []
-    ess_complete = True
-    for item in items:
-        diagnostics = getattr(item, "diagnostics", None)
-        raw_count = getattr(diagnostics, "divergences", None)
-        count = (
-            raw_count
-            if isinstance(raw_count, int) and not isinstance(raw_count, bool)
-            else None
-        )
-        counts.append(count)
-        raw_status = getattr(diagnostics, "diagnostics_status", None)
-        if raw_status in {"available", "partial", "unavailable"}:
-            statuses.append(str(raw_status))
-        elif count is None:
-            statuses.append("unavailable")
-        else:
-            statuses.append("available")
-        raw_reason = getattr(diagnostics, "diagnostics_reason", None)
-        if raw_reason:
-            reasons.append(str(raw_reason))
-        raw_rhat = getattr(diagnostics, "max_rhat", None)
-        if isinstance(raw_rhat, int | float) and not isinstance(raw_rhat, bool):
-            rhat = float(raw_rhat)
-            if np.isfinite(rhat):
-                rhats.append(rhat)
-        if diagnostics is None or not hasattr(diagnostics, "min_bulk_ess"):
-            ess_complete = False
-        else:
-            raw_ess = diagnostics.min_bulk_ess
-            if (
-                isinstance(raw_ess, int | float)
-                and not isinstance(raw_ess, bool)
-                and np.isfinite(float(raw_ess))
-            ):
-                ess_values.append(float(raw_ess))
-            else:
-                ess_complete = False
-    total = 0
-    missing_count = False
-    for count in counts:
-        if count is None:
-            missing_count = True
-            break
-        total += count
-    rank = {"available": 0, "partial": 1, "unavailable": 2}
-    status = (
-        "unavailable" if missing_count else max(statuses, key=lambda name: rank[name])
-    )
-    return _DiagnosticRecord(
-        divergences=None if missing_count else total,
-        max_rhat=max(rhats) if rhats else None,
-        min_bulk_ess=min(ess_values) if ess_complete and ess_values else None,
-        status=status,
-        reason="; ".join(dict.fromkeys(reasons)) or None,
-    )
-
-
-def _assemble_grouped(
-    *,
-    draws: dict[tuple[int, float], list[object]],
-    failures: tuple[str, ...],
-    n_fits: int,
-    horizons: tuple[int, ...],
-    translated: tuple[float, ...],
-    decision: DecisionRule,
-    criterion: PowerCriterion,
-    scale: str,
-    baseline: float | None,
-    worthwhile: float,
-    ratio: float,
-    family: str,
-    noise_scale: float,
-    n_replicates: int,
-    estimator: str,
-    donors: tuple[str, ...],
-    treated: tuple[str, ...],
-    seed: int,
-    frame: pd.DataFrame,
-    selection_end: object,
-) -> tuple[EffectByDuration, _DiagnosticRecord]:
-    withhold = ratio > MISFIT_RMSE_TO_NOISE
-    reason = (
-        (
-            "Pre-period misfit: simplex reconstruction failed "
-            f"(median RMSE / injected noise sd={ratio:.3f}, threshold "
-            f"{MISFIT_RMSE_TO_NOISE}). The decision rate was not labeled as power."
-        )
-        if withhold
-        else None
-    )
-    points: list[PowerPoint] = []
-    null_rates: list[float] = []
-    nonzero_rates: list[float] = []
-    withheld_rates: list[float] = []
-    diagnostic_items: list[object] = []
-    n_treated = len(treated)
-    for duration in horizons:
-        null = draws[(duration, 0.0)]
-        false_positive = _rate([bool(item.decision.decided) for item in null])
-        for effect in translated:
-            sample = draws[(duration, effect)]
-            decided = [bool(item.decision.decided) for item in sample]
-            rate = _rate(decided)
-            if effect == 0.0:
-                null_rates.append(rate)
-                withheld_rates.append(rate)
-            else:
-                nonzero_rates.append(rate)
-            means = [_estimand_mean(item.summary, decision.estimand) for item in sample]
-            widths = [
-                float(item.decision.hdi_upper - item.decision.hdi_lower)
-                for item in sample
-            ]
-            truth = _grouped_truth(
-                scale, effect, duration, baseline, decision.estimand, n_treated
-            )
-            covers = [
-                bool(item.decision.hdi_lower <= truth <= item.decision.hdi_upper)
-                for item in sample
-            ]
-            width = float(np.mean(widths))
-            precision_met = None
-            if criterion.precision_target is not None and not withhold:
-                precision_met = width <= criterion.precision_target
-            points.append(
-                PowerPoint(
-                    duration=duration,
-                    effect=effect,
-                    scale=scale,
-                    probability=float("nan") if withhold else rate,
-                    monte_carlo_error=float("nan")
-                    if withhold
-                    else monte_carlo_error(rate, len(sample)),
-                    n_decided=sum(decided),
-                    n_replicates=len(sample),
-                    posterior_mean=float(np.mean(means)),
-                    posterior_tail_mean=float(
-                        np.mean(
-                            [
-                                item.decision.posterior_tail_probability
-                                for item in sample
-                            ]
-                        )
-                    ),
-                    interval_width=width,
-                    bias=float(np.mean([mean - truth for mean in means])),
-                    coverage=_rate(covers),
-                    false_positive_rate=float("nan") if withhold else false_positive,
-                    wrong_sign_rate=_wrong_sign_rate(
-                        [_wrong_sign(mean, truth) for mean in means]
-                    ),
-                    detection=float("nan") if withhold else rate,
-                    failed_runs=len(failures),
-                    precision_met=precision_met,
-                )
-            )
-            if effect == 0.0:
-                diagnostic_items.extend(sample)
-    mdes = tuple(
-        _mde_for(points, duration, decision, criterion, worthwhile, withhold)
-        for duration in horizons
-    )
-    donor_sd = _donor_sd(frame, donors, selection_end)
-    scales = tuple(
-        _unit_scale(frame, name, selection_end, donor_sd) for name in sorted(treated)
-    )
-    study = StudyRecord(
-        scenario_family=family,
-        conditional_on=CONDITIONAL_ON,
-        generated=_grouped_generated(family, scales),
-        mechanism=GROUPED_MECHANISM,
-        sampler_seed=seed,
-        data_seed_scheme=GROUPED_DATA_SEED_SCHEME,
-        noise_scale=noise_scale,
-        donor_weights=tuple(1.0 / len(donors) for _ in donors)
-        if family != "persistent_misfit"
-        else (),
-        ar_coefficient=TEMPORAL_AR_COEFFICIENT
-        if family == "temporal_dependence"
-        else None,
-        horizon_reuse=False,
-    )
-    chosen = nonzero_rates or withheld_rates
-    within = (
-        all(item <= criterion.false_positive_tolerance for item in null_rates)
-        if null_rates and not withhold
-        else None
-    )
-    record = _summarize_diagnostics(diagnostic_items)
-    return (
-        EffectByDuration(
-            points=tuple(points),
-            minimum_detectable_effects=mdes,
-            study=study,
-            n_fits=n_fits,
-            n_replicates=n_replicates,
-            failed_runs=len(failures),
-            failure_messages=failures,
-            power_withheld=withhold,
-            withhold_reason=reason,
-            preperiod_rmse_ratio=ratio,
-            decision_rate_not_power=float(np.mean(chosen))
-            if withhold and chosen
-            else None,
-            minimum_worthwhile_effect=worthwhile,
-            precision_target=criterion.precision_target,
-            false_positive_within_tolerance=within,
-            decision=decision,
-            criterion=criterion,
-            estimator=estimator,
-            scale=scale,
-            baseline=baseline,
-            divergences=record.divergences,
-            max_rhat=record.max_rhat,
-        ),
-        record,
-    )
+    candidate_id: str
+    treated: tuple[str, ...]
+    donors: tuple[str, ...]
+    n_donors: int
+    group_size: int
+    duration: int
+    estimator: str
+    cost: float | None
+    outcome_share: float | None
+    proxy_score: float | None
+    proxy_role: object
+    shortlist_rank: object
+    boundary: bool
+    screen_status: object
+    evaluation_status: str
+    reason: str | None
+    power: float | None
+    power_withheld: bool
+    false_positive_rate: float | None
+    precision_met: object
+    interval_width: object
+    monte_carlo_error: float | None
+    mde: object
+    mde_status: object
+    n_fits: int
+    failed_runs: int
+    divergences: int | None
+    max_rhat: float | None
+    min_bulk_ess: float | None
+    diagnostics_status: str | None
+    diagnostics_reason: str | None
+    unit_scale: float | None
+    eligible: bool
+    pareto: bool
+    selected: bool
 
 
 def _result_rows(
     screen: pd.DataFrame,
     horizons: tuple[int, ...],
     evaluations: Mapping[str, _CandidateEvaluation],
-    decision: DecisionRule,
     criterion: PowerCriterion,
     worthwhile: float,
     estimator: str,
-) -> list[dict[str, object]]:
-    rows: list[dict[str, object]] = []
+) -> list[_SearchRow]:
+    rows: list[_SearchRow] = []
     for _, screen_row in screen.iterrows():
         identity = str(screen_row["candidate_id"])
         evaluation = evaluations.get(identity)
@@ -2360,95 +1856,216 @@ def _result_rows(
                 if point is None or withheld
                 else _finite_or_none(point.probability)
             )
-            eligible = _eligible(status, power, point, criterion, screen_row, withheld)
             rows.append(
-                {
-                    "candidate_id": identity,
-                    "treated": tuple(screen_row["treated"]),
-                    "donors": tuple(screen_row["donors"]),
-                    "n_donors": int(screen_row["n_donors"]),
-                    "group_size": len(tuple(screen_row["treated"])),
-                    "duration": duration,
-                    "estimator": estimator,
-                    "cost": _finite_or_none(screen_row["cost"]),
-                    "outcome_share": _finite_or_none(screen_row["outcome_share"]),
-                    "proxy_score": _finite_or_none(screen_row["proxy_score"]),
-                    "proxy_role": screen_row["proxy_role"],
-                    "shortlist_rank": screen_row["shortlist_rank"],
-                    "boundary": bool(screen_row["boundary"]),
-                    "screen_status": screen_row["status"],
-                    "evaluation_status": status,
-                    "reason": reason,
-                    "power": power,
-                    "power_withheld": withheld,
-                    "false_positive_rate": None
+                _SearchRow(
+                    candidate_id=identity,
+                    treated=tuple(screen_row["treated"]),
+                    donors=tuple(screen_row["donors"]),
+                    n_donors=int(screen_row["n_donors"]),
+                    group_size=len(tuple(screen_row["treated"])),
+                    duration=duration,
+                    estimator=estimator,
+                    cost=_finite_or_none(screen_row["cost"]),
+                    outcome_share=_finite_or_none(screen_row["outcome_share"]),
+                    proxy_score=_finite_or_none(screen_row["proxy_score"]),
+                    proxy_role=screen_row["proxy_role"],
+                    shortlist_rank=screen_row["shortlist_rank"],
+                    boundary=bool(screen_row["boundary"]),
+                    screen_status=screen_row["status"],
+                    evaluation_status=status,
+                    reason=reason,
+                    power=power,
+                    power_withheld=withheld,
+                    false_positive_rate=None
                     if point is None
                     else _finite_or_none(point.false_positive_rate),
-                    "precision_met": None if point is None else point.precision_met,
-                    "interval_width": None if point is None else point.interval_width,
-                    "monte_carlo_error": None
+                    precision_met=None if point is None else point.precision_met,
+                    interval_width=None if point is None else point.interval_width,
+                    monte_carlo_error=None
                     if point is None
                     else _finite_or_none(point.monte_carlo_error),
-                    "mde": None if mde is None else mde.effect,
-                    "mde_status": None if mde is None else mde.status,
-                    "n_fits": n_fits,
-                    "failed_runs": failed,
-                    "divergences": None
+                    mde=None if mde is None else mde.effect,
+                    mde_status=None if mde is None else mde.status,
+                    n_fits=n_fits,
+                    failed_runs=failed,
+                    divergences=None
                     if evaluation is None or evaluation.diagnostics is None
                     else evaluation.diagnostics.divergences,
-                    "max_rhat": None
+                    max_rhat=None
                     if evaluation is None or evaluation.diagnostics is None
                     else evaluation.diagnostics.max_rhat,
-                    "min_bulk_ess": None
+                    min_bulk_ess=None
                     if evaluation is None or evaluation.diagnostics is None
                     else evaluation.diagnostics.min_bulk_ess,
-                    "diagnostics_status": None
+                    diagnostics_status=None
                     if evaluation is None or evaluation.diagnostics is None
                     else evaluation.diagnostics.status,
-                    "diagnostics_reason": None
+                    diagnostics_reason=None
                     if evaluation is None or evaluation.diagnostics is None
                     else evaluation.diagnostics.reason,
-                    "unit_scale": _max_unit_scale(evaluation),
-                    "eligible": eligible,
-                    "pareto": False,
-                    "selected": False,
-                    "_decision": decision,
-                }
+                    unit_scale=_max_unit_scale(evaluation),
+                    eligible=_eligible(
+                        status, power, point, criterion, screen_row, withheld
+                    ),
+                    pareto=False,
+                    selected=False,
+                )
             )
     return rows
 
 
 def _select(
-    rows: list[dict[str, object]],
+    rows: Sequence[_SearchRow],
     criterion: PowerCriterion,
-) -> tuple[dict[str, object] | None, str, str | None, str | None]:
-    eligible = [row for row in rows if row["eligible"]]
+) -> tuple[_SearchRow | None, str, str | None, str | None]:
+    eligible = [row for row in rows if row.eligible]
     completed = [
         row
         for row in rows
-        if row["evaluation_status"] == "completed" and row["power"] is not None
+        if row.evaluation_status == "completed" and row.power is not None
     ]
     closest = None
     if completed:
-        closest = str(
-            max(
-                completed, key=lambda row: (float(row["power"]), -int(row["duration"]))
-            )[  # type: ignore[arg-type]
-                "candidate_id"
-            ]
-        )
+        closest = max(completed, key=_power_key).candidate_id
     if not eligible:
         return None, "inconclusive", _redesign_reason(rows, criterion), closest
-    chosen = min(
-        eligible,
-        key=lambda row: (
-            float(row["cost"]),  # type: ignore[arg-type]
-            -float(row["power"]),  # type: ignore[arg-type]
-            str(row["candidate_id"]),
-            int(row["duration"]),  # type: ignore[arg-type]
+    return min(eligible, key=_selection_key), "frozen", None, closest
+
+
+def _power_key(row: _SearchRow) -> tuple[float, int]:
+    if row.power is None:
+        raise TypeError("completed row is missing power")
+    return (row.power, -row.duration)
+
+
+def _selection_key(row: _SearchRow) -> tuple[float, float, str, int]:
+    if row.cost is None or row.power is None:
+        raise TypeError("eligible row is missing cost or power")
+    return (row.cost, -row.power, row.candidate_id, row.duration)
+
+
+def _pareto(rows: Sequence[_SearchRow]) -> set[tuple[str, int]]:
+    completed = [
+        row
+        for row in rows
+        if row.evaluation_status == "completed" and not row.power_withheld
+    ]
+    kept: set[tuple[str, int]] = set()
+    for row in completed:
+        if any(_dominates(other, row) for other in completed if other is not row):
+            continue
+        kept.add((row.candidate_id, row.duration))
+    return kept
+
+
+def _dominates(left: _SearchRow, right: _SearchRow) -> bool:
+    """Return whether left is no worse on every axis and better on one.
+
+    Power and outcome share improve when larger. Cost and interval width
+    improve when smaller. A missing value is worse than any finite value
+    and ties another missing value.
+    """
+    better = False
+    for left_value, right_value, higher_is_better in _axes(left, right):
+        if left_value is None and right_value is None:
+            continue
+        if left_value is None:
+            return False
+        if right_value is None:
+            better = True
+            continue
+        delta = left_value - right_value
+        improved = delta > 0.0 if higher_is_better else delta < 0.0
+        worse = delta < 0.0 if higher_is_better else delta > 0.0
+        if worse:
+            return False
+        if improved:
+            better = True
+    return better
+
+
+def _axes(
+    left: _SearchRow, right: _SearchRow
+) -> tuple[tuple[float | None, float | None, bool], ...]:
+    return (
+        (_finite_or_none(left.power), _finite_or_none(right.power), True),
+        (
+            _finite_or_none(left.interval_width),
+            _finite_or_none(right.interval_width),
+            False,
+        ),
+        (_finite_or_none(left.cost), _finite_or_none(right.cost), False),
+        (
+            _finite_or_none(left.outcome_share),
+            _finite_or_none(right.outcome_share),
+            True,
         ),
     )
-    return chosen, "frozen", None, closest
+
+
+def _present_float(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(
+        value, int | float | np.integer | np.floating
+    ):
+        raise TypeError(f"selected row is missing numeric {name}")
+    return float(value)
+
+
+def _freeze(
+    frame: pd.DataFrame,
+    selected: _SearchRow,
+    decision: DecisionRule,
+    sample_kwargs: Mapping[str, object],
+    caller_seed: int,
+    horizons: tuple[int, ...],
+    outcome_scale: str,
+    time_column: str | None,
+    scale: str,
+    baseline: float | None,
+) -> FrozenDesign:
+    duration = selected.duration
+    identity = selected.candidate_id
+    seed = sampler_seed(caller_seed, identity, horizons)
+    settings = dict(sample_kwargs)
+    settings["random_seed"] = seed
+    spec = _build_handoff(
+        frame,
+        selected.treated,
+        selected.donors,
+        decision,
+        estimator=selected.estimator,
+        duration=duration,
+        sample_kwargs=settings,
+        outcome_scale=outcome_scale,
+        time_column=None,
+    )
+    return FrozenDesign(
+        candidate_id=identity,
+        treated_units=selected.treated,
+        control_units=selected.donors,
+        duration=duration,
+        estimator=selected.estimator,
+        decision=decision,
+        sample_kwargs=tuple(settings.items()),
+        sampler_seed=seed,
+        outcome_scale=outcome_scale,
+        time_column=time_column,
+        history=frame.copy(),
+        training_index=tuple(spec.training_index),
+        holdout_index=tuple(spec.holdout_index),
+        scale=scale,
+        baseline=baseline,
+        cost=_present_float(selected.cost, "cost"),
+        power=_present_float(selected.power, "power"),
+        false_positive_rate=_present_float(
+            selected.false_positive_rate, "false_positive_rate"
+        ),
+        interval_width=_present_float(selected.interval_width, "interval_width"),
+        monte_carlo_error=_present_float(
+            selected.monte_carlo_error, "monte_carlo_error"
+        ),
+        selection_objective=SELECTION_OBJECTIVE,
+    )
 
 
 def _eligible(
@@ -2470,114 +2087,6 @@ def _eligible(
     if false_positive is None or false_positive > criterion.false_positive_tolerance:
         return False
     return point.precision_met is not False
-
-
-def _pareto(rows: list[dict[str, object]]) -> set[tuple[str, int]]:
-    completed = [
-        row
-        for row in rows
-        if row["evaluation_status"] == "completed" and not row["power_withheld"]
-    ]
-    kept: set[tuple[str, int]] = set()
-    for row in completed:
-        dominated = False
-        for other in completed:
-            if other is row:
-                continue
-            if _dominates(other, row):
-                dominated = True
-                break
-        if not dominated:
-            kept.add((str(row["candidate_id"]), int(row["duration"])))  # type: ignore[arg-type]
-    return kept
-
-
-def _dominates(left: dict[str, object], right: dict[str, object]) -> bool:
-    """Return whether left is no worse on every axis and better on one.
-
-    Power and outcome share improve when larger. Cost and interval width
-    improve when smaller. A missing value is worse than any finite value
-    and ties another missing value.
-    """
-    better = False
-    for name, higher_is_better in (
-        ("power", True),
-        ("interval_width", False),
-        ("cost", False),
-        ("outcome_share", True),
-    ):
-        left_value = _finite_or_none(left[name])
-        right_value = _finite_or_none(right[name])
-        if left_value is None and right_value is None:
-            continue
-        if left_value is None:
-            return False
-        if right_value is None:
-            better = True
-            continue
-        delta = left_value - right_value
-        improved = delta > 0.0 if higher_is_better else delta < 0.0
-        worse = delta < 0.0 if higher_is_better else delta > 0.0
-        if worse:
-            return False
-        if improved:
-            better = True
-    return better
-
-
-def _freeze(
-    frame: pd.DataFrame,
-    selected: dict[str, object],
-    decision: DecisionRule,
-    sample_kwargs: Mapping[str, object],
-    caller_seed: int,
-    horizons: tuple[int, ...],
-    outcome_scale: str,
-    time_column: str | None,
-    scale: str,
-    baseline: float | None,
-) -> FrozenDesign:
-    treated = tuple(selected["treated"])  # type: ignore[arg-type]
-    donors = tuple(selected["donors"])  # type: ignore[arg-type]
-    duration = int(selected["duration"])  # type: ignore[arg-type]
-    identity = str(selected["candidate_id"])
-    seed = sampler_seed(caller_seed, identity, horizons)
-    settings = dict(sample_kwargs)
-    settings["random_seed"] = seed
-    spec = _build_handoff(
-        frame,
-        treated,
-        donors,
-        decision,
-        estimator=str(selected["estimator"]),
-        duration=duration,
-        sample_kwargs=settings,
-        outcome_scale=outcome_scale,
-        time_column=None,
-    )
-    return FrozenDesign(
-        candidate_id=identity,
-        treated_units=treated,
-        control_units=donors,
-        duration=duration,
-        estimator=str(selected["estimator"]),
-        decision=decision,
-        sample_kwargs=tuple(settings.items()),
-        sampler_seed=seed,
-        outcome_scale=outcome_scale,
-        time_column=time_column,
-        history=frame.copy(),
-        training_index=tuple(spec.training_index),
-        holdout_index=tuple(spec.holdout_index),
-        scale=scale,
-        baseline=baseline,
-        cost=float(selected["cost"]),  # type: ignore[arg-type]
-        power=float(selected["power"]),  # type: ignore[arg-type]
-        false_positive_rate=float(selected["false_positive_rate"]),  # type: ignore[arg-type]
-        interval_width=float(selected["interval_width"]),  # type: ignore[arg-type]
-        monte_carlo_error=float(selected["monte_carlo_error"]),  # type: ignore[arg-type]
-        selection_objective=SELECTION_OBJECTIVE,
-    )
 
 
 def _build_handoff(
@@ -2614,48 +2123,6 @@ def _build_handoff(
         sample_kwargs=sample_kwargs,
         outcome_scale=outcome_scale,
         time_column=time_column,
-    )
-
-
-def _candidate_request(**kwargs: object) -> CandidateRequest:
-    return CandidateRequest(
-        units=tuple(kwargs["units"]),  # type: ignore[arg-type]
-        min_group_size=int(kwargs["min_group_size"]),  # type: ignore[arg-type]
-        max_group_size=int(kwargs["max_group_size"]),  # type: ignore[arg-type]
-        history=kwargs["frame"],  # type: ignore[arg-type]
-        selection_end=kwargs["selection_end"],
-        random_seed=int(kwargs["random_seed"]),  # type: ignore[arg-type]
-        treatment_eligible=None
-        if kwargs["treatment_eligible"] is None
-        else tuple(kwargs["treatment_eligible"]),  # type: ignore[arg-type]
-        donor_eligible=None
-        if kwargs["donor_eligible"] is None
-        else tuple(kwargs["donor_eligible"]),  # type: ignore[arg-type]
-        always_control=tuple(kwargs["always_control"]),  # type: ignore[arg-type]
-        excluded_units=tuple(kwargs["excluded_units"]),  # type: ignore[arg-type]
-        required_treated=tuple(kwargs["required_treated"]),  # type: ignore[arg-type]
-        supplied_groups=None
-        if kwargs["supplied_groups"] is None
-        else tuple(tuple(group) for group in kwargs["supplied_groups"]),  # type: ignore[arg-type]
-        fixed_treated=None
-        if kwargs["fixed_treated"] is None
-        else tuple(kwargs["fixed_treated"]),  # type: ignore[arg-type]
-        donor_pools=None
-        if kwargs["donor_pools"] is None
-        else tuple(tuple(pool) for pool in kwargs["donor_pools"]),  # type: ignore[arg-type]
-        spillover_exclusions=tuple(kwargs["spillover_exclusions"]),  # type: ignore[arg-type]
-        min_remaining_donors=int(kwargs["min_remaining_donors"]),  # type: ignore[arg-type]
-        min_outcome_share=kwargs["min_outcome_share"],  # type: ignore[arg-type]
-        max_outcome_share=kwargs["max_outcome_share"],  # type: ignore[arg-type]
-        unit_costs=tuple(kwargs["unit_costs"]),  # type: ignore[arg-type]
-        budget=kwargs["cost_budget"],  # type: ignore[arg-type]
-        unit_covariates=tuple(kwargs["unit_covariates"]),  # type: ignore[arg-type]
-        balance_constraints=tuple(kwargs["balance_constraints"]),  # type: ignore[arg-type]
-        exact_ceiling=int(kwargs["exact_ceiling"]),  # type: ignore[arg-type]
-        max_generated=None
-        if kwargs["max_generated"] is None
-        else int(kwargs["max_generated"]),  # type: ignore[arg-type]
-        shortlist_size=int(kwargs["shortlist_size"]),  # type: ignore[arg-type]
     )
 
 
@@ -2813,199 +2280,6 @@ def _mean_error(values: Sequence[float]) -> float | None:
     return float(np.std(array, ddof=1) / np.sqrt(len(array)))
 
 
-def _grouped_truth(
-    scale: str,
-    magnitude: float,
-    duration: int,
-    baseline: float | None,
-    estimand: str,
-    n_treated: int,
-) -> float:
-    increment = unit_period_effect(
-        scale=scale,  # type: ignore[arg-type]
-        magnitude=magnitude,
-        duration=duration,
-        n_treated=n_treated,
-        baseline=baseline,
-    )
-    if estimand == "cumulative_total":
-        return float(increment * duration * n_treated)
-    if estimand == "average_per_period":
-        return float(increment * n_treated)
-    if estimand == "average_per_treated_unit":
-        return float(increment * duration)
-    raise ValueError(f"Unsupported estimand {estimand!r}.")
-
-
-def _estimand_mean(summary: object, estimand: str) -> float:
-    name = f"{estimand}_mean"
-    value = float(getattr(summary, name))
-    if not np.isfinite(value):
-        raise RuntimeError(
-            "A successful evaluation returned a non-finite estimand mean."
-        )
-    return value
-
-
-def _mde_for(
-    points: Sequence[PowerPoint],
-    duration: int,
-    decision: DecisionRule,
-    criterion: PowerCriterion,
-    worthwhile: float,
-    withhold: bool,
-) -> MinimumDetectableEffect:
-    selected = [item for item in points if item.duration == duration]
-    if withhold or any(not np.isfinite(item.probability) for item in selected):
-        effect = None
-        status = "out_of_range"
-        lower = upper = lower_power = upper_power = None
-        reason: str | None = "power withheld"
-        convention = MDE_CONVENTION
-    else:
-        interpolated = interpolate_minimum_detectable_effect(
-            [item.effect for item in selected],
-            [item.probability for item in selected],
-            target_power=criterion.target_power,
-            direction=decision.direction,
-        )
-        effect = interpolated.effect
-        status = interpolated.status
-        lower = interpolated.lower_effect
-        upper = interpolated.upper_effect
-        lower_power = interpolated.lower_power
-        upper_power = interpolated.upper_power
-        reason = interpolated.reason
-        convention = interpolated.convention
-    errors = {item.effect: item.monte_carlo_error for item in selected}
-    comparison = None
-    if effect is not None:
-        comparison = (
-            "mde_larger_than_worthwhile"
-            if abs(effect) > abs(worthwhile)
-            else "mde_at_or_below_worthwhile"
-        )
-    return MinimumDetectableEffect(
-        duration=duration,
-        target_power=criterion.target_power,
-        effect=effect,
-        status=status,  # type: ignore[arg-type]
-        convention=convention,
-        minimum_worthwhile_effect=worthwhile,
-        worthwhile_comparison=comparison,
-        reason=reason,
-        lower_effect=lower,
-        upper_effect=upper,
-        lower_power=lower_power,
-        upper_power=upper_power,
-        lower_monte_carlo_error=errors.get(lower) if lower in errors else None,
-        upper_monte_carlo_error=errors.get(upper) if upper in errors else None,
-    )
-
-
-def _grouped_rmse_ratio(
-    panels: Sequence[pd.DataFrame],
-    treated: tuple[str, ...],
-    donors: tuple[str, ...],
-    horizons: tuple[int, ...],
-    noise_scale: float,
-    scales: Mapping[str, float],
-) -> float:
-    pre_rows = len(panels[0]) - min(horizons)
-    ratios: list[float] = []
-    for panel in panels:
-        donor_matrix = panel.loc[:, list(donors)].to_numpy(dtype=float)[:pre_rows]
-        for name in treated:
-            outcome = panel[name].to_numpy(dtype=float)[:pre_rows]
-            injected = noise_scale * float(scales[name])
-            ratios.append(preperiod_simplex_rmse(donor_matrix, outcome) / injected)
-    return float(np.median(ratios))
-
-
-def _grouped_generated(family: str, scales: tuple[float, ...]) -> str:
-    noise = (
-        "persistent_misfit noise is noise_scale, not the unit scale. "
-        if family == "persistent_misfit"
-        else f"Unit noise scales relative to donor sd are {scales}. "
-    )
-    return (
-        f"{family}: each treated column is replaced. Donors stay observed. "
-        f"{noise}Common-shock share is {COMMON_SHOCK_SHARE}. "
-        "persistent_misfit uses the published trend instead of the donor "
-        "combination. Treatment is injected by translation after the untreated "
-        "series exists."
-    )
-
-
-def _unit_scale(
-    history: pd.DataFrame, name: str, selection_end: object, donor_sd: float
-) -> float:
-    """Return this unit's pre-cutoff scale relative to the donor standard deviation.
-
-    Values below one stay below one. A non-positive scale cannot be simulated
-    at the unit's own size, so it is a zero-fit refusal.
-    """
-    labels = list(history.index)
-    end = labels.index(selection_end)
-    values = history.iloc[: end + 1][name].to_numpy(dtype=float)
-    std = float(np.std(values))
-    if (
-        not np.isfinite(std)
-        or std <= 0.0
-        or not np.isfinite(donor_sd)
-        or donor_sd <= 0.0
-    ):
-        raise ValueError(
-            "A treated unit must have positive finite pre-cutoff variation. "
-            "No fit was started."
-        )
-    return std / donor_sd
-
-
-def _rows_through(history: pd.DataFrame, selection_end: object) -> pd.DataFrame:
-    """Return rows at or before ``selection_end``. The holdout stays out."""
-    labels = list(history.index)
-    return history.iloc[: labels.index(selection_end) + 1]
-
-
-def _donor_sd(
-    history: pd.DataFrame, donors: Sequence[str], selection_end: object
-) -> float:
-    matrix = (
-        _rows_through(history, selection_end).loc[:, list(donors)].to_numpy(dtype=float)
-    )
-    return float(np.std(matrix))
-
-
-def _noise_scale(
-    history: pd.DataFrame, donors: Sequence[str], selection_end: object
-) -> float:
-    matrix = (
-        _rows_through(history, selection_end).loc[:, list(donors)].to_numpy(dtype=float)
-    )
-    if (
-        matrix.ndim != 2
-        or not np.isfinite(matrix).all()
-        or float(np.std(matrix)) <= 0.0
-    ):
-        raise ValueError(
-            "Observed donors must have positive finite variation. No fit was started."
-        )
-    return float(NOISE_TO_DONOR_SD * np.std(matrix))
-
-
-def _ar1_noise(rng: np.random.Generator, n_rows: int, rho: float) -> np.ndarray:
-    shocks = rng.normal(0.0, 1.0, size=n_rows)
-    if rho == 0.0:
-        return np.asarray(shocks, dtype=float)
-    noise = np.empty(n_rows)
-    noise[0] = shocks[0]
-    innovation = math.sqrt(1.0 - rho * rho)
-    for step in range(1, n_rows):
-        noise[step] = rho * noise[step - 1] + innovation * shocks[step]
-    return noise
-
-
 def _point_or_none(
     evaluation: _CandidateEvaluation | None, duration: int, worthwhile: float
 ) -> PowerPoint | None:
@@ -3071,15 +2345,14 @@ def _capability_refusal(reason: object) -> bool:
     return any(marker in text for marker in _CAPABILITY_REFUSAL_MARKERS)
 
 
-def _rejected_design_reason(rows: list[dict[str, object]]) -> str:
+def _rejected_design_reason(rows: Sequence[_SearchRow]) -> str:
     """Keep the estimator sentence only when every refusal is a capability."""
     distinct: list[str] = []
     for row in rows:
-        if row["evaluation_status"] != "rejected" or not row["reason"]:
+        if row.evaluation_status != "rejected" or not row.reason:
             continue
-        text = str(row["reason"])
-        if text not in distinct:
-            distinct.append(text)
+        if row.reason not in distinct:
+            distinct.append(row.reason)
     if distinct and all(_capability_refusal(text) for text in distinct):
         return (
             "No supported design. The estimator refused the requested groups "
@@ -3089,24 +2362,24 @@ def _rejected_design_reason(rows: list[dict[str, object]]) -> str:
     return f"No supported design. {detail} No design was frozen."
 
 
-def _redesign_reason(rows: list[dict[str, object]], criterion: PowerCriterion) -> str:
-    statuses = {row["evaluation_status"] for row in rows}
+def _redesign_reason(rows: Sequence[_SearchRow], criterion: PowerCriterion) -> str:
+    statuses = {row.evaluation_status for row in rows}
     if statuses <= {"filtered"}:
         return (
             "No passing candidate. Widen eligibility or the donor pool. "
             "No design was frozen."
         )
-    if any(row["evaluation_status"] == "skipped" for row in rows):
+    if any(row.evaluation_status == "skipped" for row in rows):
         return (
             "The fit budget stopped evaluation before every shortlisted "
             "design was studied. No design was frozen."
         )
     if "rejected" in statuses and not any(
-        row["evaluation_status"] in {"completed", "withheld", "failed"} for row in rows
+        row.evaluation_status in {"completed", "withheld", "failed"} for row in rows
     ):
         return _rejected_design_reason(rows)
-    if any(row["power_withheld"] for row in rows) and not any(
-        row["evaluation_status"] == "completed" for row in rows
+    if any(row.power_withheld for row in rows) and not any(
+        row.evaluation_status == "completed" for row in rows
     ):
         return (
             "Every evaluated design withheld power. Do not launch on a "
@@ -3115,26 +2388,26 @@ def _redesign_reason(rows: list[dict[str, object]], criterion: PowerCriterion) -
     completed = [
         row
         for row in rows
-        if row["evaluation_status"] == "completed" and row["power"] is not None
+        if row.evaluation_status == "completed" and row.power is not None
     ]
     if not completed:
         return "No design produced a qualified power estimate. No design was frozen."
-    best = max(completed, key=lambda row: float(row["power"]))  # type: ignore[arg-type]
+    best = max(completed, key=_power_key)
+    power = best.power
+    if power is None:
+        raise TypeError("completed row is missing power")
     gaps: list[str] = []
-    if float(best["power"]) < criterion.target_power:  # type: ignore[arg-type]
-        gaps.append(
-            f"best power {float(best['power']):.3f} is below "
-            f"{criterion.target_power:.3f}"
-        )
-    false_positive = best["false_positive_rate"]
+    if power < criterion.target_power:
+        gaps.append(f"best power {power:.3f} is below {criterion.target_power:.3f}")
+    false_positive = best.false_positive_rate
     if (
         false_positive is not None
-        and float(false_positive) > criterion.false_positive_tolerance
-    ):  # type: ignore[arg-type]
+        and false_positive > criterion.false_positive_tolerance
+    ):
         gaps.append("false-positive rate exceeds tolerance")
-    if best["precision_met"] is False:
+    if best.precision_met is False:
         gaps.append("precision target was missed")
-    if best["cost"] is None:
+    if best.cost is None:
         gaps.append("cost is unknown, so the minimum-cost objective cannot choose")
     detail = "; ".join(gaps) if gaps else "the declared criteria were not met"
     return (
@@ -3298,14 +2571,6 @@ def _effect_grid(
     return values
 
 
-def _with_zero(effects: Sequence[float]) -> tuple[float, ...]:
-    ordered: list[float] = []
-    for effect in (0.0, *effects):
-        if effect not in ordered:
-            ordered.append(float(effect))
-    return tuple(ordered)
-
-
 def _finite_or_none(value: object) -> float | None:
     if value is None or value is pd.NA:
         return None
@@ -3321,27 +2586,3 @@ def _finite_or_none(value: object) -> float | None:
     if not np.isfinite(number):
         return None
     return number
-
-
-def _rate(flags: Sequence[bool]) -> float:
-    if not flags:
-        raise ValueError("A rate needs at least one successful replicate.")
-    return float(np.mean(np.asarray(flags, dtype=float)))
-
-
-def _wrong_sign(mean: float, truth: float) -> bool | None:
-    if truth > 0.0:
-        return mean < 0.0
-    if truth < 0.0:
-        return mean > 0.0
-    return None
-
-
-def _wrong_sign_rate(flags: Sequence[bool | None]) -> float:
-    if not flags or all(flag is None for flag in flags):
-        return float("nan")
-    if any(flag is None for flag in flags):
-        raise RuntimeError(
-            "Wrong-sign is undefined for a mix of zero and nonzero effects."
-        )
-    return _rate([bool(flag) for flag in flags])
