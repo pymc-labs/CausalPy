@@ -1944,6 +1944,65 @@ def test_size_one_tolerance_above_fixed_ceiling_still_raises() -> None:
         _run(criterion=replace(_criterion(), monte_carlo_error_tolerance=0.04))
 
 
+def test_mixed_vanilla_tolerance_above_fixed_ceiling_still_raises() -> None:
+    """Size-one rows in a mixed vanilla search keep the ceiling refusal."""
+    with pytest.raises(ValueError, match="fixed-design ceiling"):
+        _run(
+            criterion=replace(_criterion(), monte_carlo_error_tolerance=0.04),
+            budget=_budget(400),
+            min_group_size=1,
+            max_group_size=2,
+        )
+
+
+def test_validate_selection_refuses_a_bad_label_before_panel_scaling() -> None:
+    """A grouped confirmation uses search's label refusal, not a raw index."""
+    frame = _panel()
+    with pytest.raises(ValueError, match="exact planning label"):
+        validate_selection(
+            frame,
+            UNITS,
+            _decision(),
+            _criterion(),
+            WORTHWHILE,
+            (DURATION,),
+            n_replicates=1,
+            random_seed=11,
+            budget=_budget(),
+            sample_kwargs=LIGHT,
+            selection_end=99,
+            always_control=("c", "d"),
+            unit_costs=_costs(),
+            min_group_size=2,
+            max_group_size=2,
+            shortlist_size=1,
+        )
+
+
+def test_validate_selection_refuses_an_impossible_duration_before_scaling() -> None:
+    """A one-row cutoff must not hide the training-row refusal."""
+    frame = _panel(3)
+    with pytest.raises(ValueError, match="fewer than 2 training rows"):
+        validate_selection(
+            frame,
+            UNITS,
+            _decision(),
+            _criterion(),
+            WORTHWHILE,
+            (3,),
+            n_replicates=1,
+            random_seed=11,
+            budget=_budget(),
+            sample_kwargs=LIGHT,
+            selection_end=0,
+            always_control=("c", "d"),
+            unit_costs=_costs(),
+            min_group_size=2,
+            max_group_size=2,
+            shortlist_size=1,
+        )
+
+
 def test_holdout_shift_keeps_the_largest_injection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

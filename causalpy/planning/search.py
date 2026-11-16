@@ -1082,7 +1082,9 @@ def validate_selection(
     a copy whose holdout alone contains the worthwhile effect. The inner
     power curve is not this report. A replicate that freezes nothing is
     inconclusive, not a false positive. Operational constraints accepted by
-    :func:`search` are replayed on every inner search. A size-one
+    :func:`search` are replayed on every inner search. A missing label or a
+    duration that leaves fewer than two training rows is refused before any
+    panel is drawn, with the same message as :func:`search`. A size-one
     ``synthetic_control`` procedure draws each non-control column from
     :meth:`ReferencePowerEvaluator.untreated_panel` against the fixed donor
     core. A grouped or mixed procedure keeps the grouped generator. A
@@ -1186,6 +1188,7 @@ def validate_selection(
         )
     family = _require_family(scenario_family)
     frame = _planning_frame(history, time_column)
+    _require_selection_end(frame, selection_end, _require_durations(durations))
     false_positives: list[bool] = []
     detections: list[bool] = []
     widths: list[float] = []
@@ -1858,6 +1861,10 @@ def _reference_study(
     except MisfitNotPower as exc:
         return _CandidateEvaluation(exc.report, "withheld", str(exc), exc.report.n_fits)
     except ValueError as exc:
+        # The ceiling is a search-level refusal, same as a pure size-one
+        # search. Recording it makes a mixed vanilla screen look unsupported.
+        if "fixed-design ceiling" in str(exc):
+            raise
         return _CandidateEvaluation(None, "rejected", str(exc), 0)
     except Exception as exc:
         message = str(exc)
