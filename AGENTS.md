@@ -44,7 +44,7 @@ Every Python invocation in this repository, including simple text/JSON inspectio
 ## Sandbox and permissions
 
 - **PyMC/PyTensor require filesystem access** outside the workspace (e.g. `~/.pytensor/compiledir_*` for C compilation cache, `~/.matplotlib` for font cache). The default Cursor sandbox blocks writes to these paths, causing misleading `ValueError` or `PermissionError` failures that look like real test errors but are not.
-- **Always use `required_permissions: ["all"]`** when running `pytest`, `uv run make doctest`, or any command that imports PyMC, PyTensor, or matplotlib. This avoids false negatives from sandbox restrictions.
+- **Always use `required_permissions: ["all"]`** when running `uv run pytest` (or `$CONDA_EXE run -n CausalPy pytest`), `uv run make doctest`, or any command that imports PyMC, PyTensor, or matplotlib. This avoids false negatives from sandbox restrictions.
 - **If a test run shows `compiledir ... you don't have read, write or listing permissions`**, that is a sandbox problem, not a code problem. Re-run with `["all"]` permissions before investigating further.
 
 ## Documentation
@@ -100,7 +100,7 @@ Renamed or deleted how-to pages must keep a **permanent** entry in `rediraffe_re
   - A PR is ready for review, or you are about to push for CI
   - You finished a large or multi-file task touching production code
   - You are handing off to another person or agent
-  - During iterative work, rely on `prek` and targeted `pytest` instead
+  - During iterative work, use `uv run prek` and targeted `uv run pytest`, or `$CONDA_EXE run -n CausalPy prek` and `$CONDA_EXE run -n CausalPy pytest` on conda
   - Command: `uv run make test-patch-cov` (or `$CONDA_EXE run -n CausalPy make test-patch-cov` on the conda fallback)
   - The gate measures **production code only** (`causalpy/tests/*` excluded) at **96%**, approximating the remote Codecov patch check against `upstream/main` when available, falling back to `origin/main`. Override `DIFF_COVER_COMPARE_BRANCH`, `DIFF_COVER_FAIL_UNDER`, or `DIFF_COVER_EXCLUDE` only when the PR deliberately targets a different base or threshold.
 - **Quick check**: Run `uv run ruff check causalpy/` for fast linting feedback during development
