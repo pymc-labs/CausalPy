@@ -677,10 +677,12 @@ def test_overflow_boundary_filters_ignore_unit_order() -> None:
 def test_unreadable_excluded_outcome_filters_without_dropping_siblings() -> None:
     dirty = ("bad", pd.NA, [[1.0]], 10**309)
     for value in dirty:
+        # Pandas 2.3 raises OverflowError while constructing a column from 10**309. Insert the value into an object column so the product filter, not the constructor, sees it.
         frame = pd.DataFrame(
-            {"a": [1.0], "b": [2.0], "c": [value]},
+            {"a": [1.0], "b": [2.0], "c": pd.Series([None], dtype=object)},
             index=pd.Index([1], name="time"),
         )
+        frame.iloc[0, frame.columns.get_loc("c")] = value
         table = _generate(
             excluded_units=("c",),
             supplied_groups=(("a",), ("c",)),
