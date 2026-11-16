@@ -36,6 +36,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import time
+import tracemalloc
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 
@@ -317,7 +319,9 @@ class SearchResult:
     withheld curve keyed by ``candidate_id``. ``frozen`` is ``None`` when
     no design met the declared criteria. ``closest_candidate_id`` is the
     nearest completed row for a redesign note. It is not a selection.
-    ``optimality`` is never ``global``.
+    ``optimality`` is never ``global``. ``runtime_seconds`` is wall time for
+    this call. ``peak_traced_bytes`` is the tracemalloc peak of Python
+    allocations during the call, not process RSS.
     """
 
     frame: pd.DataFrame
@@ -335,6 +339,8 @@ class SearchResult:
     selection_objective: str
     evaluation_order: str
     pareto_ids: tuple[str, ...]
+    runtime_seconds: float
+    peak_traced_bytes: int
 
     def plot_data(self) -> pd.DataFrame:
         """Return a copy of the plot-ready table. Does not fit."""
@@ -373,8 +379,9 @@ class ScreeningComparison:
 
     Identity loss needs no fit. Decision regret is the frozen shortlist cost
     minus the frozen exhaustive cost, so a positive value means the cap chose
-    a more expensive qualified design. ``None`` means power was not computed
-    or one side did not freeze.
+    a more expensive qualified design. ``cost_regret`` is ``None`` when one
+    side did not freeze, or when the exhaustive pass did not evaluate every
+    passing identity. ``cost_regret_reason`` says which of those applied.
     """
 
     shortlist_ids: tuple[str, ...]
@@ -384,6 +391,7 @@ class ScreeningComparison:
     exhaustive_winner: str | None
     cost_regret: float | None
     n_inference_fits: int
+    cost_regret_reason: str | None = None
 
 
 def sampler_seed(caller_seed: int, candidate_id: str, durations: Sequence[int]) -> int:
@@ -406,6 +414,32 @@ def sampler_seed(caller_seed: int, candidate_id: str, durations: Sequence[int]) 
     digest = hashlib.sha256(payload.encode("utf-8")).digest()
     value = int.from_bytes(digest[:8], "little") % (2**31 - 1)
     return value or 1
+
+
+class _SearchTrace:
+    """Stop a search-owned tracemalloc session if this call raises."""
+
+    def __init__(self) -> None:
+        self.started = time.perf_counter()
+        self.own = False
+        if not tracemalloc.is_tracing():
+            tracemalloc.start()
+            self.own = True
+        tracemalloc.reset_peak()
+
+    def finish(self) -> tuple[float, int]:
+        elapsed = time.perf_counter() - self.started
+        _, peak = tracemalloc.get_traced_memory()
+        self.close()
+        return elapsed, int(peak)
+
+    def close(self) -> None:
+        if self.own and tracemalloc.is_tracing():
+            tracemalloc.stop()
+        self.own = False
+
+    def __del__(self) -> None:
+        self.close()
 
 
 def search(
@@ -499,7 +533,9 @@ def search(
     scale : str, optional
         ``absolute`` or ``relative``. Relative needs ``baseline``.
     baseline : float or None, optional
-        Cumulative baseline for a relative effect. Ignored when absolute.
+        Cumulative baseline for a relative effect. An absolute effect rejects
+        a baseline and starts no fit. A relative effect without a finite
+        baseline strictly above zero is rejected the same way.
     outcome_scale : str, optional
         ``outcome`` or ``unit``. Passed to the plan, not recomputed here.
     time_column : str or None, optional
@@ -557,8 +593,10 @@ def search(
     -------
     SearchResult
         The screen, one row per candidate and duration, and at most one
-        frozen design.
+        frozen design. ``runtime_seconds`` and ``peak_traced_bytes`` cover
+        this call.
     """
+    trace = _SearchTrace()
     frame = _planning_frame(history, time_column)
     time_column = None
     horizons = _require_durations(durations)
@@ -628,6 +666,8 @@ def search(
             caller_seed,
             outcome_scale,
             time_column,
+            scale,
+            baseline,
         )
         if refusal is not None:
             evaluations[identity] = refusal
@@ -695,6 +735,7 @@ def search(
             baseline,
         )
     optimality = _optimality(table.partial, skipped, screen, evaluations)
+    elapsed, peak = trace.finish()
     return SearchResult(
         frame=pd.DataFrame(rows, columns=list(SEARCH_COLUMNS)),
         candidates=table,
@@ -711,6 +752,8 @@ def search(
         selection_objective=SELECTION_OBJECTIVE,
         evaluation_order=EVALUATION_ORDER,
         pareto_ids=tuple(sorted({item[0] for item in pareto})),
+        runtime_seconds=elapsed,
+        peak_traced_bytes=peak,
     )
 
 
@@ -921,8 +964,9 @@ def compare_screening(
     objects. The exhaustive cap is the count of candidates the generator did
     not filter, not a second ranking rule. Identity loss is a shortlisted
     identity that cap dropped. Cost regret is the capped winner's cost minus
-    the exhaustive winner's cost when both freeze. ``None`` means one side
-    did not freeze.
+    the exhaustive winner's cost only when both freeze and the exhaustive
+    pass evaluated every passing identity. A skipped exhaustive row or a
+    partial generator withholds that number; ``cost_regret_reason`` says why.
 
     Parameters
     ----------
@@ -1042,8 +1086,20 @@ def compare_screening(
     )
     lost = tuple(item for item in exhaustive_ids if item not in set(shortlist_ids))
     regret = None
-    if capped.frozen is not None and exhaustive.frozen is not None:
+    if capped.frozen is None or exhaustive.frozen is None:
+        regret_reason = (
+            "One side did not freeze, so cost regret is not a decision comparison."
+        )
+    elif exhaustive.partial or int(
+        (exhaustive.frame["evaluation_status"] == "skipped").sum()
+    ):
+        regret_reason = (
+            "The exhaustive pass did not evaluate every passing identity, "
+            "so cost regret is withheld."
+        )
+    else:
         regret = float(capped.frozen.cost - exhaustive.frozen.cost)
+        regret_reason = None
     return ScreeningComparison(
         shortlist_ids=shortlist_ids,
         exhaustive_ids=exhaustive_ids,
@@ -1054,6 +1110,7 @@ def compare_screening(
         else exhaustive.frozen.candidate_id,
         cost_regret=regret,
         n_inference_fits=capped.n_inference_fits + exhaustive.n_inference_fits,
+        cost_regret_reason=regret_reason,
     )
 
 
@@ -1100,6 +1157,39 @@ class _CandidateEvaluation:
     unit_scale: float | None = None
 
 
+def _scale_baseline_refusal(
+    scale: str, baseline: float | None
+) -> _CandidateEvaluation | None:
+    """Reject a scale and baseline pair before any fit is reserved."""
+    if scale == "relative" and (
+        baseline is None or not np.isfinite(baseline) or baseline <= 0.0
+    ):
+        return _CandidateEvaluation(
+            None,
+            "rejected",
+            (
+                "Relative effects require a finite baseline strictly above zero. "
+                "No fit was started."
+            ),
+            0,
+        )
+    if scale == "absolute" and baseline is not None:
+        return _CandidateEvaluation(
+            None,
+            "rejected",
+            "An absolute effect does not take a baseline. No fit was started.",
+            0,
+        )
+    if scale not in {"absolute", "relative"}:
+        return _CandidateEvaluation(
+            None,
+            "rejected",
+            "scale must be 'absolute' or 'relative'. No fit was started.",
+            0,
+        )
+    return None
+
+
 def _free_refusal(
     frame: pd.DataFrame,
     row: pd.Series,
@@ -1110,8 +1200,13 @@ def _free_refusal(
     caller_seed: int,
     outcome_scale: str,
     time_column: str | None,
+    scale: str,
+    baseline: float | None,
 ) -> _CandidateEvaluation | None:
     """Return a zero-fit refusal, or None when the study would sample."""
+    scale_refusal = _scale_baseline_refusal(scale, baseline)
+    if scale_refusal is not None:
+        return scale_refusal
     treated = tuple(row["treated"])
     donors = tuple(row["donors"])
     if not (estimator == "synthetic_control" and len(treated) == 1):
@@ -1314,9 +1409,10 @@ def _grouped_study(
         translated = _with_zero(effects)
         noise = _noise_scale(frame, donors)
         donor_sd = float(np.std(frame.loc[:, list(donors)].to_numpy(dtype=float)))
-        unit_scale = max(
-            _unit_scale(frame, name, selection_end, donor_sd) for name in treated
-        )
+        scales = {
+            name: _unit_scale(frame, name, selection_end, donor_sd) for name in treated
+        }
+        unit_scale = max(scales.values())
         panels = [
             _grouped_panel(
                 frame,
@@ -1330,7 +1426,7 @@ def _grouped_study(
             )
             for replicate in range(replicates)
         ]
-        ratio = _grouped_rmse_ratio(panels, treated, donors, horizons, noise)
+        ratio = _grouped_rmse_ratio(panels, treated, donors, horizons, noise, scales)
     except ValueError as exc:
         return _CandidateEvaluation(None, "rejected", str(exc), 0)
     draws: dict[tuple[int, float], list[object]] = {
@@ -1358,6 +1454,12 @@ def _grouped_study(
                     relative_effects=translated,
                     relative_baseline=baseline,
                 )
+        except ValueError as exc:
+            message = str(exc)
+            failures.append(f"ValueError: {message}")
+            if "No fit was started" not in message:
+                n_fits += len(horizons)
+            continue
         except Exception as exc:
             failures.append(f"{type(exc).__name__}: {exc}")
             n_fits += len(horizons)
@@ -1373,8 +1475,22 @@ def _grouped_study(
             draws[key].append(evaluation)
     if not any(draws.values()):
         detail = failures[0] if failures else "no successful replicate"
+        if n_fits == 0:
+            return _CandidateEvaluation(None, "rejected", detail, 0)
         return _CandidateEvaluation(
             None, "failed", f"Every replicate failed ({detail}).", n_fits
+        )
+    shortest = min(len(sample) for sample in draws.values())
+    if shortest < replicates:
+        return _CandidateEvaluation(
+            None,
+            "failed",
+            (
+                f"Only {shortest} of {replicates} replicates completed. "
+                "The declared tolerance sample was not reached. No design "
+                "was frozen from this study."
+            ),
+            n_fits,
         )
     study = _assemble_grouped(
         draws=draws,
@@ -1474,7 +1590,7 @@ def _assemble_grouped(
         withhold = True
         reason = (
             "Pre-period misfit: simplex reconstruction failed "
-            f"(median RMSE / noise_scale={ratio:.3f}, threshold "
+            f"(median RMSE / injected noise sd={ratio:.3f}, threshold "
             f"{MISFIT_RMSE_TO_NOISE}). The decision rate was not labeled as power."
         )
     points: list[PowerPoint] = []
@@ -1746,29 +1862,36 @@ def _pareto(rows: list[dict[str, object]]) -> set[tuple[str, int]]:
 
 
 def _dominates(left: dict[str, object], right: dict[str, object]) -> bool:
-    axes = (
-        (_higher(left, "power"), _higher(right, "power")),
-        (_lower(left, "interval_width"), _lower(right, "interval_width")),
-        (_lower(left, "cost"), _lower(right, "cost")),
-        (_higher(left, "outcome_share"), _higher(right, "outcome_share")),
-    )
+    """Return whether left is no worse on every axis and better on one.
+
+    Power and outcome share improve when larger. Cost and interval width
+    improve when smaller. A missing value is worse than any finite value
+    and ties another missing value.
+    """
     better = False
-    for left_key, right_key in axes:
-        if left_key > right_key:
-            better = True
-        elif left_key < right_key:
+    for name, higher_is_better in (
+        ("power", True),
+        ("interval_width", False),
+        ("cost", False),
+        ("outcome_share", True),
+    ):
+        left_value = _finite_or_none(left[name])
+        right_value = _finite_or_none(right[name])
+        if left_value is None and right_value is None:
+            continue
+        if left_value is None:
             return False
+        if right_value is None:
+            better = True
+            continue
+        delta = left_value - right_value
+        improved = delta > 0.0 if higher_is_better else delta < 0.0
+        worse = delta < 0.0 if higher_is_better else delta > 0.0
+        if worse:
+            return False
+        if improved:
+            better = True
     return better
-
-
-def _higher(row: dict[str, object], name: str) -> float:
-    value = _finite_or_none(row[name])
-    return float("-inf") if value is None else value
-
-
-def _lower(row: dict[str, object], name: str) -> float:
-    value = _finite_or_none(row[name])
-    return float("inf") if value is None else value
 
 
 def _freeze(
@@ -2071,6 +2194,7 @@ def _grouped_rmse_ratio(
     donors: tuple[str, ...],
     horizons: tuple[int, ...],
     noise_scale: float,
+    scales: Mapping[str, float],
 ) -> float:
     pre_rows = len(panels[0]) - min(horizons)
     ratios: list[float] = []
@@ -2078,7 +2202,8 @@ def _grouped_rmse_ratio(
         donor_matrix = panel.loc[:, list(donors)].to_numpy(dtype=float)[:pre_rows]
         for name in treated:
             outcome = panel[name].to_numpy(dtype=float)[:pre_rows]
-            ratios.append(preperiod_simplex_rmse(donor_matrix, outcome) / noise_scale)
+            injected = noise_scale * float(scales[name])
+            ratios.append(preperiod_simplex_rmse(donor_matrix, outcome) / injected)
     return float(np.median(ratios))
 
 
@@ -2122,8 +2247,8 @@ def _ar1_noise(rng: np.random.Generator, n_rows: int, rho: float) -> np.ndarray:
     noise = np.empty(n_rows)
     noise[0] = shocks[0]
     innovation = math.sqrt(1.0 - rho * rho)
-    for time in range(1, n_rows):
-        noise[time] = rho * noise[time - 1] + innovation * shocks[time]
+    for step in range(1, n_rows):
+        noise[step] = rho * noise[step - 1] + innovation * shocks[step]
     return noise
 
 

@@ -38,6 +38,7 @@ from causalpy.planning.search import (
     SEARCH_COLUMNS,
     ComputationalBudget,
     FrozenDesign,
+    _pareto,
     compare_screening,
     plot_search,
     sampler_seed,
@@ -679,6 +680,346 @@ def test_shortlist_cap_can_miss_a_cheaper_qualified_design(
     assert compared.shortlist_winner != compared.exhaustive_winner
     assert compared.cost_regret is not None
     assert compared.cost_regret > 0.0
+    assert compared.cost_regret_reason is None
+
+
+def _completed_row(
+    candidate_id: str,
+    *,
+    power: float = 0.9,
+    width: float = 1.0,
+    cost: float = 1.0,
+    share: float = 0.2,
+) -> dict[str, object]:
+    return {
+        "candidate_id": candidate_id,
+        "duration": DURATION,
+        "evaluation_status": "completed",
+        "power_withheld": False,
+        "power": power,
+        "interval_width": width,
+        "cost": cost,
+        "outcome_share": share,
+    }
+
+
+def test_pareto_treats_lower_cost_and_width_as_better() -> None:
+    """A dearer equal row does not dominate, and a missing cost is worse."""
+    cheap = _completed_row("cheap", cost=1.0)
+    dear = _completed_row("dear", cost=5.0)
+    missing = _completed_row("missing", cost=float("nan"))
+    kept = _pareto([cheap, dear, missing])
+    assert ("cheap", DURATION) in kept
+    assert ("dear", DURATION) not in kept
+    assert ("missing", DURATION) not in kept
+
+
+def test_scale_baseline_mismatches_are_rejected_before_fits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A baseline pair the engine would refuse must not reserve or start a fit."""
+    calls = _spy_engine(monkeypatch)
+    relative = _run(
+        estimator="augmented_synthetic_control",
+        min_group_size=2,
+        max_group_size=2,
+        scale="relative",
+        baseline=None,
+    )
+    absolute = _run(
+        estimator="augmented_synthetic_control",
+        min_group_size=2,
+        max_group_size=2,
+        scale="absolute",
+        baseline=10.0,
+    )
+    assert calls == []
+    for result in (relative, absolute):
+        assert result.frozen is None
+        assert result.n_inference_fits == 0
+        assert set(result.frame["evaluation_status"]) == {"rejected"}
+        assert int(result.frame["n_fits"].max()) == 0
+    assert "No fit was started" in " ".join(relative.frame["reason"].astype(str))
+    assert "does not take a baseline" in " ".join(absolute.frame["reason"].astype(str))
+
+
+def _grouped_success(monkeypatch: pytest.MonkeyPatch) -> list[int]:
+    from causalpy.planning.reference import HistoryOnlyPlan
+
+    calls: list[int] = []
+
+    def evaluate(
+        self: object,
+        durations: int | Sequence[int],
+        *,
+        absolute_effects: Sequence[float] | None = None,
+        relative_effects: Sequence[float] | None = None,
+        relative_baseline: float | None = None,
+        relative_floor: float | None = None,
+    ) -> SimpleNamespace:
+        del self, relative_effects, relative_baseline, relative_floor
+        calls.append(1)
+        if len(calls) == 2:
+            raise ValueError("No fit was started. replicate died")
+        effects = tuple(absolute_effects or ())
+        horizons = (
+            (int(durations),)
+            if isinstance(durations, int)
+            else tuple(int(item) for item in durations)
+        )
+        evaluations = [
+            SimpleNamespace(
+                duration=duration,
+                scenario=SimpleNamespace(magnitude=effect),
+                summary=SimpleNamespace(cumulative_total_mean=effect),
+                decision=SimpleNamespace(
+                    decided=effect > 0.0,
+                    hdi_lower=0.0,
+                    hdi_upper=1.0,
+                    posterior_tail_probability=0.01,
+                ),
+                diagnostics=SimpleNamespace(divergences=0, max_rhat=1.0),
+            )
+            for duration in horizons
+            for effect in (0.0, *effects)
+        ]
+        return SimpleNamespace(n_inference_fits=len(horizons), evaluations=evaluations)
+
+    monkeypatch.setattr(HistoryOnlyPlan, "evaluate", evaluate)
+    return calls
+
+
+def test_short_replicate_sample_does_not_freeze(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One failed replicate must not publish power from the survivor."""
+    calls = _grouped_success(monkeypatch)
+    result = _run(
+        estimator="augmented_synthetic_control",
+        min_group_size=2,
+        max_group_size=2,
+        shortlist_size=1,
+    )
+    assert len(calls) == 2
+    assert result.frozen is None
+    assert result.n_inference_fits == 1
+    studied = result.frame[result.frame["screen_status"] == "shortlisted"]
+    assert set(studied["evaluation_status"]) == {"failed"}
+    assert studied["power"].isna().all()
+    assert "tolerance sample was not reached" in " ".join(studied["reason"].astype(str))
+
+
+def test_grouped_misfit_uses_injected_noise_not_unit_scale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A large unit is not misfit merely because its observed scale exceeds 3."""
+    from causalpy.planning.power import MISFIT_RMSE_TO_NOISE
+
+    def evaluate(
+        self: object,
+        durations: int | Sequence[int],
+        *,
+        absolute_effects: Sequence[float] | None = None,
+        relative_effects: Sequence[float] | None = None,
+        relative_baseline: float | None = None,
+        relative_floor: float | None = None,
+    ) -> SimpleNamespace:
+        del self, relative_effects, relative_baseline, relative_floor
+        effects = tuple(absolute_effects or ())
+        horizons = (
+            (int(durations),)
+            if isinstance(durations, int)
+            else tuple(int(item) for item in durations)
+        )
+        evaluations = [
+            SimpleNamespace(
+                duration=duration,
+                scenario=SimpleNamespace(magnitude=effect),
+                summary=SimpleNamespace(cumulative_total_mean=effect),
+                decision=SimpleNamespace(
+                    decided=effect > 0.0,
+                    hdi_lower=0.0,
+                    hdi_upper=1.0,
+                    posterior_tail_probability=0.01,
+                ),
+                diagnostics=SimpleNamespace(divergences=0, max_rhat=1.0),
+            )
+            for duration in horizons
+            for effect in (0.0, *effects)
+            for _replicate in range(2)
+        ]
+        return SimpleNamespace(n_inference_fits=len(horizons), evaluations=evaluations)
+
+    from causalpy.planning.reference import HistoryOnlyPlan
+
+    monkeypatch.setattr(HistoryOnlyPlan, "evaluate", evaluate)
+    frame = _panel()
+    donors = ["b", "c", "d"]
+    donor_sd = float(np.std(frame[donors].to_numpy(dtype=float)))
+    rng = np.random.default_rng(1)
+    frame["large"] = frame[donors].mean(axis=1) + rng.normal(
+        0.0, 5.0 * donor_sd, size=len(frame)
+    )
+    units = ("a", "large", *donors)
+    result = _run(
+        history=frame,
+        units=units,
+        estimator="augmented_synthetic_control",
+        min_group_size=2,
+        max_group_size=2,
+        fixed_treated=("a", "large"),
+        shortlist_size=1,
+        unit_costs=tuple((name, 1.0) for name in units),
+    )
+    study = next(iter(result.studies.values()))
+    assert study.preperiod_rmse_ratio < MISFIT_RMSE_TO_NOISE
+    assert not bool(result.frame["power_withheld"].any())
+    trend = _run(
+        estimator="augmented_synthetic_control",
+        min_group_size=2,
+        max_group_size=2,
+        shortlist_size=1,
+        scenario_family="persistent_misfit",
+    )
+    trend_study = next(iter(trend.studies.values()))
+    assert trend_study.preperiod_rmse_ratio > MISFIT_RMSE_TO_NOISE
+
+
+def test_truncated_exhaustive_pass_withholds_cost_regret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A frozen exhaustive winner is not decision regret when later rows were skipped."""
+    monkeypatch.setattr(
+        "causalpy.planning.power.ReferencePowerEvaluator.effect_by_duration",
+        lambda self, durations, effects, *, criterion, **kwargs: _study(power=0.95),
+    )
+    frame = _panel()
+    compared = compare_screening(
+        frame,
+        UNITS,
+        _decision(),
+        _criterion(),
+        WORTHWHILE,
+        (DURATION,),
+        selection_end=_selection_end(frame),
+        sample_kwargs=LIGHT,
+        random_seed=11,
+        budget=ComputationalBudget(2),
+        shortlist_size=1,
+        unit_costs=_costs(),
+    )
+    assert compared.cost_regret is None
+    assert compared.cost_regret_reason is not None
+    assert "exhaustive" in compared.cost_regret_reason
+
+
+def test_search_records_wall_time_and_traced_peak(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _spy_engine(monkeypatch)
+    result = _run()
+    assert result.runtime_seconds >= 0.0
+    assert result.peak_traced_bytes > 0
+
+
+def test_validate_selection_injects_only_the_grouped_holdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The outer loop, not a spy of search, injects a frozen group on the holdout."""
+    from causalpy.planning.reference import HistoryOnlyPlan
+
+    seen: list[pd.DataFrame] = []
+
+    def evaluate(
+        self: object,
+        durations: int | Sequence[int],
+        *,
+        absolute_effects: Sequence[float] | None = None,
+        relative_effects: Sequence[float] | None = None,
+        relative_baseline: float | None = None,
+        relative_floor: float | None = None,
+    ) -> SimpleNamespace:
+        del self, relative_effects, relative_baseline, relative_floor
+        effects = tuple(absolute_effects or ())
+        horizons = (
+            (int(durations),)
+            if isinstance(durations, int)
+            else tuple(int(item) for item in durations)
+        )
+        evaluations = [
+            SimpleNamespace(
+                duration=duration,
+                scenario=SimpleNamespace(magnitude=effect),
+                summary=SimpleNamespace(cumulative_total_mean=effect),
+                decision=SimpleNamespace(
+                    decided=effect > 0.0,
+                    hdi_lower=0.0,
+                    hdi_upper=1.0,
+                    posterior_tail_probability=0.01,
+                ),
+                diagnostics=SimpleNamespace(divergences=0, max_rhat=1.0),
+            )
+            for duration in horizons
+            for effect in (0.0, *effects)
+        ]
+        return SimpleNamespace(n_inference_fits=len(horizons), evaluations=evaluations)
+
+    class _Spec:
+        def run(self, panel: pd.DataFrame) -> SimpleNamespace:
+            seen.append(panel.copy())
+            return SimpleNamespace(
+                decision=SimpleNamespace(
+                    decided=True,
+                    hdi_lower=0.0,
+                    hdi_upper=1.0,
+                    posterior_tail_probability=0.01,
+                )
+            )
+
+    monkeypatch.setattr(HistoryOnlyPlan, "evaluate", evaluate)
+    monkeypatch.setattr(FrozenDesign, "analysis_handoff", lambda self: _Spec())
+    frame = _panel()
+    report = validate_selection(
+        frame,
+        UNITS,
+        _decision(),
+        PowerCriterion(
+            target_power=0.8,
+            false_positive_tolerance=0.15,
+            precision_target=None,
+            monte_carlo_error_tolerance=0.5,
+            qualification_scope="post_search",
+        ),
+        WORTHWHILE,
+        (DURATION,),
+        n_replicates=1,
+        random_seed=11,
+        budget=_budget(),
+        sample_kwargs=LIGHT,
+        selection_end=_selection_end(frame),
+        always_control=("c", "d"),
+        unit_costs=_costs(),
+        min_group_size=2,
+        max_group_size=2,
+        shortlist_size=1,
+        estimator="augmented_synthetic_control",
+    )
+    assert report.n_frozen == 1
+    assert report.failures == ()
+    assert report.training_max_abs_diff == 0.0
+    assert report.holdout_shift is not None
+    assert report.holdout_shift > 0.0
+    null, injected = seen
+    changed = [
+        column
+        for column in null.columns
+        if not np.allclose(
+            null[column].to_numpy(dtype=float),
+            injected[column].to_numpy(dtype=float),
+        )
+    ]
+    assert changed
+    assert set(changed) <= {"a", "b"}
 
 
 def test_frozen_handoff_does_not_sample(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -809,8 +1150,10 @@ def test_nightly_large_unit_need_not_increase_grouped_power() -> None:
 
     The effect is 0.28 donor standard deviations per period: above the small
     unit's cumulative threshold and inside the noise of a unit whose observed
-    scale is 2.5 donor standard deviations. A larger scale trips the published
-    pre-period misfit screen and withholds power instead of reporting it.
+    scale is 2.5 donor standard deviations. Scale alone does not trip the
+    pre-period screen: that screen compares reconstruction error with the
+    noise actually injected, so a larger unit need not be withheld and need
+    not raise power.
     """
     frame = _detectable_panel()
     donors = ["austin", "boston", "chicago", "denver"]
