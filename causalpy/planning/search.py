@@ -3176,12 +3176,18 @@ def _require_selection_end(
     frame: pd.DataFrame, selection_end: object, horizons: tuple[int, ...]
 ) -> None:
     labels = list(frame.index)
+    longest = max(horizons)
+    if len(frame) - longest < MIN_TRAINING_ROWS:
+        raise ValueError(
+            f"history has {len(frame)} rows. Duration {longest} leaves "
+            f"fewer than {MIN_TRAINING_ROWS} training rows. No fit was started."
+        )
     if selection_end not in labels:
         raise ValueError(
             "selection_end is not an exact planning label. A partial date "
             "string is not a label. No fit was started."
         )
-    earliest_holdout = labels[-max(horizons)]
+    earliest_holdout = labels[-longest]
     if labels.index(selection_end) >= labels.index(earliest_holdout):
         raise ValueError(
             "selection_end must be strictly before every requested holdout. "

@@ -333,26 +333,54 @@ def test_zero_budget_rejects_a_free_refusal_before_skipping(
     assert "fit budget" in result.reason
 
 
-def test_grouped_short_window_is_a_recorded_rejection(
+def test_grouped_short_window_is_refused_before_a_fit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fits = _install_group_adapter(monkeypatch)
-    result = _run(
-        durations=(15,),
-        selection_end=0,
-        estimator="augmented_synthetic_control",
-        min_group_size=2,
-        max_group_size=2,
-        shortlist_size=2,
-        budget=_budget(50),
-    )
-    rejected = result.frame.loc[result.frame["evaluation_status"] == "rejected"]
+    with pytest.raises(ValueError, match="fewer than 2 training rows"):
+        _run(
+            durations=(15,),
+            selection_end=0,
+            estimator="augmented_synthetic_control",
+            min_group_size=2,
+            max_group_size=2,
+            shortlist_size=2,
+            budget=_budget(50),
+        )
     assert fits == []
-    assert len(rejected) == 2
-    assert rejected["reason"].str.contains("fewer than 2 training rows").all()
-    assert rejected["n_fits"].sum() == 0
-    assert result.frozen is None
-    assert result.n_inference_fits == 0
+
+
+def test_impossible_duration_is_refused_before_holdout_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _spy_engine(monkeypatch)
+    frame = _panel(3)
+    base = {
+        "history": frame,
+        "units": UNITS,
+        "decision": _decision(),
+        "criterion": _criterion(),
+        "worthwhile_effect": WORTHWHILE,
+        "sample_kwargs": LIGHT,
+        "random_seed": 11,
+        "budget": _budget(),
+        "unit_costs": _costs(),
+        "min_group_size": 1,
+        "max_group_size": 1,
+        "shortlist_size": 1,
+        "selection_end": 0,
+    }
+    with pytest.raises(ValueError, match="fewer than 2 training rows") as too_long:
+        search(**base, durations=(2, 10))
+    assert "list index out of range" not in str(too_long.value)
+    with pytest.raises(ValueError, match="fewer than 2 training rows") as equal:
+        search(**base, durations=(3,))
+    assert "selection_end must be strictly" not in str(equal.value)
+    ordering = dict(base)
+    ordering["selection_end"] = int(frame.index[-1])
+    with pytest.raises(ValueError, match="selection_end must be strictly"):
+        search(**ordering, durations=(1,))
+    assert calls == []
 
 
 def test_grouped_constant_donors_are_rejected_without_raising(
