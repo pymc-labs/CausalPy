@@ -170,8 +170,8 @@ class FrozenDesign:
 
     ``analysis_handoff`` rebuilds the published spec for this identity.
     ``inject`` adds the planned effect only on the frozen holdout. ``audit``
-    fits this identity on a later window and refuses a window that overlaps
-    the planning holdout. None of the three consults another candidate.
+    fits this identity on a later window and refuses a window that reuses
+    the frozen planning index. None of the three consults another candidate.
     """
 
     candidate_id: str
@@ -256,17 +256,19 @@ class FrozenDesign:
     def audit(self, panel: pd.DataFrame) -> AuditReport:
         """Fit this identity on an untouched tail. Does not re-search.
 
-        The panel's tail of the frozen duration is the audit holdout. Overlap
-        with the planning holdout is refused before sampling, including when
-        those labels fall in the audit training index. A panel index that is
-        not the frozen history label domain is refused before any fit. The
-        retained time-column name names that domain; this method does not
-        index the panel.
+        The panel's tail of the frozen duration is the audit holdout. Any
+        audit training or holdout label already in the frozen planning index
+        is refused before sampling. Overlap with the planning holdout is
+        named separately, including when those labels fall in the audit
+        training index. A panel index that is not the frozen history label
+        domain is refused before any fit. The retained time-column name
+        names that domain; this method does not index the panel.
 
         Parameters
         ----------
         panel : pandas.DataFrame
-            Later history. Its tail must be disjoint from the planning holdout.
+            Later history. Its training and holdout labels must be disjoint
+            from the frozen planning index.
         """
         if not isinstance(panel, pd.DataFrame):
             raise TypeError("panel must be a pandas DataFrame. No fit was started.")
@@ -297,6 +299,17 @@ class FrozenDesign:
             raise ValueError(
                 "Audit training includes the frozen planning holdout "
                 f"{contaminated}. That is not an untouched window. No fit was started."
+            )
+        planning_labels = set(self.history.index)
+        reused = [
+            label
+            for label in (*spec.training_index, *spec.holdout_index)
+            if label in planning_labels
+        ]
+        if reused:
+            raise ValueError(
+                "Audit window reuses frozen planning labels "
+                f"{reused}. That is not an untouched window. No fit was started."
             )
         evaluation = spec.run(panel)
         return AuditReport(

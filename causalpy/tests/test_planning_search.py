@@ -1774,6 +1774,46 @@ def test_audit_refuses_training_on_the_planning_holdout(
         result.frozen.audit(later)
 
 
+def test_audit_refuses_a_window_inside_the_planning_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A prefix can miss the planning holdout and still reuse selection training."""
+    _spy_engine(monkeypatch)
+    frame = _panel()
+    result = _run(history=frame)
+    assert result.frozen is not None
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("audit started a fit")
+
+    monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _boom)
+    with pytest.raises(ValueError, match="reuses frozen planning"):
+        result.frozen.audit(frame.iloc[:-DURATION])
+
+
+def test_audit_reaches_a_later_window_outside_the_planning_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """New labels must still reach the audit fit."""
+    _spy_engine(monkeypatch)
+    frame = _panel()
+    result = _run(history=frame)
+    frozen = result.frozen
+    assert frozen is not None
+    later = frame.copy()
+    later.index = pd.RangeIndex(len(frame), 2 * len(frame), name=frame.index.name)
+    started: list[bool] = []
+
+    def _boom(*_args, **_kwargs):
+        started.append(True)
+        raise RuntimeError("fit reached")
+
+    monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _boom)
+    with pytest.raises(RuntimeError, match="fit reached"):
+        frozen.audit(later)
+    assert started == [True]
+
+
 def test_confirmation_failure_nulls_rates_and_charges_started_fits(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
