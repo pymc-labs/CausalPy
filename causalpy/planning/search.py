@@ -65,6 +65,11 @@ from causalpy.planning.contracts import (
     require_positive_int,
     unit_period_effect,
 )
+from causalpy.planning.evaluation import (
+    _CandidateEvaluation,
+    _DiagnosticRecord,
+    _finished_evaluation,
+)
 from causalpy.planning.grouped_study import (
     GROUPED_DATA_SEED_SCHEME as GROUPED_DATA_SEED_SCHEME,
 )
@@ -72,7 +77,6 @@ from causalpy.planning.grouped_study import (
     GROUPED_MECHANISM as GROUPED_MECHANISM,
 )
 from causalpy.planning.grouped_study import (
-    _DiagnosticRecord,
     _grouped_panel,
     _grouped_study,
     _noise_scale,
@@ -1524,17 +1528,6 @@ def plot_search(result: SearchResult) -> Figure:
     return fig
 
 
-@dataclass
-class _CandidateEvaluation:
-    study: EffectByDuration | None
-    status: str
-    reason: str | None
-    n_fits: int
-    unit_scale: float | None = None
-    diagnostics: _DiagnosticRecord | None = None
-    failed_runs: int = 0
-
-
 def _scale_baseline_refusal(
     scale: str, baseline: float | None
 ) -> _CandidateEvaluation | None:
@@ -1739,33 +1732,6 @@ def _post_fit_failure_count(message: str, planned: int, fits: int) -> int:
     if fits:
         return 1
     return 0
-
-
-def _finished_evaluation(
-    study: EffectByDuration,
-    n_fits: int,
-    *,
-    unit_scale: float | None = None,
-    diagnostics: _DiagnosticRecord | None = None,
-) -> _CandidateEvaluation:
-    """Label a finished curve. A withheld curve is not a completed selection."""
-    if study.power_withheld:
-        return _CandidateEvaluation(
-            study,
-            "withheld",
-            study.withhold_reason,
-            n_fits,
-            unit_scale=unit_scale,
-            diagnostics=diagnostics,
-        )
-    return _CandidateEvaluation(
-        study,
-        "completed",
-        None,
-        n_fits,
-        unit_scale=unit_scale,
-        diagnostics=diagnostics,
-    )
 
 
 def _reference_study(

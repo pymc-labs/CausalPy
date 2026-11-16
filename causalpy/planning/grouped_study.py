@@ -21,8 +21,6 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -34,27 +32,33 @@ from causalpy.planning.contracts import (
     PowerCriterion,
     unit_period_effect,
 )
+from causalpy.planning.evaluation import (
+    _CandidateEvaluation,
+    _DiagnosticRecord,
+    _finished_evaluation,
+)
 from causalpy.planning.power import (
     CONDITIONAL_ON,
-    MDE_CONVENTION,
     MISFIT_RMSE_TO_NOISE,
     MISFIT_TREND_PER_DONOR_SD,
     NOISE_TO_DONOR_SD,
     SCENARIO_FAMILIES,
     TEMPORAL_AR_COEFFICIENT,
     EffectByDuration,
-    MinimumDetectableEffect,
     PowerPoint,
     StudyRecord,
-    interpolate_minimum_detectable_effect,
+    _ar1_noise,
+    _estimand_mean,
+    _is_wrong_sign,
+    _mde_for,
+    _rate,
+    _with_zero,
+    _wrong_sign_rate,
     monte_carlo_error,
     preperiod_simplex_rmse,
     replicates_for_tolerance,
 )
 from causalpy.planning.reference import HistoryOnlyPlan
-
-if TYPE_CHECKING:
-    from causalpy.planning.search import _CandidateEvaluation
 
 GROUPED_DATA_SEED_SCHEME = (
     "numpy.random.SeedSequence([sampler_seed, replicate_index, family_code])"
@@ -73,21 +77,6 @@ GROUPED_MECHANISM = (
     "candidates and it does not refit the power engine's private assembly."
 )
 COMMON_SHOCK_SHARE = 0.5
-
-
-@dataclass(frozen=True)
-class _DiagnosticRecord:
-    """Grouped sampling diagnostics for one search row.
-
-    ``divergences`` is null when any replicate count is missing. It is not
-    the power curve's required integer.
-    """
-
-    divergences: int | None
-    max_rhat: float | None
-    min_bulk_ess: float | None
-    status: str | None
-    reason: str | None
 
 
 def _grouped_study(
@@ -110,11 +99,6 @@ def _grouped_study(
     seed: int,
     fit_ceiling: int,
 ) -> _CandidateEvaluation:
-    # search imports this module. Import the orchestrator types only when a study runs.
-    from causalpy.planning.search import (
-        _CandidateEvaluation,
-        _finished_evaluation,
-    )
 
     try:
         replicates = replicates_for_tolerance(
@@ -418,7 +402,14 @@ def _assemble_grouped(
                 withheld_rates.append(rate)
             else:
                 nonzero_rates.append(rate)
-            means = [_estimand_mean(item.summary, decision.estimand) for item in sample]
+            means = []
+            for item in sample:
+                mean = _estimand_mean(item.summary, decision.estimand)
+                if not np.isfinite(mean):
+                    raise RuntimeError(
+                        "A successful evaluation returned a non-finite estimand mean."
+                    )
+                means.append(mean)
             widths = [
                 float(item.decision.hdi_upper - item.decision.hdi_lower)
                 for item in sample
@@ -459,7 +450,7 @@ def _assemble_grouped(
                     coverage=_rate(covers),
                     false_positive_rate=float("nan") if withhold else false_positive,
                     wrong_sign_rate=_wrong_sign_rate(
-                        [_wrong_sign(mean, truth) for mean in means]
+                        [_is_wrong_sign(mean, truth) for mean in means]
                     ),
                     detection=float("nan") if withhold else rate,
                     failed_runs=len(failures),
@@ -551,72 +542,6 @@ def _grouped_truth(
     if estimand == "average_per_treated_unit":
         return float(increment * duration)
     raise ValueError(f"Unsupported estimand {estimand!r}.")
-
-
-def _estimand_mean(summary: object, estimand: str) -> float:
-    name = f"{estimand}_mean"
-    value = float(getattr(summary, name))
-    if not np.isfinite(value):
-        raise RuntimeError(
-            "A successful evaluation returned a non-finite estimand mean."
-        )
-    return value
-
-
-def _mde_for(
-    points: Sequence[PowerPoint],
-    duration: int,
-    decision: DecisionRule,
-    criterion: PowerCriterion,
-    worthwhile: float,
-    withhold: bool,
-) -> MinimumDetectableEffect:
-    selected = [item for item in points if item.duration == duration]
-    if withhold or any(not np.isfinite(item.probability) for item in selected):
-        effect = None
-        status = "out_of_range"
-        lower = upper = lower_power = upper_power = None
-        reason: str | None = "power withheld"
-        convention = MDE_CONVENTION
-    else:
-        interpolated = interpolate_minimum_detectable_effect(
-            [item.effect for item in selected],
-            [item.probability for item in selected],
-            target_power=criterion.target_power,
-            direction=decision.direction,
-        )
-        effect = interpolated.effect
-        status = interpolated.status
-        lower = interpolated.lower_effect
-        upper = interpolated.upper_effect
-        lower_power = interpolated.lower_power
-        upper_power = interpolated.upper_power
-        reason = interpolated.reason
-        convention = interpolated.convention
-    errors = {item.effect: item.monte_carlo_error for item in selected}
-    comparison = None
-    if effect is not None:
-        comparison = (
-            "mde_larger_than_worthwhile"
-            if abs(effect) > abs(worthwhile)
-            else "mde_at_or_below_worthwhile"
-        )
-    return MinimumDetectableEffect(
-        duration=duration,
-        target_power=criterion.target_power,
-        effect=effect,
-        status=status,  # type: ignore[arg-type]
-        convention=convention,
-        minimum_worthwhile_effect=worthwhile,
-        worthwhile_comparison=comparison,
-        reason=reason,
-        lower_effect=lower,
-        upper_effect=upper,
-        lower_power=lower_power,
-        upper_power=upper_power,
-        lower_monte_carlo_error=errors.get(lower) if lower in errors else None,
-        upper_monte_carlo_error=errors.get(upper) if upper in errors else None,
-    )
 
 
 def _grouped_rmse_ratio(
@@ -714,47 +639,3 @@ def _noise_scale(
             "Observed donors must have positive finite variation. No fit was started."
         )
     return float(NOISE_TO_DONOR_SD * np.std(matrix))
-
-
-def _ar1_noise(rng: np.random.Generator, n_rows: int, rho: float) -> np.ndarray:
-    shocks = rng.normal(0.0, 1.0, size=n_rows)
-    if rho == 0.0:
-        return np.asarray(shocks, dtype=float)
-    noise = np.empty(n_rows)
-    noise[0] = shocks[0]
-    innovation = math.sqrt(1.0 - rho * rho)
-    for step in range(1, n_rows):
-        noise[step] = rho * noise[step - 1] + innovation * shocks[step]
-    return noise
-
-
-def _with_zero(effects: Sequence[float]) -> tuple[float, ...]:
-    ordered: list[float] = []
-    for effect in (0.0, *effects):
-        if effect not in ordered:
-            ordered.append(float(effect))
-    return tuple(ordered)
-
-
-def _rate(flags: Sequence[bool]) -> float:
-    if not flags:
-        raise ValueError("A rate needs at least one successful replicate.")
-    return float(np.mean(np.asarray(flags, dtype=float)))
-
-
-def _wrong_sign(mean: float, truth: float) -> bool | None:
-    if truth > 0.0:
-        return mean < 0.0
-    if truth < 0.0:
-        return mean > 0.0
-    return None
-
-
-def _wrong_sign_rate(flags: Sequence[bool | None]) -> float:
-    if not flags or all(flag is None for flag in flags):
-        return float("nan")
-    if any(flag is None for flag in flags):
-        raise RuntimeError(
-            "Wrong-sign is undefined for a mix of zero and nonzero effects."
-        )
-    return _rate([bool(flag) for flag in flags])
