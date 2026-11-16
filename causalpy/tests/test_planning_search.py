@@ -883,6 +883,215 @@ def test_grouped_misfit_uses_injected_noise_not_unit_scale(
     )
     trend_study = next(iter(trend.studies.values()))
     assert trend_study.preperiod_rmse_ratio > MISFIT_RMSE_TO_NOISE
+    assert trend_study.power_withheld
+    assert trend.frozen is None
+    trend_rows = trend.frame[trend.frame["screen_status"] == "shortlisted"]
+    assert trend_rows["power"].isna().all()
+    trend_reason = " ".join(trend_rows["reason"].astype(str))
+    assert "injected noise sd" in trend_reason
+    assert "not labeled as power" in trend_reason
+    studied = result.frame[result.frame["screen_status"] == "shortlisted"]
+    assert studied["divergences"].eq(0).all()
+    assert set(studied["diagnostics_status"]) == {"available"}
+
+
+def _install_decisive_evaluate(
+    monkeypatch: pytest.MonkeyPatch,
+    diagnostics: object,
+) -> None:
+    def evaluate(
+        self: object,
+        durations: int | Sequence[int],
+        *,
+        absolute_effects: Sequence[float] | None = None,
+        relative_effects: Sequence[float] | None = None,
+        relative_baseline: float | None = None,
+        relative_floor: float | None = None,
+    ) -> SimpleNamespace:
+        del self, relative_effects, relative_baseline, relative_floor
+        effects = tuple(absolute_effects or ())
+        horizons = (
+            (int(durations),)
+            if isinstance(durations, int)
+            else tuple(int(item) for item in durations)
+        )
+        evaluations = [
+            SimpleNamespace(
+                duration=duration,
+                scenario=SimpleNamespace(magnitude=effect),
+                summary=SimpleNamespace(cumulative_total_mean=effect),
+                decision=SimpleNamespace(
+                    decided=effect > 0.0,
+                    hdi_lower=0.0,
+                    hdi_upper=1.0,
+                    posterior_tail_probability=0.01,
+                ),
+                diagnostics=diagnostics,
+            )
+            for duration in horizons
+            for effect in (0.0, *effects)
+            for _replicate in range(2)
+        ]
+        return SimpleNamespace(n_inference_fits=len(horizons), evaluations=evaluations)
+
+    from causalpy.planning.reference import HistoryOnlyPlan
+
+    monkeypatch.setattr(HistoryOnlyPlan, "evaluate", evaluate)
+
+
+def test_quiet_unit_keeps_its_own_noise_scale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A treated unit quieter than its donors is not floored to their scale."""
+    from causalpy.planning.search import _unit_scale
+
+    _install_decisive_evaluate(
+        monkeypatch,
+        SimpleNamespace(divergences=0, max_rhat=1.0, min_bulk_ess=100.0),
+    )
+    frame = _panel()
+    donors = ["b", "c", "d"]
+    donor_sd = float(np.std(frame[donors].to_numpy(dtype=float)))
+    labels = list(frame.index)
+    cutoff = labels.index(_selection_end(frame))
+    rng = np.random.default_rng(2)
+    pre = rng.normal(0.0, 1.0, size=cutoff + 1)
+    pre = (pre - pre.mean()) / np.std(pre) * 0.45 * donor_sd
+    quiet = np.zeros(len(frame))
+    quiet[: cutoff + 1] = pre
+    frame["quiet"] = quiet
+    units = ("quiet", *donors)
+    assert _unit_scale(
+        frame, "quiet", _selection_end(frame), donor_sd
+    ) == pytest.approx(0.45)
+    result = _run(
+        history=frame,
+        units=units,
+        estimator="augmented_synthetic_control",
+        min_group_size=1,
+        max_group_size=1,
+        fixed_treated=("quiet",),
+        shortlist_size=1,
+        unit_costs=tuple((name, 1.0) for name in units),
+    )
+    studied = result.frame[result.frame["screen_status"] == "shortlisted"]
+    assert studied["unit_scale"].iloc[0] == pytest.approx(0.45)
+    assert float(studied["unit_scale"].iloc[0]) < 1.0
+    assert not bool(studied["power_withheld"].any())
+    assert result.frozen is not None
+
+
+def test_constant_treated_unit_is_a_zero_fit_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A treated unit with no pre-cutoff variation is refused before fitting."""
+    calls: list[object] = []
+
+    def evaluate(self: object, *args: object, **kwargs: object) -> SimpleNamespace:
+        del self, args, kwargs
+        calls.append("evaluate")
+        raise AssertionError("no fit was started")
+
+    from causalpy.planning.reference import HistoryOnlyPlan
+
+    monkeypatch.setattr(HistoryOnlyPlan, "evaluate", evaluate)
+    frame = _panel()
+    frame["flat"] = 1.0
+    units = ("flat", "b", "c", "d")
+    result = _run(
+        history=frame,
+        units=units,
+        estimator="augmented_synthetic_control",
+        min_group_size=1,
+        max_group_size=1,
+        fixed_treated=("flat",),
+        shortlist_size=1,
+        unit_costs=tuple((name, 1.0) for name in units),
+    )
+    assert calls == []
+    assert result.frozen is None
+    assert result.n_inference_fits == 0
+    studied = result.frame[result.frame["screen_status"] == "shortlisted"]
+    assert set(studied["evaluation_status"]) == {"rejected"}
+    assert "No fit was started" in " ".join(studied["reason"].astype(str))
+
+
+def test_size_one_constructor_refusal_does_not_consume_the_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An empty outcome scale is a zero-fit refusal, not a charged failed fit."""
+    calls = _spy_engine(monkeypatch)
+    result = _run(
+        outcome_scale="",
+        budget=ComputationalBudget(2),
+        min_group_size=1,
+        max_group_size=1,
+        shortlist_size=2,
+    )
+    assert calls == []
+    assert result.n_inference_fits == 0
+    assert result.frozen is None
+    studied = result.frame[result.frame["screen_status"] == "shortlisted"]
+    assert len(studied) == 2
+    assert set(studied["evaluation_status"]) == {"rejected"}
+    assert studied["n_fits"].eq(0).all()
+    assert "outcome_scale" in " ".join(studied["reason"].astype(str))
+
+
+def test_unavailable_diagnostics_stay_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing divergence count stays null; it is not stored as zero."""
+    from causalpy.planning.search import _summarize_diagnostics
+
+    mixed = _summarize_diagnostics(
+        [
+            SimpleNamespace(
+                diagnostics=SimpleNamespace(
+                    divergences=2,
+                    max_rhat=1.01,
+                    min_bulk_ess=80.0,
+                    diagnostics_status="available",
+                    diagnostics_reason=None,
+                )
+            ),
+            SimpleNamespace(
+                diagnostics=SimpleNamespace(
+                    divergences=None,
+                    max_rhat=None,
+                    min_bulk_ess=None,
+                    diagnostics_status="unavailable",
+                    diagnostics_reason="not retained",
+                )
+            ),
+        ]
+    )
+    assert mixed.divergences is None
+    assert mixed.status == "unavailable"
+    assert mixed.reason == "not retained"
+    assert mixed.max_rhat == pytest.approx(1.01)
+    _install_decisive_evaluate(
+        monkeypatch,
+        SimpleNamespace(
+            divergences=None,
+            max_rhat=None,
+            min_bulk_ess=None,
+            diagnostics_status="unavailable",
+            diagnostics_reason="not retained",
+        ),
+    )
+    result = _run(
+        estimator="augmented_synthetic_control",
+        min_group_size=2,
+        max_group_size=2,
+        shortlist_size=1,
+    )
+    studied = result.frame[result.frame["screen_status"] == "shortlisted"]
+    assert studied["divergences"].isna().all()
+    assert set(studied["diagnostics_status"]) == {"unavailable"}
+    assert set(studied["diagnostics_reason"]) == {"not retained"}
+    assert result.studies
+    assert next(iter(result.studies.values())).divergences == 0
 
 
 def test_truncated_exhaustive_pass_withholds_cost_regret(

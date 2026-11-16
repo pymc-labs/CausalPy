@@ -29,6 +29,8 @@ result is inconclusive and no design is frozen. A shortlist stopped by the
 fit cap says so, rather than claiming those rows failed the power criteria.
 ``n_fits`` is repeated on every duration row of one study.
 ``SearchResult.n_inference_fits`` is the study total, so summing the column double-counts a multi-duration search.
+
+A grouped pre-period simplex ratio above the published misfit threshold withholds power for every estimator. That decision rate is not power and the row is not frozen. Unit noise uses each treated unit's own pre-cutoff scale, including values below one. The result frame records grouped sampling diagnostics. A missing divergence count stays missing there. ``EffectByDuration.divergences`` is the power curve's required integer and is not that record. Size-one diagnostics stay on the reference engine's integer field, which cannot represent a missing count.
 """
 
 from __future__ import annotations
@@ -138,6 +140,11 @@ SEARCH_COLUMNS = (
     "mde_status",
     "n_fits",
     "failed_runs",
+    "divergences",
+    "max_rhat",
+    "min_bulk_ess",
+    "diagnostics_status",
+    "diagnostics_reason",
     "unit_scale",
     "eligible",
     "pareto",
@@ -315,10 +322,13 @@ class AuditReport:
 class SearchResult:
     """Screen, power, and one explicit selection or an inconclusive result.
 
-    ``frame`` is the plot-ready table. ``studies`` holds a completed or
-    withheld curve keyed by ``candidate_id``. ``frozen`` is ``None`` when
-    no design met the declared criteria. ``closest_candidate_id`` is the
-    nearest completed row for a redesign note. It is not a selection.
+    ``frame`` is the plot-ready table. Grouped rows record ``divergences``,
+    ``max_rhat``, ``min_bulk_ess``, ``diagnostics_status``, and
+    ``diagnostics_reason``. A missing divergence count stays null. The power
+    curve's ``divergences`` integer is not that record. ``studies`` holds a
+    completed or withheld curve keyed by ``candidate_id``. ``frozen`` is
+    ``None`` when no design met the declared criteria.
+    ``closest_candidate_id`` is the nearest completed row for a redesign note. It is not a selection.
     ``optimality`` is never ``global``. ``runtime_seconds`` is wall time for
     this call. ``peak_traced_bytes`` is the tracemalloc peak of Python
     allocations during the call, not process RSS.
@@ -498,6 +508,10 @@ def search(
     extending the published conditional-on-donors mechanism. The inner
     criterion passed to the size-one engine is ``fixed_design`` because that
     engine refuses ``post_search``. The outer validation owns that scope.
+    A grouped pre-period simplex ratio above the published misfit threshold
+    withholds power for every estimator, and that row is not frozen. A
+    constructor refusal, including a size-one plan, is rejected with zero
+    fits before the budget is reserved.
 
     Parameters
     ----------
@@ -1148,6 +1162,21 @@ def plot_search(result: SearchResult) -> Figure:
     return fig
 
 
+@dataclass(frozen=True)
+class _DiagnosticRecord:
+    """Grouped sampling diagnostics for one search row.
+
+    ``divergences`` is null when any replicate count is missing. It is not
+    the power curve's required integer.
+    """
+
+    divergences: int | None
+    max_rhat: float | None
+    min_bulk_ess: float | None
+    status: str | None
+    reason: str | None
+
+
 @dataclass
 class _CandidateEvaluation:
     study: EffectByDuration | None
@@ -1155,6 +1184,7 @@ class _CandidateEvaluation:
     reason: str | None
     n_fits: int
     unit_scale: float | None = None
+    diagnostics: _DiagnosticRecord | None = None
 
 
 def _scale_baseline_refusal(
@@ -1209,23 +1239,22 @@ def _free_refusal(
         return scale_refusal
     treated = tuple(row["treated"])
     donors = tuple(row["donors"])
-    if not (estimator == "synthetic_control" and len(treated) == 1):
-        seed = sampler_seed(caller_seed, str(row["candidate_id"]), horizons)
-        settings = dict(sample_kwargs)
-        settings["random_seed"] = seed
-        try:
-            HistoryOnlyPlan(
-                frame,
-                treated,
-                donors,
-                decision,
-                estimator=estimator,
-                sample_kwargs=settings,
-                time_column=time_column,
-                outcome_scale=outcome_scale,
-            )
-        except (TypeError, ValueError) as exc:
-            return _CandidateEvaluation(None, "rejected", str(exc), 0)
+    seed = sampler_seed(caller_seed, str(row["candidate_id"]), horizons)
+    settings = dict(sample_kwargs)
+    settings["random_seed"] = seed
+    try:
+        HistoryOnlyPlan(
+            frame,
+            treated,
+            donors,
+            decision,
+            estimator=estimator,
+            sample_kwargs=settings,
+            time_column=time_column,
+            outcome_scale=outcome_scale,
+        )
+    except (TypeError, ValueError) as exc:
+        return _CandidateEvaluation(None, "rejected", str(exc), 0)
     return _setup_refusal(frame, donors, horizons)
 
 
@@ -1343,6 +1372,9 @@ def _reference_study(
             time_column=time_column,
             outcome_scale=outcome_scale,
         )
+    except (TypeError, ValueError) as exc:
+        return _CandidateEvaluation(None, "rejected", str(exc), 0)
+    try:
         evaluator = ReferencePowerEvaluator(plan, history=frame, scenario_family=family)
         # The engine refuses post_search. This module applies that scope
         # to the returned curve; the engine only computes the fixed design.
@@ -1361,8 +1393,10 @@ def _reference_study(
     except ValueError as exc:
         return _CandidateEvaluation(None, "rejected", str(exc), 0)
     except Exception as exc:
+        message = str(exc)
+        fits = 0 if "No fit was started" in message else len(horizons)
         return _CandidateEvaluation(
-            None, "failed", f"{type(exc).__name__}: {exc}", len(horizons)
+            None, "failed", f"{type(exc).__name__}: {message}", fits
         )
     return _CandidateEvaluation(study, "completed", None, study.n_fits)
 
@@ -1492,7 +1526,7 @@ def _grouped_study(
             ),
             n_fits,
         )
-    study = _assemble_grouped(
+    study, diagnostics = _assemble_grouped(
         draws=draws,
         failures=tuple(failures),
         n_fits=n_fits,
@@ -1516,7 +1550,12 @@ def _grouped_study(
     )
     status = "withheld" if study.power_withheld else "completed"
     return _CandidateEvaluation(
-        study, status, study.withhold_reason, n_fits, unit_scale=unit_scale
+        study,
+        status,
+        study.withhold_reason,
+        n_fits,
+        unit_scale=unit_scale,
+        diagnostics=diagnostics,
     )
 
 
@@ -1561,6 +1600,72 @@ def _grouped_panel(
     return panel
 
 
+def _summarize_diagnostics(items: Sequence[object]) -> _DiagnosticRecord:
+    """Record adapter diagnostics without turning a missing count into zero."""
+    if not items:
+        return _DiagnosticRecord(None, None, None, None, None)
+    counts: list[int | None] = []
+    rhats: list[float] = []
+    ess_values: list[float] = []
+    statuses: list[str] = []
+    reasons: list[str] = []
+    ess_complete = True
+    for item in items:
+        diagnostics = getattr(item, "diagnostics", None)
+        raw_count = getattr(diagnostics, "divergences", None)
+        count = (
+            raw_count
+            if isinstance(raw_count, int) and not isinstance(raw_count, bool)
+            else None
+        )
+        counts.append(count)
+        raw_status = getattr(diagnostics, "diagnostics_status", None)
+        if raw_status in {"available", "partial", "unavailable"}:
+            statuses.append(str(raw_status))
+        elif count is None:
+            statuses.append("unavailable")
+        else:
+            statuses.append("available")
+        raw_reason = getattr(diagnostics, "diagnostics_reason", None)
+        if raw_reason:
+            reasons.append(str(raw_reason))
+        raw_rhat = getattr(diagnostics, "max_rhat", None)
+        if isinstance(raw_rhat, int | float) and not isinstance(raw_rhat, bool):
+            rhat = float(raw_rhat)
+            if np.isfinite(rhat):
+                rhats.append(rhat)
+        if diagnostics is None or not hasattr(diagnostics, "min_bulk_ess"):
+            ess_complete = False
+        else:
+            raw_ess = diagnostics.min_bulk_ess
+            if (
+                isinstance(raw_ess, int | float)
+                and not isinstance(raw_ess, bool)
+                and np.isfinite(float(raw_ess))
+            ):
+                ess_values.append(float(raw_ess))
+            else:
+                ess_complete = False
+    total = 0
+    missing_count = False
+    for count in counts:
+        if count is None:
+            missing_count = True
+            break
+        total += count
+    rank = {"available": 0, "partial": 1, "unavailable": 2}
+    status = (
+        "unavailable" if missing_count else max(statuses, key=lambda name: rank[name])
+    )
+    return _DiagnosticRecord(
+        divergences=None if missing_count else total,
+        max_rhat=max(rhats) if rhats else None,
+        min_bulk_ess=min(ess_values) if ess_complete and ess_values else None,
+        status=status,
+        reason="; ".join(dict.fromkeys(reasons)) or None,
+    )
+
+
 def _assemble_grouped(
     *,
     draws: dict[tuple[int, float], list[object]],
@@ -1583,22 +1688,22 @@ def _assemble_grouped(
     seed: int,
     frame: pd.DataFrame,
     selection_end: object,
-) -> EffectByDuration:
-    withhold = False
-    reason = None
-    if estimator == "synthetic_control" and ratio > MISFIT_RMSE_TO_NOISE:
-        withhold = True
-        reason = (
+) -> tuple[EffectByDuration, _DiagnosticRecord]:
+    withhold = ratio > MISFIT_RMSE_TO_NOISE
+    reason = (
+        (
             "Pre-period misfit: simplex reconstruction failed "
             f"(median RMSE / injected noise sd={ratio:.3f}, threshold "
             f"{MISFIT_RMSE_TO_NOISE}). The decision rate was not labeled as power."
         )
+        if withhold
+        else None
+    )
     points: list[PowerPoint] = []
     null_rates: list[float] = []
     nonzero_rates: list[float] = []
     withheld_rates: list[float] = []
-    rhats: list[float] = []
-    divergences = 0
+    diagnostic_items: list[object] = []
     n_treated = len(treated)
     for duration in horizons:
         null = draws[(duration, 0.0)]
@@ -1661,14 +1766,7 @@ def _assemble_grouped(
                 )
             )
             if effect == 0.0:
-                divergences += sum(
-                    int(item.diagnostics.divergences or 0) for item in sample
-                )
-                rhats.extend(
-                    float(item.diagnostics.max_rhat)
-                    for item in sample
-                    if item.diagnostics.max_rhat is not None
-                )
+                diagnostic_items.extend(sample)
     mdes = tuple(
         _mde_for(points, duration, decision, criterion, worthwhile, withhold)
         for duration in horizons
@@ -1699,28 +1797,34 @@ def _assemble_grouped(
         if null_rates and not withhold
         else None
     )
-    return EffectByDuration(
-        points=tuple(points),
-        minimum_detectable_effects=mdes,
-        study=study,
-        n_fits=n_fits,
-        n_replicates=n_replicates,
-        failed_runs=len(failures),
-        failure_messages=failures,
-        power_withheld=withhold,
-        withhold_reason=reason,
-        preperiod_rmse_ratio=ratio,
-        decision_rate_not_power=float(np.mean(chosen)) if withhold and chosen else None,
-        minimum_worthwhile_effect=worthwhile,
-        precision_target=criterion.precision_target,
-        false_positive_within_tolerance=within,
-        decision=decision,
-        criterion=criterion,
-        estimator=estimator,
-        scale=scale,
-        baseline=baseline,
-        divergences=divergences,
-        max_rhat=max(rhats) if rhats else None,
+    record = _summarize_diagnostics(diagnostic_items)
+    return (
+        EffectByDuration(
+            points=tuple(points),
+            minimum_detectable_effects=mdes,
+            study=study,
+            n_fits=n_fits,
+            n_replicates=n_replicates,
+            failed_runs=len(failures),
+            failure_messages=failures,
+            power_withheld=withhold,
+            withhold_reason=reason,
+            preperiod_rmse_ratio=ratio,
+            decision_rate_not_power=float(np.mean(chosen))
+            if withhold and chosen
+            else None,
+            minimum_worthwhile_effect=worthwhile,
+            precision_target=criterion.precision_target,
+            false_positive_within_tolerance=within,
+            decision=decision,
+            criterion=criterion,
+            estimator=estimator,
+            scale=scale,
+            baseline=baseline,
+            divergences=0 if record.divergences is None else record.divergences,
+            max_rhat=record.max_rhat,
+        ),
+        record,
     )
 
 
@@ -1778,6 +1882,21 @@ def _result_rows(
                     "mde_status": None if mde is None else mde.status,
                     "n_fits": n_fits,
                     "failed_runs": failed,
+                    "divergences": None
+                    if evaluation is None or evaluation.diagnostics is None
+                    else evaluation.diagnostics.divergences,
+                    "max_rhat": None
+                    if evaluation is None or evaluation.diagnostics is None
+                    else evaluation.diagnostics.max_rhat,
+                    "min_bulk_ess": None
+                    if evaluation is None or evaluation.diagnostics is None
+                    else evaluation.diagnostics.min_bulk_ess,
+                    "diagnostics_status": None
+                    if evaluation is None or evaluation.diagnostics is None
+                    else evaluation.diagnostics.status,
+                    "diagnostics_reason": None
+                    if evaluation is None or evaluation.diagnostics is None
+                    else evaluation.diagnostics.reason,
                     "unit_scale": _max_unit_scale(evaluation),
                     "eligible": eligible,
                     "pareto": False,
@@ -2220,11 +2339,26 @@ def _grouped_generated(family: str, scales: tuple[float, ...]) -> str:
 def _unit_scale(
     history: pd.DataFrame, name: str, selection_end: object, donor_sd: float
 ) -> float:
+    """Return this unit's pre-cutoff scale relative to the donor standard deviation.
+
+    Values below one stay below one. A non-positive scale cannot be simulated
+    at the unit's own size, so it is a zero-fit refusal.
+    """
     labels = list(history.index)
     end = labels.index(selection_end)
     values = history.iloc[: end + 1][name].to_numpy(dtype=float)
     std = float(np.std(values))
-    return max(std, donor_sd) / donor_sd
+    if (
+        not np.isfinite(std)
+        or std <= 0.0
+        or not np.isfinite(donor_sd)
+        or donor_sd <= 0.0
+    ):
+        raise ValueError(
+            "A treated unit must have positive finite pre-cutoff variation. "
+            "No fit was started."
+        )
+    return std / donor_sd
 
 
 def _noise_scale(history: pd.DataFrame, donors: Sequence[str]) -> float:
