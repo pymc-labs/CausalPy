@@ -18,7 +18,9 @@ This applies to documentation-only work and implementations composed from lower-
 
 **uv is the default environment manager.** Use `uv run <command>` for commands that import project code, run tests, build docs, or use repo tooling — there is no environment to activate. If the project has not been synced yet in the current checkout, run `uv sync --locked --extra dev --extra docs --extra test --extra lint` first.
 
-**Conda fallback:** if `uv` is unavailable, fall back to `mamba`, `micromamba`, or `conda` (in that preference order) against the `CausalPy` env described by `environment.yml`. Reuse an existing `CausalPy` env whenever possible; do not create or update an env unless the task needs the project environment and the existing env is missing, stale, or broken. Use `$CONDA_EXE run -n CausalPy <command>`; never use `$CONDA_EXE activate`. For simple text/JSON inspection helpers that do not import project code, any Python on `PATH` is fine.
+**Conda fallback:** if `uv` is unavailable, fall back to `mamba`, `micromamba`, or `conda` (in that preference order) against the `CausalPy` env described by `environment.yml`. Reuse an existing `CausalPy` env whenever possible; do not create or update an env unless the task needs the project environment and the existing env is missing, stale, or broken. Use `$CONDA_EXE run -n CausalPy <command>`; never use `$CONDA_EXE activate`.
+
+Every Python invocation in this repository, including simple text/JSON inspection helpers, must use `uv run` or the documented conda fallback. Bare `python3` may not be this project's interpreter, and a command run from the wrong working directory can import the wrong checkout.
 
 - If `$CONDA_EXE run -n CausalPy ...` fails because the named env cannot be resolved, inspect `$CONDA_EXE env list` and retry with `$CONDA_EXE run -p <full-prefix> <command>`.
 - In git worktrees, prefer reusing an existing uv `.venv` or conda env. Because the repo uses editable installs, rerun `uv sync` (or `make setup` / `make setup-conda`) in the current worktree only when that checkout has not been synced/installed into the env yet or when dependencies changed.
