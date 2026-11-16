@@ -209,10 +209,15 @@ def _grouped_study(
         if n_fits == 0:
             return _CandidateEvaluation(None, "rejected", detail, 0)
         return _CandidateEvaluation(
-            None, "failed", f"Every replicate failed ({detail}).", n_fits
+            None,
+            "failed",
+            f"Every replicate failed ({detail}).",
+            n_fits,
+            failed_runs=len(failures) or 1,
         )
     shortest = min(len(sample) for sample in draws.values())
     if shortest < replicates:
+        partial = [item for sample in draws.values() for item in sample]
         return _CandidateEvaluation(
             None,
             "failed",
@@ -222,6 +227,8 @@ def _grouped_study(
                 "was frozen from this study."
             ),
             n_fits,
+            diagnostics=_summarize_diagnostics(partial),
+            failed_runs=max(len(failures), replicates - shortest),
         )
     study, diagnostics = _assemble_grouped(
         draws=draws,

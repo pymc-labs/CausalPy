@@ -879,6 +879,56 @@ def test_short_replicate_sample_does_not_freeze(
     assert set(studied["evaluation_status"]) == {"failed"}
     assert studied["power"].isna().all()
     assert "tolerance sample was not reached" in " ".join(studied["reason"].astype(str))
+    assert int(studied["failed_runs"].sum()) == 1
+    assert set(studied["diagnostics_status"]) == {"available"}
+    assert studied["power"].isna().all()
+    assert studied["selected"].eq(False).all()
+
+
+def test_grouped_all_failed_keeps_the_failure_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Replicates that all fail after a fit keep the count and stay unfrozen."""
+    from causalpy.planning.reference import HistoryOnlyPlan
+
+    calls: list[int] = []
+
+    def evaluate(
+        self: object,
+        durations: int | Sequence[int],
+        *,
+        absolute_effects: Sequence[float] | None = None,
+        relative_effects: Sequence[float] | None = None,
+        relative_baseline: float | None = None,
+        relative_floor: float | None = None,
+    ) -> SimpleNamespace:
+        del (
+            self,
+            durations,
+            absolute_effects,
+            relative_effects,
+            relative_baseline,
+            relative_floor,
+        )
+        calls.append(1)
+        raise RuntimeError("sampler died")
+
+    monkeypatch.setattr(HistoryOnlyPlan, "evaluate", evaluate)
+    result = _run(
+        estimator="augmented_synthetic_control",
+        min_group_size=2,
+        max_group_size=2,
+        shortlist_size=1,
+    )
+    studied = result.frame[result.frame["screen_status"] == "shortlisted"]
+    assert calls
+    assert result.frozen is None
+    assert set(studied["evaluation_status"]) == {"failed"}
+    assert int(studied["failed_runs"].sum()) == len(calls)
+    assert int(studied["n_fits"].sum()) == len(calls)
+    assert studied["power"].isna().all()
+    assert studied["diagnostics_status"].isna().all()
+    assert studied["selected"].eq(False).all()
 
 
 def test_grouped_misfit_uses_injected_noise_not_unit_scale(
@@ -1591,6 +1641,11 @@ def test_size_one_short_sample_is_failed_and_not_frozen(
     assert "Only 1 of 2 replicates completed" in " ".join(studied["reason"].astype(str))
     assert int(studied["n_fits"].sum()) == 1
     assert result.n_inference_fits == 1
+    assert int(studied["failed_runs"].sum()) == 1
+    assert studied["power"].isna().all()
+    assert set(studied["diagnostics_status"]) == {"available"}
+    assert int(studied["divergences"].fillna(-1).sum()) == 0
+    assert studied["selected"].eq(False).all()
 
 
 @pytest.mark.parametrize(
@@ -1622,6 +1677,9 @@ def test_post_fit_reference_failure_charges_the_reservation(
     assert result.n_inference_fits == 2
     assert len(skipped) == 2
     assert result.frozen is None
+    expected_runs = 2 if "Every replicate failed" in message else 1
+    assert int(failed["failed_runs"].sum()) == expected_runs
+    assert failed["power"].isna().all()
 
 
 def test_pre_fit_reference_refusal_does_not_consume_the_budget(
@@ -1646,6 +1704,7 @@ def test_pre_fit_reference_refusal_does_not_consume_the_budget(
     assert len(failed) == 2
     assert int(failed["n_fits"].sum()) == 0
     assert result.frozen is None
+    assert int(failed["failed_runs"].sum()) == 0
 
 
 def test_input_refusal_summary_quotes_the_row_not_the_estimator() -> None:

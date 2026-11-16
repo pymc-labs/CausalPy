@@ -1516,6 +1516,7 @@ class _CandidateEvaluation:
     n_fits: int
     unit_scale: float | None = None
     diagnostics: _DiagnosticRecord | None = None
+    failed_runs: int = 0
 
 
 def _scale_baseline_refusal(
@@ -1703,6 +1704,26 @@ def _reference_failure_fits(message: str, reserved: int) -> int:
     return 0
 
 
+def _retained_diagnostics(study: EffectByDuration) -> _DiagnosticRecord:
+    """Copy counts the engine already computed. Do not invent a bulk-ESS."""
+    return _DiagnosticRecord(
+        divergences=study.divergences,
+        max_rhat=study.max_rhat,
+        min_bulk_ess=None,
+        status="available" if study.divergences is not None else None,
+        reason=None,
+    )
+
+
+def _post_fit_failure_count(message: str, planned: int, fits: int) -> int:
+    """Count replicates the engine failed, not fits charged to the budget."""
+    if "Every replicate failed" in message:
+        return planned
+    if fits:
+        return 1
+    return 0
+
+
 def _finished_evaluation(
     study: EffectByDuration,
     n_fits: int,
@@ -1784,7 +1805,18 @@ def _reference_study(
             message, _reserved_reference_fits(criterion, horizons)
         )
         return _CandidateEvaluation(
-            None, "failed", f"{type(exc).__name__}: {message}", fits
+            None,
+            "failed",
+            f"{type(exc).__name__}: {message}",
+            fits,
+            failed_runs=_post_fit_failure_count(
+                message,
+                replicates_for_tolerance(
+                    criterion.monte_carlo_error_tolerance,
+                    n_durations=len(horizons),
+                ),
+                fits,
+            ),
         )
     planned = replicates_for_tolerance(
         criterion.monte_carlo_error_tolerance, n_durations=len(horizons)
@@ -1800,6 +1832,8 @@ def _reference_study(
                 "was frozen from this study."
             ),
             study.n_fits,
+            diagnostics=_retained_diagnostics(study),
+            failed_runs=max(int(study.failed_runs), planned - successful),
         )
     return _finished_evaluation(study, study.n_fits)
 
@@ -2325,7 +2359,11 @@ def _row_status(
         return "filtered", ",".join(str(item) for item in reasons), 0, 0
     if evaluation is None:
         return "not_shortlisted", "Not on the generator shortlist.", 0, 0
-    failed = 0 if evaluation.study is None else int(evaluation.study.failed_runs)
+    failed = (
+        evaluation.failed_runs
+        if evaluation.study is None
+        else int(evaluation.study.failed_runs)
+    )
     return evaluation.status, evaluation.reason, evaluation.n_fits, failed
 
 
