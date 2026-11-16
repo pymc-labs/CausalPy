@@ -30,7 +30,7 @@ fit cap says so, rather than claiming those rows failed the power criteria.
 ``n_fits`` is repeated on every duration row of one study.
 ``SearchResult.n_inference_fits`` is the study total, so summing the column double-counts a multi-duration search.
 
-A grouped pre-period simplex ratio above the published misfit threshold withholds power for every estimator. That decision rate is not power and the row is not frozen. Unit noise uses each treated unit's own pre-cutoff scale, including values below one. The result frame records grouped sampling diagnostics. A missing divergence count stays missing there. ``EffectByDuration.divergences`` is the power curve's required integer and is not that record. Size-one diagnostics stay on the reference engine's integer field, which cannot represent a missing count.
+Size-one diagnostics stay on the reference engine's integer field, which cannot represent a missing count. A size-one study that returns fewer successful replicates than the declared tolerance is failed and is not frozen. A post-fit reference failure charges the reserved replicate count. An inconclusive summary quotes the recorded row reasons unless every refusal is an estimator capability refusal.
 """
 
 from __future__ import annotations
@@ -511,7 +511,10 @@ def search(
     A grouped pre-period simplex ratio above the published misfit threshold
     withholds power for every estimator, and that row is not frozen. A
     constructor refusal, including a size-one plan, is rejected with zero
-    fits before the budget is reserved.
+    fits before the budget is reserved. A size-one study that returns fewer
+    successful replicates than its declared tolerance is failed and is not
+    frozen. A reference failure after fitting starts charges the reserved
+    replicate count, so the next candidate cannot start on an under-count.
 
     Parameters
     ----------
@@ -771,6 +774,90 @@ def search(
     )
 
 
+def _replay_search(
+    history: pd.DataFrame,
+    units: Sequence[str],
+    decision: DecisionRule,
+    criterion: PowerCriterion,
+    worthwhile_effect: float,
+    durations: Sequence[int],
+    *,
+    estimator: str,
+    min_group_size: int,
+    max_group_size: int,
+    selection_end: object,
+    sample_kwargs: Mapping[str, object],
+    random_seed: int,
+    budget: ComputationalBudget,
+    scale: str,
+    baseline: float | None,
+    outcome_scale: str,
+    time_column: str | None,
+    always_control: Sequence[str],
+    unit_costs: Sequence[tuple[str, float]],
+    shortlist_size: int,
+    scenario_family: str,
+    treatment_eligible: Sequence[str] | None,
+    donor_eligible: Sequence[str] | None,
+    excluded_units: Sequence[str],
+    required_treated: Sequence[str],
+    supplied_groups: Sequence[Sequence[str]] | None,
+    fixed_treated: Sequence[str] | None,
+    donor_pools: Sequence[Sequence[str]] | None,
+    spillover_exclusions: Sequence[tuple[str, str]],
+    min_remaining_donors: int,
+    min_outcome_share: float | None,
+    max_outcome_share: float | None,
+    cost_budget: float | None,
+    unit_covariates: Sequence[tuple[str, Sequence[tuple[str, float]]]],
+    balance_constraints: Sequence[BalanceConstraint],
+    exact_ceiling: int,
+    max_generated: int | None,
+    effect_grid: Sequence[float] | None,
+) -> SearchResult:
+    """Run one inner search with the caller's operational constraints."""
+    return search(
+        history,
+        units,
+        decision,
+        criterion,
+        worthwhile_effect,
+        durations,
+        estimator=estimator,
+        min_group_size=min_group_size,
+        max_group_size=max_group_size,
+        selection_end=selection_end,
+        sample_kwargs=sample_kwargs,
+        random_seed=random_seed,
+        budget=budget,
+        scale=scale,
+        baseline=baseline,
+        outcome_scale=outcome_scale,
+        time_column=time_column,
+        treatment_eligible=treatment_eligible,
+        donor_eligible=donor_eligible,
+        always_control=always_control,
+        excluded_units=excluded_units,
+        required_treated=required_treated,
+        supplied_groups=supplied_groups,
+        fixed_treated=fixed_treated,
+        donor_pools=donor_pools,
+        spillover_exclusions=spillover_exclusions,
+        min_remaining_donors=min_remaining_donors,
+        min_outcome_share=min_outcome_share,
+        max_outcome_share=max_outcome_share,
+        unit_costs=unit_costs,
+        cost_budget=cost_budget,
+        unit_covariates=unit_covariates,
+        balance_constraints=balance_constraints,
+        exact_ceiling=exact_ceiling,
+        max_generated=max_generated,
+        shortlist_size=shortlist_size,
+        scenario_family=scenario_family,
+        effect_grid=effect_grid,
+    )
+
+
 def validate_selection(
     history: pd.DataFrame,
     units: Sequence[str],
@@ -795,6 +882,23 @@ def validate_selection(
     outcome_scale: str = "outcome",
     time_column: str | None = None,
     unit_costs: Sequence[tuple[str, float]] = (),
+    treatment_eligible: Sequence[str] | None = None,
+    donor_eligible: Sequence[str] | None = None,
+    excluded_units: Sequence[str] = (),
+    required_treated: Sequence[str] = (),
+    supplied_groups: Sequence[Sequence[str]] | None = None,
+    fixed_treated: Sequence[str] | None = None,
+    donor_pools: Sequence[Sequence[str]] | None = None,
+    spillover_exclusions: Sequence[tuple[str, str]] = (),
+    min_remaining_donors: int = 1,
+    min_outcome_share: float | None = None,
+    max_outcome_share: float | None = None,
+    cost_budget: float | None = None,
+    unit_covariates: Sequence[tuple[str, Sequence[tuple[str, float]]]] = (),
+    balance_constraints: Sequence[BalanceConstraint] = (),
+    exact_ceiling: int = 5000,
+    max_generated: int | None = None,
+    effect_grid: Sequence[float] | None = None,
 ) -> SelectionValidation:
     """Re-run search on independent panels and confirm the frozen design.
 
@@ -802,7 +906,8 @@ def validate_selection(
     only if a design froze, fits that handoff on the untreated panel and on
     a copy whose holdout alone contains the worthwhile effect. The inner
     power curve is not this report. A replicate that freezes nothing is
-    inconclusive, not a false positive.
+    inconclusive, not a false positive. Operational constraints accepted by
+    :func:`search` are replayed on every inner search.
 
     Parameters
     ----------
@@ -851,6 +956,40 @@ def validate_selection(
         Column to use as the planning index.
     unit_costs : sequence of tuple, optional
         ``(unit, cost)`` pairs passed to each inner search.
+    treatment_eligible : sequence of str or None, optional
+        Units that may be treated. Forwarded to each inner search.
+    donor_eligible : sequence of str or None, optional
+        Units that may be donors. Forwarded to each inner search.
+    excluded_units : sequence of str, optional
+        Names removed before enumeration. Forwarded to each inner search.
+    required_treated : sequence of str, optional
+        Names present in every enumerated treated group.
+    supplied_groups : sequence of sequences of str or None, optional
+        Treated groups to screen instead of enumerating sizes.
+    fixed_treated : sequence of str or None, optional
+        One treated group. ``donor_pools`` may vary around it.
+    donor_pools : sequence of sequences of str or None, optional
+        Alternative donor sets for ``fixed_treated``.
+    spillover_exclusions : sequence of tuple of str, optional
+        ``(source, contaminated)`` pairs forwarded to each inner search.
+    min_remaining_donors : int, optional
+        Smallest donor pool kept after spillover exclusions.
+    min_outcome_share : float or None, optional
+        Lowest selected-window share that passes.
+    max_outcome_share : float or None, optional
+        Highest selected-window share that passes.
+    cost_budget : float or None, optional
+        Screen cost cap. It is not the fit budget.
+    unit_covariates : sequence of tuple, optional
+        ``(unit, ((covariate, value), ...))`` scalars forwarded unchanged.
+    balance_constraints : sequence of BalanceConstraint, optional
+        Equal-weight covariate gaps forwarded to each inner search.
+    exact_ceiling : int, optional
+        Spaces at or below this count are enumerated in full.
+    max_generated : int or None, optional
+        Identities kept when the space exceeds ``exact_ceiling``.
+    effect_grid : sequence of float or None, optional
+        Nonzero effects to translate. Zero is still evaluated.
 
     Returns
     -------
@@ -885,7 +1024,7 @@ def validate_selection(
             replicate,
             selection_end,
         )
-        result = search(
+        result = _replay_search(
             panel,
             units,
             decision,
@@ -904,9 +1043,26 @@ def validate_selection(
             outcome_scale=outcome_scale,
             time_column=None,  # ``_planning_frame`` already indexed this panel.
             always_control=always_control,
+            unit_costs=unit_costs,
             shortlist_size=shortlist_size,
             scenario_family=family,
-            unit_costs=unit_costs,
+            treatment_eligible=treatment_eligible,
+            donor_eligible=donor_eligible,
+            excluded_units=excluded_units,
+            required_treated=required_treated,
+            supplied_groups=supplied_groups,
+            fixed_treated=fixed_treated,
+            donor_pools=donor_pools,
+            spillover_exclusions=spillover_exclusions,
+            min_remaining_donors=min_remaining_donors,
+            min_outcome_share=min_outcome_share,
+            max_outcome_share=max_outcome_share,
+            cost_budget=cost_budget,
+            unit_covariates=unit_covariates,
+            balance_constraints=balance_constraints,
+            exact_ceiling=exact_ceiling,
+            max_generated=max_generated,
+            effect_grid=effect_grid,
         )
         if result.frozen is None:
             reasons.append(result.reason or "inconclusive")
@@ -970,6 +1126,23 @@ def compare_screening(
     baseline: float | None = None,
     outcome_scale: str = "outcome",
     time_column: str | None = None,
+    treatment_eligible: Sequence[str] | None = None,
+    donor_eligible: Sequence[str] | None = None,
+    excluded_units: Sequence[str] = (),
+    required_treated: Sequence[str] = (),
+    supplied_groups: Sequence[Sequence[str]] | None = None,
+    fixed_treated: Sequence[str] | None = None,
+    donor_pools: Sequence[Sequence[str]] | None = None,
+    spillover_exclusions: Sequence[tuple[str, str]] = (),
+    min_remaining_donors: int = 1,
+    min_outcome_share: float | None = None,
+    max_outcome_share: float | None = None,
+    cost_budget: float | None = None,
+    unit_covariates: Sequence[tuple[str, Sequence[tuple[str, float]]]] = (),
+    balance_constraints: Sequence[BalanceConstraint] = (),
+    exact_ceiling: int = 5000,
+    max_generated: int | None = None,
+    effect_grid: Sequence[float] | None = None,
 ) -> ScreeningComparison:
     """Compare a capped shortlist with the generator's unfiltered set.
 
@@ -981,6 +1154,8 @@ def compare_screening(
     the exhaustive winner's cost only when both freeze and the exhaustive
     pass evaluated every passing identity. A skipped exhaustive row or a
     partial generator withholds that number; ``cost_regret_reason`` says why.
+    Operational constraints accepted by :func:`search` are replayed on both
+    passes.
 
     Parameters
     ----------
@@ -1027,61 +1202,94 @@ def compare_screening(
         ``outcome`` or ``unit``.
     time_column : str or None, optional
         Column to use as the planning index.
+    treatment_eligible : sequence of str or None, optional
+        Units that may be treated. Forwarded to both searches.
+    donor_eligible : sequence of str or None, optional
+        Units that may be donors. Forwarded to both searches.
+    excluded_units : sequence of str, optional
+        Names removed before enumeration. Forwarded to both searches.
+    required_treated : sequence of str, optional
+        Names present in every enumerated treated group.
+    supplied_groups : sequence of sequences of str or None, optional
+        Treated groups to screen instead of enumerating sizes.
+    fixed_treated : sequence of str or None, optional
+        One treated group. ``donor_pools`` may vary around it.
+    donor_pools : sequence of sequences of str or None, optional
+        Alternative donor sets for ``fixed_treated``.
+    spillover_exclusions : sequence of tuple of str, optional
+        ``(source, contaminated)`` pairs forwarded to both searches.
+    min_remaining_donors : int, optional
+        Smallest donor pool kept after spillover exclusions.
+    min_outcome_share : float or None, optional
+        Lowest selected-window share that passes.
+    max_outcome_share : float or None, optional
+        Highest selected-window share that passes.
+    cost_budget : float or None, optional
+        Screen cost cap. It is not the fit budget.
+    unit_covariates : sequence of tuple, optional
+        ``(unit, ((covariate, value), ...))`` scalars forwarded unchanged.
+    balance_constraints : sequence of BalanceConstraint, optional
+        Equal-weight covariate gaps forwarded to both searches.
+    exact_ceiling : int, optional
+        Spaces at or below this count are enumerated in full.
+    max_generated : int or None, optional
+        Identities kept when the space exceeds ``exact_ceiling``.
+    effect_grid : sequence of float or None, optional
+        Nonzero effects to translate. Zero is still evaluated.
 
     Returns
     -------
     ScreeningComparison
         Identity loss, cost regret, and the two search results.
     """
-    capped = search(
-        history,
-        units,
-        decision,
-        criterion,
-        worthwhile_effect,
-        durations,
-        estimator=estimator,
-        min_group_size=min_group_size,
-        max_group_size=max_group_size,
-        selection_end=selection_end,
-        sample_kwargs=sample_kwargs,
-        random_seed=random_seed,
-        budget=budget,
-        scale=scale,
-        baseline=baseline,
-        outcome_scale=outcome_scale,
-        time_column=time_column,
-        always_control=always_control,
-        unit_costs=unit_costs,
-        shortlist_size=shortlist_size,
-        scenario_family=scenario_family,
-    )
+
+    def _pass(shortlist: int) -> SearchResult:
+        return _replay_search(
+            history,
+            units,
+            decision,
+            criterion,
+            worthwhile_effect,
+            durations,
+            estimator=estimator,
+            min_group_size=min_group_size,
+            max_group_size=max_group_size,
+            selection_end=selection_end,
+            sample_kwargs=sample_kwargs,
+            random_seed=random_seed,
+            budget=budget,
+            scale=scale,
+            baseline=baseline,
+            outcome_scale=outcome_scale,
+            time_column=time_column,
+            always_control=always_control,
+            unit_costs=unit_costs,
+            shortlist_size=shortlist,
+            scenario_family=scenario_family,
+            treatment_eligible=treatment_eligible,
+            donor_eligible=donor_eligible,
+            excluded_units=excluded_units,
+            required_treated=required_treated,
+            supplied_groups=supplied_groups,
+            fixed_treated=fixed_treated,
+            donor_pools=donor_pools,
+            spillover_exclusions=spillover_exclusions,
+            min_remaining_donors=min_remaining_donors,
+            min_outcome_share=min_outcome_share,
+            max_outcome_share=max_outcome_share,
+            cost_budget=cost_budget,
+            unit_covariates=unit_covariates,
+            balance_constraints=balance_constraints,
+            exact_ceiling=exact_ceiling,
+            max_generated=max_generated,
+            effect_grid=effect_grid,
+        )
+
+    capped = _pass(shortlist_size)
     passing = int(
         (capped.candidates.frame["status"] != "filtered").sum()  # type: ignore[attr-defined]
     )
-    exhaustive = search(
-        history,
-        units,
-        decision,
-        criterion,
-        worthwhile_effect,
-        durations,
-        estimator=estimator,
-        min_group_size=min_group_size,
-        max_group_size=max_group_size,
-        selection_end=selection_end,
-        sample_kwargs=sample_kwargs,
-        random_seed=random_seed,
-        budget=budget,
-        scale=scale,
-        baseline=baseline,
-        outcome_scale=outcome_scale,
-        time_column=time_column,
-        always_control=always_control,
-        unit_costs=unit_costs,
-        shortlist_size=max(passing, shortlist_size),
-        scenario_family=scenario_family,
-    )
+    exhaustive = _pass(max(passing, shortlist_size))
     shortlist_ids = tuple(
         sorted(
             str(item)
@@ -1345,6 +1553,29 @@ def _evaluate_candidate(
     )
 
 
+def _reserved_reference_fits(
+    criterion: PowerCriterion, horizons: tuple[int, ...]
+) -> int:
+    """Return the fit count a size-one study reserved before it started."""
+    planned = replicates_for_tolerance(
+        criterion.monte_carlo_error_tolerance, n_durations=len(horizons)
+    )
+    return planned * len(horizons)
+
+
+def _reference_failure_fits(message: str, reserved: int) -> int:
+    """Charge the reservation after fitting starts, and zero before it.
+
+    ``Every replicate failed`` is emitted only after the engine has counted
+    one fit per horizon for every planned replicate, even when an inner
+    message says no fit started. A pre-fit refusal carries ``No fit was
+    started`` and does not carry that wrapper.
+    """
+    if "Every replicate failed" in message or "No fit was started" not in message:
+        return reserved
+    return 0
+
+
 def _reference_study(
     frame: pd.DataFrame,
     treated: tuple[str, ...],
@@ -1394,9 +1625,26 @@ def _reference_study(
         return _CandidateEvaluation(None, "rejected", str(exc), 0)
     except Exception as exc:
         message = str(exc)
-        fits = 0 if "No fit was started" in message else len(horizons)
+        fits = _reference_failure_fits(
+            message, _reserved_reference_fits(criterion, horizons)
+        )
         return _CandidateEvaluation(
             None, "failed", f"{type(exc).__name__}: {message}", fits
+        )
+    planned = replicates_for_tolerance(
+        criterion.monte_carlo_error_tolerance, n_durations=len(horizons)
+    )
+    successful = min((point.n_replicates for point in study.points), default=0)
+    if successful < planned:
+        return _CandidateEvaluation(
+            None,
+            "failed",
+            (
+                f"Only {successful} of {planned} replicates completed. "
+                "The declared tolerance sample was not reached. No design "
+                "was frozen from this study."
+            ),
+            study.n_fits,
         )
     return _CandidateEvaluation(study, "completed", None, study.n_fits)
 
@@ -2434,6 +2682,41 @@ def _max_unit_scale(evaluation: _CandidateEvaluation | None) -> float | None:
     return evaluation.unit_scale
 
 
+_CAPABILITY_REFUSAL_MARKERS = (
+    "Unknown estimator",
+    "declared adapter seam",
+    "reference adapter fits one treated unit",
+    "reference adapter fits WeightedSumFitter",
+    "Grouped qualification is not this issue",
+    "supports at most",
+    "does not allow a",
+    "Other estimators are the",
+)
+
+
+def _capability_refusal(reason: object) -> bool:
+    text = "" if reason is None else str(reason)
+    return any(marker in text for marker in _CAPABILITY_REFUSAL_MARKERS)
+
+
+def _rejected_design_reason(rows: list[dict[str, object]]) -> str:
+    """Keep the estimator sentence only when every refusal is a capability."""
+    distinct: list[str] = []
+    for row in rows:
+        if row["evaluation_status"] != "rejected" or not row["reason"]:
+            continue
+        text = str(row["reason"])
+        if text not in distinct:
+            distinct.append(text)
+    if distinct and all(_capability_refusal(text) for text in distinct):
+        return (
+            "No supported design. The estimator refused the requested groups "
+            "before sampling. No design was frozen."
+        )
+    detail = " ".join(distinct) if distinct else "The rows do not say why."
+    return f"No supported design. {detail} No design was frozen."
+
+
 def _redesign_reason(rows: list[dict[str, object]], criterion: PowerCriterion) -> str:
     statuses = {row["evaluation_status"] for row in rows}
     if statuses <= {"filtered"}:
@@ -2449,10 +2732,7 @@ def _redesign_reason(rows: list[dict[str, object]], criterion: PowerCriterion) -
     if "rejected" in statuses and not any(
         row["evaluation_status"] in {"completed", "withheld", "failed"} for row in rows
     ):
-        return (
-            "No supported design. The estimator refused the requested groups "
-            "before sampling. No design was frozen."
-        )
+        return _rejected_design_reason(rows)
     if any(row["power_withheld"] for row in rows) and not any(
         row["evaluation_status"] == "completed" for row in rows
     ):

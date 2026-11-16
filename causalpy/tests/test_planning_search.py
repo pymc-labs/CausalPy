@@ -16,7 +16,9 @@
 from __future__ import annotations
 
 import inspect
+import sys
 from collections.abc import Sequence
+from dataclasses import replace
 from types import SimpleNamespace
 
 import numpy as np
@@ -1475,3 +1477,184 @@ def test_nightly_reference_search_returns_a_numeric_power() -> None:
     assert not studied.empty
     assert studied["power"].notna().all()
     assert studied["monte_carlo_error"].max() <= 0.0625 + 1e-9
+
+
+def test_size_one_short_sample_is_failed_and_not_frozen(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A study below the declared replicate count is failed, not completed."""
+
+    def _effect_by_duration(self, durations, effects, *, criterion, **kwargs):
+        del self, durations, effects, criterion, kwargs
+        study = _study()
+        return replace(
+            study,
+            n_fits=1,
+            n_replicates=1,
+            points=tuple(replace(point, n_replicates=1) for point in study.points),
+        )
+
+    monkeypatch.setattr(
+        "causalpy.planning.power.ReferencePowerEvaluator.effect_by_duration",
+        _effect_by_duration,
+    )
+    result = _run(shortlist_size=1, budget=_budget(4))
+    studied = result.frame.loc[result.frame["evaluation_status"] == "failed"]
+    assert result.frozen is None
+    assert len(studied) == 1
+    assert "Only 1 of 2 replicates completed" in " ".join(studied["reason"].astype(str))
+    assert int(studied["n_fits"].sum()) == 1
+    assert result.n_inference_fits == 1
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["Every replicate failed.", "horizon reuse"],
+)
+def test_post_fit_reference_failure_charges_the_reservation(
+    monkeypatch: pytest.MonkeyPatch,
+    message: str,
+) -> None:
+    """A failure after fitting starts consumes the reserved replicate count."""
+    calls = {"n": 0}
+
+    def _effect_by_duration(self, durations, effects, *, criterion, **kwargs):
+        del self, durations, effects, criterion, kwargs
+        calls["n"] += 1
+        raise RuntimeError(message)
+
+    monkeypatch.setattr(
+        "causalpy.planning.power.ReferencePowerEvaluator.effect_by_duration",
+        _effect_by_duration,
+    )
+    result = _run(shortlist_size=3, budget=_budget(2))
+    failed = result.frame.loc[result.frame["evaluation_status"] == "failed"]
+    skipped = result.frame.loc[result.frame["evaluation_status"] == "skipped"]
+    assert calls["n"] == 1
+    assert len(failed) == 1
+    assert int(failed["n_fits"].sum()) == 2
+    assert result.n_inference_fits == 2
+    assert len(skipped) == 2
+    assert result.frozen is None
+
+
+def test_pre_fit_reference_refusal_does_not_consume_the_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A refusal before any fit is charged zero, so the next candidate runs."""
+    calls = {"n": 0}
+
+    def _effect_by_duration(self, durations, effects, *, criterion, **kwargs):
+        del self, durations, effects, criterion, kwargs
+        calls["n"] += 1
+        raise RuntimeError("No fit was started.")
+
+    monkeypatch.setattr(
+        "causalpy.planning.power.ReferencePowerEvaluator.effect_by_duration",
+        _effect_by_duration,
+    )
+    result = _run(shortlist_size=2, budget=_budget(2))
+    failed = result.frame.loc[result.frame["evaluation_status"] == "failed"]
+    assert calls["n"] == 2
+    assert result.n_inference_fits == 0
+    assert len(failed) == 2
+    assert int(failed["n_fits"].sum()) == 0
+    assert result.frozen is None
+
+
+def test_input_refusal_summary_quotes_the_row_not_the_estimator() -> None:
+    """A baseline refusal is not reported as an estimator capability refusal."""
+    result = _run(
+        estimator="augmented_synthetic_control",
+        min_group_size=2,
+        max_group_size=2,
+        scale="relative",
+        baseline=None,
+    )
+    assert result.frozen is None
+    assert "baseline" in (result.reason or "")
+    assert "estimator refused" not in (result.reason or "")
+    assert "The rows do not say why" not in (result.reason or "")
+
+
+def test_validators_replay_a_constrained_grouped_procedure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Omitting a donor pool must not widen the procedure the validators replay."""
+    seen: list[tuple[tuple[str, ...], tuple[str, ...]]] = []
+
+    def _ratio(panels, treated, donors, horizons, noise_scale, scales):
+        del panels, horizons, noise_scale, scales
+        seen.append((tuple(treated), tuple(donors)))
+        return 0.0
+
+    class _Adapter:
+        def __init__(self, *, model, sample_kwargs, random_seed) -> None:
+            del model, sample_kwargs, random_seed
+
+        def capabilities(self) -> Capabilities:
+            return Capabilities(
+                estimator="augmented_synthetic_control",
+                deterministic_effect_reuse=True,
+                horizon_reuse=False,
+                post_period_donor_data=True,
+                group_support=True,
+                max_group_size=3,
+                allowed_decision_rules=("positive",),
+                evidence=(("group_support", "contract_adapter"),),
+            )
+
+        def fit_window(self, request):
+            return SimpleNamespace(n_inference_fits=1, duration=request.duration)
+
+        def translate(self, fit, scenario, decision, *, fit_index, outcome_scale):
+            del decision, fit_index, outcome_scale
+            return SimpleNamespace(
+                duration=fit.duration,
+                scenario=scenario,
+                decision=SimpleNamespace(
+                    decided=False,
+                    hdi_lower=0.0,
+                    hdi_upper=1.0,
+                    posterior_tail_probability=0.4,
+                ),
+                summary=SimpleNamespace(
+                    cumulative_total_mean=0.0,
+                    average_per_period_mean=0.0,
+                    average_per_treated_unit_mean=0.0,
+                ),
+                diagnostics=SimpleNamespace(divergences=0, max_rhat=1.0),
+            )
+
+    monkeypatch.setattr(
+        "causalpy.planning.reference._registered_adapters",
+        lambda: {"augmented_synthetic_control": _Adapter},
+    )
+    monkeypatch.setattr(
+        sys.modules["causalpy.planning.search"], "_grouped_rmse_ratio", _ratio
+    )
+    frame = _panel()
+    shared = {
+        "history": frame,
+        "units": UNITS,
+        "decision": _decision(),
+        "criterion": _criterion(),
+        "worthwhile_effect": WORTHWHILE,
+        "durations": (DURATION,),
+        "selection_end": _selection_end(frame),
+        "sample_kwargs": LIGHT,
+        "random_seed": 11,
+        "budget": _budget(8),
+        "estimator": "augmented_synthetic_control",
+        "min_group_size": 2,
+        "max_group_size": 2,
+        "always_control": ("d",),
+        "fixed_treated": ("a", "b"),
+        "donor_pools": (("c",),),
+        "spillover_exclusions": (),
+        "shortlist_size": 2,
+    }
+    validate_selection(n_replicates=1, **shared)
+    compare_screening(**shared)
+    assert seen
+    assert set(seen) == {(("a", "b"), ("c",))}
