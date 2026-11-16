@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -44,6 +45,14 @@ from causalpy.planning.power import (
     TEMPORAL_AR_COEFFICIENT,
     MisfitNotPower,
     ReferencePowerEvaluator,
+    _donor_matrix,
+    _draw_from,
+    _estimand_mean,
+    _median_rmse_ratio,
+    _rate,
+    _true_estimand,
+    _with_zero,
+    _wrong_sign_rate,
     interpolate_minimum_detectable_effect,
     minimum_detectable_effect,
     monte_carlo_error,
@@ -789,6 +798,555 @@ def test_families_record_distinct_scopes_without_fitting(
             continue
         assert records[name].study.donor_weights == equal
     assert records["correctly_specified_noisy_reference"].power_withheld is False
+
+
+def test_missing_points_and_stored_mdes_are_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_fit(monkeypatch)
+    result = _evaluator(_history()).effect_by_duration(
+        (4,),
+        (5.0,),
+        decision=_decision(),
+        criterion=_criterion(),
+    )
+    with pytest.raises(ValueError, match="No unique point") as caught:
+        result.point(4, 9.0)
+    message = str(caught.value)
+    assert "(4, 0.0)" in message
+    assert "(4, 5.0)" in message
+    with pytest.raises(ValueError, match="No minimum detectable effect"):
+        minimum_detectable_effect(result, duration=8)
+
+
+def test_interpolation_rejects_a_bad_grid_before_searching() -> None:
+    with pytest.raises(ValueError, match="direction"):
+        interpolate_minimum_detectable_effect(
+            [0.0, 1.0],
+            [0.0, 1.0],
+            target_power=0.8,
+            direction="two-sided",
+        )
+    with pytest.raises(ValueError, match="same length"):
+        interpolate_minimum_detectable_effect(
+            [0.0, 1.0],
+            [0.0],
+            target_power=0.8,
+            direction="positive",
+        )
+    with pytest.raises(ValueError, match="power must be in"):
+        interpolate_minimum_detectable_effect(
+            [0.0, 1.0],
+            [0.0, 1.1],
+            target_power=0.8,
+            direction="positive",
+        )
+    with pytest.raises(ValueError, match="power must be in"):
+        interpolate_minimum_detectable_effect(
+            [0.0, 1.0],
+            [0.0, -0.1],
+            target_power=0.8,
+            direction="positive",
+        )
+    missing_side = interpolate_minimum_detectable_effect(
+        [-2.0, -1.0],
+        [0.0, 1.0],
+        target_power=0.8,
+        direction="positive",
+    )
+    assert missing_side.status == "out_of_range"
+    assert missing_side.effect is None
+    assert missing_side.reason == "no effect on the decision side"
+
+
+def test_simplex_screen_rejects_malformed_inputs() -> None:
+    with pytest.raises(ValueError, match=r"n_rows, n_donors"):
+        preperiod_simplex_rmse(np.ones(4), np.ones(4))
+    with pytest.raises(ValueError, match=r"n_rows, n_donors"):
+        preperiod_simplex_rmse(np.ones((4, 1)), np.ones((4, 1)))
+    with pytest.raises(ValueError, match=r"n_rows, n_donors"):
+        preperiod_simplex_rmse(np.ones((4, 1)), np.ones(3))
+    with pytest.raises(ValueError, match="at least two rows"):
+        preperiod_simplex_rmse(np.ones((1, 1)), np.ones(1))
+    with pytest.raises(ValueError, match="at least two rows"):
+        preperiod_simplex_rmse(np.ones((2, 0)), np.ones(2))
+    with pytest.raises(ValueError, match="finite"):
+        preperiod_simplex_rmse(
+            np.array([[1.0, np.nan], [2.0, 3.0]]),
+            np.ones(2),
+        )
+    with pytest.raises(ValueError, match="finite"):
+        preperiod_simplex_rmse(np.ones((2, 1)), np.array([1.0, np.inf]))
+
+
+def test_bad_inputs_are_refused_before_fitting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _patch_fit(monkeypatch)
+    history = _history()
+    evaluator = _evaluator(history)
+    decision = _decision()
+    criterion = _criterion()
+    assert evaluator.scenario_family == "correctly_specified_noisy_reference"
+    with pytest.raises(TypeError, match="DataFrame"):
+        ReferencePowerEvaluator(
+            _plan(history),
+            history=history.to_numpy(),  # type: ignore[arg-type]
+            scenario_family="correctly_specified_noisy_reference",
+        )
+    with pytest.raises(TypeError, match="PowerRequest"):
+        evaluator.repeated_experiment_power(object())  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="PowerCriterion"):
+        evaluator.effect_by_duration(
+            (4,),
+            (1.0,),
+            decision=decision,
+            criterion=object(),  # type: ignore[arg-type]
+        )
+    with pytest.raises(ValueError, match="scale"):
+        evaluator.effect_by_duration(
+            (4,),
+            (1.0,),
+            decision=decision,
+            criterion=criterion,
+            scale="multiplicative",  # type: ignore[arg-type]
+        )
+    with pytest.raises(ValueError, match="does not take a baseline"):
+        evaluator.effect_by_duration(
+            (4,),
+            (1.0,),
+            decision=decision,
+            criterion=criterion,
+            baseline=10.0,
+        )
+    for durations in ("4", b"4", 4):
+        with pytest.raises(TypeError, match="durations"):
+            evaluator.effect_by_duration(
+                durations,  # type: ignore[arg-type]
+                (1.0,),
+                decision=decision,
+                criterion=criterion,
+            )
+    with pytest.raises(ValueError, match="must not be empty"):
+        evaluator.effect_by_duration(
+            (),
+            (1.0,),
+            decision=decision,
+            criterion=criterion,
+        )
+    with pytest.raises(ValueError, match="unique"):
+        evaluator.effect_by_duration(
+            (4, 4),
+            (1.0,),
+            decision=decision,
+            criterion=criterion,
+        )
+    for effects in ("1.0", b"1", 1.0):
+        with pytest.raises(TypeError, match="effects"):
+            evaluator.effect_by_duration(
+                (4,),
+                effects,  # type: ignore[arg-type]
+                decision=decision,
+                criterion=criterion,
+            )
+    assert calls == []
+
+
+def test_a_different_history_is_a_different_study(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _patch_fit(monkeypatch)
+    history = _history()
+    plan = _plan(history)
+    decision = _decision()
+    criterion = _criterion()
+
+    def run(frame: pd.DataFrame) -> None:
+        ReferencePowerEvaluator(
+            plan,
+            history=frame,
+            scenario_family="correctly_specified_noisy_reference",
+        ).effect_by_duration(
+            (4,),
+            (1.0,),
+            decision=decision,
+            criterion=criterion,
+        )
+
+    shifted = history.copy()
+    shifted.index = shifted.index + 1
+    with pytest.raises(ValueError, match="same order"):
+        run(shifted)
+    with pytest.raises(ValueError, match="missing units"):
+        run(history.drop(columns=[TREATED]))
+    text = history.copy()
+    text["austin"] = "not-a-number"
+    with pytest.raises(ValueError, match="finite numbers"):
+        run(text)
+    missing = history.copy()
+    missing["austin"] = np.nan
+    with pytest.raises(ValueError, match="finite numbers"):
+        run(missing)
+    flat = history.copy()
+    for name in CONTROLS:
+        flat[name] = 1.0
+    with pytest.raises(ValueError, match="positive variation"):
+        run(flat)
+    assert calls == []
+
+
+def test_time_column_labels_must_be_the_planned_axis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_fit(monkeypatch)
+    frame = _history().rename_axis("time").reset_index()
+    plan = HistoryOnlyPlan(
+        frame,
+        TREATED,
+        CONTROLS,
+        _decision(),
+        estimator="synthetic_control",
+        sample_kwargs=LIGHT,
+        time_column="time",
+        outcome_scale="outcome",
+    )
+    result = ReferencePowerEvaluator(
+        plan,
+        history=frame,
+        scenario_family="correctly_specified_noisy_reference",
+    ).effect_by_duration(
+        (4,),
+        (5.0,),
+        decision=_decision(),
+        criterion=_criterion(),
+    )
+    assert result.point(4, 5.0).probability == 1.0
+    assert result.study.sampler_seed == LIGHT["random_seed"]
+    with pytest.raises(ValueError, match="time column"):
+        ReferencePowerEvaluator(
+            plan,
+            history=frame.drop(columns=["time"]),
+            scenario_family="correctly_specified_noisy_reference",
+        ).effect_by_duration(
+            (4,),
+            (5.0,),
+            decision=_decision(),
+            criterion=_criterion(),
+        )
+
+
+@pytest.mark.parametrize(
+    ("estimand", "expected"),
+    [
+        ("average_per_period", 5.0),
+        ("average_per_treated_unit", 20.0),
+    ],
+)
+def test_translated_power_uses_the_requested_estimand(
+    monkeypatch: pytest.MonkeyPatch,
+    estimand: str,
+    expected: float,
+) -> None:
+    _patch_fit(monkeypatch)
+    decision = replace(_decision(), estimand=estimand)
+    result = _evaluator(_history(), decision=decision).effect_by_duration(
+        (4,),
+        (5.0,),
+        decision=decision,
+        criterion=_criterion(),
+    )
+    row = result.point(4, 5.0)
+    assert row.posterior_mean == pytest.approx(expected)
+    assert row.bias == pytest.approx(0.0, abs=1e-8)
+    assert row.probability == 1.0
+
+
+def test_an_mde_above_the_worthwhile_effect_is_named(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_fit(monkeypatch)
+    result = _evaluator(_history()).effect_by_duration(
+        (4,),
+        (5.0,),
+        decision=_decision(),
+        criterion=_criterion(),
+        minimum_worthwhile_effect=1.0,
+    )
+    stored = minimum_detectable_effect(result, duration=4)
+    assert stored.effect == 5.0
+    assert stored.worthwhile_comparison == "mde_larger_than_worthwhile"
+
+
+def test_the_closed_over_plan_must_stay_on_the_reference_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _patch_fit(monkeypatch)
+    history = _history()
+    plan = _plan(history)
+    decision = _decision()
+    criterion = _criterion()
+    original_handoff = HistoryOnlyPlan.analysis_handoff
+
+    def grouped(self: HistoryOnlyPlan, *, duration: int) -> object:
+        return replace(
+            original_handoff(self, duration=duration),
+            treated_units=(TREATED, "austin"),
+        )
+
+    monkeypatch.setattr(HistoryOnlyPlan, "analysis_handoff", grouped)
+    with pytest.raises(ValueError, match="one treated unit"):
+        ReferencePowerEvaluator(
+            plan,
+            history=history,
+            scenario_family="correctly_specified_noisy_reference",
+        ).effect_by_duration(
+            (4,),
+            (1.0,),
+            decision=decision,
+            criterion=criterion,
+        )
+
+    def missing_model(self: HistoryOnlyPlan, *, duration: int) -> object:
+        return replace(original_handoff(self, duration=duration), model=None)
+
+    monkeypatch.setattr(HistoryOnlyPlan, "analysis_handoff", missing_model)
+    with pytest.raises(RuntimeError, match="did not hand off its model"):
+        ReferencePowerEvaluator(
+            plan,
+            history=history,
+            scenario_family="correctly_specified_noisy_reference",
+        ).effect_by_duration(
+            (4,),
+            (1.0,),
+            decision=decision,
+            criterion=criterion,
+        )
+
+    monkeypatch.setattr(HistoryOnlyPlan, "analysis_handoff", original_handoff)
+    original_capabilities = HistoryOnlyPlan.capabilities.fget
+
+    def no_reuse(self: HistoryOnlyPlan) -> object:
+        return replace(original_capabilities(self), deterministic_effect_reuse=False)
+
+    monkeypatch.setattr(HistoryOnlyPlan, "capabilities", property(no_reuse))
+    with pytest.raises(ValueError, match="deterministic effect reuse"):
+        ReferencePowerEvaluator(
+            plan,
+            history=history,
+            scenario_family="correctly_specified_noisy_reference",
+        ).effect_by_duration(
+            (4,),
+            (1.0,),
+            decision=decision,
+            criterion=criterion,
+        )
+
+    def reused_horizon(self: HistoryOnlyPlan) -> object:
+        return replace(original_capabilities(self), horizon_reuse=True)
+
+    monkeypatch.setattr(HistoryOnlyPlan, "capabilities", property(reused_horizon))
+    with pytest.raises(ValueError, match="Horizon reuse"):
+        ReferencePowerEvaluator(
+            plan,
+            history=history,
+            scenario_family="correctly_specified_noisy_reference",
+        ).effect_by_duration(
+            (4,),
+            (1.0,),
+            decision=decision,
+            criterion=criterion,
+        )
+    assert calls == []
+
+
+def test_translation_must_return_each_requested_effect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evaluator = _evaluator(_history())
+    decision = _decision()
+    criterion = _criterion()
+
+    def install(result: object) -> None:
+        monkeypatch.setattr(
+            HistoryOnlyPlan, "evaluate", lambda *_args, **_kwargs: result
+        )
+
+    install(
+        SimpleNamespace(
+            capabilities=SimpleNamespace(horizon_reuse=True),
+            evaluations=(),
+            n_inference_fits=0,
+        )
+    )
+    with pytest.raises(RuntimeError, match="Horizon reuse is off"):
+        evaluator.effect_by_duration(
+            (4,),
+            (1.0,),
+            decision=decision,
+            criterion=criterion,
+        )
+
+    install(
+        SimpleNamespace(
+            capabilities=SimpleNamespace(horizon_reuse=False),
+            evaluations=(),
+            n_inference_fits=0,
+        )
+    )
+    with pytest.raises(RuntimeError, match="own fit"):
+        evaluator.effect_by_duration(
+            (4,),
+            (1.0,),
+            decision=decision,
+            criterion=criterion,
+        )
+
+    install(
+        SimpleNamespace(
+            capabilities=SimpleNamespace(horizon_reuse=False),
+            evaluations=(
+                SimpleNamespace(fit_index=0),
+                SimpleNamespace(fit_index=1),
+            ),
+            n_inference_fits=1,
+        )
+    )
+    with pytest.raises(RuntimeError, match="own fit"):
+        evaluator.effect_by_duration(
+            (4,),
+            (1.0,),
+            decision=decision,
+            criterion=criterion,
+        )
+
+    install(
+        SimpleNamespace(
+            capabilities=SimpleNamespace(horizon_reuse=False),
+            evaluations=(
+                SimpleNamespace(
+                    fit_index=0,
+                    duration=4,
+                    scenario=SimpleNamespace(magnitude=99.0),
+                ),
+            ),
+            n_inference_fits=1,
+        )
+    )
+    with pytest.raises(RuntimeError, match="not requested"):
+        evaluator.effect_by_duration(
+            (4,),
+            (1.0,),
+            decision=decision,
+            criterion=criterion,
+        )
+
+    evaluation = SimpleNamespace(
+        fit_index=0,
+        duration=4,
+        scenario=SimpleNamespace(magnitude=0.0),
+        summary=SimpleNamespace(
+            cumulative_total_mean=0.0,
+            average_per_period_mean=0.0,
+            average_per_treated_unit_mean=0.0,
+        ),
+        decision=SimpleNamespace(
+            decided=False,
+            hdi_lower=-1.0,
+            hdi_upper=1.0,
+            posterior_tail_probability=0.1,
+        ),
+        diagnostics=SimpleNamespace(max_rhat=1.0, divergences=0),
+    )
+    install(
+        SimpleNamespace(
+            capabilities=SimpleNamespace(horizon_reuse=False),
+            evaluations=(evaluation,),
+            n_inference_fits=1,
+        )
+    )
+    with pytest.raises(RuntimeError, match="every translated effect"):
+        evaluator.effect_by_duration(
+            (4,),
+            (1.0,),
+            decision=decision,
+            criterion=criterion,
+        )
+
+
+def test_rate_and_screen_guards_refuse_undefined_inputs() -> None:
+    assert _with_zero((0.0, 1.0, 1.0)) == (0.0, 1.0)
+    with pytest.raises(ValueError, match="at least one"):
+        _wrong_sign_rate(())
+    with pytest.raises(RuntimeError, match="mix of zero and nonzero"):
+        _wrong_sign_rate((None, False))
+    with pytest.raises(ValueError, match="at least one"):
+        _rate(())
+    summary = SimpleNamespace(
+        cumulative_total_mean=1.0,
+        average_per_period_mean=2.0,
+        average_per_treated_unit_mean=3.0,
+    )
+    assert _estimand_mean(summary, "average_per_period") == 2.0
+    assert _estimand_mean(summary, "average_per_treated_unit") == 3.0
+    with pytest.raises(ValueError, match="Unsupported estimand"):
+        _estimand_mean(summary, "rope")
+    with pytest.raises(ValueError, match="Unsupported estimand"):
+        _true_estimand(
+            scale="absolute",
+            magnitude=1.0,
+            duration=4,
+            baseline=None,
+            estimand="rope",
+        )
+    with pytest.raises(RuntimeError, match="non-finite"):
+        _draw_from(
+            SimpleNamespace(
+                summary=SimpleNamespace(cumulative_total_mean=float("nan"))
+            ),
+            _decision(),
+            "absolute",
+            None,
+        )
+    with pytest.raises(ValueError, match="training rows"):
+        _median_rmse_ratio([_history().iloc[:2]], None, (2,), 1.0)
+
+    class _RaisingSlice:
+        def to_numpy(self, dtype: object = None, **kwargs: object) -> np.ndarray:
+            raise TypeError("not numeric")
+
+    class _RaisingLoc:
+        def __getitem__(self, key: object) -> _RaisingSlice:
+            return _RaisingSlice()
+
+    class _RaisingHistory(pd.DataFrame):
+        @property
+        def loc(self) -> _RaisingLoc:  # type: ignore[override]
+            return _RaisingLoc()
+
+    with pytest.raises(ValueError, match="finite numbers"):
+        _donor_matrix(
+            _RaisingHistory({name: [1.0, 2.0] for name in CONTROLS}),
+            CONTROLS,
+        )
+
+    class _OneDSlice:
+        def to_numpy(self, dtype: object = None, **kwargs: object) -> np.ndarray:
+            return np.ones(3)
+
+    class _OneDLoc:
+        def __getitem__(self, key: object) -> _OneDSlice:
+            return _OneDSlice()
+
+    class _OneDHistory(pd.DataFrame):
+        @property
+        def loc(self) -> _OneDLoc:  # type: ignore[override]
+            return _OneDLoc()
+
+    with pytest.raises(ValueError, match="finite numbers"):
+        _donor_matrix(
+            _OneDHistory({name: [1.0, 2.0, 3.0] for name in CONTROLS}),
+            CONTROLS,
+        )
 
 
 @pytest.mark.nightly
