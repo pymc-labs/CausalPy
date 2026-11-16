@@ -209,13 +209,6 @@ def _finite(value: float) -> float | None:
     return value
 
 
-class _FilteredShare:
-    """Marker for a share that is stored as null and filtered."""
-
-
-_FILTERED_SHARE = _FilteredShare()
-
-
 def _reasons_cost_share(
     request: CandidateRequest,
     identity: _Identity,
@@ -250,28 +243,28 @@ def _reasons_cost_share(
             matched["cost_unknown"] = True
         elif cost > request.budget:
             matched["over_budget"] = True
-    raw_share = _outcome_share(request, treated, history, population)
-    share: float | None
-    if isinstance(raw_share, _FilteredShare):
+    # mypy does not narrow `is` against a bare object() sentinel.
+    share = _outcome_share(request, treated, history, population)
+    if share is _FILTERED_SHARE:
         matched["outcome_share"] = True
         share = None
-    else:
-        share = raw_share
-        if share is not None and (
-            (
-                request.min_outcome_share is not None
-                and share < request.min_outcome_share
-            )
-            or (
-                request.max_outcome_share is not None
-                and share > request.max_outcome_share
-            )
-        ):
-            matched["outcome_share"] = True
+    elif share is not None and (
+        (
+            request.min_outcome_share is not None and share < request.min_outcome_share  # type: ignore[operator]
+        )
+        or (
+            request.max_outcome_share is not None and share > request.max_outcome_share  # type: ignore[operator]
+        )
+    ):
+        matched["outcome_share"] = True
     if _fails_balance(request, treated, population):
         matched["representativeness"] = True
     reasons = tuple(reason for reason in _REASON_ORDER if matched[reason])
-    return reasons, cost, share
+    # Identity already stored None for the sentinel; mypy cannot see that.
+    return reasons, cost, share  # type: ignore[return-value]
+
+
+_FILTERED_SHARE = object()
 
 
 def _outcome_share(
@@ -279,7 +272,7 @@ def _outcome_share(
     treated: tuple[str, ...],
     history: pd.DataFrame | None,
     population: tuple[str, ...],
-) -> float | None | _FilteredShare:
+) -> float | None | object:
     if history is None:
         if (
             request.min_outcome_share is not None
