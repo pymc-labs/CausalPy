@@ -1853,3 +1853,199 @@ def test_size_one_validation_draws_the_reference_panel(
         unit_costs=_costs(),
     )
     assert plans == []
+
+
+def test_withheld_size_one_curve_cannot_freeze(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reference curve with power withheld is not a completed selection."""
+    withheld = replace(
+        _study(),
+        power_withheld=True,
+        withhold_reason="Pre-period misfit. The decision rate was not labeled as power.",
+    )
+
+    def _effect_by_duration(self, durations, effects, *, criterion, **kwargs):
+        del self, durations, effects, criterion, kwargs
+        return withheld
+
+    monkeypatch.setattr(
+        "causalpy.planning.power.ReferencePowerEvaluator.effect_by_duration",
+        _effect_by_duration,
+    )
+    result = _run()
+    studied = result.frame[result.frame["screen_status"] == "shortlisted"]
+    assert result.frozen is None
+    assert set(studied["evaluation_status"]) == {"withheld"}
+    assert not bool(studied["eligible"].any())
+    assert studied["power"].isna().all()
+    assert studied["reason"].str.contains("not labeled as power").all()
+
+
+def test_grouped_tolerance_above_budget_skips_instead_of_aborting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A grouped sample larger than the caller budget returns the screen."""
+    from causalpy.planning.reference import HistoryOnlyPlan
+
+    calls: list[int] = []
+
+    def evaluate(self, durations, **kwargs):
+        del self, durations, kwargs
+        calls.append(1)
+        raise AssertionError("the over-budget sample must not fit")
+
+    monkeypatch.setattr(HistoryOnlyPlan, "evaluate", evaluate)
+    result = _run(
+        criterion=replace(_criterion(), monte_carlo_error_tolerance=0.05),
+        budget=_budget(10),
+        estimator="augmented_synthetic_control",
+        min_group_size=1,
+        max_group_size=1,
+    )
+    shortlisted = result.frame[result.frame["screen_status"] == "shortlisted"]
+    assert result.frozen is None
+    assert not shortlisted.empty
+    assert set(shortlisted["evaluation_status"]) == {"skipped"}
+    assert shortlisted["n_fits"].eq(0).all()
+    assert shortlisted["reason"].str.contains("caller budget").all()
+    assert calls == []
+
+
+def test_size_one_tolerance_above_fixed_ceiling_still_raises() -> None:
+    with pytest.raises(ValueError, match="fixed-design ceiling"):
+        _run(criterion=replace(_criterion(), monte_carlo_error_tolerance=0.04))
+
+
+def test_holdout_shift_keeps_the_largest_injection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later smaller group does not hide an earlier injection."""
+    frame = _panel()
+    end = _selection_end(frame)
+    labels = list(frame.index)
+    cut = labels.index(end)
+    seen: list[int] = []
+
+    def replay(*args, **kwargs):
+        del args, kwargs
+        seen.append(1)
+        treated = ("a",) if len(seen) == 1 else ("a", "b", "c")
+        frozen = FrozenDesign(
+            candidate_id="-".join(treated),
+            treated_units=treated,
+            control_units=("d",),
+            duration=DURATION,
+            estimator="augmented_synthetic_control",
+            decision=_decision(),
+            sample_kwargs=(),
+            sampler_seed=1,
+            outcome_scale="outcome",
+            time_column=None,
+            history=frame,
+            training_index=tuple(labels[: cut + 1]),
+            holdout_index=tuple(labels[cut + 1 :]),
+            scale="absolute",
+            baseline=None,
+            cost=1.0,
+            power=0.9,
+            false_positive_rate=0.0,
+            interval_width=1.0,
+            monte_carlo_error=0.05,
+            selection_objective="test",
+        )
+        return SimpleNamespace(frozen=frozen, reason=None)
+
+    monkeypatch.setattr(
+        sys.modules["causalpy.planning.search"], "_replay_search", replay
+    )
+    monkeypatch.setattr(
+        FrozenDesign,
+        "analysis_handoff",
+        lambda self: SimpleNamespace(
+            run=lambda panel: SimpleNamespace(
+                decision=SimpleNamespace(decided=True, hdi_lower=0.0, hdi_upper=1.0)
+            )
+        ),
+    )
+    report = validate_selection(
+        frame,
+        UNITS,
+        _decision(),
+        _criterion(),
+        WORTHWHILE,
+        (DURATION,),
+        n_replicates=2,
+        random_seed=11,
+        budget=_budget(),
+        sample_kwargs=LIGHT,
+        selection_end=end,
+        always_control=("d",),
+        unit_costs=_costs(),
+        estimator="augmented_synthetic_control",
+        min_group_size=1,
+        max_group_size=3,
+    )
+    assert report.n_frozen == 2
+    assert report.holdout_shift == pytest.approx(WORTHWHILE)
+
+
+def test_large_unit_persistent_misfit_still_withholds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Published misfit noise is not scaled by a large historical unit."""
+    from causalpy.planning.power import MISFIT_RMSE_TO_NOISE
+
+    _install_decisive_evaluate(
+        monkeypatch, SimpleNamespace(divergences=0, max_rhat=1.0)
+    )
+    frame = _panel()
+    frame["a"] = frame["a"] * 100
+    result = _run(
+        history=frame,
+        estimator="augmented_synthetic_control",
+        min_group_size=1,
+        max_group_size=1,
+        shortlist_size=1,
+        scenario_family="persistent_misfit",
+    )
+    study = next(iter(result.studies.values()))
+    assert study.preperiod_rmse_ratio > MISFIT_RMSE_TO_NOISE
+    assert study.power_withheld
+    assert result.frozen is None
+    studied = result.frame[result.frame["screen_status"] == "shortlisted"]
+    assert studied["power"].isna().all()
+    assert studied["evaluation_status"].eq("withheld").all()
+
+
+def test_absent_persistent_misfit_rejects_before_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[int] = []
+    from causalpy.planning.reference import HistoryOnlyPlan
+
+    def evaluate(self, durations, **kwargs):
+        del self, durations, kwargs
+        calls.append(1)
+        raise AssertionError("an absent misfit must not fit")
+
+    monkeypatch.setattr(HistoryOnlyPlan, "evaluate", evaluate)
+
+    monkeypatch.setattr(
+        sys.modules["causalpy.planning.search"],
+        "_grouped_rmse_ratio",
+        lambda *args, **kwargs: 0.1,
+    )
+    result = _run(
+        estimator="augmented_synthetic_control",
+        min_group_size=1,
+        max_group_size=1,
+        shortlist_size=1,
+        scenario_family="persistent_misfit",
+    )
+    shortlisted = result.frame[result.frame["screen_status"] == "shortlisted"]
+    assert calls == []
+    assert result.frozen is None
+    assert set(shortlisted["evaluation_status"]) == {"rejected"}
+    assert shortlisted["n_fits"].eq(0).all()
+    assert shortlisted["reason"].str.contains("not present").all()

@@ -30,7 +30,7 @@ fit cap says so, rather than claiming those rows failed the power criteria.
 ``n_fits`` is repeated on every duration row of one study.
 ``SearchResult.n_inference_fits`` is the study total, so summing the column double-counts a multi-duration search.
 
-Size-one diagnostics stay on the reference engine's integer field, which cannot represent a missing count. A size-one study that returns fewer successful replicates than the declared tolerance is failed and is not frozen. A post-fit reference failure charges the reserved replicate count. An inconclusive summary quotes the recorded row reasons unless every refusal is an estimator capability refusal. A rejected identity was attempted, so a fully attempted shortlist is not labeled capped. A grouped curve whose divergence count is missing is not attached to ``SearchResult.studies``, because that integer cannot hold null.
+Size-one diagnostics stay on the reference engine's integer field, which cannot represent a missing count. A size-one study that returns fewer successful replicates than the declared tolerance is failed and is not frozen. A post-fit reference failure charges the reserved replicate count. An inconclusive summary quotes the recorded row reasons unless every refusal is an estimator capability refusal. A rejected identity was attempted, so a fully attempted shortlist is not labeled capped. A grouped curve whose divergence count is missing is not attached to ``SearchResult.studies``, because that integer cannot hold null. A size-one curve with power withheld is withheld and is not frozen. A grouped tolerance sample uses the caller budget as its fit ceiling and skips the shortlist instead of aborting the screen. Validation keeps the largest absolute holdout injection. Grouped ``persistent_misfit`` noise is the published noise scale, and a ratio that does not trip is a zero-fit rejection.
 """
 
 from __future__ import annotations
@@ -375,6 +375,8 @@ class SelectionValidation:
     selection. ``mean_interval_width`` is the mean alternate-panel interval
     width, and ``interval_width_monte_carlo_error`` is the standard error of
     that mean. The inner model-conditional curve is not reused as this proof.
+    ``holdout_shift`` is the frozen replicate whose mean holdout injection
+    has the largest absolute value. A later smaller group does not replace it.
     """
 
     n_replicates: int
@@ -525,6 +527,11 @@ def search(
     successful replicates than its declared tolerance is failed and is not
     frozen. A reference failure after fitting starts charges the reserved
     replicate count, so the next candidate cannot start on an under-count.
+    A size-one curve with ``power_withheld`` is withheld and cannot freeze.
+    A grouped tolerance sample uses the caller budget as its fit ceiling.
+    When that sample exceeds the budget, the screen is still returned and
+    the shortlisted rows are skipped. A grouped ``persistent_misfit`` whose
+    ratio does not trip is rejected before a fit.
 
     Parameters
     ----------
@@ -637,12 +644,36 @@ def search(
     family = _require_family(scenario_family)
     _require_selection_end(frame, selection_end, horizons)
     effects = _effect_grid(worthwhile, effect_grid)
+    size_one = _size_one_reference_procedure(
+        estimator,
+        min_group_size,
+        max_group_size,
+        fixed_treated,
+        supplied_groups,
+    )
+    fit_ceiling = max(budget.max_inference_fits, 1)
+    ceiling_skip: str | None = None
     try:
-        planned = replicates_for_tolerance(
-            criterion.monte_carlo_error_tolerance, n_durations=len(horizons)
-        )
+        if size_one:
+            planned = replicates_for_tolerance(
+                criterion.monte_carlo_error_tolerance, n_durations=len(horizons)
+            )
+        else:
+            planned = replicates_for_tolerance(
+                criterion.monte_carlo_error_tolerance,
+                n_durations=len(horizons),
+                ceiling=fit_ceiling,
+            )
     except ValueError as exc:
-        raise ValueError(str(exc)) from exc
+        message = str(exc)
+        if size_one or "fixed-design ceiling" not in message:
+            raise
+        planned = 0
+        ceiling_skip = (
+            "The tolerance sample exceeds the caller budget "
+            f"({budget.max_inference_fits} fits). Replicates were not reduced. "
+            "No fit was started."
+        )
     request = _candidate_request(
         frame=frame,
         units=units,
@@ -699,6 +730,12 @@ def search(
         if refusal is not None:
             evaluations[identity] = refusal
             continue
+        if ceiling_skip is not None:
+            evaluations[identity] = _CandidateEvaluation(
+                None, "skipped", ceiling_skip, 0
+            )
+            skipped += 1
+            continue
         planned_fits = planned * len(horizons)
         if fits_used + planned_fits > budget.max_inference_fits:
             evaluations[identity] = _CandidateEvaluation(
@@ -723,6 +760,7 @@ def search(
             outcome_scale=outcome_scale,
             time_column=time_column,
             selection_end=selection_end,
+            fit_ceiling=fit_ceiling,
         )
         fits_used += outcome.n_fits
         if _publish_study(outcome):
@@ -1102,7 +1140,9 @@ def validate_selection(
             training_diff,
             _training_diff(panel, injected, result.frozen.training_index),
         )
-        shift = _holdout_shift(panel, injected, result.frozen)
+        observed_shift = _holdout_shift(panel, injected, result.frozen)
+        if shift is None or abs(observed_shift) > abs(shift):
+            shift = observed_shift
         started = 0
         try:
             null_spec = result.frozen.analysis_handoff()
@@ -1546,6 +1586,7 @@ def _evaluate_candidate(
     outcome_scale: str,
     time_column: str | None,
     selection_end: object,
+    fit_ceiling: int,
 ) -> _CandidateEvaluation:
     treated = tuple(row["treated"])
     donors = tuple(row["donors"])
@@ -1588,6 +1629,7 @@ def _evaluate_candidate(
         time_column,
         selection_end,
         seed,
+        fit_ceiling,
     )
 
 
@@ -1612,6 +1654,33 @@ def _reference_failure_fits(message: str, reserved: int) -> int:
     if "Every replicate failed" in message or "No fit was started" not in message:
         return reserved
     return 0
+
+
+def _finished_evaluation(
+    study: EffectByDuration,
+    n_fits: int,
+    *,
+    unit_scale: float | None = None,
+    diagnostics: _DiagnosticRecord | None = None,
+) -> _CandidateEvaluation:
+    """Label a finished curve. A withheld curve is not a completed selection."""
+    if study.power_withheld:
+        return _CandidateEvaluation(
+            study,
+            "withheld",
+            study.withhold_reason,
+            n_fits,
+            unit_scale=unit_scale,
+            diagnostics=diagnostics,
+        )
+    return _CandidateEvaluation(
+        study,
+        "completed",
+        None,
+        n_fits,
+        unit_scale=unit_scale,
+        diagnostics=diagnostics,
+    )
 
 
 def _reference_study(
@@ -1684,7 +1753,7 @@ def _reference_study(
             ),
             study.n_fits,
         )
-    return _CandidateEvaluation(study, "completed", None, study.n_fits)
+    return _finished_evaluation(study, study.n_fits)
 
 
 def _grouped_study(
@@ -1705,6 +1774,7 @@ def _grouped_study(
     time_column: str | None,
     selection_end: object,
     seed: int,
+    fit_ceiling: int,
 ) -> _CandidateEvaluation:
     try:
         HistoryOnlyPlan(
@@ -1724,7 +1794,9 @@ def _grouped_study(
         return setup
     try:
         replicates = replicates_for_tolerance(
-            criterion.monte_carlo_error_tolerance, n_durations=len(horizons)
+            criterion.monte_carlo_error_tolerance,
+            n_durations=len(horizons),
+            ceiling=fit_ceiling,
         )
         translated = _with_zero(effects)
         noise = _noise_scale(frame, donors)
@@ -1746,9 +1818,25 @@ def _grouped_study(
             )
             for replicate in range(replicates)
         ]
-        ratio = _grouped_rmse_ratio(panels, treated, donors, horizons, noise, scales)
+        ratio_scales = (
+            dict.fromkeys(treated, 1.0) if family == "persistent_misfit" else scales
+        )
+        ratio = _grouped_rmse_ratio(
+            panels, treated, donors, horizons, noise, ratio_scales
+        )
     except ValueError as exc:
         return _CandidateEvaluation(None, "rejected", str(exc), 0)
+    if family == "persistent_misfit" and ratio <= MISFIT_RMSE_TO_NOISE:
+        return _CandidateEvaluation(
+            None,
+            "rejected",
+            (
+                "Declared persistent_misfit was not present: median pre-period "
+                f"RMSE / noise_scale was {ratio}, below {MISFIT_RMSE_TO_NOISE}. "
+                "Power was not reported. No fit was started."
+            ),
+            0,
+        )
     draws: dict[tuple[int, float], list[object]] = {
         (duration, effect): [] for duration in horizons for effect in translated
     }
@@ -1834,11 +1922,8 @@ def _grouped_study(
         frame=frame,
         selection_end=selection_end,
     )
-    status = "withheld" if study.power_withheld else "completed"
-    return _CandidateEvaluation(
+    return _finished_evaluation(
         study,
-        status,
-        study.withhold_reason,
         n_fits,
         unit_scale=unit_scale,
         diagnostics=diagnostics,
@@ -1876,7 +1961,7 @@ def _grouped_panel(
             centered = centered - float(centered.mean())
             series = (
                 MISFIT_TREND_PER_DONOR_SD * donor_sd * centered
-                + noise_scale * scale * rng.normal(0.0, 1.0, size=n_rows)
+                + noise_scale * rng.normal(0.0, 1.0, size=n_rows)
             )
         else:
             unit = _ar1_noise(rng, n_rows, rho)
@@ -2131,11 +2216,15 @@ def _result_rows(
             point = _point_or_none(evaluation, duration, worthwhile)
             mde = _mde_or_none(evaluation, duration)
             status, reason, n_fits, failed = _row_status(screen_row, evaluation)
-            power = None if point is None else _finite_or_none(point.probability)
             withheld = bool(
                 evaluation and evaluation.study and evaluation.study.power_withheld
             )
-            eligible = _eligible(status, power, point, criterion, screen_row)
+            power = (
+                None
+                if point is None or withheld
+                else _finite_or_none(point.probability)
+            )
+            eligible = _eligible(status, power, point, criterion, screen_row, withheld)
             rows.append(
                 {
                     "candidate_id": identity,
@@ -2232,8 +2321,9 @@ def _eligible(
     point: PowerPoint | None,
     criterion: PowerCriterion,
     screen_row: pd.Series,
+    power_withheld: bool = False,
 ) -> bool:
-    if status != "completed" or power is None or point is None:
+    if status != "completed" or power is None or point is None or power_withheld:
         return False
     cost = _finite_or_none(screen_row["cost"])
     if cost is None:
@@ -2702,12 +2792,17 @@ def _grouped_rmse_ratio(
 
 
 def _grouped_generated(family: str, scales: tuple[float, ...]) -> str:
+    noise = (
+        "persistent_misfit noise is noise_scale, not the unit scale. "
+        if family == "persistent_misfit"
+        else f"Unit noise scales relative to donor sd are {scales}. "
+    )
     return (
         f"{family}: each treated column is replaced. Donors stay observed. "
-        f"Unit noise scales relative to donor sd are {scales}. Common-shock "
-        f"share is {COMMON_SHOCK_SHARE}. persistent_misfit uses the published "
-        "trend instead of the donor combination. Treatment is injected by "
-        "translation after the untreated series exists."
+        f"{noise}Common-shock share is {COMMON_SHOCK_SHARE}. "
+        "persistent_misfit uses the published trend instead of the donor "
+        "combination. Treatment is injected by translation after the untreated "
+        "series exists."
     )
 
 
