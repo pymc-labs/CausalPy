@@ -30,7 +30,7 @@ fit cap says so, rather than claiming those rows failed the power criteria.
 ``n_fits`` is repeated on every duration row of one study.
 ``SearchResult.n_inference_fits`` is the study total, so summing the column double-counts a multi-duration search.
 
-Size-one diagnostics stay on the reference engine's integer field, which cannot represent a missing count. A size-one study that returns fewer successful replicates than the declared tolerance is failed and is not frozen. A post-fit reference failure charges the reserved replicate count. An inconclusive summary quotes the recorded row reasons unless every refusal is an estimator capability refusal. A rejected identity was attempted, so a fully attempted shortlist is not labeled capped. A grouped curve whose divergence count is missing is not attached to ``SearchResult.studies``, because that integer cannot hold null. A size-one curve with power withheld is withheld and is not frozen. A grouped tolerance sample uses the caller budget as its fit ceiling and skips the shortlist instead of aborting the screen. Validation keeps the largest absolute holdout injection. Grouped ``persistent_misfit`` noise is the published noise scale, and a ratio that does not trip is a zero-fit rejection.
+Size-one diagnostics stay on the reference engine's integer field, which cannot represent a missing count. A size-one study that returns fewer successful replicates than the declared tolerance is failed and is not frozen. A post-fit reference failure charges the reserved replicate count. An inconclusive summary quotes the recorded row reasons unless every refusal is an estimator capability refusal. A rejected identity was attempted, so a fully attempted shortlist is not labeled capped. A grouped curve whose divergence count is missing is published on ``SearchResult.studies`` with that null. ``None`` means the fit did not report a count, not zero. A size-one curve with power withheld is withheld and is not frozen. A grouped tolerance sample uses the caller budget as its fit ceiling and skips the shortlist instead of aborting the screen. Validation keeps the largest absolute holdout injection. Grouped ``persistent_misfit`` noise is the published noise scale, and a ratio that does not trip is a zero-fit rejection. Audit refuses before sampling when the panel index is not the frozen planning label domain. The caller time-column name is retained because the stored history is already indexed. Grouped noise scale and donor standard deviation use rows at or before the holdout. Observed donor paths stay the covariate combination.
 """
 
 from __future__ import annotations
@@ -60,6 +60,7 @@ from causalpy.planning.contracts import (
     CandidateRequest,
     DecisionRule,
     PowerCriterion,
+    require_positive_int,
     unit_period_effect,
 )
 from causalpy.planning.power import (
@@ -207,7 +208,11 @@ class FrozenDesign:
     selection_objective: str
 
     def analysis_handoff(self) -> AnalysisHandoff | AdapterAnalysisHandoff:
-        """Return the frozen analysis spec. Does not sample."""
+        """Return the frozen analysis spec. Does not sample.
+
+        The stored history is already indexed, so the retained time-column
+        name is not looked up again.
+        """
         return _build_handoff(
             self.history,
             self.treated_units,
@@ -217,7 +222,7 @@ class FrozenDesign:
             duration=self.duration,
             sample_kwargs=dict(self.sample_kwargs),
             outcome_scale=self.outcome_scale,
-            time_column=self.time_column,
+            time_column=None,
         )
 
     def inject(self, panel: pd.DataFrame, effect: float) -> pd.DataFrame:
@@ -264,7 +269,10 @@ class FrozenDesign:
 
         The panel's tail of the frozen duration is the audit holdout. Overlap
         with the planning holdout is refused before sampling, including when
-        those labels fall in the audit training index.
+        those labels fall in the audit training index. A panel index that is
+        not the frozen history label domain is refused before any fit. The
+        retained time-column name names that domain; this method does not
+        index the panel.
 
         Parameters
         ----------
@@ -273,6 +281,7 @@ class FrozenDesign:
         """
         if not isinstance(panel, pd.DataFrame):
             raise TypeError("panel must be a pandas DataFrame. No fit was started.")
+        _require_audit_label_domain(self, panel)
         spec = _build_handoff(
             panel,
             self.treated_units,
@@ -282,7 +291,7 @@ class FrozenDesign:
             duration=self.duration,
             sample_kwargs=dict(self.sample_kwargs),
             outcome_scale=self.outcome_scale,
-            time_column=self.time_column,
+            time_column=None,
         )
         overlap = [
             label for label in spec.holdout_index if label in set(self.holdout_index)
@@ -327,16 +336,33 @@ class AuditReport:
     reason: str | None
 
 
+def _require_audit_label_domain(design: FrozenDesign, panel: pd.DataFrame) -> None:
+    """Refuse a panel index that is not the frozen planning label domain."""
+    expected = design.history.index
+    actual = panel.index
+    if type(actual) is not type(expected) or actual.dtype != expected.dtype:
+        name = design.time_column
+        hint = (
+            f" Index the panel with {name!r} before audit." if name is not None else ""
+        )
+        raise ValueError(
+            "Audit panel index is not the frozen planning label domain. "
+            f"The retained time-column name is {name!r}.{hint} "
+            "No fit was started."
+        )
+
+
 @dataclass(frozen=True)
 class SearchResult:
     """Screen, power, and one explicit selection or an inconclusive result.
 
     ``frame`` is the plot-ready table. Grouped rows record ``divergences``,
     ``max_rhat``, ``min_bulk_ess``, ``diagnostics_status``, and
-    ``diagnostics_reason``. A missing divergence count stays null. The power
-    curve's ``divergences`` integer is not that record. ``studies`` holds a
-    completed or withheld curve whose divergence integer is a recorded count,
-    keyed by ``candidate_id``. A grouped curve with a missing count is omitted.
+    ``diagnostics_reason``. A missing divergence count stays null on the frame.
+    ``EffectByDuration.divergences`` is that count or ``None`` when the fit did
+    not report one. ``None`` does not mean zero. ``studies`` holds a completed
+    or withheld curve, including a null grouped count, keyed by
+    ``candidate_id``.
     ``None`` when no design met the declared criteria.
     ``closest_candidate_id`` is the nearest completed row for a redesign note. It is not a selection.
     ``optimality`` is never ``global``. ``runtime_seconds`` is wall time for
@@ -439,23 +465,33 @@ def sampler_seed(caller_seed: int, candidate_id: str, durations: Sequence[int]) 
 
 
 class _SearchTrace:
-    """Stop a search-owned tracemalloc session if this call raises."""
+    """Close a tracer this call started. Leave a foreign tracer running.
+
+    ``finish`` reports this call's peak above the peak already recorded when
+    the tracer was not ours. It does not reset that peak.
+    """
 
     def __init__(self) -> None:
         self.started = time.perf_counter()
         self.own = False
+        self._closed = False
+        self._baseline = 0
         if not tracemalloc.is_tracing():
             tracemalloc.start()
             self.own = True
-        tracemalloc.reset_peak()
+        else:
+            _, peak = tracemalloc.get_traced_memory()
+            self._baseline = int(peak)
 
     def finish(self) -> tuple[float, int]:
         elapsed = time.perf_counter() - self.started
         _, peak = tracemalloc.get_traced_memory()
-        self.close()
-        return elapsed, int(peak)
+        return elapsed, max(0, int(peak) - self._baseline)
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         if self.own and tracemalloc.is_tracing():
             tracemalloc.stop()
         self.own = False
@@ -631,7 +667,97 @@ def search(
         this call.
     """
     trace = _SearchTrace()
+    try:
+        return _search_screen(
+            trace,
+            history,
+            units,
+            decision,
+            criterion,
+            worthwhile_effect,
+            durations,
+            selection_end=selection_end,
+            sample_kwargs=sample_kwargs,
+            random_seed=random_seed,
+            budget=budget,
+            estimator=estimator,
+            min_group_size=min_group_size,
+            max_group_size=max_group_size,
+            scale=scale,
+            baseline=baseline,
+            outcome_scale=outcome_scale,
+            time_column=time_column,
+            treatment_eligible=treatment_eligible,
+            donor_eligible=donor_eligible,
+            always_control=always_control,
+            excluded_units=excluded_units,
+            required_treated=required_treated,
+            supplied_groups=supplied_groups,
+            fixed_treated=fixed_treated,
+            donor_pools=donor_pools,
+            spillover_exclusions=spillover_exclusions,
+            min_remaining_donors=min_remaining_donors,
+            min_outcome_share=min_outcome_share,
+            max_outcome_share=max_outcome_share,
+            unit_costs=unit_costs,
+            cost_budget=cost_budget,
+            unit_covariates=unit_covariates,
+            balance_constraints=balance_constraints,
+            exact_ceiling=exact_ceiling,
+            max_generated=max_generated,
+            shortlist_size=shortlist_size,
+            scenario_family=scenario_family,
+            effect_grid=effect_grid,
+        )
+    finally:
+        trace.close()
+
+
+def _search_screen(
+    trace: _SearchTrace,
+    history: pd.DataFrame,
+    units: Sequence[str],
+    decision: DecisionRule,
+    criterion: PowerCriterion,
+    worthwhile_effect: float,
+    durations: Sequence[int],
+    *,
+    selection_end: object,
+    sample_kwargs: Mapping[str, object],
+    random_seed: int,
+    budget: ComputationalBudget,
+    estimator: str,
+    min_group_size: int,
+    max_group_size: int,
+    scale: str,
+    baseline: float | None,
+    outcome_scale: str,
+    time_column: str | None,
+    treatment_eligible: Sequence[str] | None,
+    donor_eligible: Sequence[str] | None,
+    always_control: Sequence[str],
+    excluded_units: Sequence[str],
+    required_treated: Sequence[str],
+    supplied_groups: Sequence[Sequence[str]] | None,
+    fixed_treated: Sequence[str] | None,
+    donor_pools: Sequence[Sequence[str]] | None,
+    spillover_exclusions: Sequence[tuple[str, str]],
+    min_remaining_donors: int,
+    min_outcome_share: float | None,
+    max_outcome_share: float | None,
+    unit_costs: Sequence[tuple[str, float]],
+    cost_budget: float | None,
+    unit_covariates: Sequence[tuple[str, Sequence[tuple[str, float]]]],
+    balance_constraints: Sequence[BalanceConstraint],
+    exact_ceiling: int,
+    max_generated: int | None,
+    shortlist_size: int,
+    scenario_family: str,
+    effect_grid: Sequence[float] | None,
+) -> SearchResult:
+    """Run one screen. The caller owns the trace and closes it."""
     frame = _planning_frame(history, time_column)
+    planning_column = time_column
     time_column = None
     horizons = _require_durations(durations)
     _require_decision(decision)
@@ -726,6 +852,7 @@ def search(
             time_column,
             scale,
             baseline,
+            selection_end,
         )
         if refusal is not None:
             evaluations[identity] = refusal
@@ -795,7 +922,7 @@ def search(
             caller_seed,
             horizons,
             outcome_scale,
-            time_column,
+            planning_column,
             scale,
             baseline,
         )
@@ -1518,6 +1645,7 @@ def _free_refusal(
     time_column: str | None,
     scale: str,
     baseline: float | None,
+    selection_end: object,
 ) -> _CandidateEvaluation | None:
     """Return a zero-fit refusal, or None when the study would sample."""
     scale_refusal = _scale_baseline_refusal(scale, baseline)
@@ -1541,13 +1669,14 @@ def _free_refusal(
         )
     except (TypeError, ValueError) as exc:
         return _CandidateEvaluation(None, "rejected", str(exc), 0)
-    return _setup_refusal(frame, donors, horizons)
+    return _setup_refusal(frame, donors, horizons, selection_end)
 
 
 def _setup_refusal(
     frame: pd.DataFrame,
     donors: tuple[str, ...],
     horizons: tuple[int, ...],
+    selection_end: object,
 ) -> _CandidateEvaluation | None:
     """Reject a window or donor pool that cannot start a fit."""
     longest = max(horizons)
@@ -1562,7 +1691,7 @@ def _setup_refusal(
             0,
         )
     try:
-        _noise_scale(frame, donors)
+        _noise_scale(frame, donors, selection_end)
     except ValueError as exc:
         return _CandidateEvaluation(None, "rejected", str(exc), 0)
     return None
@@ -1789,7 +1918,7 @@ def _grouped_study(
         )
     except (TypeError, ValueError) as exc:
         return _CandidateEvaluation(None, "rejected", str(exc), 0)
-    setup = _setup_refusal(frame, donors, horizons)
+    setup = _setup_refusal(frame, donors, horizons, selection_end)
     if setup is not None:
         return setup
     try:
@@ -1799,8 +1928,8 @@ def _grouped_study(
             ceiling=fit_ceiling,
         )
         translated = _with_zero(effects)
-        noise = _noise_scale(frame, donors)
-        donor_sd = float(np.std(frame.loc[:, list(donors)].to_numpy(dtype=float)))
+        noise = _noise_scale(frame, donors, selection_end)
+        donor_sd = _donor_sd(frame, donors, selection_end)
         scales = {
             name: _unit_scale(frame, name, selection_end, donor_sd) for name in treated
         }
@@ -1951,7 +2080,7 @@ def _grouped_panel(
     combo = donor_matrix @ weights
     rho = TEMPORAL_AR_COEFFICIENT if family == "temporal_dependence" else 0.0
     common = _ar1_noise(np.random.default_rng(children[0]), n_rows, rho)
-    donor_sd = float(np.std(donor_matrix))
+    donor_sd = _donor_sd(history, donors, selection_end)
     share = math.sqrt(COMMON_SHOCK_SHARE)
     for index, name in enumerate(sorted(treated)):
         rng = np.random.default_rng(children[index + 1])
@@ -2142,7 +2271,7 @@ def _assemble_grouped(
         _mde_for(points, duration, decision, criterion, worthwhile, withhold)
         for duration in horizons
     )
-    donor_sd = float(np.std(frame.loc[:, list(donors)].to_numpy(dtype=float)))
+    donor_sd = _donor_sd(frame, donors, selection_end)
     scales = tuple(
         _unit_scale(frame, name, selection_end, donor_sd) for name in sorted(treated)
     )
@@ -2192,7 +2321,7 @@ def _assemble_grouped(
             estimator=estimator,
             scale=scale,
             baseline=baseline,
-            divergences=0 if record.divergences is None else record.divergences,
+            divergences=record.divergences,
             max_rhat=record.max_rhat,
         ),
         record,
@@ -2417,7 +2546,7 @@ def _freeze(
         duration=duration,
         sample_kwargs=settings,
         outcome_scale=outcome_scale,
-        time_column=time_column,
+        time_column=None,
     )
     return FrozenDesign(
         candidate_id=identity,
@@ -2577,17 +2706,12 @@ def _reference_column(
 
 
 def _publish_study(outcome: _CandidateEvaluation) -> bool:
-    """Keep a curve whose divergence integer is a recorded count.
+    """Keep a finished curve, including one whose grouped count is missing.
 
-    Size-one studies have no search diagnostic record. Their integer is the
-    reference engine's own count. A grouped record with a missing count is
-    not zero, and ``EffectByDuration.divergences`` cannot hold null.
+    ``None`` means the fit did not report a count. It is not zero, and it does
+    not drop the curve.
     """
-    if outcome.study is None:
-        return False
-    if outcome.diagnostics is None:
-        return True
-    return outcome.diagnostics.divergences is not None
+    return outcome.study is not None
 
 
 def _validation_panel(
@@ -2635,7 +2759,7 @@ def _validation_panel(
         family,
         seed,
         replicate,
-        _noise_scale(history, donors),
+        _noise_scale(history, donors, selection_end),
         selection_end,
     )
 
@@ -2831,8 +2955,27 @@ def _unit_scale(
     return std / donor_sd
 
 
-def _noise_scale(history: pd.DataFrame, donors: Sequence[str]) -> float:
-    matrix = history.loc[:, list(donors)].to_numpy(dtype=float)
+def _rows_through(history: pd.DataFrame, selection_end: object) -> pd.DataFrame:
+    """Return rows at or before ``selection_end``. The holdout stays out."""
+    labels = list(history.index)
+    return history.iloc[: labels.index(selection_end) + 1]
+
+
+def _donor_sd(
+    history: pd.DataFrame, donors: Sequence[str], selection_end: object
+) -> float:
+    matrix = (
+        _rows_through(history, selection_end).loc[:, list(donors)].to_numpy(dtype=float)
+    )
+    return float(np.std(matrix))
+
+
+def _noise_scale(
+    history: pd.DataFrame, donors: Sequence[str], selection_end: object
+) -> float:
+    matrix = (
+        _rows_through(history, selection_end).loc[:, list(donors)].to_numpy(dtype=float)
+    )
     if (
         matrix.ndim != 2
         or not np.isfinite(matrix).all()
@@ -3050,9 +3193,9 @@ def _require_selection_end(
 def _require_durations(durations: Sequence[int]) -> tuple[int, ...]:
     if isinstance(durations, (str, bytes)) or not isinstance(durations, Sequence):
         raise TypeError("durations must be a sequence of positive integers.")
-    values = tuple(int(item) for item in durations)
-    if not values or any(item <= 0 for item in values):
+    if not durations:
         raise ValueError("durations must be positive. No fit was started.")
+    values = tuple(require_positive_int(item, "durations") for item in durations)
     if len(values) != len(set(values)):
         raise ValueError("durations must be unique. No fit was started.")
     return values

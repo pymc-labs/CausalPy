@@ -292,7 +292,7 @@ class EffectByDuration:
     estimator: str
     scale: str
     baseline: float | None
-    divergences: int
+    divergences: int | None
     max_rhat: float | None
 
     def point(self, duration: int, effect: float) -> PowerPoint:

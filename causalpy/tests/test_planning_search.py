@@ -559,7 +559,7 @@ def test_search_indexes_a_time_column_once(monkeypatch: pytest.MonkeyPatch) -> N
     )
     assert calls
     assert result.frozen is not None
-    assert result.frozen.time_column is None
+    assert result.frozen.time_column == "time"
     spec = result.frozen.analysis_handoff()
     assert spec.time_column is None
     assert list(result.frozen.holdout_index) == list(indexed.index[-DURATION:])
@@ -955,9 +955,10 @@ def test_quiet_unit_keeps_its_own_noise_scale(
     )
     frame = _panel()
     donors = ["b", "c", "d"]
-    donor_sd = float(np.std(frame[donors].to_numpy(dtype=float)))
+    end = _selection_end(frame)
     labels = list(frame.index)
-    cutoff = labels.index(_selection_end(frame))
+    cutoff = labels.index(end)
+    donor_sd = float(np.std(frame.iloc[: cutoff + 1][donors].to_numpy(dtype=float)))
     rng = np.random.default_rng(2)
     pre = rng.normal(0.0, 1.0, size=cutoff + 1)
     pre = (pre - pre.mean()) / np.std(pre) * 0.45 * donor_sd
@@ -965,9 +966,7 @@ def test_quiet_unit_keeps_its_own_noise_scale(
     quiet[: cutoff + 1] = pre
     frame["quiet"] = quiet
     units = ("quiet", *donors)
-    assert _unit_scale(
-        frame, "quiet", _selection_end(frame), donor_sd
-    ) == pytest.approx(0.45)
+    assert _unit_scale(frame, "quiet", end, donor_sd) == pytest.approx(0.45)
     result = _run(
         history=frame,
         units=units,
@@ -1094,7 +1093,7 @@ def test_unavailable_diagnostics_stay_missing(
     assert studied["divergences"].isna().all()
     assert set(studied["diagnostics_status"]) == {"unavailable"}
     assert set(studied["diagnostics_reason"]) == {"not retained"}
-    assert result.studies == {}
+    assert next(iter(result.studies.values())).divergences is None
 
 
 def test_truncated_exhaustive_pass_withholds_cost_regret(
@@ -2049,3 +2048,112 @@ def test_absent_persistent_misfit_rejects_before_fit(
     assert set(shortlisted["evaluation_status"]) == {"rejected"}
     assert shortlisted["n_fits"].eq(0).all()
     assert shortlisted["reason"].str.contains("not present").all()
+
+
+def test_audit_refuses_a_panel_outside_the_frozen_label_domain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An unindexed time column is not the frozen label domain."""
+    _spy_engine(monkeypatch)
+    frame = _panel()
+    dated = frame.copy()
+    dated.index = pd.date_range("2020-01-01", periods=len(frame), freq="D")
+    result = search(
+        dated.reset_index().rename(columns={"index": "time"}),
+        UNITS,
+        _decision(),
+        _criterion(),
+        WORTHWHILE,
+        (DURATION,),
+        selection_end=dated.index[-DURATION - 1],
+        sample_kwargs=LIGHT,
+        random_seed=11,
+        budget=_budget(),
+        unit_costs=_costs(),
+        time_column="time",
+        min_group_size=1,
+        max_group_size=1,
+        shortlist_size=1,
+    )
+    frozen = result.frozen
+    assert frozen is not None
+    assert frozen.time_column == "time"
+    with pytest.raises(ValueError, match="label domain"):
+        frozen.audit(dated.reset_index())
+    with pytest.raises(ValueError, match="overlaps"):
+        frozen.audit(dated)
+
+
+def test_grouped_holdout_spike_does_not_change_pre_cutoff_scale() -> None:
+    """A holdout shock must not rescale the pre-cutoff grouped series."""
+    from causalpy.planning.search import _grouped_panel, _noise_scale
+
+    history = _panel(20)
+    end = history.index[-DURATION - 1]
+    spiked = history.copy()
+    spiked.iloc[-DURATION:] += 80.0
+    treated = ("a", "b")
+    donors = ("c", "d")
+    calm_scale = _noise_scale(history, donors, end)
+    spiked_scale = _noise_scale(spiked, donors, end)
+    assert calm_scale == pytest.approx(spiked_scale)
+    calm = _grouped_panel(
+        history,
+        treated,
+        donors,
+        "correctly_specified_noisy_reference",
+        11,
+        0,
+        calm_scale,
+        end,
+    )
+    shocked = _grouped_panel(
+        spiked,
+        treated,
+        donors,
+        "correctly_specified_noisy_reference",
+        11,
+        0,
+        spiked_scale,
+        end,
+    )
+    cutoff = list(history.index).index(end) + 1
+    for name in treated:
+        assert calm.iloc[:cutoff][name].to_numpy() == pytest.approx(
+            shocked.iloc[:cutoff][name].to_numpy()
+        )
+    assert shocked.iloc[-1]["c"] == pytest.approx(spiked.iloc[-1]["c"])
+    assert not np.allclose(
+        calm.iloc[-DURATION:][list(treated)].to_numpy(),
+        shocked.iloc[-DURATION:][list(treated)].to_numpy(),
+    )
+
+
+def test_search_closes_only_a_tracer_it_started() -> None:
+    """A foreign tracer stays running, and its peak is not reset."""
+    import tracemalloc
+
+    assert not tracemalloc.is_tracing()
+    with pytest.raises(TypeError, match="ComputationalBudget"):
+        _run(budget="not-a-budget")
+    assert not tracemalloc.is_tracing()
+    tracemalloc.start()
+    blob = bytearray(1_000_000)
+    foreign_peak = tracemalloc.get_traced_memory()[1]
+    try:
+        with pytest.raises(TypeError, match="ComputationalBudget"):
+            _run(budget="not-a-budget")
+        assert tracemalloc.is_tracing()
+        assert tracemalloc.get_traced_memory()[1] >= foreign_peak
+    finally:
+        del blob
+        tracemalloc.stop()
+
+
+def test_boolean_duration_is_rejected_before_a_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = _spy_engine(monkeypatch)
+    with pytest.raises(TypeError, match="not a bool"):
+        _run(durations=(True,))
+    assert calls == []
