@@ -396,7 +396,7 @@ def _assemble_grouped(
     null_rates: list[float] = []
     nonzero_rates: list[float] = []
     withheld_rates: list[float] = []
-    diagnostic_items: list[object] = []
+    diagnostic_items: list[CanonicalEvaluation] = []
     n_treated = len(treated)
     for duration in horizons:
         null = draws[(duration, 0.0)]

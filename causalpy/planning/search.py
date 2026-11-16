@@ -829,7 +829,9 @@ def _search_screen(
         max_outcome_share=max_outcome_share,
         unit_costs=tuple(unit_costs),
         budget=cost_budget,
-        unit_covariates=tuple(unit_covariates),
+        unit_covariates=tuple(
+            (name, tuple(values)) for name, values in unit_covariates
+        ),
         balance_constraints=tuple(balance_constraints),
         exact_ceiling=exact_ceiling,
         max_generated=max_generated,
@@ -898,8 +900,9 @@ def _search_screen(
             fit_ceiling=fit_ceiling,
         )
         fits_used += outcome.n_fits
-        if _publish_study(outcome):
-            studies[identity] = outcome.study
+        published = outcome.study
+        if published is not None:
+            studies[identity] = published
         evaluations[identity] = outcome
     rows = _result_rows(
         screen,
@@ -2190,15 +2193,6 @@ def _reference_column(
         )
         cache[name] = evaluator
     return evaluator.untreated_panel(replicate)[name]
-
-
-def _publish_study(outcome: _CandidateEvaluation) -> bool:
-    """Keep a finished curve, including one whose grouped count is missing.
-
-    ``None`` means the fit did not report a count. It is not zero, and it does
-    not drop the curve.
-    """
-    return outcome.study is not None
 
 
 def _validation_panel(
