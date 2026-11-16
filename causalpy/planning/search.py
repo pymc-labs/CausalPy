@@ -30,7 +30,7 @@ fit cap says so, rather than claiming those rows failed the power criteria.
 ``n_fits`` is repeated on every duration row of one study.
 ``SearchResult.n_inference_fits`` is the study total, so summing the column double-counts a multi-duration search.
 
-Size-one diagnostics stay on the reference engine's integer field, which cannot represent a missing count. A size-one study that returns fewer successful replicates than the declared tolerance is failed and is not frozen. A post-fit reference failure charges the reserved replicate count. An inconclusive summary quotes the recorded row reasons unless every refusal is an estimator capability refusal.
+Size-one diagnostics stay on the reference engine's integer field, which cannot represent a missing count. A size-one study that returns fewer successful replicates than the declared tolerance is failed and is not frozen. A post-fit reference failure charges the reserved replicate count. An inconclusive summary quotes the recorded row reasons unless every refusal is an estimator capability refusal. A rejected identity was attempted, so a fully attempted shortlist is not labeled capped. A grouped curve whose divergence count is missing is not attached to ``SearchResult.studies``, because that integer cannot hold null.
 """
 
 from __future__ import annotations
@@ -263,7 +263,8 @@ class FrozenDesign:
         """Fit this identity on an untouched tail. Does not re-search.
 
         The panel's tail of the frozen duration is the audit holdout. Overlap
-        with the planning holdout is refused before sampling.
+        with the planning holdout is refused before sampling, including when
+        those labels fall in the audit training index.
 
         Parameters
         ----------
@@ -290,6 +291,14 @@ class FrozenDesign:
             raise ValueError(
                 "Audit holdout overlaps the frozen planning holdout "
                 f"{overlap}. That is not an untouched window. No fit was started."
+            )
+        contaminated = [
+            label for label in spec.training_index if label in set(self.holdout_index)
+        ]
+        if contaminated:
+            raise ValueError(
+                "Audit training includes the frozen planning holdout "
+                f"{contaminated}. That is not an untouched window. No fit was started."
             )
         evaluation = spec.run(panel)
         return AuditReport(
@@ -326,7 +335,8 @@ class SearchResult:
     ``max_rhat``, ``min_bulk_ess``, ``diagnostics_status``, and
     ``diagnostics_reason``. A missing divergence count stays null. The power
     curve's ``divergences`` integer is not that record. ``studies`` holds a
-    completed or withheld curve keyed by ``candidate_id``. ``frozen`` is
+    completed or withheld curve whose divergence integer is a recorded count,
+    keyed by ``candidate_id``. A grouped curve with a missing count is omitted.
     ``None`` when no design met the declared criteria.
     ``closest_candidate_id`` is the nearest completed row for a redesign note. It is not a selection.
     ``optimality`` is never ``global``. ``runtime_seconds`` is wall time for
@@ -715,7 +725,7 @@ def search(
             selection_end=selection_end,
         )
         fits_used += outcome.n_fits
-        if outcome.study is not None:
+        if _publish_study(outcome):
             studies[identity] = outcome.study
         evaluations[identity] = outcome
     rows = _result_rows(
@@ -907,7 +917,13 @@ def validate_selection(
     a copy whose holdout alone contains the worthwhile effect. The inner
     power curve is not this report. A replicate that freezes nothing is
     inconclusive, not a false positive. Operational constraints accepted by
-    :func:`search` are replayed on every inner search.
+    :func:`search` are replayed on every inner search. A size-one
+    ``synthetic_control`` procedure draws each non-control column from
+    :meth:`ReferencePowerEvaluator.untreated_panel` against the fixed donor
+    core. A grouped or mixed procedure keeps the grouped generator. A
+    confirmation that raises is not a non-detection: the rates stay null if
+    any frozen confirmation failed, and ``confirmation_fits`` counts calls
+    that started.
 
     Parameters
     ----------
@@ -1014,6 +1030,15 @@ def validate_selection(
     shift: float | None = None
     confirmation_fits = 0
     frozen_count = 0
+    confirmation_failed = False
+    reference = _size_one_reference_procedure(
+        estimator,
+        min_group_size,
+        max_group_size,
+        fixed_treated,
+        supplied_groups,
+    )
+    panel_cache: dict[str, ReferencePowerEvaluator] = {}
     for replicate in range(count):
         panel = _validation_panel(
             frame,
@@ -1023,6 +1048,10 @@ def validate_selection(
             random_seed,
             replicate,
             selection_end,
+            decision=decision,
+            sample_kwargs=sample_kwargs,
+            reference=reference,
+            panel_cache=panel_cache,
         )
         result = _replay_search(
             panel,
@@ -1074,27 +1103,36 @@ def validate_selection(
             _training_diff(panel, injected, result.frozen.training_index),
         )
         shift = _holdout_shift(panel, injected, result.frozen)
+        started = 0
         try:
-            null_eval = result.frozen.analysis_handoff().run(panel)
-            alt_eval = result.frozen.analysis_handoff().run(injected)
+            null_spec = result.frozen.analysis_handoff()
+            started = 1
+            null_eval = null_spec.run(panel)
+            alt_spec = result.frozen.analysis_handoff()
+            started = 2
+            alt_eval = alt_spec.run(injected)
         except Exception as exc:
             failures.append(f"{type(exc).__name__}: {exc}")
-            confirmation_fits += 2
+            confirmation_fits += started
+            confirmation_failed = True
             continue
         confirmation_fits += 2
         false_positives.append(bool(null_eval.decision.decided))
         detections.append(bool(alt_eval.decision.decided))
         widths.append(float(alt_eval.decision.hdi_upper - alt_eval.decision.hdi_lower))
+    identified = not confirmation_failed
     return SelectionValidation(
         n_replicates=count,
         n_frozen=frozen_count,
         n_inconclusive=count - frozen_count,
-        false_positive_rate=_optional_rate(false_positives),
-        power=_optional_rate(detections),
-        mean_interval_width=float(np.mean(widths)) if widths else None,
-        interval_width_monte_carlo_error=_mean_error(widths),
-        false_positive_monte_carlo_error=_optional_error(false_positives),
-        power_monte_carlo_error=_optional_error(detections),
+        false_positive_rate=_optional_rate(false_positives) if identified else None,
+        power=_optional_rate(detections) if identified else None,
+        mean_interval_width=float(np.mean(widths)) if widths and identified else None,
+        interval_width_monte_carlo_error=_mean_error(widths) if identified else None,
+        false_positive_monte_carlo_error=(
+            _optional_error(false_positives) if identified else None
+        ),
+        power_monte_carlo_error=_optional_error(detections) if identified else None,
         confirmation_fits=confirmation_fits,
         failures=tuple(failures),
         training_max_abs_diff=training_diff,
@@ -2395,6 +2433,73 @@ def _candidate_request(**kwargs: object) -> CandidateRequest:
     )
 
 
+def _size_one_reference_procedure(
+    estimator: str,
+    min_group_size: int,
+    max_group_size: int,
+    fixed_treated: Sequence[str] | None,
+    supplied_groups: Sequence[Sequence[str]] | None,
+) -> bool:
+    """Return whether every candidate this call can study is size-one synthetic control."""
+    fixed_is_size_one = fixed_treated is None or len(tuple(fixed_treated)) == 1
+    groups_are_size_one = supplied_groups is None or all(
+        len(tuple(group)) == 1 for group in supplied_groups
+    )
+    return (
+        estimator == "synthetic_control"
+        and min_group_size == 1
+        and max_group_size == 1
+        and fixed_is_size_one
+        and groups_are_size_one
+    )
+
+
+def _reference_column(
+    cache: dict[str, ReferencePowerEvaluator],
+    history: pd.DataFrame,
+    name: str,
+    donors: tuple[str, ...],
+    decision: DecisionRule,
+    family: str,
+    caller_seed: int,
+    sample_kwargs: Mapping[str, object],
+    replicate: int,
+) -> pd.Series:
+    """Draw one non-control column from the published size-one generator."""
+    evaluator = cache.get(name)
+    if evaluator is None:
+        seed = sampler_seed(caller_seed, f"validation-panel:{name}", ())
+        settings = dict(sample_kwargs)
+        settings["random_seed"] = seed
+        plan = HistoryOnlyPlan(
+            history,
+            (name,),
+            donors,
+            decision,
+            estimator="synthetic_control",
+            sample_kwargs=settings,
+        )
+        evaluator = ReferencePowerEvaluator(
+            plan, history=history, scenario_family=family
+        )
+        cache[name] = evaluator
+    return evaluator.untreated_panel(replicate)[name]
+
+
+def _publish_study(outcome: _CandidateEvaluation) -> bool:
+    """Keep a curve whose divergence integer is a recorded count.
+
+    Size-one studies have no search diagnostic record. Their integer is the
+    reference engine's own count. A grouped record with a missing count is
+    not zero, and ``EffectByDuration.divergences`` cannot hold null.
+    """
+    if outcome.study is None:
+        return False
+    if outcome.diagnostics is None:
+        return True
+    return outcome.diagnostics.divergences is not None
+
+
 def _validation_panel(
     history: pd.DataFrame,
     units: Sequence[str],
@@ -2403,22 +2508,44 @@ def _validation_panel(
     caller_seed: int,
     replicate: int,
     selection_end: object,
+    *,
+    decision: DecisionRule,
+    sample_kwargs: Mapping[str, object],
+    reference: bool,
+    panel_cache: dict[str, ReferencePowerEvaluator],
 ) -> pd.DataFrame:
+    """Draw the outer panel from the generator the inner path will use."""
     treated = tuple(name for name in units if name not in set(always_control))
     if not treated:
         raise ValueError(
             "validate_selection needs at least one unit outside always_control. "
             "No fit was started."
         )
+    donors = tuple(always_control)
+    if reference:
+        panel = history.copy()
+        for name in treated:
+            panel[name] = _reference_column(
+                panel_cache,
+                history,
+                name,
+                donors,
+                decision,
+                family,
+                caller_seed,
+                sample_kwargs,
+                replicate,
+            )
+        return panel
     seed = sampler_seed(caller_seed, json.dumps(list(treated)), (replicate,))
     return _grouped_panel(
         history,
         treated,
-        tuple(always_control),
+        donors,
         family,
         seed,
         replicate,
-        _noise_scale(history, tuple(always_control)),
+        _noise_scale(history, donors),
         selection_end,
     )
 
@@ -2783,7 +2910,7 @@ def _optimality(
     evaluated = sum(
         1
         for item in evaluations.values()
-        if item.status in {"completed", "withheld", "failed"}
+        if item.status in {"completed", "withheld", "failed", "rejected"}
     )
     if evaluated < passing:
         return "capped"

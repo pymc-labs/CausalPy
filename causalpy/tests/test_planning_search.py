@@ -376,6 +376,8 @@ def test_grouped_constant_donors_are_rejected_without_raising(
     assert rejected["reason"].str.contains("positive finite variation").all()
     assert result.n_inference_fits == 0
     assert result.frozen is None
+    assert set(result.frame["evaluation_status"]) == {"rejected"}
+    assert result.optimality == "shortlist"
 
 
 def test_size_one_routes_through_the_published_engine(
@@ -1092,8 +1094,7 @@ def test_unavailable_diagnostics_stay_missing(
     assert studied["divergences"].isna().all()
     assert set(studied["diagnostics_status"]) == {"unavailable"}
     assert set(studied["diagnostics_reason"]) == {"not retained"}
-    assert result.studies
-    assert next(iter(result.studies.values())).divergences == 0
+    assert result.studies == {}
 
 
 def test_truncated_exhaustive_pass_withholds_cost_regret(
@@ -1658,3 +1659,197 @@ def test_validators_replay_a_constrained_grouped_procedure(
     compare_screening(**shared)
     assert seen
     assert set(seen) == {(("a", "b"), ("c",))}
+
+
+def test_audit_refuses_training_on_the_planning_holdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A later tail can miss the planning holdout while training still contains it."""
+    _spy_engine(monkeypatch)
+    frame = _panel()
+    result = _run(history=frame)
+    assert result.frozen is not None
+    extra = frame.iloc[:DURATION].copy()
+    extra.index = pd.RangeIndex(
+        len(frame), len(frame) + DURATION, name=frame.index.name
+    )
+    later = pd.concat([frame, extra])
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("audit started a fit")
+
+    monkeypatch.setattr("causalpy.planning.reference.SyntheticControl", _boom)
+    with pytest.raises(ValueError, match="Audit training includes"):
+        result.frozen.audit(later)
+
+
+def test_confirmation_failure_nulls_rates_and_charges_started_fits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A second confirmation that never starts is one fit, not a non-detection."""
+    _install_decisive_evaluate(
+        monkeypatch,
+        SimpleNamespace(
+            divergences=0,
+            max_rhat=1.0,
+            min_bulk_ess=80.0,
+            diagnostics_status="available",
+            diagnostics_reason=None,
+        ),
+    )
+    calls = {"n": 0}
+
+    class _Spec:
+        def run(self, panel: pd.DataFrame) -> SimpleNamespace:
+            del panel
+            return SimpleNamespace(
+                decision=SimpleNamespace(
+                    decided=False,
+                    hdi_lower=0.0,
+                    hdi_upper=1.0,
+                    posterior_tail_probability=0.4,
+                )
+            )
+
+    def _handoff(self: FrozenDesign) -> _Spec:
+        del self
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise RuntimeError("second confirmation was not started")
+        return _Spec()
+
+    monkeypatch.setattr(FrozenDesign, "analysis_handoff", _handoff)
+    frame = _panel()
+    report = validate_selection(
+        frame,
+        UNITS,
+        _decision(),
+        _criterion(),
+        WORTHWHILE,
+        (DURATION,),
+        n_replicates=1,
+        random_seed=11,
+        budget=_budget(),
+        sample_kwargs=LIGHT,
+        selection_end=_selection_end(frame),
+        estimator="augmented_synthetic_control",
+        min_group_size=2,
+        max_group_size=2,
+        shortlist_size=1,
+        always_control=("c", "d"),
+        unit_costs=_costs(),
+    )
+    assert report.n_frozen == 1
+    assert report.confirmation_fits == 1
+    assert report.power is None
+    assert report.false_positive_rate is None
+    assert report.mean_interval_width is None
+    assert report.power_monte_carlo_error is None
+    assert report.false_positive_monte_carlo_error is None
+    assert report.interval_width_monte_carlo_error is None
+    assert report.failures
+    assert "second confirmation was not started" in report.failures[0]
+
+
+def test_size_one_validation_draws_the_reference_panel(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Size-one confirmation uses the reference generator; a group does not."""
+    plans: list[tuple[str, ...]] = []
+    draws: list[tuple[str, int]] = []
+    panels: list[pd.DataFrame] = []
+
+    class _Plan:
+        def __init__(self, history, treated, donors, decision, **kwargs) -> None:
+            del decision, kwargs
+            self.history = history
+            self.treated_units = tuple(treated)
+            self.donors = tuple(donors)
+            plans.append(self.treated_units)
+
+    class _Evaluator:
+        def __init__(self, plan, *, history, scenario_family) -> None:
+            del history, scenario_family
+            self.plan = plan
+
+        def untreated_panel(self, replicate: int) -> pd.DataFrame:
+            name = self.plan.treated_units[0]
+            draws.append((name, replicate))
+            panel = self.plan.history.copy()
+            panel[name] = float(replicate) + 3.0
+            return panel
+
+    def _fake_search(*args, **kwargs):
+        del kwargs
+        panels.append(args[0].copy())
+        return SimpleNamespace(frozen=None, reason="inconclusive")
+
+    module = sys.modules["causalpy.planning.search"]
+    monkeypatch.setattr(module, "HistoryOnlyPlan", _Plan)
+    monkeypatch.setattr(module, "ReferencePowerEvaluator", _Evaluator)
+    monkeypatch.setattr(module, "search", _fake_search)
+    frame = _panel()
+    report = validate_selection(
+        frame,
+        UNITS,
+        _decision(),
+        _criterion(),
+        WORTHWHILE,
+        (DURATION,),
+        n_replicates=2,
+        random_seed=11,
+        budget=_budget(),
+        sample_kwargs=LIGHT,
+        selection_end=_selection_end(frame),
+        always_control=("c", "d"),
+        unit_costs=_costs(),
+    )
+    assert report.n_frozen == 0
+    assert plans == [("a",), ("b",)]
+    assert draws == [("a", 0), ("b", 0), ("a", 1), ("b", 1)]
+    assert len(panels) == 2
+    for replicate, panel in enumerate(panels):
+        assert panel.loc[:, ["c", "d"]].equals(frame.loc[:, ["c", "d"]])
+        assert panel["a"].eq(float(replicate) + 3.0).all()
+        assert panel["b"].eq(float(replicate) + 3.0).all()
+
+    plans.clear()
+    validate_selection(
+        frame,
+        UNITS,
+        _decision(),
+        _criterion(),
+        WORTHWHILE,
+        (DURATION,),
+        n_replicates=1,
+        random_seed=11,
+        budget=_budget(),
+        sample_kwargs=LIGHT,
+        selection_end=_selection_end(frame),
+        estimator="augmented_synthetic_control",
+        min_group_size=2,
+        max_group_size=2,
+        always_control=("c", "d"),
+        unit_costs=_costs(),
+    )
+    assert plans == []
+    plans.clear()
+    validate_selection(
+        frame,
+        UNITS,
+        _decision(),
+        _criterion(),
+        WORTHWHILE,
+        (DURATION,),
+        n_replicates=1,
+        random_seed=11,
+        budget=_budget(),
+        sample_kwargs=LIGHT,
+        selection_end=_selection_end(frame),
+        estimator="synthetic_control",
+        min_group_size=1,
+        max_group_size=2,
+        always_control=("c", "d"),
+        unit_costs=_costs(),
+    )
+    assert plans == []
