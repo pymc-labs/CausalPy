@@ -154,7 +154,7 @@ def test_workflow_shards_are_exhaustive_and_non_overlapping(
 
     assert workflow["concurrency"]["cancel-in-progress"] is True
     assert strategy["fail-fast"] is False
-    assert strategy["max-parallel"] == 1
+    assert "max-parallel" not in strategy
     assert {shard["collection"] for shard in matrix} == PRODUCTION_NOTEBOOK_COLLECTIONS
     assert run_step["env"] == {
         "NOTEBOOK_COLLECTION": "${{ matrix.collection }}",
