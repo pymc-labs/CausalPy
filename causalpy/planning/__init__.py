@@ -23,12 +23,15 @@ and is not implemented here.
 :class:`HistoryOnlyPlan` fits the ordinary synthetic-control analysis once
 per horizon and translates effects without refitting. A registered adapter,
 or one passed in, is called instead. Construction does not sample.
-Repeated-experiment power is not computed.
 
 Group fitting, augmented synthetic control, and interactive fixed effects
 are the issue #1440 seam. Power is the issue #1439 seam. Candidate screening
-is the issue #1441 seam. :class:`CandidateRequest` stores that screen. It
-does not enumerate or fit.
+is the issue #1441 seam. Grouped treatment search is the issue #319 seam:
+:func:`search` screens with :class:`CandidateGenerator` and evaluates power
+through :class:`causalpy.planning.power.ReferencePowerEvaluator` or by
+translating :class:`HistoryOnlyPlan` fits. It freezes one explicit selection
+and does not add a second scoring implementation. :class:`CandidateRequest`
+stores the screen. It does not enumerate or fit.
 """
 
 from causalpy.planning.contracts import (
@@ -77,19 +80,43 @@ from causalpy.planning.seams import (
     EstimatorAdapter,
     PowerEvaluator,
 )
+from causalpy.planning.search import (
+    EVALUATION_ORDER,
+    GROUPED_DATA_SEED_SCHEME,
+    GROUPED_MECHANISM,
+    SEARCH_COLUMNS,
+    SELECTION_OBJECTIVE,
+    AuditReport,
+    ComputationalBudget,
+    FrozenDesign,
+    ScreeningComparison,
+    SearchResult,
+    SelectionValidation,
+    compare_screening,
+    plot_search,
+    sampler_seed,
+    search,
+    validate_selection,
+)
 
 __all__ = [
     "CANDIDATE_COLUMNS",
     "CANDIDATE_FILTER_REASONS",
     "DRAW_ALIGNED_UNIT_SUM",
+    "EVALUATION_ORDER",
     "FIXED_DESIGN_FIT_CEILING",
+    "GROUPED_DATA_SEED_SCHEME",
+    "GROUPED_MECHANISM",
     "OWNERSHIP",
     "REFERENCE_CAPABILITIES",
     "REJECTED_ESTIMATOR_MAPPINGS",
     "RELATIVE_BASELINE_CONVENTION",
+    "SEARCH_COLUMNS",
+    "SELECTION_OBJECTIVE",
     "VALIDATION_MATRIX",
     "AnalysisDecision",
     "AnalysisHandoff",
+    "AuditReport",
     "BalanceConstraint",
     "CandidateGenerator",
     "CandidateRequest",
@@ -97,6 +124,7 @@ __all__ = [
     "CanonicalEvaluation",
     "CanonicalFit",
     "Capabilities",
+    "ComputationalBudget",
     "DataBoundary",
     "DecisionRule",
     "EffectScenario",
@@ -104,6 +132,7 @@ __all__ = [
     "EstimandSummary",
     "EstimatorAdapter",
     "FitDiagnostics",
+    "FrozenDesign",
     "HistoryOnlyPlan",
     "PlanningResult",
     "PowerCriterion",
@@ -111,13 +140,21 @@ __all__ = [
     "PowerRequest",
     "Provenance",
     "RepeatedExperimentPower",
+    "ScreeningComparison",
+    "SearchResult",
+    "SelectionValidation",
     "SyntheticControlAdapter",
     "ValidationCell",
     "WindowRequest",
     "aggregate_unit_impacts",
+    "compare_screening",
     "decide",
     "evaluation_table",
     "plot_evaluation",
+    "plot_search",
     "require_relative_baseline",
+    "sampler_seed",
+    "search",
     "unit_period_effect",
+    "validate_selection",
 ]

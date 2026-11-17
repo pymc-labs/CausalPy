@@ -1411,3 +1411,137 @@ def test_nightly_persistent_misfit_is_not_labeled_as_power() -> None:
     assert report.n_fits <= 64
     assert np.isnan(report.points[0].probability)
     assert report.study.scenario_family == "persistent_misfit"
+
+
+def _spiked_history(n_rows: int = 24, jump_at: int = 20) -> pd.DataFrame:
+    history = _history(n_rows)
+    spiked = history.copy()
+    spiked.iloc[jump_at:] += 80.0
+    return spiked
+
+
+def test_selection_end_excludes_a_holdout_jump_from_the_noise_scale() -> None:
+    """A holdout donor shock must not rescale the pre-cutoff screen."""
+    history = _history(24)
+    spiked = _spiked_history()
+    end = history.index[13]
+    windowed = ReferencePowerEvaluator(
+        _plan(spiked),
+        history=spiked,
+        scenario_family="correctly_specified_noisy_reference",
+        selection_end=end,
+    )
+    calm = ReferencePowerEvaluator(
+        _plan(history),
+        history=history,
+        scenario_family="correctly_specified_noisy_reference",
+        selection_end=end,
+    )
+    full = ReferencePowerEvaluator(
+        _plan(spiked),
+        history=spiked,
+        scenario_family="correctly_specified_noisy_reference",
+    )
+    assert windowed.noise_scale == pytest.approx(calm.noise_scale)
+    assert full.noise_scale > windowed.noise_scale
+
+
+def test_selection_end_withholds_persistent_misfit_after_a_holdout_jump(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The size-one screen must not keep a misfit because the holdout is noisy."""
+    spiked = _spiked_history()
+    end = spiked.index[13]
+    evaluator = ReferencePowerEvaluator(
+        _plan(spiked),
+        history=spiked,
+        scenario_family="persistent_misfit",
+        selection_end=end,
+    )
+    seen: list[int] = []
+
+    def fake(self: SyntheticControlAdapter, request: object) -> CanonicalFit:
+        seen.append(len(request.history))
+        return _zero_fit(request, offset=20.0)
+
+    monkeypatch.setattr(SyntheticControlAdapter, "fit_window", fake)
+    result = evaluator.effect_by_duration(
+        (4,),
+        (20.0,),
+        decision=_decision(),
+        criterion=_criterion(),
+    )
+    assert set(seen) == {len(spiked)}
+    assert result.power_withheld is True
+    assert result.preperiod_rmse_ratio > MISFIT_RMSE_TO_NOISE
+    assert np.isnan(result.points[0].probability)
+
+
+def test_selection_end_keeps_a_matched_panel_despite_a_holdout_jump(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A post-cutoff donor shock must not flip a pre-cutoff keep."""
+    spiked = _spiked_history()
+    evaluator = ReferencePowerEvaluator(
+        _plan(spiked),
+        history=spiked,
+        scenario_family="correctly_specified_noisy_reference",
+        selection_end=spiked.index[13],
+    )
+    seen: list[int] = []
+
+    def fake(self: SyntheticControlAdapter, request: object) -> CanonicalFit:
+        seen.append(len(request.history))
+        return _zero_fit(request, offset=20.0)
+
+    monkeypatch.setattr(SyntheticControlAdapter, "fit_window", fake)
+    result = evaluator.effect_by_duration(
+        (4,),
+        (20.0,),
+        decision=_decision(),
+        criterion=_criterion(),
+    )
+    nonzero = [point for point in result.points if point.effect != 0.0]
+    assert set(seen) == {len(spiked)}
+    assert result.power_withheld is False
+    assert nonzero
+    assert np.isfinite(nonzero[0].probability)
+
+
+def test_evaluator_refuses_a_selection_end_inside_the_holdout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    history = _history(16)
+    evaluator = ReferencePowerEvaluator(
+        _plan(history),
+        history=history,
+        scenario_family="correctly_specified_noisy_reference",
+        selection_end=history.index[-1],
+    )
+    calls = _patch_fit(monkeypatch)
+    with pytest.raises(ValueError, match="selection_end must be strictly"):
+        evaluator.effect_by_duration(
+            (4,),
+            (1.0,),
+            decision=_decision(),
+            criterion=_criterion(),
+        )
+    assert calls == []
+
+
+def test_evaluator_refuses_an_unknown_or_short_selection_end() -> None:
+    history = _history(16)
+    with pytest.raises(ValueError, match="not an exact planning label"):
+        ReferencePowerEvaluator(
+            _plan(history),
+            history=history,
+            scenario_family="correctly_specified_noisy_reference",
+            selection_end="missing",
+        )
+    with pytest.raises(ValueError, match="at least"):
+        ReferencePowerEvaluator(
+            _plan(history),
+            history=history,
+            scenario_family="correctly_specified_noisy_reference",
+            selection_end=history.index[0],
+        )
