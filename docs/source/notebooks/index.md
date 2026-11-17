@@ -216,6 +216,13 @@ A quasi-experimental design that uses time series methods to generate counterfac
 :link: interrupted-time-series-placebo-in-time-analysis
 :link-type: doc
 :::
+
+:::{grid-item-card} Hierarchical Interrupted Time Series for staggered launches
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/hierarchical-interrupted-time-series-pymc.png
+:link: hierarchical-interrupted-time-series-pymc
+:link-type: doc
+:::
 ::::
 
 ## Comparative Interrupted Time Series
@@ -504,6 +511,7 @@ interrupted-time-series-post-intervention-analysis.ipynb
 interrupted-time-series-covid.ipynb
 interrupted-time-series-lift-test.ipynb
 interrupted-time-series-placebo-in-time-analysis.ipynb
+hierarchical-interrupted-time-series-pymc.ipynb
 :::
 
 :::{toctree}
