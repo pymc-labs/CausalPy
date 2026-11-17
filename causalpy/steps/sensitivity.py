@@ -175,7 +175,7 @@ class SensitivityAnalysis:
 
         Returns
         -------
-        PipelineContext
+        ~causalpy.pipeline.PipelineContext
             The same context with ``sensitivity_results`` and ``report``
             populated.
 

@@ -1311,7 +1311,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
         Returns
         -------
-        EffectSummary
+        ~causalpy.reporting.EffectSummary
             Object with .table (DataFrame) and .text (str) attributes.
             The .text attribute contains a detailed multi-paragraph narrative report.
         """
