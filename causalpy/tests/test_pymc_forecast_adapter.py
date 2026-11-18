@@ -33,11 +33,7 @@ from causalpy.experiments.model_adapter import (
     PyMCForecastAdapter,
     make_model_adapter,
 )
-from causalpy.pymc_forecast_models import (
-    PyMCForecastModel,
-    _posterior_for_prediction,
-    _pymc_chain_count,
-)
+from causalpy.pymc_forecast_models import PyMCForecastModel, _pymc_chain_count
 
 pymc_forecast = pytest.importorskip("pymc_forecast", minversion="0.3")
 if not SpecifierSet(">=0.3,<0.4").contains(
@@ -847,77 +843,6 @@ def test_non_hmc_forecaster_does_not_receive_chains():
         forecaster_kwargs={"num_steps": 10},
     )
     assert "chains" not in model.forecaster_kwargs
-
-
-def test_unset_num_samples_keeps_materialized_posterior():
-    """None does not thin a posterior that already exists."""
-    posterior = xr.Dataset(
-        {"beta": xr.DataArray(np.ones((4, 1000)), dims=("chain", "draw"))}
-    )
-    idata = xr.DataTree.from_dict({"posterior": posterior})
-
-    class _Forecaster:
-        def __init__(self):
-            self.idata = idata
-
-        def draw_posterior(self, num_samples, random_seed=None):
-            raise AssertionError("materialized posterior must not be thinned")
-
-    got = _posterior_for_prediction(_Forecaster(), None, None)
-    assert got.sizes["chain"] == 4
-    assert got.sizes["draw"] == 1000
-
-
-def test_explicit_num_samples_thins_materialized_posterior():
-    """A caller-supplied count still thins."""
-    posterior = xr.Dataset(
-        {"beta": xr.DataArray(np.ones((4, 1000)), dims=("chain", "draw"))}
-    )
-
-    class _Forecaster:
-        def __init__(self):
-            self.idata = xr.DataTree.from_dict({"posterior": posterior})
-            self.calls = []
-
-        def draw_posterior(self, num_samples, random_seed=None):
-            self.calls.append((num_samples, random_seed))
-            return xr.Dataset(
-                {
-                    "beta": xr.DataArray(
-                        np.ones((1, num_samples)), dims=("chain", "draw")
-                    )
-                }
-            )
-
-    forecaster = _Forecaster()
-    got = _posterior_for_prediction(forecaster, 7, 3)
-    assert forecaster.calls == [(7, 3)]
-    assert got.sizes["draw"] == 7
-
-
-def test_unset_num_samples_draws_from_variational_approximation():
-    """A variational fit has no finite posterior, so None draws 500."""
-
-    class _Forecaster:
-        idata = None
-
-        def __init__(self):
-            self.calls = []
-
-        def draw_posterior(self, num_samples, random_seed=None):
-            self.calls.append((num_samples, random_seed))
-            return xr.Dataset(
-                {
-                    "beta": xr.DataArray(
-                        np.ones((1, num_samples)), dims=("chain", "draw")
-                    )
-                }
-            )
-
-    forecaster = _Forecaster()
-    got = _posterior_for_prediction(forecaster, None, 2)
-    assert forecaster.calls == [(500, 2)]
-    assert got.sizes["draw"] == 500
 
 
 @pytest.mark.integration

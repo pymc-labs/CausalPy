@@ -17,12 +17,19 @@ import runpy
 import sys
 from importlib import metadata
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
+import numpy as np
 import pytest
+import xarray as xr
 
-from causalpy.pymc_forecast_models import PyMCForecastModel, _import_pymc_forecast
+from causalpy.pymc_forecast_models import (
+    PyMCForecastModel,
+    _import_pymc_forecast,
+    _posterior_for_prediction,
+    _pymc_chain_count,
+)
 
 
 @pytest.fixture
@@ -110,3 +117,96 @@ def test_forecast_integration_version_skips(
     except pytest.skip.Exception as err:
         pytest.fail(f"Supported dependency was skipped: {err}")
     guard.assert_not_called()
+
+
+def test_chain_count_uses_one_cpu_when_the_count_is_unavailable(monkeypatch):
+    """An unavailable CPU count still resolves to PyMC's minimum of two chains."""
+    monkeypatch.setattr(
+        "causalpy.pymc_forecast_models.multiprocessing.cpu_count",
+        Mock(side_effect=NotImplementedError),
+    )
+    assert _pymc_chain_count() == 2
+
+
+def test_unset_num_samples_keeps_materialized_posterior():
+    """None returns the stored posterior and does not thin it."""
+    posterior = xr.Dataset(
+        {"beta": xr.DataArray(np.ones((4, 1000)), dims=("chain", "draw"))}
+    )
+
+    class _Forecaster:
+        idata = SimpleNamespace(posterior=posterior)
+
+        def draw_posterior(self, num_samples, random_seed=None):
+            raise AssertionError("materialized posterior must not be thinned")
+
+    got = _posterior_for_prediction(_Forecaster(), None, None)
+    assert got is posterior
+
+
+def test_non_dataset_posterior_group_is_converted():
+    """A posterior group that is not a Dataset is converted, not thinned."""
+    group = xr.DataArray(np.ones((2, 3)), dims=("chain", "draw"), name="beta")
+
+    class _Forecaster:
+        idata = SimpleNamespace(posterior=group)
+
+        def draw_posterior(self, num_samples, random_seed=None):
+            raise AssertionError("materialized posterior must not be thinned")
+
+    got = _posterior_for_prediction(_Forecaster(), None, None)
+    assert isinstance(got, xr.Dataset)
+    assert got.sizes["chain"] == 2
+    assert got.sizes["draw"] == 3
+
+
+def test_unset_num_samples_draws_from_variational_approximation():
+    """No materialized posterior draws the approximation count, not a thin of 1000."""
+
+    class _Forecaster:
+        idata = None
+
+        def __init__(self):
+            self.calls = []
+
+        def draw_posterior(self, num_samples, random_seed=None):
+            self.calls.append((num_samples, random_seed))
+            return xr.Dataset(
+                {
+                    "beta": xr.DataArray(
+                        np.ones((1, num_samples)), dims=("chain", "draw")
+                    )
+                }
+            )
+
+    forecaster = _Forecaster()
+    got = _posterior_for_prediction(forecaster, None, 2)
+    assert forecaster.calls == [(500, 2)]
+    assert got.sizes["draw"] == 500
+
+
+def test_explicit_num_samples_thins_materialized_posterior():
+    """A caller-supplied count still thins."""
+    posterior = xr.Dataset(
+        {"beta": xr.DataArray(np.ones((4, 1000)), dims=("chain", "draw"))}
+    )
+
+    class _Forecaster:
+        def __init__(self):
+            self.idata = SimpleNamespace(posterior=posterior)
+            self.calls = []
+
+        def draw_posterior(self, num_samples, random_seed=None):
+            self.calls.append((num_samples, random_seed))
+            return xr.Dataset(
+                {
+                    "beta": xr.DataArray(
+                        np.ones((1, num_samples)), dims=("chain", "draw")
+                    )
+                }
+            )
+
+    forecaster = _Forecaster()
+    got = _posterior_for_prediction(forecaster, 7, 3)
+    assert forecaster.calls == [(7, 3)]
+    assert got.sizes["draw"] == 7
