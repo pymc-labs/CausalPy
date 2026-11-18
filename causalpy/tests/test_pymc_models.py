@@ -1465,6 +1465,28 @@ def test_clone_carries_prior_sample_kwargs():
     assert cloned.sample_kwargs == {"draws": 9}
 
 
+def test_kalman_var_names_subsets_a_copy():
+    """A mu-only request drops y_hat and leaves the source tree intact."""
+    mu = xr.DataArray(
+        np.ones((1, 2, 3, 1)),
+        dims=["chain", "draw", "obs_ind", "treated_units"],
+    )
+    source = xr.DataTree()
+    source["posterior_predictive"] = xr.Dataset({"y_hat": mu, "mu": mu})
+    restricted = cp.pymc_models.StateSpaceTimeSeries._subset_kalman_predictive(
+        None, source, ["mu"]
+    )
+    assert list(restricted["posterior_predictive"].to_dataset().data_vars) == ["mu"]
+    assert set(source["posterior_predictive"].to_dataset().data_vars) == {
+        "y_hat",
+        "mu",
+    }
+    untouched = cp.pymc_models.StateSpaceTimeSeries._subset_kalman_predictive(
+        None, source, None
+    )
+    assert untouched is source
+
+
 def test_clone_carries_prior_sample_kwargs_on_overriding_backends():
     """The BBETS/StateSpace _clone overrides forward the setting too."""
     from causalpy.tests.test_timeseries_model_coverage import MockComponent

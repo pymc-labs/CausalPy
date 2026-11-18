@@ -17,7 +17,7 @@ import inspect
 import warnings
 from collections.abc import Iterable
 from copy import deepcopy
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import arviz as az
 import numpy as np
@@ -28,8 +28,10 @@ import xarray as xr
 from patsy import dmatrix
 from pymc_extras.prior import Prior
 
+from causalpy._arviz_compat import hdi_bounds
+from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import GroupNotSampledException
-from causalpy.utils import _bayesian_r2_score, _design_fingerprint
+from causalpy.utils import _bayesian_r2_score, _design_fingerprint, round_num
 from causalpy.variable_selection_priors import VariableSelectionPrior
 
 
@@ -83,6 +85,166 @@ def _assign_group_coords(idata: xr.DataTree, group: str, **coords: Any) -> xr.Da
     """Assign coordinates to a DataTree group through its Dataset."""
     idata[group] = idata[group].to_dataset().assign_coords(**coords)
     return idata
+
+
+FamilyName = Literal["gaussian", "poisson", "negative_binomial", "bernoulli"]
+LinkName = Literal["identity", "log", "logit"]
+
+_CANONICAL_FAMILY_LINKS: dict[FamilyName, LinkName] = {
+    "gaussian": "identity",
+    "poisson": "log",
+    "negative_binomial": "log",
+    "bernoulli": "logit",
+}
+
+_LIKELIHOOD_DIMS = ["obs_ind", "treated_units"]
+
+
+def _canonical_link_for_family(family: FamilyName) -> LinkName:
+    """Return the canonical link for a curated response family."""
+    return _CANONICAL_FAMILY_LINKS[family]
+
+
+def _validate_family(family: str) -> FamilyName:
+    """Validate a curated response family name."""
+    if family not in _CANONICAL_FAMILY_LINKS:
+        valid = ", ".join(sorted(_CANONICAL_FAMILY_LINKS))
+        raise ValueError(f"Unsupported family {family!r}. Expected one of: {valid}.")
+    return cast(FamilyName, family)
+
+
+def _validate_glr_user_priors(
+    family: FamilyName, priors: dict[str, Any] | None
+) -> None:
+    """Reject incompatible user overrides for built-in GLM families."""
+    if not priors or "y_hat" not in priors:
+        return
+    if family != "gaussian":
+        raise ValueError(
+            f"Custom priors['y_hat'] is not supported for family {family!r}. "
+            "The observation model is fixed by the family; override beta or, "
+            "for Negative Binomial models, alpha."
+        )
+
+
+def _validate_family_response(family: FamilyName, y: Any) -> None:
+    """Reject outcomes outside the family's support before the graph is built."""
+    if family == "gaussian":
+        return
+    values = np.asarray(y, dtype=float)
+    if not np.all(np.isfinite(values)):
+        raise ValueError(
+            f"family {family!r} requires finite outcome values, but the outcome "
+            "contains NaN or infinite entries."
+        )
+    if family == "bernoulli":
+        if not np.isin(values, (0.0, 1.0)).all():
+            raise ValueError("family 'bernoulli' requires outcome values in {0, 1}.")
+        return
+    if (values < 0).any() or not np.allclose(values, np.round(values)):
+        raise ValueError(
+            f"family {family!r} requires non-negative integer-valued outcomes (counts)."
+        )
+
+
+def _inverse_link(eta: Any, link: LinkName) -> Any:
+    """Apply the inverse link draw by draw to obtain response-scale expectations."""
+    if link == "identity":
+        return eta
+    if link == "log":
+        return pm.math.exp(eta)
+    if link == "logit":
+        return pm.math.sigmoid(eta)
+    raise ValueError(f"Unsupported link {link!r}")  # pragma: no cover
+
+
+def _default_priors_for_family(family: FamilyName) -> dict[str, Prior]:
+    """Return curated default priors for a generalized linear regression family."""
+    if family == "gaussian":
+        beta_sigma = 50.0
+    elif family == "bernoulli":
+        beta_sigma = 2.5
+    else:
+        beta_sigma = 1.0
+    beta_prior = Prior(
+        "Normal", mu=0, sigma=beta_sigma, dims=["treated_units", "coeffs"]
+    )
+    if family == "gaussian":
+        return {
+            "beta": beta_prior,
+            "y_hat": Prior(
+                "Normal",
+                sigma=Prior("HalfNormal", sigma=1, dims=["treated_units"]),
+                dims=_LIKELIHOOD_DIMS,
+            ),
+        }
+    if family == "poisson":
+        return {
+            "beta": beta_prior,
+            "y_hat": Prior("Poisson", dims=_LIKELIHOOD_DIMS),
+        }
+    if family == "negative_binomial":
+        return {
+            "beta": beta_prior,
+            "alpha": Prior("Exponential", lam=1.0, dims=["treated_units"]),
+            "y_hat": Prior("NegativeBinomial", dims=_LIKELIHOOD_DIMS),
+        }
+    if family == "bernoulli":
+        return {
+            "beta": beta_prior,
+            "y_hat": Prior("Bernoulli", dims=_LIKELIHOOD_DIMS),
+        }
+    raise ValueError(f"Unsupported family {family!r}")  # pragma: no cover
+
+
+def _build_regression_head(X: Any, beta: Any, link: LinkName) -> tuple[Any, Any]:
+    """Build link-scale ``eta`` and response-scale ``mu`` for a regression head."""
+    eta = pm.Deterministic(
+        "eta",
+        pt.dot(X, beta.T),
+        dims=_LIKELIHOOD_DIMS,
+    )
+    mu = pm.Deterministic(
+        "mu",
+        _inverse_link(eta, link),
+        dims=_LIKELIHOOD_DIMS,
+    )
+    return eta, mu
+
+
+def _create_family_likelihood(
+    family: FamilyName,
+    *,
+    mu: Any,
+    y_obs: Any,
+    priors: dict[str, Prior],
+) -> None:
+    """Create the family likelihood as ``y_hat`` on the model graph."""
+    y_hat_prior = priors["y_hat"]
+
+    if family == "bernoulli":
+        dist = y_hat_prior.deepcopy()
+        dist.parameters["p"] = mu
+        dist.parameters["observed"] = y_obs
+        dist.create_variable("y_hat")
+        return
+
+    if family == "negative_binomial":
+        # ``create_likelihood_variable`` deep-copies parameters. A live ``alpha``
+        # tensor copied that way is lifted to ``alpha_lifted`` and the logp
+        # graph will not compile. Set ``mu`` and the live tensor, then create
+        # the likelihood directly.
+        dist = y_hat_prior.deepcopy()
+        if "alpha" in priors:
+            dist.parameters["alpha"] = priors["alpha"].create_variable("alpha")
+        elif "alpha" not in dist.parameters:
+            dist.parameters["alpha"] = 1.0
+        dist.parameters["mu"] = mu
+        dist.parameters["observed"] = y_obs
+        dist.create_variable("y_hat")
+        return
+
+    y_hat_prior.create_likelihood_variable("y_hat", mu=mu, observed=y_obs)
 
 
 class PyMCModel(pm.Model):
@@ -376,10 +538,28 @@ class PyMCModel(pm.Model):
             else:
                 n_treated_units = len(treated_units_coord)
 
+            # Match the fitted data node's dtype. Poisson, Negative Binomial,
+            # and Bernoulli graphs register integer mutable data; a float64
+            # placeholder fails ``pm.set_data``.
+            y_dtype = self.named_vars["y"].type.dtype
             pm.set_data(
-                {"X": X, "y": np.zeros((new_no_of_observations, n_treated_units))},
+                {
+                    "X": X,
+                    "y": np.zeros(
+                        (new_no_of_observations, n_treated_units), dtype=y_dtype
+                    ),
+                },
                 coords={"obs_ind": obs_coords},
             )
+
+    def _effective_default_priors(self) -> dict[str, Any]:
+        """Return the default-prior floor assembled by :meth:`build`.
+
+        The class attribute ``default_priors`` remains the released extension
+        point. Overrides live here when that attribute can be shadowed by a
+        subclass dict that would otherwise drop required priors.
+        """
+        return dict(self.default_priors)
 
     def build(
         self,
@@ -442,10 +622,10 @@ class PyMCModel(pm.Model):
             for dimension in data.dims:
                 coords.setdefault(str(dimension), data.get_index(dimension))
 
-        # Merge the effective priors from scratch, exactly once per graph.
-        # Precedence is defaults -> data-derived -> user.
+        # Precedence is defaults -> data-derived -> user. ``_effective_default_priors``
+        # is the floor so a subclass class-level dict cannot drop required priors.
         self.priors = {
-            **self.default_priors,
+            **self._effective_default_priors(),
             **self.priors_from_data(X, y),
             **(self._user_priors or {}),
         }
@@ -673,6 +853,7 @@ class PyMCModel(pm.Model):
         out_of_sample: bool | None = False,
         *,
         group: Literal["prior", "posterior"] = "posterior",
+        var_names: list[str] | tuple[str, ...] | None = None,
     ) -> xr.DataTree:
         """
         Predict data given input data `X`, conditioned on the given draw group.
@@ -695,6 +876,10 @@ class PyMCModel(pm.Model):
             reproduces the posterior-predictive machinery using prior draws,
             which is how the experiment-level prior phase computes
             counterfactuals without any posterior.
+        var_names : list or tuple of str, optional
+            Posterior-predictive variables to sample. Defaults to
+            ``("y_hat", "mu")``. G-computation passes ``("mu",)`` so the
+            estimand path does not draw unused outcome noise.
 
         Returns
         -------
@@ -713,10 +898,11 @@ class PyMCModel(pm.Model):
         # Base _data_setter doesn't use coords, but subclasses might override _data_setter to use it.
         # If a subclass needs coords in _data_setter, it should handle it.
         self._data_setter(X)
+        sampled = ["y_hat", "mu"] if var_names is None else list(var_names)
         with self:
             pp = pm.sample_posterior_predictive(
                 conditioning_draws,
-                var_names=["y_hat", "mu"],
+                var_names=sampled,
                 progressbar=False,
                 random_seed=random_seed,
             )
@@ -764,9 +950,237 @@ class PyMCModel(pm.Model):
         return pd.Series(scores)
 
 
-class LinearRegression(PyMCModel):
-    r"""
-    Custom PyMC model for linear regression.
+class GeneralizedLinearRegression(PyMCModel):
+    r"""Curated generalized linear regression with outcome-scale ``mu``.
+
+    ``eta = X @ beta`` is the configured inverse link's linear predictor.
+    ``mu`` is the inverse-linked conditional expectation. Supported families
+    and their canonical links are Gaussian/identity, Poisson/log,
+    Negative Binomial/log, and Bernoulli/logit.
+
+    Gaussian models score Bayesian :math:`R^2`. Other families skip that
+    score because :meth:`score` returns ``None``.
+
+    Parameters
+    ----------
+    family : {"gaussian", "poisson", "negative_binomial", "bernoulli"}, optional
+        Response family. The canonical inverse link is exposed read-only.
+    sample_kwargs : dict, optional
+        Extra arguments for :func:`pymc.sample`, forwarded to
+        :class:`PyMCModel`.
+    priors : dict, optional
+        User priors merged over family defaults inside :meth:`build`.
+        ``priors["y_hat"]`` is accepted only for the Gaussian family.
+    prior_sample_kwargs : dict, optional
+        Extra arguments for :func:`pymc.sample_prior_predictive`.
+    """
+
+    default_priors: dict[str, Prior] = {}
+
+    def __init__(
+        self,
+        sample_kwargs: dict[str, Any] | None = None,
+        priors: dict[str, Any] | None = None,
+        *,
+        family: FamilyName = "gaussian",
+        prior_sample_kwargs: dict[str, Any] | None = None,
+    ) -> None:
+        self.family = _validate_family(family)
+        _validate_glr_user_priors(self.family, priors)
+        super().__init__(
+            sample_kwargs=sample_kwargs,
+            priors=priors,
+            prior_sample_kwargs=prior_sample_kwargs,
+        )
+        # Visible before build so subclass partial defaults cannot hide the family floor.
+        self.priors = {**self._effective_default_priors(), **(self._user_priors or {})}
+
+    @property
+    def link(self) -> LinkName:
+        """Canonical inverse link for ``family``. Assignment is rejected."""
+        return _canonical_link_for_family(self.family)
+
+    def _effective_default_priors(self) -> dict[str, Any]:
+        """Merge family defaults under any subclass ``default_priors`` dict."""
+        return {**_default_priors_for_family(self.family), **self.default_priors}
+
+    def build(
+        self,
+        X: xr.DataArray | dict[str, xr.DataArray],
+        y: xr.DataArray | dict[str, xr.DataArray],
+        coords: dict[str, Any] | None = None,
+    ) -> None:
+        """Validate the outcome support, then build the lazy graph.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Predictor matrix. Mapping inputs are rejected.
+        y : xarray.DataArray
+            Observed outcomes. Mapping inputs are rejected.
+        coords : dict, optional
+            Coordinate metadata forwarded to the PyMC model.
+        """
+        if not isinstance(X, dict) and not isinstance(y, dict):
+            _validate_family_response(self.family, y)
+        super().build(X, y, coords)
+
+    def build_model(
+        self,
+        X: xr.DataArray | dict[str, xr.DataArray],
+        y: xr.DataArray | dict[str, xr.DataArray],
+        coords: dict[str, Any] | None,
+    ) -> None:
+        """Define the family likelihood and the response-scale ``mu`` node.
+
+        Parameters
+        ----------
+        X : xarray.DataArray
+            Predictor matrix with ``obs_ind`` and ``coeffs`` dimensions.
+        y : xarray.DataArray
+            Observed outcomes with ``obs_ind`` and ``treated_units`` dimensions.
+        coords : dict or None
+            Coordinate metadata. A default ``treated_units`` coordinate is
+            added when missing.
+        """
+        if isinstance(X, dict) or isinstance(y, dict):
+            raise TypeError(
+                "GeneralizedLinearRegression does not support mapping-valued inputs"
+            )
+        with self:
+            if coords is not None and "treated_units" not in coords:
+                coords = coords.copy()
+                coords["treated_units"] = ["unit_0"]
+            if coords is not None:
+                self.add_coords(coords)
+            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
+            y_obs = pm.Data("y", y, dims=_LIKELIHOOD_DIMS)
+            beta = self.priors["beta"].create_variable("beta")
+            _eta, mu = _build_regression_head(X, beta, self.link)
+            _create_family_likelihood(
+                self.family, mu=mu, y_obs=y_obs, priors=self.priors
+            )
+
+    def score(
+        self, X: Any, y: Any, coords: dict[str, Any] | None = None
+    ) -> pd.Series | None:
+        """Score Bayesian :math:`R^2` for Gaussian models; otherwise return ``None``.
+
+        Parameters
+        ----------
+        X : array-like
+            Predictor matrix.
+        y : array-like
+            Observed outcomes.
+        coords : dict, optional
+            Coordinate metadata for the Gaussian score path.
+        """
+        if self.family != "gaussian":
+            return None
+        return super().score(X, y, coords)
+
+    def print_coefficients(
+        self, labels: list[str], round_to: int | None = None
+    ) -> None:
+        """Print posterior summaries for regression coefficients and auxiliaries.
+
+        Parameters
+        ----------
+        labels : list of str
+            Coefficient names matching the ``coeffs`` coordinate.
+        round_to : int, optional
+            Significant figures. ``None`` uses 2.
+        """
+        if self.idata is None or "posterior" not in self.idata.children:
+            raise RuntimeError("Model has not been fit")
+
+        def _print_row(
+            max_label_length: int, name: str, coeff_samples: xr.DataArray, round_to: int
+        ) -> None:
+            formatted_name = f"  {name: <{max_label_length}}"
+            lower, upper = hdi_bounds(coeff_samples, prob=HDI_PROB, dim="sample")
+            formatted_val = (
+                f"{round_num(coeff_samples.mean().data, round_to)}, "
+                f"{HDI_PROB * 100:.0f}% HDI "
+                f"[{round_num(lower, round_to)}, {round_num(upper, round_to)}]"
+            )
+            print(f"  {formatted_name}  {formatted_val}")
+
+        def _print_coefficients_for_unit(
+            unit_coeffs: xr.DataArray,
+            extra_rows: list[tuple[str, xr.DataArray]],
+            labels: list[str],
+            round_to: int,
+        ) -> None:
+            extra_names = [name for name, _ in extra_rows]
+            max_label_length = max(len(name) for name in [*labels, *extra_names])
+            for name in labels:
+                _print_row(
+                    max_label_length, name, unit_coeffs.sel(coeffs=name), round_to
+                )
+            for name, samples in extra_rows:
+                _print_row(max_label_length, name, samples, round_to)
+
+        print("Model coefficients:")
+        coeffs = az.extract(self.idata, group="posterior", var_names="beta")
+        treated_units = coeffs.coords["treated_units"].values
+        posterior = self.idata["posterior"].to_dataset()
+        for unit in treated_units:
+            if len(treated_units) > 1:
+                print(f"\nTreated unit: {unit}")
+            extra_rows: list[tuple[str, xr.DataArray]] = []
+            if self.family == "gaussian":
+                if "sigma" in posterior:
+                    sigma_var_name = "sigma"
+                elif "y_hat_sigma" in posterior:
+                    sigma_var_name = "y_hat_sigma"
+                else:
+                    raise ValueError(
+                        "Neither 'sigma' nor 'y_hat_sigma' found in posterior"
+                    )
+                extra_rows.append(
+                    (
+                        "y_hat_sigma",
+                        az.extract(
+                            self.idata, group="posterior", var_names=sigma_var_name
+                        ).sel(treated_units=unit),
+                    )
+                )
+            elif self.family == "negative_binomial" and "alpha" in posterior:
+                extra_rows.append(
+                    (
+                        "alpha",
+                        az.extract(
+                            self.idata, group="posterior", var_names="alpha"
+                        ).sel(treated_units=unit),
+                    )
+                )
+            _print_coefficients_for_unit(
+                coeffs.sel(treated_units=unit),
+                extra_rows,
+                labels,
+                round_to or 2,
+            )
+
+    def _clone(
+        self, priors: dict[str, Any] | None = None
+    ) -> "GeneralizedLinearRegression":
+        """Create a fresh, unfitted copy with the same family and priors.
+
+        ``priors`` overrides the stored user priors on the copy. Omitting it
+        preserves them. The override is how ``auto_scale_sigma=False`` pins a
+        legacy noise prior without reconstructing the subclass by hand.
+        """
+        return type(self)(
+            sample_kwargs=self.sample_kwargs,
+            priors=self._user_priors if priors is None else priors,
+            family=self.family,
+            prior_sample_kwargs=self.prior_sample_kwargs,
+        )
+
+
+class LinearRegression(GeneralizedLinearRegression):
+    r"""Gaussian identity specialization of :class:`GeneralizedLinearRegression`.
 
     Defines the PyMC model
 
@@ -775,6 +1189,15 @@ class LinearRegression(PyMCModel):
         \sigma &\sim \mathrm{HalfNormal}(1) \\
         \mu &= X \cdot \beta \\
         y &\sim \mathrm{Normal}(\mu, \sigma) \\
+
+    Parameters
+    ----------
+    sample_kwargs : dict, optional
+        Extra arguments for :func:`pymc.sample`.
+    priors : dict, optional
+        User priors merged over the Gaussian family defaults.
+    prior_sample_kwargs : dict, optional
+        Extra arguments for :func:`pymc.sample_prior_predictive`.
 
     Examples
     --------
@@ -800,47 +1223,42 @@ class LinearRegression(PyMCModel):
     >>> _ = lr.fit(X, y, coords=coords)
     """  # noqa: W605
 
-    default_priors = {
-        "beta": Prior("Normal", mu=0, sigma=50, dims=["treated_units", "coeffs"]),
-        "y_hat": Prior(
-            "Normal",
-            sigma=Prior("HalfNormal", sigma=1, dims=["treated_units"]),
-            dims=["obs_ind", "treated_units"],
-        ),
-    }
+    default_priors = _default_priors_for_family("gaussian")
 
-    def build_model(
+    def __init__(
         self,
-        X: xr.DataArray | dict[str, xr.DataArray],
-        y: xr.DataArray | dict[str, xr.DataArray],
-        coords: dict[str, Any] | None,
+        sample_kwargs: dict[str, Any] | None = None,
+        priors: dict[str, Any] | None = None,
+        prior_sample_kwargs: dict[str, Any] | None = None,
     ) -> None:
-        """
-        Define the PyMC model.
+        """Create a Gaussian identity regression. ``family`` is not a caller argument.
 
         Parameters
         ----------
-        X : xr.DataArray
-            Design matrix with dims ``("obs_ind", "coeffs")``.
-        y : xr.DataArray
-            Outcome with dims ``("obs_ind", "treated_units")``.
-        coords : dict or None
-            Coordinate names for the model's named dimensions.
+        sample_kwargs : dict, optional
+            Extra arguments for :func:`pymc.sample`.
+        priors : dict, optional
+            User priors merged over the Gaussian family defaults.
+        prior_sample_kwargs : dict, optional
+            Extra arguments for :func:`pymc.sample_prior_predictive`.
         """
-        with self:
-            # Ensure treated_units coordinate exists for consistency
-            if coords is not None and "treated_units" not in coords:
-                coords = coords.copy()
-                coords["treated_units"] = ["unit_0"]
+        super().__init__(
+            sample_kwargs=sample_kwargs,
+            priors=priors,
+            family="gaussian",
+            prior_sample_kwargs=prior_sample_kwargs,
+        )
 
-            self.add_coords(coords)
-            X = pm.Data("X", X, dims=["obs_ind", "coeffs"])
-            y = pm.Data("y", y, dims=["obs_ind", "treated_units"])
-            beta = self.priors["beta"].create_variable("beta")
-            mu = pm.Deterministic(
-                "mu", pt.dot(X, beta.T), dims=["obs_ind", "treated_units"]
-            )
-            self.priors["y_hat"].create_likelihood_variable("y_hat", mu=mu, observed=y)
+    def _clone(self, priors: dict[str, Any] | None = None) -> "LinearRegression":
+        """Clone without exposing ``family`` to the Gaussian constructor.
+
+        ``priors`` overrides the stored user priors; omitting it preserves them.
+        """
+        return type(self)(
+            sample_kwargs=self.sample_kwargs,
+            priors=self._user_priors if priors is None else priors,
+            prior_sample_kwargs=self.prior_sample_kwargs,
+        )
 
 
 #: The observation-noise prior both weighted-sum fitters carried before #887 made
@@ -3613,6 +4031,32 @@ class StateSpaceTimeSeries(PyMCModel):
         )
         return forecast.to_dataset() if isinstance(forecast, xr.DataTree) else forecast
 
+    def _subset_kalman_predictive(
+        self,
+        result: xr.DataTree,
+        var_names: list[str] | tuple[str, ...] | None,
+    ) -> xr.DataTree:
+        """Return only the requested posterior-predictive variables.
+
+        The Kalman path always materializes ``y_hat`` and ``mu``. ``None``
+        keeps both. A subset is applied to a copy so stored ``idata`` still
+        holds the full predictive group.
+        """
+        if var_names is None:
+            return result
+        requested = list(var_names)
+        dataset = result["posterior_predictive"].to_dataset()
+        missing = [name for name in requested if name not in dataset.data_vars]
+        if missing:
+            available = ", ".join(sorted(map(str, dataset.data_vars)))
+            raise ValueError(
+                "Posterior-predictive variables not available on the Kalman path: "
+                f"{missing}. Available: {available}."
+            )
+        restricted = result.copy()
+        restricted["posterior_predictive"] = dataset[requested]
+        return restricted
+
     def predict(
         self,
         X: xr.DataArray | None = None,
@@ -3620,6 +4064,7 @@ class StateSpaceTimeSeries(PyMCModel):
         out_of_sample: bool | None = False,
         *,
         group: Literal["prior", "posterior"] = "posterior",
+        var_names: list[str] | tuple[str, ...] | None = None,
     ) -> xr.DataTree:
         """
         Predict data given input X.
@@ -3640,6 +4085,10 @@ class StateSpaceTimeSeries(PyMCModel):
             Only the posterior is supported; requesting ``"prior"`` raises
             the group-not-sampled error (the Kalman path has no prior
             equivalent).
+        var_names : list or tuple of str, optional
+            Posterior-predictive variables to return. ``None`` returns both
+            ``y_hat`` and ``mu``. G-computation passes ``("mu",)`` so the
+            estimand path does not keep unused outcome noise.
 
         Returns
         -------
@@ -3653,7 +4102,7 @@ class StateSpaceTimeSeries(PyMCModel):
                 group="prior",
             )
         if not out_of_sample:
-            return self._prepare_idata()
+            return self._subset_kalman_predictive(self._prepare_idata(), var_names)
         else:
             # Extract datetime from X coordinates
             if X is None:
@@ -3713,7 +4162,7 @@ class StateSpaceTimeSeries(PyMCModel):
             if isinstance(X, xr.DataArray) and "obs_ind" in X.coords:
                 _assign_group_coords(result, "posterior_predictive", obs_ind=X.obs_ind)
 
-            return result
+            return self._subset_kalman_predictive(result, var_names)
 
     def score(
         self,
