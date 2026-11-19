@@ -986,3 +986,100 @@ def test_explicit_formula_namespace_supports_stateful_and_numpy_terms(
         experiment.post_design.X.sel(coeffs="I(np.sqrt(t))").values,
         np.sqrt(series.t.iloc[70:]),
     )
+
+
+def test_native_exog_transformer_sees_observed_clock(forecaster_class):
+    from sklearn.preprocessing import FunctionTransformer
+
+    utc = pd.date_range("2019-01-01 04:00", periods=90, freq="MS", tz="UTC")
+    local = utc.tz_convert("America/New_York")
+    hour = local.hour.to_numpy(dtype=float)
+    data = pd.DataFrame(
+        {
+            "y": 30 + 8 * hour + np.random.default_rng(233).normal(size=len(utc)),
+            "hour": hour,
+        },
+        index=local,
+    )
+
+    def local_hour(frame):
+        return frame.assign(hour=frame.index.hour.astype(float))
+
+    def fit(transformer):
+        model = SkforecastModel(
+            forecaster_class(estimator=Ridge(), lags=1, transformer_exog=transformer),
+            calibration_size=16,
+            n_boot=25,
+        )
+        return cp.InterruptedTimeSeries(data, local[64], "y ~ hour", model=model).fit()
+
+    native = fit(FunctionTransformer(local_hour))
+    explicit = fit(None)
+    xr.testing.assert_identical(
+        native.result.counterfactual_paths, explicit.result.counterfactual_paths
+    )
+
+
+def test_native_outcome_transformer_sees_original_name_and_clock(forecaster_class):
+    from sklearn.preprocessing import StandardScaler
+
+    index = pd.date_range(
+        "2019-01-01 04:00", periods=90, freq="MS", tz="UTC"
+    ).tz_convert("America/New_York")
+    outcome = "observed result"
+    data = pd.DataFrame(
+        {outcome: np.random.default_rng(237).normal(size=len(index))}, index=index
+    )
+    expected_train = index[:50]
+
+    class NamedScaler(StandardScaler):
+        def fit_transform(self, X, y=None, **fit_params):
+            assert X.columns.tolist() == [outcome]
+            assert X.index.equals(expected_train)
+            return super().fit_transform(X, y, **fit_params)
+
+    def fit(transformer):
+        model = SkforecastModel(
+            forecaster_class(estimator=Ridge(), lags=1, transformer_y=transformer),
+            calibration_size=14,
+            n_boot=25,
+        )
+        return cp.InterruptedTimeSeries(
+            data, index[64], 'Q("observed result") ~ 1', model=model
+        ).fit()
+
+    xr.testing.assert_identical(
+        fit(NamedScaler()).result.counterfactual_paths,
+        fit(StandardScaler()).result.counterfactual_paths,
+    )
+
+
+def test_native_rolling_features_see_observed_clock(forecaster_class):
+    from skforecast.preprocessing import RollingFeatures
+
+    index = pd.date_range(
+        "2019-01-01 04:00", periods=90, freq="MS", tz="UTC"
+    ).tz_convert("America/New_York")
+    data = pd.DataFrame(
+        {"y": np.random.default_rng(330).normal(size=len(index))}, index=index
+    )
+
+    class ObservedRollingFeatures(RollingFeatures):
+        def transform_batch(self, X):
+            assert X.index.equals(index[:50])
+            return super().transform_batch(X)
+
+    def fit(features):
+        model = SkforecastModel(
+            forecaster_class(estimator=Ridge(), lags=None, window_features=features),
+            calibration_size=14,
+            n_boot=25,
+        )
+        return cp.InterruptedTimeSeries(data, index[64], "y ~ 1", model=model).fit()
+
+    xr.testing.assert_identical(
+        fit(
+            ObservedRollingFeatures(stats="mean", window_sizes=2)
+        ).result.counterfactual_paths,
+        fit(RollingFeatures(stats="mean", window_sizes=2)).result.counterfactual_paths,
+    )

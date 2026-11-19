@@ -332,6 +332,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         )
         if self._model_backend.calibration_size is not None:
             coords["forecast_index"] = self.data.index
+            coords["outcome_name"] = self.outcome_variable_name
         return pre_X, self.pre_design["y"], coords
 
     def _finalize(self, group: Literal["prior", "posterior"]) -> None:

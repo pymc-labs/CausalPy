@@ -19,6 +19,7 @@ import warnings
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Literal
 
 import numpy as np
@@ -139,50 +140,73 @@ def _exog(X: xr.DataArray, index: pd.Index) -> pd.DataFrame | None:
     return None if frame.empty else frame
 
 
-class _CalendarFeaturesOnObservedIndex:
-    """Present original timestamps to native features when the model clock changes."""
+def _translate_index(
+    index: pd.Index, *, source: pd.Index, target: pd.Index
+) -> pd.Index:
+    positions = source.get_indexer(index)
+    if (positions < 0).any():
+        raise BadIndexException("Model dates must align to the observed forecast grid.")
+    return target.take(positions)
+
+
+class _PreprocessorOnObservedIndex:
+    """Translate pandas labels at the native preprocessing boundary."""
 
     def __init__(
         self,
-        features: Any,
-        observed_dates: Callable[[pd.DatetimeIndex], pd.DatetimeIndex],
+        preprocessor: Any,
+        to_observed: Callable[[pd.Index], pd.Index],
+        to_model: Callable[[pd.Index], pd.Index],
     ) -> None:
-        self._features = features
-        self._observed_dates = observed_dates
+        self._preprocessor = preprocessor
+        self._to_observed = to_observed
+        self._to_model = to_model
 
-    @property
-    def feature_names_out_(self) -> list[str]:
-        return self._features.feature_names_out_
+    def _apply(self, method: Callable, data: Any) -> Any:
+        if isinstance(data, pd.Index):
+            return method(self._to_observed(data))
+        if isinstance(data, (pd.Series, pd.DataFrame)):
+            transformed = method(data.set_axis(self._to_observed(data.index)))
+            if isinstance(transformed, (pd.Series, pd.DataFrame)):
+                return transformed.set_axis(self._to_model(transformed.index))
+            return transformed
+        return method(data)
 
-    def fit_transform(self, index: pd.DatetimeIndex) -> pd.DataFrame:
-        return self._features.fit_transform(self._observed_dates(index))
+    def fit_transform(self, data: Any) -> Any:
+        return self._apply(self._preprocessor.fit_transform, data)
 
-    def transform(self, index: pd.DatetimeIndex) -> pd.DataFrame:
-        return self._features.transform(self._observed_dates(index))
+    def transform(self, data: Any) -> Any:
+        return self._apply(self._preprocessor.transform, data)
+
+    def transform_batch(self, data: Any) -> Any:
+        return self._apply(self._preprocessor.transform_batch, data)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(object.__getattribute__(self, "_preprocessor"), name)
 
 
-def _use_observed_dates(
-    forecaster: Any, grid: pd.DatetimeIndex, observed: pd.DatetimeIndex
-) -> None:
-    """Keep calendar features and training weights on the caller's clock."""
-
-    def observed_dates(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
-        positions = grid.get_indexer(index)
-        if (positions < 0).any():
-            raise BadIndexException(
-                "Model dates must align to the observed forecast grid."
+def _use_observed_index(forecaster: Any, grid: pd.Index, observed: pd.Index) -> None:
+    """Keep the native preprocessing inputs on the caller's clock."""
+    to_observed = partial(_translate_index, source=grid, target=observed)
+    to_model = partial(_translate_index, source=observed, target=grid)
+    for name in ("calendar_features", "transformer_y", "transformer_exog"):
+        preprocessor = getattr(forecaster, name)
+        if preprocessor is not None:
+            setattr(
+                forecaster,
+                name,
+                _PreprocessorOnObservedIndex(preprocessor, to_observed, to_model),
             )
-        return observed.take(positions)
-
-    if forecaster.calendar_features is not None:
-        forecaster.calendar_features = _CalendarFeaturesOnObservedIndex(
-            forecaster.calendar_features, observed_dates
-        )
+    if forecaster.window_features is not None:
+        forecaster.window_features = [
+            _PreprocessorOnObservedIndex(features, to_observed, to_model)
+            for features in forecaster.window_features
+        ]
     if forecaster.weight_func is not None:
         weight_func = forecaster.weight_func
 
-        def observed_weights(index: pd.DatetimeIndex) -> np.ndarray:
-            return weight_func(observed_dates(index))
+        def observed_weights(index: pd.Index) -> np.ndarray:
+            return weight_func(to_observed(index))
 
         forecaster.weight_func = observed_weights
 
@@ -265,14 +289,12 @@ class _SkforecastAdapter(ModelAdapter):
         if not isinstance(full_index, pd.Index):
             raise ValueError("SkforecastModel requires the full ITS observation index.")
         grid = _regular_index(full_index, len(pre_index), window_size)
-        if (
-            isinstance(grid, pd.DatetimeIndex)
-            and isinstance(full_index, pd.DatetimeIndex)
-            and grid.tz != full_index.tz
-        ):
-            _use_observed_dates(forecaster, grid, full_index)
+        if not grid.equals(full_index):
+            _use_observed_index(forecaster, grid, full_index)
         index = grid[: len(pre_index)]
-        outcome = pd.Series(y.values[:, 0], index=index, name="y")
+        outcome = pd.Series(
+            y.values[:, 0], index=index, name=(coords or {}).get("outcome_name", "y")
+        )
         if not np.isfinite(outcome).all():
             raise ValueError(
                 "SkforecastModel requires finite pre-intervention outcomes."
