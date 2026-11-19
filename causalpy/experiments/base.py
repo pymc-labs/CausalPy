@@ -27,6 +27,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import xarray as xr
+from matplotlib.layout_engine import PlaceHolderLayoutEngine
 from sklearn.base import RegressorMixin
 
 from causalpy.custom_exceptions import (
@@ -753,7 +754,11 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
             # so it is not clipped (some subclass plots already call
             # tight_layout before we get here).
             if "bbox_to_anchor" in legend_kwargs:
-                fig.tight_layout()
+                engine = fig.get_layout_engine()
+                if engine is None or isinstance(engine, PlaceHolderLayoutEngine):
+                    fig.set_layout_engine("tight")
+                # Preserve renderer-owned layouts and any reserved note rectangle.
+                fig.canvas.draw()
 
         if show:
             plt.show()

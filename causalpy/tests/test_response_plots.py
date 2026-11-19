@@ -660,3 +660,57 @@ def test_staggered_default_note_names_expected_difference(staggered_experiment):
     assert "expected difference" in note
     assert "conditional expectation" not in note
     plt.close(figure)
+
+
+@pytest.mark.parametrize("group", ["prior", "posterior"])
+@pytest.mark.parametrize("response_type", ["expectation", "prediction"])
+def test_legend_anchor_preserves_compact_its_note_layout(
+    mock_pymc_sample, tmp_path, group, response_type
+):
+    dates = pd.date_range("2020-01-01", periods=16)
+    data = pd.DataFrame({"t": range(16), "y": np.arange(16) + 2.0}, index=dates)
+    experiment = cp.InterruptedTimeSeries(
+        data,
+        dates[8],
+        formula="y ~ 1 + t",
+        model=cp.pymc_models.LinearRegression(
+            sample_kwargs={
+                "draws": 20,
+                "tune": 20,
+                "chains": 2,
+                "cores": 1,
+                "random_seed": 41,
+            }
+        ),
+    ).fit()
+    figure, axes = experiment.plot(
+        group=group,
+        response_type=response_type,
+        figsize=(4 if group == "prior" else 8, 4),
+        show=False,
+        legend_kwargs={"bbox_to_anchor": (1.05, 1)},
+    )
+    figure.savefig(tmp_path / "its-note-legend.png")
+    renderer = figure.canvas.get_renderer()
+    note = next(text for text in figure.texts if "observation" in text.get_text())
+    bounds = note.get_window_extent(renderer)
+    assert all(not bounds.overlaps(axis.get_tightbbox(renderer)) for axis in axes)
+    assert bounds.x0 >= 0 and bounds.x1 <= figure.bbox.width
+    plt.close(figure)
+
+
+def test_legend_anchor_preserves_native_rd_caption_layout(rd_data, tmp_path):
+    experiment = cp.RegressionDiscontinuity(
+        rd_data,
+        formula="y ~ 1 + x + treated",
+        treatment_threshold=0.5,
+        model=LinearRegression(),
+    ).fit()
+    figure, _axis = experiment.plot(
+        show_response_annotation=True,
+        show=False,
+        legend_kwargs={"bbox_to_anchor": (1.05, 1)},
+    )
+    figure.savefig(tmp_path / "rd-note-legend.png")
+    assert any("Point prediction" in note.get_text() for note in figure.texts)
+    plt.close(figure)
