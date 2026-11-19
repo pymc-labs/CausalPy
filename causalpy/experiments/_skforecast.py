@@ -156,25 +156,25 @@ class _PreprocessorOnObservedIndex:
         self,
         preprocessor: Any,
         to_observed: Callable[[pd.Index], pd.Index] | None,
-        output: Callable[[Any, pd.Index], Any] | None = None,
+        output: Callable[[Any, pd.Index, pd.Index], Any],
     ) -> None:
         self._preprocessor = preprocessor
         self._to_observed = to_observed
         self._output = output
 
     def _apply(self, method: Callable, data: Any) -> Any:
-        if isinstance(data, pd.Index) and self._to_observed is not None:
-            return method(self._to_observed(data))
-        if isinstance(data, (pd.Series, pd.DataFrame)):
-            if self._to_observed is not None:
-                data = data.set_axis(self._to_observed(data.index))
-            transformed = method(data)
-            if self._output is not None and isinstance(
-                transformed, (pd.Series, pd.DataFrame)
-            ):
-                return self._output(transformed, data.index)
-            return transformed
-        return method(data)
+        if not isinstance(data, (pd.Index, pd.Series, pd.DataFrame)):
+            return method(data)
+        index_only = isinstance(data, pd.Index)
+        model_index = data if index_only else data.index
+        observed_index = model_index
+        if self._to_observed is not None:
+            observed_index = self._to_observed(model_index)
+            data = observed_index if index_only else data.set_axis(observed_index)
+        transformed = method(data)
+        if isinstance(transformed, (pd.Series, pd.DataFrame)):
+            return self._output(transformed, observed_index, model_index)
+        return transformed
 
     def fit_transform(self, data: Any) -> Any:
         return self._apply(self._preprocessor.fit_transform, data)
@@ -189,19 +189,21 @@ class _PreprocessorOnObservedIndex:
         return getattr(object.__getattribute__(self, "_preprocessor"), name)
 
 
-def _validate_transformed_exog(data: Any, input_index: pd.Index) -> Any:
+def _align_transformed_rows(
+    data: Any, observed_index: pd.Index, model_index: pd.Index, *, name: str
+) -> Any:
     index = data.index
     positional = (
         isinstance(index, pd.RangeIndex)
         and index.name is None
-        and len(index) == len(input_index)
+        and len(index) == len(observed_index)
         and index.equals(pd.RangeIndex(len(data)))
     )
-    if not positional and not _same_labels(index, input_index):
+    if not positional and not _same_labels(index, observed_index):
         raise BadIndexException(
-            "Transformed exogenous covariates must keep their observation labels in order."
+            f"Transformed {name} must keep their observation labels in order."
         )
-    return data
+    return data.set_axis(model_index)
 
 
 def _configure_native_preprocessors(
@@ -212,19 +214,13 @@ def _configure_native_preprocessors(
     if not grid.equals(observed):
         to_observed = partial(_translate_index, source=grid, target=observed)
 
-        def on_model_grid(data: Any, _input_index: pd.Index) -> Any:
+        def on_model_grid(
+            data: Any, _observed_index: pd.Index, _model_index: pd.Index
+        ) -> Any:
             return data.set_axis(
                 _translate_index(data.index, source=observed, target=grid)
             )
 
-        if forecaster.calendar_features is not None:
-            forecaster.calendar_features = _PreprocessorOnObservedIndex(
-                forecaster.calendar_features, to_observed
-            )
-        if forecaster.transformer_y is not None:
-            forecaster.transformer_y = _PreprocessorOnObservedIndex(
-                forecaster.transformer_y, to_observed, on_model_grid
-            )
         if forecaster.window_features is not None:
             forecaster.window_features = [
                 _PreprocessorOnObservedIndex(features, to_observed, on_model_grid)
@@ -237,10 +233,22 @@ def _configure_native_preprocessors(
                 return weight_func(to_observed(index))
 
             forecaster.weight_func = observed_weights
-    if forecaster.transformer_exog is not None:
-        forecaster.transformer_exog = _PreprocessorOnObservedIndex(
-            forecaster.transformer_exog, to_observed, _validate_transformed_exog
-        )
+    for attribute, name in (
+        ("calendar_features", "calendar features"),
+        ("transformer_y", "outcomes"),
+        ("transformer_exog", "exogenous covariates"),
+    ):
+        preprocessor = getattr(forecaster, attribute)
+        if preprocessor is not None:
+            setattr(
+                forecaster,
+                attribute,
+                _PreprocessorOnObservedIndex(
+                    preprocessor,
+                    to_observed,
+                    partial(_align_transformed_rows, name=name),
+                ),
+            )
 
 
 @dataclass(frozen=True, slots=True)

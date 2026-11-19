@@ -14,6 +14,7 @@
 """Interrupted Time Series Analysis."""
 
 import ast
+from decimal import Decimal, localcontext
 from typing import Any, Literal
 
 import numpy as np
@@ -1496,7 +1497,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             Direction for tail probability calculation (PyMC only, ignored for OLS).
         alpha : float, default=0.05
             Tail mass for intervals. Skforecast reports equal-tailed bootstrap
-            prediction intervals with mass ``1 - alpha``.
+            prediction intervals with mass ``1 - alpha`` and requires
+            ``0 <= alpha < 1``.
         cumulative : bool, default=True
             Whether to include cumulative effect statistics.
         relative : bool, default=True
@@ -1545,6 +1547,10 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         bundle = self._require_bundle(group)
         paths = bundle.counterfactual_paths
         if paths is not None:
+            if not 0 <= alpha < 1:
+                raise ValueError("Prediction interval alpha must be in [0, 1).")
+            with localcontext(prec=28):
+                prob = float(1 - Decimal(str(alpha)))
             coords = self.datapost.index
             end = self.treatment_end_time
             if end is not None and period in ("intervention", "post"):
@@ -1568,14 +1574,14 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                     observed,
                     paths,
                     end,
-                    1 - alpha,
+                    prob,
                     cumulative=cumulative,
                     relative=relative,
                 )
             return _summarize_realized_effect(
                 observed,
                 paths,
-                1 - alpha,
+                prob,
                 prefix=prefix,
                 cumulative=cumulative,
                 relative=relative,

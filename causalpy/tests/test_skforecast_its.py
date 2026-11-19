@@ -162,7 +162,7 @@ def forecast_model(forecaster_class):
     )
 
 
-@pytest.mark.parametrize("prob", [0.8, 0.95])
+@pytest.mark.parametrize("prob", [0.29, 0.8, 0.95])
 def test_path_intervals_agree_across_plot_data_summary_persistence_and_report(
     series, forecast_model, prob, monkeypatch
 ):
@@ -333,6 +333,17 @@ def test_prediction_interval_labels_match_requested_level(
     )
     assert f"{percent}% bootstrap prediction intervals" in result.text
     assert f"{percent}% bootstrap prediction intervals" in capsys.readouterr().out
+    summary = exp.effect_summary(alpha=1 - level)
+    assert f"{percent}% bootstrap prediction intervals" in summary.text
+
+
+@pytest.mark.parametrize("alpha", [-1e-17, 1.0])
+def test_prediction_summary_rejects_alpha_outside_interval_domain(
+    series, forecast_model, alpha
+):
+    exp = cp.InterruptedTimeSeries(series, 70, "y ~ 1", model=forecast_model).fit()
+    with pytest.raises(ValueError, match="alpha must be in"):
+        exp.effect_summary(alpha=alpha)
 
 
 def test_shifted_outcomes_shift_intervals_and_window_total(series, forecast_model):
@@ -1055,7 +1066,10 @@ def test_native_exog_transformer_sees_observed_clock(forecaster_class, preserve_
     )
 
 
-def test_native_outcome_transformer_sees_original_name_and_clock(forecaster_class):
+@pytest.mark.parametrize("labelled_output", [False, True])
+def test_native_outcome_transformer_sees_original_name_and_clock(
+    forecaster_class, labelled_output
+):
     from sklearn.preprocessing import StandardScaler
 
     index = pd.date_range(
@@ -1071,7 +1085,12 @@ def test_native_outcome_transformer_sees_original_name_and_clock(forecaster_clas
         def fit_transform(self, X, y=None, **fit_params):
             assert X.columns.tolist() == [outcome]
             assert X.index.equals(expected_train)
-            return super().fit_transform(X, y, **fit_params)
+            scaled = super().fit_transform(X, y, **fit_params)
+            return pd.DataFrame(
+                scaled,
+                columns=X.columns,
+                index=X.index if labelled_output else None,
+            )
 
     def fit(transformer):
         model = SkforecastModel(
@@ -1121,9 +1140,13 @@ def test_native_rolling_features_see_observed_clock(forecaster_class):
 
 
 @pytest.mark.parametrize("clock_fallback", [False, True])
-def test_transformed_exog_rejects_reordered_observation_labels(
-    forecaster_class, clock_fallback
+@pytest.mark.parametrize(
+    "preprocessor", ["transformer_exog", "transformer_y", "calendar_features"]
+)
+def test_native_preprocessing_rejects_reordered_observation_labels(
+    forecaster_class, clock_fallback, preprocessor
 ):
+    from skforecast.preprocessing import CalendarFeatures
     from sklearn.preprocessing import FunctionTransformer
 
     from causalpy.custom_exceptions import BadIndexException
@@ -1133,16 +1156,26 @@ def test_transformed_exog_rejects_reordered_observation_labels(
         index = index.tz_convert("America/New_York")
     t = np.arange(len(index))
     data = pd.DataFrame({"y": 30 + 8 * t, "t": t}, index=index)
+
+    class ReorderedCalendar(CalendarFeatures):
+        def transform(self, X):
+            return super().transform(X).iloc[::-1]
+
+    def reverse_labelled(frame):
+        return frame.iloc[::-1] if isinstance(frame, pd.DataFrame) else frame
+
+    transformer = (
+        ReorderedCalendar(features=["month"])
+        if preprocessor == "calendar_features"
+        else FunctionTransformer(reverse_labelled, check_inverse=False)
+    )
     model = SkforecastModel(
-        forecaster_class(
-            estimator=Ridge(),
-            lags=1,
-            transformer_exog=FunctionTransformer(lambda frame: frame.iloc[::-1]),
-        ),
+        forecaster_class(estimator=Ridge(), lags=1, **{preprocessor: transformer}),
         calibration_size=16,
         n_boot=25,
     )
-    experiment = cp.InterruptedTimeSeries(data, index[64], "y ~ t", model=model)
+    formula = "y ~ t" if preprocessor == "transformer_exog" else "y ~ 1"
+    experiment = cp.InterruptedTimeSeries(data, index[64], formula, model=model)
     with pytest.raises(
         BadIndexException, match="keep their observation labels in order"
     ):
