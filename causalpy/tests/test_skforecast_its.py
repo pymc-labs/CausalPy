@@ -694,6 +694,21 @@ def test_calibration_reporting_distinguishes_upstream_pool_cap(forecaster_class)
     assert "sampled from a pool of 10000" in text
 
 
+def test_native_grid_rejects_exog_on_a_different_observed_clock(series, forecast_model):
+    from causalpy.custom_exceptions import BadIndexException
+
+    local = pd.date_range(
+        "2026-02-01 19:00", periods=len(series), freq="D", tz="America/New_York"
+    )
+    experiment = cp.InterruptedTimeSeries(
+        series.set_axis(local), local[64], "y ~ t", model=forecast_model
+    ).fit()
+    chicago = local[64:].tz_localize(None).tz_localize("America/Chicago")
+    wrong_clock = experiment.post_design["X"].assign_coords(obs_ind=chicago)
+    with pytest.raises(BadIndexException, match="exogenous inputs must align"):
+        experiment._model_backend.predict_counterfactual(wrong_clock, group="posterior")
+
+
 def test_local_calendar_uses_wall_time_across_dst(series, forecaster_class):
     local = pd.date_range(
         "2026-02-01 19:00", periods=len(series), freq="D", tz="America/New_York"

@@ -118,23 +118,12 @@ def _regular_index(
     )
 
 
-def _exog(X: xr.DataArray, index: pd.Index) -> pd.DataFrame | None:
-    original = X.get_index("obs_ind")
-    if (
-        isinstance(original, pd.DatetimeIndex)
-        and isinstance(index, pd.DatetimeIndex)
-        and original.tz is not None
-    ):
-        original = (
-            original.tz_localize(None)
-            if index.tz is None
-            else original.tz_convert(index.tz)
-        )
-    if not _same_labels(original, index):
+def _exog(X: xr.DataArray, observed: pd.Index, grid: pd.Index) -> pd.DataFrame | None:
+    if not _same_labels(X.get_index("obs_ind"), observed):
         raise BadIndexException(
             "Observations and exogenous inputs must align to the regular forecast grid."
         )
-    frame = X.to_pandas().set_axis(index)
+    frame = X.to_pandas().set_axis(grid)
     if not np.isfinite(frame.to_numpy()).all():
         raise ValueError("SkforecastModel requires finite exogenous inputs.")
     return None if frame.empty else frame
@@ -256,6 +245,7 @@ class _CalibratedForecast:
     forecaster: Any
     predictions_pre: xr.DataArray
     last_window: pd.Series
+    future_index: pd.Index
     future_grid: pd.Index
     score: pd.Series
     calibration_count: int
@@ -316,7 +306,8 @@ class _SkforecastAdapter(ModelAdapter):
         from skforecast.exceptions import ResidualsUsageWarning
 
         forecaster = deepcopy(self._model.forecaster)
-        training_size = y.sizes["obs_ind"] - self.calibration_size
+        pre_size = y.sizes["obs_ind"]
+        training_size = pre_size - self.calibration_size
         window_size = forecaster.window_size
         if training_size <= window_size:
             raise ValueError(
@@ -324,13 +315,12 @@ class _SkforecastAdapter(ModelAdapter):
                 f"window_size ({window_size}) after reserving calibration_size "
                 f"({self.calibration_size}) rows."
             )
-        pre_index = y.get_index("obs_ind")
         full_index = (coords or {}).get("forecast_index")
         if not isinstance(full_index, pd.Index):
             raise ValueError("SkforecastModel requires the full ITS observation index.")
-        grid = _regular_index(full_index, len(pre_index), window_size)
+        grid = _regular_index(full_index, pre_size, window_size)
         _configure_native_preprocessors(forecaster, grid, full_index)
-        index = grid[: len(pre_index)]
+        index = grid[:pre_size]
         outcome = pd.Series(
             y.values[:, 0], index=index, name=(coords or {}).get("outcome_name", "y")
         )
@@ -338,7 +328,7 @@ class _SkforecastAdapter(ModelAdapter):
             raise ValueError(
                 "SkforecastModel requires finite pre-intervention outcomes."
             )
-        exog = _exog(X, index)
+        exog = _exog(X, full_index[:pre_size], index)
         forecaster.fit(
             y=outcome.iloc[:training_size],
             exog=None if exog is None else exog.iloc[:training_size],
@@ -392,7 +382,8 @@ class _SkforecastAdapter(ModelAdapter):
             forecaster=forecaster,
             predictions_pre=predictions_pre,
             last_window=outcome.iloc[-window_size:],
-            future_grid=grid[len(pre_index) :],
+            future_index=full_index[pre_size:],
+            future_grid=grid[pre_size:],
             score=pd.Series({"unit_0_r2": r2_score(actual, predicted)}),
             calibration_count=len(actual),
             residual_pool_count=residuals.size,
@@ -425,11 +416,10 @@ class _SkforecastAdapter(ModelAdapter):
         self, X: xr.DataArray, *, group: Literal["prior", "posterior"]
     ) -> tuple[xr.DataArray, xr.DataArray]:
         fitted = self._require_fitted(group)
-        index = X.get_index("obs_ind")
         paths = fitted.forecaster.predict_bootstrapping(
-            steps=len(index),
+            steps=len(fitted.future_index),
             last_window=fitted.last_window,
-            exog=_exog(X, fitted.future_grid),
+            exog=_exog(X, fitted.future_index, fitted.future_grid),
             n_boot=self._model.n_boot,
             random_state=self._model.random_state,
             use_in_sample_residuals=False,
@@ -449,7 +439,7 @@ class _SkforecastAdapter(ModelAdapter):
             dims=("simulation", "obs_ind", "treated_units"),
             coords={
                 "simulation": np.arange(self._model.n_boot),
-                "obs_ind": index,
+                "obs_ind": fitted.future_index,
                 "treated_units": fitted.predictions_pre.treated_units,
             },
             attrs={

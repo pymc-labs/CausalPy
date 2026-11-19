@@ -1525,6 +1525,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             _extract_window,
         )
 
+        end = self.treatment_end_time
         if period is not None:
             # Validate period parameter
             valid_periods = ["intervention", "post", "comparison"]
@@ -1534,10 +1535,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 )
 
             # Check if this experiment supports three-period designs
-            if not (
-                hasattr(self, "treatment_end_time")
-                and self.treatment_end_time is not None
-            ):
+            if end is None:
                 raise ValueError(
                     f"Period '{period}' not available. This experiment may not support three-period designs. "
                     "Provide treatment_end_time to enable period-specific analysis."
@@ -1545,32 +1543,49 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
         bundle = self._require_bundle(group)
         paths = bundle.counterfactual_paths
-        if paths is not None:
-            if not 0 <= alpha < 1:
-                raise ValueError("Prediction interval alpha must be in [0, 1).")
-            prob = 1 - alpha
-            coords = self.datapost.index
-            end = self.treatment_end_time
-            if end is not None and period in ("intervention", "post"):
-                if period == "intervention":
-                    coords = coords[coords < end]
-                    prefix = "During intervention"
-                else:
-                    coords = coords[coords >= end]
-                    prefix = "Post-intervention"
-            paths, selected = _extract_window(
-                paths.sel(obs_ind=coords), coords, window, treated_unit=treated_unit
+        if paths is not None and not 0 <= alpha < 1:
+            raise ValueError("Prediction interval alpha must be in [0, 1).")
+        if paths is None and period == "comparison":
+            return self._comparison_period_summary(
+                bundle=bundle,
+                direction=direction,
+                alpha=alpha,
+                cumulative=cumulative,
+                relative=relative,
+                min_effect=min_effect,
+                group=group,
             )
+
+        coords = self.datapost.index
+        values = paths if paths is not None else bundle.impact_post
+        if period in ("intervention", "post"):
+            assert end is not None
+            if period == "intervention":
+                coords = coords[coords < end]
+                prefix = "During intervention"
+            else:
+                coords = coords[coords >= end]
+                prefix = "Post-intervention"
+            values = values.sel(obs_ind=coords)
+            if paths is None:
+                # Legacy period summaries use the entire named period.
+                window = "post"
+        windowed, window_coords = _extract_window(
+            values, coords, window, treated_unit=treated_unit
+        )
+
+        if paths is not None:
+            prob = 1 - alpha
             observed = (
                 self.post_design["y"]
                 .isel(treated_units=0, drop=True)
-                .sel(obs_ind=selected)
+                .sel(obs_ind=window_coords)
             )
             if period == "comparison":
                 assert end is not None
                 return _compare_realized_effects(
                     observed,
-                    paths,
+                    windowed,
                     end,
                     prob,
                     cumulative=cumulative,
@@ -1578,65 +1593,18 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 )
             return _summarize_realized_effect(
                 observed,
-                paths,
+                windowed,
                 prob,
                 prefix=prefix,
                 cumulative=cumulative,
                 relative=relative,
             )
 
-        # Preserve historical window selection for posterior and OLS summaries.
-        post_coords = None
-        if period is not None:
-            if period == "comparison":
-                # Comparison period: delegate to subclass method
-                return self._comparison_period_summary(
-                    bundle=bundle,
-                    direction=direction,
-                    alpha=alpha,
-                    cumulative=cumulative,
-                    relative=relative,
-                    min_effect=min_effect,
-                    group=group,
-                )
-
-            # Intervention uses a label tuple. Post uses the period-split mask.
-            if period == "intervention":
-                # Intervention period: treatment_time <= index < treatment_end_time
-                intervention_indices = self.datapost.index[
-                    self.datapost.index < self.treatment_end_time
-                ]
-                # Use the last index before treatment_end_time as the end bound
-                window = (self.treatment_time, intervention_indices.max())
-                prefix = "During intervention"
-            elif period == "post":
-                # Same inclusive bound as the period split. Do not pass
-                # treatment_end_time into _extract_window.
-                post_coords = self.datapost.index[
-                    self.datapost.index >= self.treatment_end_time
-                ]
-                prefix = "Post-intervention"
-
-        # Extract windowed impact data
-        if post_coords is not None:
-            if len(post_coords) == 0:
-                raise ValueError("Window contains no time points")
-            windowed_impact = bundle.impact_post.sel(obs_ind=post_coords)
-            window_coords = post_coords
-        else:
-            windowed_impact, window_coords = _extract_window(
-                bundle.impact_post,
-                self.datapost.index,
-                window,
-                treated_unit=treated_unit,
-            )
-
-        # Extract counterfactual for relative effects
         counterfactual = _extract_counterfactual(
             bundle.predictions_post, window_coords, treated_unit=treated_unit
         )
         return _effect_summary_timeseries(
-            windowed_impact,
+            windowed,
             counterfactual,
             window_coords,
             direction=direction,
