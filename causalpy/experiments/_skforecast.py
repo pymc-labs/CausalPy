@@ -32,6 +32,12 @@ from causalpy.skl_models import SkforecastModel, _validate_recursive_forecaster
 def _regular_index(index: pd.Index) -> pd.DatetimeIndex | pd.RangeIndex:
     if isinstance(index, pd.DatetimeIndex):
         freq = index.freq or index.inferred_freq
+        if index.tz is not None and index.inferred_freq is None:
+            utc = index.tz_convert("UTC")
+            if utc.inferred_freq is not None:
+                # Short lag windows can hide a DST transition and make the
+                # upstream forecaster choose the wrong calendar convention.
+                return pd.DatetimeIndex(utc, freq=freq or utc.inferred_freq)
         if freq is not None:
             return pd.DatetimeIndex(index, freq=freq)
     elif pd.api.types.is_integer_dtype(index.dtype):
@@ -47,11 +53,19 @@ def _regular_index(index: pd.Index) -> pd.DatetimeIndex | pd.RangeIndex:
 
 
 def _exog(X: xr.DataArray, index: pd.Index) -> pd.DataFrame | None:
-    if not X.get_index("obs_ind").equals(index):
+    original = X.get_index("obs_ind")
+    if (
+        isinstance(original, pd.DatetimeIndex)
+        and isinstance(index, pd.DatetimeIndex)
+        and original.tz is not None
+        and index.tz is not None
+    ):
+        original = original.tz_convert(index.tz)
+    if not original.equals(index):
         raise BadIndexException(
             "Observations and exogenous inputs must align to the regular forecast grid."
         )
-    frame = X.to_pandas().set_axis(index).drop(columns="Intercept", errors="ignore")
+    frame = X.to_pandas().set_axis(index)
     if not np.isfinite(frame.to_numpy()).all():
         raise ValueError("SkforecastModel requires finite exogenous inputs.")
     return None if frame.empty else frame
@@ -62,12 +76,15 @@ class _SkforecastAdapter(ModelAdapter):
         _validate_recursive_forecaster(model.forecaster)
         # Snapshot the configuration at installation, like the sklearn adapter.
         self._model = deepcopy(model)
-        self._fit_inputs: tuple[xr.DataArray, xr.DataArray] | None = None
+        self._fit_inputs: (
+            tuple[xr.DataArray, xr.DataArray, dict[str, Any] | None] | None
+        ) = None
         self._forecaster: Any = None
         self._pre_prediction: xr.DataArray
         self._last_window: pd.Series
         self._score: pd.Series
         self._calibration_count: int
+        self._residual_pool_count: int
         self._calibration_degenerate: bool
 
     @property
@@ -98,13 +115,14 @@ class _SkforecastAdapter(ModelAdapter):
         self, X: xr.DataArray, y: xr.DataArray, *, coords: dict[str, Any] | None = None
     ) -> None:
         if self._fit_inputs is None:
-            self._fit_inputs = (X, y)
+            self._fit_inputs = (X, y, coords)
 
     def sample_posterior(self, **kwargs: Any) -> None:
         if kwargs:
             raise TypeError("Set the bootstrap controls on SkforecastModel.")
         assert self._fit_inputs is not None
-        self.fit(*self._fit_inputs)
+        X, y, coords = self._fit_inputs
+        self.fit(X, y, coords=coords)
 
     def fit(
         self, X: xr.DataArray, y: xr.DataArray, *, coords: dict[str, Any] | None = None
@@ -120,8 +138,9 @@ class _SkforecastAdapter(ModelAdapter):
                 f"window_size ({window_size}) after reserving calibration_size "
                 f"({self.calibration_size}) rows."
             )
-        original_index = y.get_index("obs_ind")
-        index = _regular_index(original_index)
+        pre_index = y.get_index("obs_ind")
+        full_index = (coords or {}).get("forecast_index", pre_index)
+        index = _regular_index(full_index)[: len(pre_index)]
         outcome = pd.Series(y.values[:, 0], index=index, name="y")
         if not np.isfinite(outcome).all():
             raise ValueError(
@@ -180,6 +199,7 @@ class _SkforecastAdapter(ModelAdapter):
         self._last_window = outcome.iloc[-window_size:]
         self._score = pd.Series({"unit_0_r2": r2_score(actual, predicted)})
         self._calibration_count = len(actual)
+        self._residual_pool_count = residuals.size
         self._calibration_degenerate = degenerate
         self._forecaster = forecaster
 
@@ -220,7 +240,7 @@ class _SkforecastAdapter(ModelAdapter):
             use_in_sample_residuals=False,
             use_binned_residuals=False,
         )
-        if not paths.index.equals(index):
+        if not paths.index.equals(future_grid):
             raise BadIndexException(
                 "Simulated paths are misaligned to the observation grid."
             )
@@ -240,6 +260,7 @@ class _SkforecastAdapter(ModelAdapter):
             attrs={
                 "calibration_size": self.calibration_size,
                 "calibration_count": self._calibration_count,
+                "residual_pool_count": self._residual_pool_count,
                 "calibration_degenerate": self._calibration_degenerate,
                 "forecaster": type(self._forecaster).__name__,
                 "estimator": type(self._forecaster.estimator).__name__,

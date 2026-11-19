@@ -19,10 +19,13 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
+from patsy import Term
 from sklearn.base import RegressorMixin
 
 from causalpy._arviz_compat import hdi_bounds
 from causalpy._predictive_intervals import (
+    _analyze_realized_persistence,
+    _calibration_text,
     _compare_realized_effects,
     _prediction_interval,
     _summarize_realized_effect,
@@ -245,15 +248,12 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
     ) -> tuple[xr.DataArray, xr.DataArray, dict[str, Any]]:
         """Return the pre-period design matrices and coordinates for build."""
         pre_X = self.pre_design["X"]
-        return (
-            pre_X,
-            self.pre_design["y"],
-            build_coords(
-                self.labels,
-                pre_X.shape[0],
-                datetime_index=self.datapre.index,
-            ),
+        coords = build_coords(
+            self.labels, pre_X.shape[0], datetime_index=self.datapre.index
         )
+        if self._model_backend.calibration_size is not None:
+            coords["forecast_index"] = self.data.index
+        return pre_X, self.pre_design["y"], coords
 
     def _finalize(self, group: Literal["prior", "posterior"]) -> None:
         """Compute the group's result bundle from its draws and assign it.
@@ -355,7 +355,14 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 "SkforecastModel requires finite post-intervention outcomes."
             )
 
-        labels = x_info.column_names
+        labels = list(x_info.column_names)
+        intercept = (
+            x_info.term_slices.get(Term([])) if calibration_size is not None else None
+        )
+        if intercept is not None:
+            pre_x = np.delete(pre_x, intercept, axis=1)
+            post_x = np.delete(post_x, intercept, axis=1)
+            del labels[intercept]
         pre_design = self._build_design_dataset(
             np.asarray(pre_x), np.asarray(pre_y), obs_ind=pre.index, coeffs=labels
         )
@@ -605,11 +612,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             return
         attrs = paths.attrs
         print(f"Model {attrs['forecaster']} ({attrs['estimator']})")
-        print(
-            f"Held-out calibration used {attrs['calibration_count']} finite one-step errors."
-        )
-        if attrs["calibration_degenerate"]:
-            print("The pooled calibration errors are degenerate.")
+        print(_calibration_text(paths))
         print(
             format_r2_score(
                 self.result.score,
@@ -1249,25 +1252,12 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
         bundle = self.result
         if bundle.counterfactual_paths is not None:
-            summary = self.effect_summary(period="comparison", alpha=1 - hdi_prob)
-            assert summary.table is not None
-            print(summary.text)
-            table = summary.table
-            during = table.loc["intervention"]
-            post = table.loc["post_intervention"]
-            result = {}
-            for period, row in (("during", during), ("post", post)):
-                for metric, column in (("mean", ""), ("total", "total_")):
-                    key = f"{metric}_effect_{period}"
-                    result[key] = float(row[f"{column}mean"])
-                    result[f"{key}_pi_lower"] = float(row[f"{column}pi_lower"])
-                    result[f"{key}_pi_upper"] = float(row[f"{column}pi_upper"])
-            result.update(
-                persistence_ratio=float(post["persistence_ratio_pct"]) / 100,
-                persistence_ratio_pi_lower=float(post["persistence_pi_lower"]) / 100,
-                persistence_ratio_pi_upper=float(post["persistence_pi_upper"]) / 100,
+            return _analyze_realized_persistence(
+                self.post_design["y"].isel(treated_units=0, drop=True),
+                bundle.counterfactual_paths.isel(treated_units=0, drop=True),
+                self.treatment_end_time,
+                hdi_prob,
             )
-            return result
 
         slices = self._period_slices(bundle)
         intervention_impact = slices["intervention_impact"]

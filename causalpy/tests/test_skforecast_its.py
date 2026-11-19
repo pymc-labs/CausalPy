@@ -298,6 +298,7 @@ def test_path_intervals_agree_across_plot_data_summary_persistence_and_report(
     assert f"{prob:.0%} bootstrap prediction intervals for realized impact" in report
     assert "pi_lower" in report and "cumulative" in report
     assert "exchangeable innovations" in report and "data:image/png" in report
+    assert f"{stop - end} observations from {end + 1} through {stop}" in report
     assert all(key not in report for key in ("p_value", "hdi_lower", "ROPE"))
 
 
@@ -374,7 +375,7 @@ def test_swapping_models_relearns_preprocessing_and_invalidates_results(
     ("drop", "error"),
     [
         (30, "regular datetime or integer grid"),
-        (80, "align to the regular forecast grid"),
+        (80, "regular datetime or integer grid"),
     ],
 )
 def test_forecast_rejects_gaps_without_renumbering(series, forecast_model, drop, error):
@@ -451,6 +452,18 @@ def test_degenerate_calibration_and_zero_denominator_are_reported(
     assert summary.table["relative_mean"].isna().all()
     assert "unavailable (unstable denominator)" in summary.text
     assert np.isnan(exp.analyze_persistence()["persistence_ratio"])
+
+    from causalpy.checks.persistence import PersistenceCheck
+    from causalpy.pipeline import PipelineContext
+
+    context = PipelineContext(data=data, experiment=exp, effect_summary=summary)
+    check = PersistenceCheck().run(exp, context)
+    context.sensitivity_results.append(check)
+    ratio = check.table.set_index("metric").loc["persistence_ratio"]
+    assert ratio[["value", "pi_lower", "pi_upper"]].isna().all()
+    report = cp.GenerateReport(include_plots=False).run(context).report
+    assert "persistence ratio is unavailable" in report
+    assert "effect persistence ratio is nan" not in report
 
 
 @pytest.mark.correctness
@@ -545,3 +558,86 @@ def test_forecast_comparison_validates_window_and_probability(series, forecast_m
         exp.effect_summary(period="comparison", window=(70, 79))
     with pytest.raises(ValueError, match="Prediction interval probability"):
         exp.get_plot_data(hdi_prob=0)
+
+
+@pytest.mark.parametrize("declared", [False, True])
+def test_business_day_cadence_uses_full_axis(forecaster_class, declared):
+    index = pd.bdate_range("2026-01-05", periods=12)
+    if not declared:
+        index = pd.DatetimeIndex(index, freq=None)
+        assert index[:4].inferred_freq == "D" and index.inferred_freq == "B"
+    data = pd.DataFrame(
+        {"y": np.random.default_rng(32).normal(size=len(index))}, index=index
+    )
+    model = SkforecastModel(forecaster_class(estimator=Ridge(), lags=1), 2, n_boot=10)
+    exp = cp.InterruptedTimeSeries(data, index[4], "y ~ 1", model=model).fit()
+    assert exp.result.counterfactual_paths.obs_ind.to_index().equals(index[4:])
+
+
+@pytest.mark.parametrize("origin", [25, 45])
+def test_utc_anchored_grid_preserves_observation_timezone(
+    series, forecast_model, origin
+):
+    utc = pd.date_range("2026-02-15", periods=len(series), freq="D", tz="UTC")
+    local = utc.tz_convert("Europe/London")
+    formula = "y ~ 1 + t"
+    exp = cp.InterruptedTimeSeries(
+        series.set_axis(local),
+        local[origin],
+        formula,
+        model=forecast_model,
+        treatment_end_time=local[origin + 10],
+    ).fit()
+    reference = cp.InterruptedTimeSeries(
+        series.set_axis(utc),
+        utc[origin],
+        formula,
+        model=forecast_model,
+        treatment_end_time=utc[origin + 10],
+    ).fit()
+    paths = exp.result.counterfactual_paths
+    assert paths.obs_ind.to_index().equals(local[origin:])
+    np.testing.assert_allclose(
+        paths.values, reference.result.counterfactual_paths.values
+    )
+    pd.testing.assert_frame_equal(
+        exp.effect_summary(period="comparison").table,
+        reference.effect_summary(period="comparison").table,
+    )
+
+
+def test_forecast_keeps_a_real_regressor_named_intercept(forecast_model):
+    rng = np.random.default_rng(21)
+    regressor = rng.normal(size=90)
+    data = pd.DataFrame(
+        {"y": 50 * regressor + rng.normal(size=90), "Intercept": regressor}
+    )
+    aliased = data.rename(columns={"Intercept": "indicator"})
+    exp = cp.InterruptedTimeSeries(
+        data, 70, "y ~ 0 + Intercept", model=forecast_model
+    ).fit()
+    reference = cp.InterruptedTimeSeries(
+        aliased, 70, "y ~ 0 + indicator", model=forecast_model
+    ).fit()
+    omitted = cp.InterruptedTimeSeries(data, 70, "y ~ 0", model=forecast_model).fit()
+    np.testing.assert_allclose(
+        exp.result.counterfactual_paths.values,
+        reference.result.counterfactual_paths.values,
+    )
+    assert not np.allclose(
+        exp.result.counterfactual_paths.values,
+        omitted.result.counterfactual_paths.values,
+    )
+
+
+def test_calibration_reporting_distinguishes_upstream_pool_cap(forecaster_class):
+    size = 10_010
+    data = pd.DataFrame({"y": np.random.default_rng(61).normal(size=size + 44)})
+    model = SkforecastModel(forecaster_class(estimator=Ridge(), lags=1), size, n_boot=8)
+    exp = cp.InterruptedTimeSeries(data, size + 40, "y ~ 1", model=model).fit()
+    attrs = exp.result.counterfactual_paths.attrs
+    assert attrs["calibration_count"] == size
+    assert attrs["residual_pool_count"] == 10_000
+    text = exp.effect_summary(relative=False).text
+    assert f"measured {size} finite one-step errors" in text
+    assert "sampled from a pool of 10000" in text

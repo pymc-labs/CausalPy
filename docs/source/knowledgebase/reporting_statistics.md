@@ -244,6 +244,8 @@ Each simulation follows the recursive model from the last observed pre-intervent
 
 The inference assumes the untreated dynamics and covariate relationships would continue and that no concurrent unmodeled change explains the gap. Pooling errors assumes approximately exchangeable innovations. These intervals capture future outcome variation conditional on one fitted model and the supplied covariates. Parameter refitting, future covariate uncertainty, and uncertainty about causal identification are outside the interval. See the {doc}`../notebooks/interrupted-time-series-sklearn` notebook for a historical coverage check.
 
+Calibration summaries give the number of finite one-step errors used for scoring. When the held-out sample exceeds the skforecast pool limit, they also give the number of errors available for bootstrap sampling.
+
 ## Choosing Between Approaches
 
 ### When to use Bayesian inference (PyMC models):

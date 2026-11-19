@@ -98,16 +98,29 @@ def _format_effect(row: dict[str, float], prefix: str = "") -> str:
     return f"{estimate:.2f} [{row[f'{prefix}pi_lower']:.2f}, {row[f'{prefix}pi_upper']:.2f}]"
 
 
+def _calibration_text(paths: xr.DataArray) -> str:
+    count = paths.attrs["calibration_count"]
+    pool = paths.attrs["residual_pool_count"]
+    text = f"Held-out calibration measured {count} finite one-step errors."
+    if pool != count:
+        text += f" The bootstrap sampled from a pool of {pool} of those errors."
+    if paths.attrs["calibration_degenerate"]:
+        text += " The pooled error distribution is degenerate."
+    return text
+
+
+def _observations_text(paths: xr.DataArray) -> str:
+    index = paths.get_index("obs_ind")
+    label = "observation" if len(index) == 1 else "observations"
+    return f"{len(index)} {label} from {index.min()} through {index.max()}"
+
+
 def _prediction_summary(
     rows: dict[str, dict[str, float]],
     lines: list[str],
     paths: xr.DataArray,
     prob: float,
 ) -> EffectSummary:
-    count = paths.attrs["calibration_count"]
-    calibration = f"Calibrated using {count} finite held-out one-step errors."
-    if paths.attrs["calibration_degenerate"]:
-        calibration += " The pooled error distribution is degenerate."
     level = _format_probability_as_percent(prob)
     table = pd.DataFrame.from_dict(rows, orient="index")
     table.attrs["prediction_interval_prob"] = prob
@@ -115,11 +128,26 @@ def _prediction_summary(
         [
             f"Estimates and {level} bootstrap prediction intervals for realized impact.",
             "\n".join(lines),
-            calibration,
+            _calibration_text(paths),
             _ASSUMPTIONS,
         ]
     )
     return EffectSummary(table=table, text=text)
+
+
+def _effect_lines(
+    prefix: str, rows: dict[str, dict[str, float]], relative: bool
+) -> list[str]:
+    lines = [
+        f"{prefix} {name} effect is {_format_effect(row)}."
+        for name, row in rows.items()
+    ]
+    if relative:
+        lines.extend(
+            f"{prefix} {name} relative effect in percent is {_format_effect(row, 'relative_')}."
+            for name, row in rows.items()
+        )
+    return lines
 
 
 def _summarize_realized_effect(
@@ -135,15 +163,27 @@ def _summarize_realized_effect(
         observed - paths, paths, prob, cumulative=cumulative, relative=relative
     )
     lines = [
-        f"{prefix} {name} effect is {_format_effect(row)}."
-        for name, row in rows.items()
+        f"{prefix} includes {_observations_text(paths)}.",
+        *_effect_lines(prefix, rows, relative),
     ]
-    if relative:
-        lines.extend(
-            f"{prefix} {name} relative effect in percent is {_format_effect(row, 'relative_')}."
-            for name, row in rows.items()
-        )
     return _prediction_summary(rows, lines, paths, prob)
+
+
+def _split_realized_periods(
+    samples: xr.DataArray,
+    treatment_end_time: int | float | pd.Timestamp,
+) -> tuple[xr.DataArray, xr.DataArray]:
+    during = samples.get_index("obs_ind") < treatment_end_time
+    if not bool(during.any()) or bool(during.all()):
+        raise ValueError("Period comparison requires observations in both periods.")
+    return samples.isel(obs_ind=during), samples.isel(obs_ind=~during)
+
+
+def _persistence_interval(
+    during: xr.DataArray, post: xr.DataArray, prob: float
+) -> dict[str, float]:
+    ratio = _stable_ratio(post.mean("obs_ind"), during.mean("obs_ind"), prob)
+    return _effect_interval(ratio, prob)
 
 
 def _compare_realized_effects(
@@ -155,41 +195,41 @@ def _compare_realized_effects(
     cumulative: bool,
     relative: bool,
 ) -> EffectSummary:
-    during = paths.obs_ind < treatment_end_time
-    if not bool(during.any()) or bool(during.all()):
-        raise ValueError("Period comparison requires observations in both periods.")
-    impact = observed - paths
-    periods = {"intervention": during, "post_intervention": ~during}
+    during_paths, post_paths = _split_realized_periods(paths, treatment_end_time)
+    during_impact = (
+        observed.sel(obs_ind=during_paths.get_index("obs_ind")) - during_paths
+    )
+    post_impact = observed.sel(obs_ind=post_paths.get_index("obs_ind")) - post_paths
     rows: dict[str, dict[str, float]] = {}
     lines = []
-    for period, mask in periods.items():
+    for period, impact, counterfactual in (
+        ("intervention", during_impact, during_paths),
+        ("post_intervention", post_impact, post_paths),
+    ):
         effects = _effect_rows(
-            impact.isel(obs_ind=mask),
-            paths.isel(obs_ind=mask),
+            impact,
+            counterfactual,
             prob,
             cumulative=cumulative,
             relative=relative,
         )
         rows[period] = effects["average"].copy()
-        for effect, row in effects.items():
-            period_label = period.replace("_", "-")
-            lines.append(
-                f"The {period_label} {effect} effect is {_format_effect(row)}."
-            )
-            if relative:
-                lines.append(
-                    f"The {period_label} {effect} relative effect in percent is "
-                    f"{_format_effect(row, 'relative_')}."
-                )
+        period_label = period.replace("_", "-")
+        lines.append(
+            f"The {period_label} period includes {_observations_text(impact)}."
+        )
+        lines.extend(_effect_lines(f"The {period_label}", effects, relative))
         if cumulative:
             rows[period].update(
                 {f"total_{key}": value for key, value in effects["cumulative"].items()}
             )
     if relative:
-        during_mean = impact.isel(obs_ind=during).mean("obs_ind")
-        post_mean = impact.isel(obs_ind=~during).mean("obs_ind")
-        ratio = 100 * _stable_ratio(post_mean, during_mean, prob)
-        interval = _effect_interval(ratio, prob)
+        interval = {
+            key: 100 * value
+            for key, value in _persistence_interval(
+                during_impact, post_impact, prob
+            ).items()
+        }
         rows["post_intervention"].update(
             persistence_ratio_pct=interval["mean"],
             persistence_pi_lower=interval["pi_lower"],
@@ -199,3 +239,40 @@ def _compare_realized_effects(
             f"Persistence as a percentage of intervention impact is {_format_effect(interval)}."
         )
     return _prediction_summary(rows, lines, paths, prob)
+
+
+def _analyze_realized_persistence(
+    observed: xr.DataArray,
+    paths: xr.DataArray,
+    treatment_end_time: int | float | pd.Timestamp,
+    prob: float,
+) -> dict[str, float]:
+    during, post = _split_realized_periods(observed - paths, treatment_end_time)
+    result = {}
+    level = _format_probability_as_percent(prob)
+    print(
+        f"Effect persistence with {level} bootstrap prediction intervals for realized impact."
+    )
+    for period, label, impact in (
+        ("during", "Intervention", during),
+        ("post", "Post-intervention", post),
+    ):
+        print(f"{label} period includes {_observations_text(impact)}.")
+        for metric, values in (
+            ("mean", impact.mean("obs_ind")),
+            ("total", impact.sum("obs_ind")),
+        ):
+            row = _effect_interval(values, prob)
+            key = f"{metric}_effect_{period}"
+            result[key] = row["mean"]
+            result[f"{key}_pi_lower"] = row["pi_lower"]
+            result[f"{key}_pi_upper"] = row["pi_upper"]
+            print(f"  {metric.capitalize()} effect is {_format_effect(row)}.")
+    ratio = _persistence_interval(during, post, prob)
+    result.update(
+        persistence_ratio=ratio["mean"],
+        persistence_ratio_pi_lower=ratio["pi_lower"],
+        persistence_ratio_pi_upper=ratio["pi_upper"],
+    )
+    print(f"Persistence ratio is {_format_effect(ratio)}.")
+    return result

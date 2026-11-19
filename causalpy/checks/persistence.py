@@ -21,6 +21,7 @@ Only applicable when ``treatment_end_time`` is set.
 
 from __future__ import annotations
 
+from math import isfinite
 from typing import Any, Literal
 
 import pandas as pd
@@ -41,7 +42,7 @@ class PersistenceCheck:
     Parameters
     ----------
     hdi_prob : float
-        HDI probability (Bayesian models only). Defaults to
+        Probability for Bayesian HDIs or skforecast prediction intervals. Defaults to
         :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
     direction : {"increase", "decrease", "two-sided"}
         Tail probability direction. Defaults to ``"increase"``.
@@ -99,29 +100,15 @@ class PersistenceCheck:
             direction=self.direction,
         )
 
+        metrics = [
+            "mean_effect_during",
+            "mean_effect_post",
+            "persistence_ratio",
+            "total_effect_during",
+            "total_effect_post",
+        ]
         table = pd.DataFrame(
-            [
-                {
-                    "metric": "mean_effect_during",
-                    "value": persistence["mean_effect_during"],
-                },
-                {
-                    "metric": "mean_effect_post",
-                    "value": persistence["mean_effect_post"],
-                },
-                {
-                    "metric": "persistence_ratio",
-                    "value": persistence["persistence_ratio"],
-                },
-                {
-                    "metric": "total_effect_during",
-                    "value": persistence["total_effect_during"],
-                },
-                {
-                    "metric": "total_effect_post",
-                    "value": persistence["total_effect_post"],
-                },
-            ]
+            {"metric": metrics, "value": [persistence[metric] for metric in metrics]}
         )
 
         ratio = persistence["persistence_ratio"]
@@ -131,6 +118,12 @@ class PersistenceCheck:
             f"persists after the intervention ends; near 0.0 indicates "
             f"the effect decays completely."
         )
+        if "persistence_ratio_pi_lower" in persistence:
+            for bound in ("pi_lower", "pi_upper"):
+                table[bound] = [persistence[f"{metric}_{bound}"] for metric in metrics]
+            if not isfinite(ratio):
+                text = "The persistence ratio is unavailable because the intervention impact denominator is unstable."
+            text += f" Intervals are {self.hdi_prob:.1%} bootstrap prediction intervals for realized impact."
 
         return CheckResult(
             check_name="PersistenceCheck",
