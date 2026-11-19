@@ -11,7 +11,7 @@ myst:
 :alt: CausalPy logo
 :::
 
-# Causal Inference for Quasi-Experiments in Python
+# CausalPy
 
 CausalPy helps you estimate what changed because of an intervention when a randomized experiment is not available. Use Bayesian models or scikit-learn with methods such as interrupted time series, synthetic control, difference-in-differences and regression discontinuity. <a class="cp-methods-pill" href="index.html#methods-and-workflows">More methods →</a>
 
@@ -34,13 +34,6 @@ experiment = cp.InterruptedTimeSeries(
     formula="y ~ 1 + t + season",
     model=cp.pymc_models.LinearRegression(),
 ).fit()
-plot_data = experiment.get_plot_data(hdi_prob=0.94)
-for revealed_month in df.index[df.index >= pd.Timestamp("2024-01-01")]:
-    summary = experiment.effect_summary(
-        window=(pd.Timestamp("2024-01-01"), revealed_month),
-        alpha=0.06, cumulative=False, relative=False,
-    )
-    average = summary.table.loc["average", ["mean", "hdi_lower", "hdi_upper"]]
 ```
 
 See the {doc}`worked Python example <notebooks/interrupted-time-series-pymc>` for a complete interrupted time series analysis.
