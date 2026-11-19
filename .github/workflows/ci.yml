@@ -127,6 +127,7 @@ jobs:
           - python-version: "3.12"
             pandas-version: "2.3"
             pandas-group: "pandas2"
+            optional-extra: "--extra skforecast"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -146,7 +147,7 @@ jobs:
         # needs mypy, which lives in `dev` (and `lint`), not `test`.
         run: >-
           uv sync --locked --extra test --extra dev --python ${{ matrix.python-version }}
-          --group ${{ matrix.pandas-group }}
+          --group ${{ matrix.pandas-group }} ${{ matrix.optional-extra }}
       - name: Fingerprint the resolved PyTensor C-cache runtime
         id: pytensor-c-cache-fingerprint
         run: |

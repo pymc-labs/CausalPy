@@ -81,6 +81,7 @@ dependencies = [
 forecast = [
     "pymc-forecast[extras]>=0.3,<0.4",
 ]
+skforecast = ["skforecast>=0.27,<0.28"]
 dev = [
     "prek",
     # Pinned: a type checker that floats turns an untouched branch red whenever upstream ships new checks. Bump deliberately, with the allowlist in [tool.mypy] re-measured (issue #1127). TOML cannot share the value, so the same pin appears in the ``lint`` extra below and the two must be bumped together.
@@ -161,6 +162,10 @@ pandas3 = ["pandas<4,>=3"]
 conflicts = [
     [
         { group = "pandas2" },
+        { group = "pandas3" },
+    ],
+    [
+        { extra = "skforecast" },
         { group = "pandas3" },
     ],
 ]

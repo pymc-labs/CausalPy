@@ -13,12 +13,93 @@
 #   limitations under the License.
 """Custom scikit-learn models for causal inference."""
 
+from dataclasses import dataclass
 from functools import partial
+from numbers import Integral
+from typing import Any
 
 import numpy as np
 from scipy.optimize import fmin_slsqp
-from sklearn.base import RegressorMixin
+from sklearn.base import RegressorMixin, is_classifier
 from sklearn.linear_model._base import LinearModel
+
+
+@dataclass(frozen=True, init=False)
+class SkforecastModel:
+    """Configure a recursive skforecast model for interrupted time series.
+
+    Requires the optional ``causalpy[skforecast]`` extra. CausalPy fits an
+    owned copy of the template so it can be reused across experiments.
+
+    Parameters
+    ----------
+    forecaster : skforecast.recursive.ForecasterRecursive
+        Unfitted single-series regression forecaster. Set its lags, features,
+        estimator, and estimator seed here. Use ``differentiation=None``.
+    calibration_size : int
+        Number of pre-intervention rows reserved for held-out one-step
+        calibration. Must be at least two. The preceding training prefix
+        must be longer than the forecaster's lag and feature window.
+    n_boot : int, default 1000
+        Number of future paths to simulate. Must be at least two.
+    random_state : int, default 123
+        Non-negative seed for residual sampling.
+    """
+
+    forecaster: Any
+    calibration_size: int
+    n_boot: int
+    random_state: int
+
+    def __init__(
+        self,
+        forecaster: Any,
+        calibration_size: int,
+        *,
+        n_boot: int = 1000,
+        random_state: int = 123,
+    ) -> None:
+        _validate_recursive_forecaster(forecaster)
+        for name, value, minimum in (
+            ("calibration_size", calibration_size, 2),
+            ("n_boot", n_boot, 2),
+            ("random_state", random_state, 0),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Integral)
+                or value < minimum
+            ):
+                raise ValueError(f"{name} must be an integer >= {minimum}.")
+        object.__setattr__(self, "forecaster", forecaster)
+        object.__setattr__(self, "calibration_size", int(calibration_size))
+        object.__setattr__(self, "n_boot", int(n_boot))
+        object.__setattr__(self, "random_state", int(random_state))
+
+
+def _validate_recursive_forecaster(forecaster: Any) -> None:
+    try:
+        from skforecast.recursive import ForecasterRecursive
+    except ModuleNotFoundError as exc:
+        if exc.name != "skforecast":
+            raise
+        raise ImportError(
+            "Install 'causalpy[skforecast]' to use SkforecastModel."
+        ) from exc
+
+    if not isinstance(forecaster, ForecasterRecursive) or is_classifier(
+        forecaster.estimator
+    ):
+        raise ValueError(
+            "SkforecastModel requires a single-series regression ForecasterRecursive. "
+            "Use ForecasterRecursive with a regression estimator."
+        )
+    if forecaster.is_fitted:
+        raise ValueError("Pass an unfitted ForecasterRecursive template.")
+    if forecaster.differentiation is not None:
+        raise ValueError(
+            "SkforecastModel requires differentiation=None for one-step calibration."
+        )
 
 
 class ScikitLearnAdaptor:

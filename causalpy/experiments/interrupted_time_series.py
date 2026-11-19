@@ -22,6 +22,11 @@ from matplotlib import pyplot as plt
 from sklearn.base import RegressorMixin
 
 from causalpy._arviz_compat import hdi_bounds
+from causalpy._predictive_intervals import (
+    _compare_realized_effects,
+    _prediction_interval,
+    _summarize_realized_effect,
+)
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import BadIndexException
 from causalpy.date_utils import (
@@ -30,7 +35,7 @@ from causalpy.date_utils import (
     validate_treatment_time_against_index,
 )
 from causalpy.experiments._results import CausalResult
-from causalpy.experiments.model_adapter import build_coords
+from causalpy.experiments.model_adapter import ModelAdapter, build_coords
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas_with_time_index
 from causalpy.plot_utils import (
@@ -43,6 +48,7 @@ from causalpy.plot_utils import (
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _apply_prior_grouping
+from causalpy.skl_models import SkforecastModel
 from causalpy.utils import _as_scalar
 
 from .base import BaseExperiment
@@ -70,6 +76,18 @@ def _ols_prob_mean_positive(impact: np.ndarray) -> float:
     return float(t.sf(0.0, df=n - 1, loc=mean, scale=standard_error))
 
 
+def _predictive_plot_series(
+    paths: xr.DataArray, observed: xr.DataArray
+) -> dict[str, xr.DataArray]:
+    predictions = paths.isel(treated_units=0, drop=True)
+    impact = observed - predictions
+    return {
+        "pred": predictions,
+        "impact": impact,
+        "cumulative_impact": impact.cumsum("obs_ind"),
+    }
+
+
 class InterruptedTimeSeries(BaseExperiment[CausalResult]):
     """
     The class for interrupted time series analysis.
@@ -94,13 +112,16 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         post-intervention period (uses ``>=`` comparison).
     formula : str
         A statistical model formula using patsy syntax (e.g., "y ~ 1 + t + C(month)").
-    model : Union[PyMCModel, RegressorMixin, PyMCForecastModel], optional
+    model : PyMCModel, RegressorMixin, PyMCForecastModel, or SkforecastModel, optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, defaults to a PyMC
         LinearRegression model. Alternatively, a
         :class:`~causalpy.pymc_forecast_models.PyMCForecastModel` wrapping a
         ``pymc_forecast`` forecasting model can serve as the counterfactual
         backend (requires the optional ``pymc-forecast`` dependency); see
         :mod:`causalpy.pymc_forecast_models` for when to prefer it.
+        :class:`~causalpy.skl_models.SkforecastModel` uses held-out one-step
+        calibration to simulate untreated outcomes and estimate prediction
+        intervals for realized impact.
     treatment_end_time : Union[int, float, pd.Timestamp], optional
         The time when treatment ended, enabling three-period analysis. Must be
         greater than ``treatment_time`` and within the data range. If None (default),
@@ -182,6 +203,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
     supports_ols = True
     supports_bayes = True
     supports_pymc_forecast = True
+    supports_skforecast = True
     _default_model_class = LinearRegression
 
     def __init__(
@@ -189,7 +211,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         data: DataFrameLike,
         treatment_time: int | float | pd.Timestamp,
         formula: str,
-        model: PyMCModel | RegressorMixin | PyMCForecastModel | None = None,
+        model: PyMCModel
+        | RegressorMixin
+        | PyMCForecastModel
+        | SkforecastModel
+        | None = None,
         treatment_end_time: int | float | pd.Timestamp | None = None,
         time_column: str | None = None,
     ) -> None:
@@ -205,8 +231,14 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         self.treatment_end_time = treatment_end_time
         self.expt_type = "Pre-Post Fit"
         self.formula = formula
-        self._build_design_matrices()
-        self._prepare_data()
+        self._build_design_matrices(self._model_backend.calibration_size)
+
+    def _prepare_model_design(self, adapter: ModelAdapter) -> None:
+        if (
+            hasattr(self, "pre_design")
+            and adapter.calibration_size != self._model_backend.calibration_size
+        ):
+            self._build_design_matrices(adapter.calibration_size)
 
     def _fit_inputs(
         self,
@@ -237,8 +269,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         post_y = self.post_design["y"]
 
         predictions_pre = self._model_backend.predict(X=pre_X, group=group)
-        predictions_post = self._model_backend.predict(
-            X=post_X, out_of_sample=True, group=group
+        predictions_post, counterfactual_paths = (
+            self._model_backend.predict_counterfactual(post_X, group=group)
         )
         # Impact below relies on exact obs_ind alignment; a mismatch (e.g. a bare
         # ndarray X getting arange coords) would silently corrupt the subtraction.
@@ -263,6 +295,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             impact_post=impact_post,
             impact_post_cumulative=impact_post_cumulative,
             score=score,
+            counterfactual_paths=counterfactual_paths,
         )
         self._assign_bundle(group, bundle)
 
@@ -301,35 +334,39 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             ),
         }
 
-    def _build_design_matrices(self) -> None:
-        """Build design matrices for pre and post intervention periods using patsy."""
-        y, X = build_formula_matrices(self.formula, self.datapre)
-        self.outcome_variable_name = y.design_info.column_names[0]
-        self._y_design_info = y.design_info
-        self._x_design_info = X.design_info
-        self.labels = X.design_info.column_names
-        self._pre_y_raw, self._pre_X_raw = np.asarray(y), np.asarray(X)
-        (new_y, new_x) = build_design_matrices(
-            [self._y_design_info, self._x_design_info], self.datapost
-        )
-        self._post_X_raw = np.asarray(new_x)
-        self._post_y_raw = np.asarray(new_y)
+    def _build_design_matrices(self, calibration_size: int | None) -> None:
+        """Learn Patsy state on the fitting rows and apply it to later observations."""
+        pre, post = self.datapre, self.datapost
+        training = pre if calibration_size is None else pre.iloc[:-calibration_size]
+        if calibration_size is not None and training.empty:
+            raise ValueError("calibration_size must leave a nonempty training prefix.")
+        na_action = {} if calibration_size is None else {"NA_action": "raise"}
+        pre_y, pre_x = build_formula_matrices(self.formula, training, **na_action)
+        y_info, x_info = pre_y.design_info, pre_x.design_info
+        if calibration_size is not None:
+            if len(y_info.column_names) != 1:
+                raise ValueError(
+                    "SkforecastModel requires a single continuous outcome."
+                )
+            pre_y, pre_x = build_design_matrices([y_info, x_info], pre, **na_action)
+        post_y, post_x = build_design_matrices([y_info, x_info], post, **na_action)
+        if calibration_size is not None and not np.isfinite(post_y).all():
+            raise ValueError(
+                "SkforecastModel requires finite post-intervention outcomes."
+            )
 
-    def _prepare_data(self) -> None:
-        """Bundle design matrices into ``xr.Dataset`` objects for pre and post periods."""
-        self.pre_design = self._build_design_dataset(
-            self._pre_X_raw,
-            self._pre_y_raw,
-            obs_ind=self.datapre.index,
-            coeffs=self.labels,
+        labels = x_info.column_names
+        pre_design = self._build_design_dataset(
+            np.asarray(pre_x), np.asarray(pre_y), obs_ind=pre.index, coeffs=labels
         )
-        self.post_design = self._build_design_dataset(
-            self._post_X_raw,
-            self._post_y_raw,
-            obs_ind=self.datapost.index,
-            coeffs=self.labels,
+        post_design = self._build_design_dataset(
+            np.asarray(post_x), np.asarray(post_y), obs_ind=post.index, coeffs=labels
         )
-        del self._pre_X_raw, self._pre_y_raw, self._post_X_raw, self._post_y_raw
+        # Publish the design only after both periods have been validated.
+        self.outcome_variable_name = y_info.column_names[0]
+        self._y_design_info, self._x_design_info = y_info, x_info
+        self.labels = labels
+        self.pre_design, self.post_design = pre_design, post_design
 
     def input_validation(
         self,
@@ -562,7 +599,24 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         """
         print(f"{self.expt_type:=^80}")
         print(f"Formula: {self.formula}")
-        self.print_coefficients(round_to)
+        paths = self.result.counterfactual_paths if self.is_fitted else None
+        if paths is None:
+            self.print_coefficients(round_to)
+            return
+        attrs = paths.attrs
+        print(f"Model {attrs['forecaster']} ({attrs['estimator']})")
+        print(
+            f"Held-out calibration used {attrs['calibration_count']} finite one-step errors."
+        )
+        if attrs["calibration_degenerate"]:
+            print("The pooled calibration errors are degenerate.")
+        print(
+            format_r2_score(
+                self.result.score,
+                round_to=round_to,
+                context="on held-out one-step forecasts",
+            )
+        )
 
     def plot(
         self,
@@ -596,7 +650,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         ci_prob : float
             Probability mass of the credible interval drawn around the
             posterior predictive, causal impact, and cumulative impact bands.
-            Must be in ``(0, 1]``. Ignored for OLS models. Defaults to
+            For skforecast this sets the mass of the equal-tailed bootstrap
+            prediction intervals. Must be in ``(0, 1]``. Ignored for OLS models. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         kind : {"ribbon", "histogram", "spaghetti"}, optional
             How posterior uncertainty is rendered via
@@ -606,7 +661,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             heatmap with a mean line overlay (no ribbon patch for legends).
         ci_kind : {"hdi", "eti"}, optional
             Credible interval type when ``kind="ribbon"``. Defaults to
-            ``"hdi"``.
+            ``"hdi"``. The skforecast backend uses equal-tailed ribbons.
         num_samples : int, optional
             Number of posterior draws when ``kind="spaghetti"``. Defaults
             to 50. Ignored for other kinds.
@@ -703,8 +758,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
         Consumes the resolved group bundle injected by
         :meth:`~causalpy.experiments.base.BaseExperiment._render_plot`.
-        Uncertainty bands are drawn only when the container carries draws;
-        point-estimate backends (singleton ``chain``/``draw``) get bare lines.
+        Uncertainty bands come from posterior draws or separate predictive paths.
 
         Parameters
         ----------
@@ -737,6 +791,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         pre_pred_all = bundle.predictions_pre
         post_pred_all = bundle.predictions_post
         with_uncertainty = has_posterior_draws(pre_pred_all)
+        paths = bundle.counterfactual_paths
         single_post_obs = len(self.datapost) <= 1
 
         pre_pred = pre_pred_all.isel(treated_units=0)
@@ -794,12 +849,23 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             ax[0].plot(self.datapost.index, post_y, "k.", zorder=3)
         else:
             ax[0].plot(self.datapre.index, pre_y, "k.")
-            ax[0].plot(
-                self.datapre.index,
-                pre_pred.mean(("chain", "draw")),
-                c="k",
-                label="model fit",
-            )
+            pre_point = pre_pred.mean(("chain", "draw"))
+            if paths is None:
+                ax[0].plot(self.datapre.index, pre_point, c="k", label="model fit")
+            else:
+                split = len(pre_point) - paths.attrs["calibration_size"]
+                ax[0].plot(
+                    self.datapre.index[:split],
+                    pre_point[:split],
+                    c="C0",
+                    label="Training fit",
+                )
+                ax[0].plot(
+                    self.datapre.index[split:],
+                    pre_point[split:],
+                    c="C2",
+                    label="Held-out one-step predictions",
+                )
             ax[0].plot(self.datapost.index, post_y, "k.")
             ax[0].plot(
                 self.datapost.index,
@@ -828,7 +894,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             title=format_r2_score(
                 bundle.score,
                 round_to=round_to,
-                context="on pre-intervention data",
+                context=(
+                    "on pre-intervention data"
+                    if paths is None
+                    else "on held-out one-step forecasts"
+                ),
             )
         )
 
@@ -901,6 +971,22 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             )
         ax[2].axhline(y=0, c="k")
         ax[2].set(title="Cumulative Causal Impact")
+
+        if paths is not None:
+            series = _predictive_plot_series(paths, post_y)
+            label = f"{ci_prob:.1%} bootstrap prediction interval"
+            for i, samples in enumerate(series.values()):
+                lower, upper = _prediction_interval(samples, ci_prob)
+                kwargs = {"color": "C1", "label": label if i == 0 else None}
+                if single_post_obs:
+                    ax[i].vlines(self.datapost.index, lower, upper, **kwargs)
+                    ax[i].plot(
+                        self.datapost.index, samples.mean("simulation"), ".", c="C1"
+                    )
+                else:
+                    ax[i].fill_between(
+                        self.datapost.index, lower, upper, alpha=0.25, **kwargs
+                    )
 
         # Intervention lines. Use a thin dashed black style and a zorder just
         # below the data so the treatment marker reads as a neutral
@@ -1025,13 +1111,17 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         hdi_prob : float, default :data:`~causalpy.constants.HDI_PROB`
             Probability mass of the highest density interval. Defaults to the
             project-wide :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
-            Ignored when the prediction container has no draws.
+            Sets the equal-tailed prediction interval level for skforecast.
+            Ignored for OLS models.
 
         Returns
         -------
         pd.DataFrame
             Observed data with ``prediction`` and ``impact`` columns plus HDI
-            bounds when draws are available. Not cached on the experiment.
+            bounds when draws are available. For skforecast, includes
+            ``cumulative_impact`` and ``*_pi_lower_*`` / ``*_pi_upper_*`` columns
+            for prediction, impact, and cumulative impact after intervention.
+            Pre-intervention bounds are missing.
         """
         bundle = self._require_bundle(group)
         with_uncertainty = has_posterior_draws(bundle.predictions_pre)
@@ -1072,6 +1162,18 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 post_data.index
             )
 
+        if bundle.counterfactual_paths is not None:
+            post_y = self.post_design["y"].isel(treated_units=0, drop=True)
+            post_data["cumulative_impact"] = bundle.impact_post_cumulative.mean(
+                ("chain", "draw")
+            ).values
+            for name, series in _predictive_plot_series(
+                bundle.counterfactual_paths, post_y
+            ).items():
+                lower, upper = _prediction_interval(series, hdi_prob)
+                post_data[f"{name}_pi_lower_{hdi_pct}"] = lower.values
+                post_data[f"{name}_pi_upper_{hdi_pct}"] = upper.values
+
         return pd.concat([pre_data, post_data])
 
     def analyze_persistence(
@@ -1092,7 +1194,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         Parameters
         ----------
         hdi_prob : float
-            Probability for the HDI interval (Bayesian models only). Defaults
+            Probability for the Bayesian HDI or skforecast prediction interval. Defaults
             to :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         direction : {"increase", "decrease", "two-sided"}, default="increase"
             Direction for tail probability calculation (Bayesian models only)
@@ -1107,6 +1209,9 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             - "persistence_ratio": Post-intervention mean effect divided by intervention mean (decimal, can exceed 1.0)
             - "total_effect_during": Total (cumulative) effect during intervention period
             - "total_effect_post": Total (cumulative) effect during post-intervention period
+            - For skforecast, each estimate also has ``_pi_lower`` and
+              ``_pi_upper`` entries. Persistence ratios are computed within
+              paired paths and are missing when the denominator is unstable.
 
         Raises
         ------
@@ -1142,7 +1247,29 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 "This method is only available for three-period designs."
             )
 
-        slices = self._period_slices(self.result)
+        bundle = self.result
+        if bundle.counterfactual_paths is not None:
+            summary = self.effect_summary(period="comparison", alpha=1 - hdi_prob)
+            assert summary.table is not None
+            print(summary.text)
+            table = summary.table
+            during = table.loc["intervention"]
+            post = table.loc["post_intervention"]
+            result = {}
+            for period, row in (("during", during), ("post", post)):
+                for metric, column in (("mean", ""), ("total", "total_")):
+                    key = f"{metric}_effect_{period}"
+                    result[key] = float(row[f"{column}mean"])
+                    result[f"{key}_pi_lower"] = float(row[f"{column}pi_lower"])
+                    result[f"{key}_pi_upper"] = float(row[f"{column}pi_upper"])
+            result.update(
+                persistence_ratio=float(post["persistence_ratio_pct"]) / 100,
+                persistence_ratio_pi_lower=float(post["persistence_pi_lower"]) / 100,
+                persistence_ratio_pi_upper=float(post["persistence_pi_upper"]) / 100,
+            )
+            return result
+
+        slices = self._period_slices(bundle)
         intervention_impact = slices["intervention_impact"]
         intervention_pred = slices["intervention_pred"]
         post_intervention_impact = slices["post_intervention_impact"]
@@ -1293,7 +1420,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         direction : {"increase", "decrease", "two-sided"}, default="increase"
             Direction for tail probability calculation (PyMC only, ignored for OLS).
         alpha : float, default=0.05
-            Significance level for HDI/CI intervals (1-alpha confidence level).
+            Tail mass for intervals. Skforecast reports equal-tailed bootstrap
+            prediction intervals with mass ``1 - alpha``.
         cumulative : bool, default=True
             Whether to include cumulative effect statistics.
         relative : bool, default=True
@@ -1321,8 +1449,6 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             _extract_window,
         )
 
-        # Handle period parameter for three-period designs
-        post_coords = None
         if period is not None:
             # Validate period parameter
             valid_periods = ["intervention", "post", "comparison"]
@@ -1341,10 +1467,52 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                     "Provide treatment_end_time to enable period-specific analysis."
                 )
 
+        bundle = self._require_bundle(group)
+        paths = bundle.counterfactual_paths
+        if paths is not None:
+            coords = self.datapost.index
+            end = self.treatment_end_time
+            if end is not None and period in ("intervention", "post"):
+                if period == "intervention":
+                    coords = coords[coords < end]
+                    prefix = "During intervention"
+                else:
+                    coords = coords[coords >= end]
+                    prefix = "Post-intervention"
+            paths, selected = _extract_window(
+                paths.sel(obs_ind=coords), coords, window, treated_unit=treated_unit
+            )
+            observed = (
+                self.post_design["y"]
+                .isel(treated_units=0, drop=True)
+                .sel(obs_ind=selected)
+            )
+            if period == "comparison":
+                assert end is not None
+                return _compare_realized_effects(
+                    observed,
+                    paths,
+                    end,
+                    1 - alpha,
+                    cumulative=cumulative,
+                    relative=relative,
+                )
+            return _summarize_realized_effect(
+                observed,
+                paths,
+                1 - alpha,
+                prefix=prefix,
+                cumulative=cumulative,
+                relative=relative,
+            )
+
+        # Preserve historical window selection for posterior and OLS summaries.
+        post_coords = None
+        if period is not None:
             if period == "comparison":
                 # Comparison period: delegate to subclass method
                 return self._comparison_period_summary(
-                    bundle=self._require_bundle(group),
+                    bundle=bundle,
                     direction=direction,
                     alpha=alpha,
                     cumulative=cumulative,
@@ -1369,9 +1537,6 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                     self.datapost.index >= self.treatment_end_time
                 ]
                 prefix = "Post-intervention"
-
-        # Resolve the group's bundle once; helpers consume containers.
-        bundle = self._require_bundle(group)
 
         # Extract windowed impact data
         if post_coords is not None:

@@ -1,6 +1,6 @@
 # ARCHITECTURE
 
-CausalPy implements 10+ quasi-experimental causal inference methods over two core statistical backends (PyMC and scikit-learn), plus an optional third backend (`pymc-forecast`, currently `InterruptedTimeSeries` only). This document orients agents and contributors to where things live, how the pieces compose, and the non-obvious conventions.
+CausalPy implements 10+ quasi-experimental causal inference methods over two core statistical backends (PyMC and scikit-learn) and two optional forecasting backends for `InterruptedTimeSeries` (`pymc-forecast` and `skforecast`). This document orients agents and contributors to where things live, how the pieces compose, and the non-obvious conventions.
 
 ## Module Map
 
@@ -9,7 +9,7 @@ CausalPy implements 10+ quasi-experimental causal inference methods over two cor
 | `causalpy/__init__.py` | Public API — re-exports experiment classes, models, pipeline, steps, transforms |
 | `causalpy/experiments/` | One experiment class per file; `base.py` holds `BaseExperiment` |
 | `causalpy/pymc_models.py` | All `PyMCModel` subclasses (Bayesian backend) |
-| `causalpy/skl_models.py` | `ScikitLearnAdaptor` mixin, `create_causalpy_compatible_class()` |
+| `causalpy/skl_models.py` | `ScikitLearnAdaptor` mixin, `create_causalpy_compatible_class()`, optional `SkforecastModel` |
 | `causalpy/pymc_forecast_models.py` | `PyMCForecastModel` wrapper (optional `pymc-forecast` backend) |
 | `causalpy/reporting.py` | `EffectSummary`, statistics and prose for both backends |
 | `causalpy/pipeline.py` | `Pipeline`, `PipelineContext`, `PipelineResult`, `Step` protocol |
@@ -73,6 +73,10 @@ Experiments with non-standard fit signatures bypass this path and call `self.mod
 
 The optional third backend, `PyMCForecastModel` (`causalpy/pymc_forecast_models.py`), wraps a `pymc_forecast` forecasting model behind the same protocol and is wired through `PyMCForecastAdapter`. It reports as Bayesian (`is_bayesian` is true for both `"pymc"` and `"pymc-forecast"` adapter kinds), so experiments and checks that branch on Bayesian-vs-OLS treat it like a PyMC backend. Experiments opt in via `supports_pymc_forecast` (currently `InterruptedTimeSeries` only); the dependency ships as the `causalpy[forecast]` extra, pinned to one upstream minor while `pymc-forecast` is 0.x. The current range is `>=0.3,<0.4`: model builders accept `(covariates, data=None)` and use `Horizon.from_data`, `innovations`, and `markov_series`. The wrapper prefers explicit upstream expected-observation outputs for canonical `mu`, falling back to the upstream latent only under the model author’s obligation to supply response-scale expectations. It keeps noisy draws in `y_hat` and uses one shared posterior subsample across pre- and post-period predictions. `StatespaceForecaster` remains unsupported until upstream provides a separate noise-free expectation.
 
+`SkforecastModel` is a Tier 2 constructor in `causalpy.skl_models`. Only ITS opts in via `supports_skforecast`. The adapter accepts canonical ITS design matrices, fits a copy of an unfitted recursive regression forecaster, and normalizes the upstream bootstrap output. ITS learns the Patsy design on the training prefix before the calibration tail and rebuilds it on replacement if the split changes. The `causalpy[skforecast]` extra pins the upstream minor range to `>=0.27,<0.28` and resolves with pandas 2.
+
+ITS stores response-scale means with singleton `chain` and `draw` dimensions. Its optional `result.counterfactual_paths` field stores separate future realizations on `(simulation, obs_ind, treated_units)`. Readers select prediction intervals by the presence of these paths. Each path starts at the final observed pre-intervention window and runs through the entire future horizon, so period splits preserve trajectory identity. Plots and reporting use equal-tailed quantiles after calculating each estimand within a path. The canonical score `unit_0_r2` measures held-out one-step performance. Coefficient tables and prior and posterior sampling diagnostics are unavailable for this backend.
+
 ## Historical placebo checks
 
 `PlaceboInTime` owns one fold-planning and execution path for both calibrated and descriptive analyses. Existing callers retain sequential/random selection, cumulative effects, hierarchical calibration, and their existing factory contract. Keyword-only `treatment_times` adds a copied explicit schedule; `min_training_rows` adds a row-count floor, and `comparison_frequency` validates complete calendar grids. One internal fold record owns the immutable window plan, execution status/reason, and optional fitted result; tables, schedule/skipped metadata, and prose are derived after execution. Random candidates use the same window planner and exclude incomplete calendar grids before feasible-subset selection. Explicit windows are preflighted before any fit. Overlapping explicit schedules require `allow_overlap=True, calibrate=False`; descriptive eligibility also requires at least one comparison window of training rows, regardless of the real post-period length.
@@ -81,10 +85,10 @@ Descriptive results are informational (`passed=None`) and omit null/assurance ca
 
 ## Experiment Lifecycle
 
-Construction is lazy: `__init__` runs validation and deterministic preprocessing only (`_build_design_matrices()` → `_prepare_data()`); nothing is sampled. The lifecycle is `configure → optional prior checks → fit()`:
+Construction runs validation and deterministic preprocessing. The lifecycle is `configure → optional prior checks → fit()`:
 
 - **`build()`** — public, idempotent, auto-called by both samplers. Merges data-driven priors (defaults → data-derived → user) and constructs the PyMC graph so the spec is inspectable (`pm.model_to_graphviz(exp.model)`, `exp.model.basic_RVs`) before any compute is spent.
-- **`sample_prior_predictive(**kwargs)`** — optional prior phase; populates `exp.prior_result`. Raises `PriorPredictiveNotSupportedException` on backends without a prior phase (sklearn, pymc-forecast, IV, state space).
+- **`sample_prior_predictive(**kwargs)`** — optional prior phase; populates `exp.prior_result`. Raises `PriorPredictiveNotSupportedException` on backends without a prior phase (sklearn, skforecast, pymc-forecast, IV, state space).
 - **`fit(**kwargs)`** — posterior phase; runs NUTS + posterior predictive first to preserve the RNG stream of the historical eager baseline, then fills the absent prior phase so `idata` matches the historical eager output. Both sampling phases re-arm mutable data nodes before drawing, so design correctness does not depend on phase order. Returns `Self`, so call sites migrate with one appended token: `cp.InterruptedTimeSeries(...).fit()`.
 
 Draw-derived state lives in per-experiment bundles (`causalpy/experiments/_results.py`) exposed through two raising properties: `exp.result` (posterior group) and `exp.prior_result` (prior group). Nothing derived from draws is assigned to the experiment itself; `is_fitted` / `has_prior_predictive` are predicates over those two slots. Read methods take keyword-only `group: Literal["prior", "posterior"]`; the guard and group→bundle resolution live once in `_render_plot()` / `_resolve_group()`. Missing groups raise `GroupNotSampledException` naming the call to make; both exceptions are re-exported from `causalpy`. Re-sampling overwrites its own group only (`fit()` again replaces posterior and warns; prior state survives). Assigning a new model — also the documented prior-revision path instead of a `set_priors()` — resets everything, because graph identity *is* the model instance.

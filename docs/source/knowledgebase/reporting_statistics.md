@@ -11,12 +11,13 @@ This page explains the statistical concepts used in CausalPy's reporting layer. 
 
 ## Model Types and Statistical Approaches
 
-CausalPy supports two modeling frameworks, each with its own statistical paradigm:
+CausalPy reports statistics according to the model and the quantity being estimated.
 
 | Model Framework | Statistical Approach | Statistics Reported |
 | --- | --- | --- |
 | PyMC models | Bayesian | Mean, Median, HDI, Tail Probabilities, ROPE |
 | Scikit-learn models | Frequentist (OLS) | Mean, Confidence Intervals, p-values |
+| skforecast in ITS | Recursive residual bootstrap | Mean and prediction intervals for realized impact |
 
 :::{note}
 The reporting layer automatically detects which type of model you're using and generates appropriate statistics. You don't need to specify the statistical approach.
@@ -232,6 +233,16 @@ Always report the actual p-value and effect size, not just whether p < 0.05. The
 - Larger |t-statistics| and smaller p-values indicate stronger evidence
 
 ---
+
+## Bootstrap prediction intervals for realized impact
+
+An ITS analysis with {class}`~causalpy.skl_models.SkforecastModel` estimates how far an observed outcome is from the untreated outcome that would have occurred at the same time. If the observation is 100 and the 95% prediction interval for its untreated value is [80, 95], subtraction gives [5, 20] for realized impact. The interval covers realized impact whenever the untreated forecast interval covers the missing outcome under the intervention design.
+
+Each simulation follows the recursive model from the last observed pre-intervention window, sampling held-out one-step errors as it forecasts. For average, total, and running cumulative impact, calculate observed minus untreated within each path and aggregate within the path before taking equal-tailed quantiles. This preserves dependence across time. Adding marginal interval endpoints discards that dependence.
+
+`effect_summary(alpha=0.05)` reports 95% intervals as `pi_lower` and `pi_upper`. `plot(ci_prob=0.95)` and `get_plot_data(hdi_prob=0.95)` use the same 95% level and the same stored simulations. The level applies to each time or selected aggregate separately. Relative average impact averages time-specific percentages within each path, while relative total impact divides the total impact by the total counterfactual within each path. For temporary interventions, persistence divides post-intervention mean impact by intervention mean impact in the same path. A zero denominator or a denominator interval spanning zero makes the ratio unavailable.
+
+The inference assumes the untreated dynamics and covariate relationships would continue and that no concurrent unmodeled change explains the gap. Pooling errors assumes approximately exchangeable innovations. These intervals capture future outcome variation conditional on one fitted model and the supplied covariates. Parameter refitting, future covariate uncertainty, and uncertainty about causal identification are outside the interval. See the {doc}`../notebooks/interrupted-time-series-sklearn` notebook for a historical coverage check.
 
 ## Choosing Between Approaches
 

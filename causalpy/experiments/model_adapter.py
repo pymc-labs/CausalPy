@@ -35,10 +35,10 @@ from causalpy.custom_exceptions import (
 )
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import PyMCModel
-from causalpy.skl_models import create_causalpy_compatible_class
+from causalpy.skl_models import SkforecastModel, create_causalpy_compatible_class
 from causalpy.utils import _design_fingerprint, round_num
 
-BackendKind = Literal["pymc", "sklearn", "pymc-forecast"]
+BackendKind = Literal["pymc", "sklearn", "pymc-forecast", "skforecast"]
 
 
 class _SamplingDiagnostics(TypedDict):
@@ -281,13 +281,18 @@ class ModelAdapter(ABC):
 
     @property
     @abstractmethod
-    def model(self) -> PyMCModel | RegressorMixin | PyMCForecastModel:
+    def model(self) -> PyMCModel | RegressorMixin | PyMCForecastModel | SkforecastModel:
         """The underlying model instance."""
 
     @property
     @abstractmethod
     def kind(self) -> BackendKind:
         """Backend identifier."""
+
+    @property
+    def calibration_size(self) -> int | None:
+        """Held-out tail required by a backend that calibrates on pre-period rows."""
+        return None
 
     @property
     def is_bayesian(self) -> bool:
@@ -384,6 +389,28 @@ class ModelAdapter(ABC):
             Expected outcomes with dimensions ``("chain", "draw", "obs_ind",
             "treated_units")``.
         """
+
+    def predict_counterfactual(
+        self, X: xr.DataArray, *, group: Literal["prior", "posterior"]
+    ) -> tuple[xr.DataArray, xr.DataArray | None]:
+        """Return expected outcomes and any separate future realization paths.
+
+        Parameters
+        ----------
+        X : xr.DataArray
+            Predictor matrix for the entire forecast horizon.
+        group : {"prior", "posterior"}
+            Which fitted group supplies the predictions.
+
+        Returns
+        -------
+        xr.DataArray
+            Expected outcomes in canonical prediction dimensions.
+        xr.DataArray or None
+            Response-scale future realizations on simulation, obs_ind, and
+            treated_units, when available.
+        """
+        return self.predict(X, out_of_sample=True, group=group), None
 
     @property
     def is_built(self) -> bool:
@@ -1328,12 +1355,13 @@ def _prepare_sklearn_model(model: RegressorMixin) -> RegressorMixin:
 
 
 def make_model_adapter(
-    model: PyMCModel | RegressorMixin | PyMCForecastModel | None,
+    model: PyMCModel | RegressorMixin | PyMCForecastModel | SkforecastModel | None,
     *,
     default_model_class: type[PyMCModel] | None,
     supports_bayes: bool,
     supports_ols: bool,
     supports_pymc_forecast: bool = False,
+    supports_skforecast: bool = False,
 ) -> ModelAdapter:
     """Resolve, validate, and wrap a model in a backend adapter.
 
@@ -1349,6 +1377,8 @@ def make_model_adapter(
         Whether the experiment supports OLS/sklearn backends.
     supports_pymc_forecast : bool, default False
         Whether the experiment supports pymc-forecast backends.
+    supports_skforecast : bool, default False
+        Whether the experiment supports skforecast backends.
 
     Returns
     -------
@@ -1378,5 +1408,12 @@ def make_model_adapter(
         if not supports_pymc_forecast:
             raise ValueError("pymc-forecast models not supported.")
         return PyMCForecastAdapter(model)
+
+    if isinstance(model, SkforecastModel):
+        if not supports_skforecast:
+            raise ValueError("SkforecastModel is supported by InterruptedTimeSeries.")
+        from causalpy.experiments._skforecast import _SkforecastAdapter
+
+        return _SkforecastAdapter(model)
 
     raise ValueError("Unsupported model type")

@@ -39,6 +39,7 @@ from causalpy.maketables_adapters import coefficient_table, get_maketables_adapt
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
+from causalpy.skl_models import SkforecastModel
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +133,7 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
     supports_bayes: bool
     supports_ols: bool
     supports_pymc_forecast: bool = False
+    supports_skforecast: bool = False
 
     _default_model_class: type[PyMCModel] | None = None
 
@@ -185,14 +187,19 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
     _supports_results: bool = True
 
     def __init__(
-        self, model: PyMCModel | RegressorMixin | PyMCForecastModel | None = None
+        self,
+        model: PyMCModel
+        | RegressorMixin
+        | PyMCForecastModel
+        | SkforecastModel
+        | None = None,
     ) -> None:
         self._result: ResultT | None = None
         self._prior_result: ResultT | None = None
         self._install_model(model)
 
     @property
-    def model(self) -> PyMCModel | RegressorMixin | PyMCForecastModel:
+    def model(self) -> PyMCModel | RegressorMixin | PyMCForecastModel | SkforecastModel:
         """The underlying model instance.
 
         Assigning a fresh model resets ``idata``, ``result``, and
@@ -204,12 +211,14 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
         return self._model_backend.model
 
     @model.setter
-    def model(self, value: PyMCModel | RegressorMixin | PyMCForecastModel) -> None:
+    def model(
+        self, value: PyMCModel | RegressorMixin | PyMCForecastModel | SkforecastModel
+    ) -> None:
         """Install *value* as the backend model and reset all lifecycle state.
 
         Parameters
         ----------
-        value : PyMCModel, RegressorMixin, or PyMCForecastModel
+        value : PyMCModel, RegressorMixin, PyMCForecastModel, or SkforecastModel
             The new backend model instance.
 
         Raises
@@ -227,7 +236,8 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
         self._install_model(value)
 
     def _install_model(
-        self, value: PyMCModel | RegressorMixin | PyMCForecastModel | None
+        self,
+        value: PyMCModel | RegressorMixin | PyMCForecastModel | SkforecastModel | None,
     ) -> None:
         """Validate *value* (``None`` builds the default) and install it."""
         adapter = make_model_adapter(
@@ -236,15 +246,20 @@ class BaseExperiment[ResultT: ResultBundle](ABC):
             supports_bayes=self.supports_bayes,
             supports_ols=self.supports_ols,
             supports_pymc_forecast=self.supports_pymc_forecast,
+            supports_skforecast=self.supports_skforecast,
         )
         if adapter.idata is not None:
             raise ValueError(
                 "The model already carries inference data. Pass a fresh model "
                 "instance instead of reusing a sampled model."
             )
+        self._prepare_model_design(adapter)
         self._model_backend = adapter
         self._result = None
         self._prior_result = None
+
+    def _prepare_model_design(self, adapter: ModelAdapter) -> None:  # noqa: B027
+        """Prepare design state for a replacement before the adapter is installed."""
 
     @property
     def idata(self) -> xr.DataTree | None:

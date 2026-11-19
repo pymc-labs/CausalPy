@@ -846,7 +846,9 @@ class PanelRegression(BaseExperiment[ResultBundle]):
                 0.975, dim=["chain", "draw"]
             ).values.flatten()
         else:
-            columns["y_fitted"] = np.squeeze(self.model.predict(self.design["X"]))
+            columns["y_fitted"] = self._model_backend.predict(
+                self.design["X"]
+            ).values.ravel()
         columns[self.unit_fe_variable] = self.data[self.unit_fe_variable].values
 
         plot_data = pd.DataFrame(columns)
@@ -1146,7 +1148,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
                 )
             else:
                 # OLS: get fitted values for this unit
-                y_fitted = np.squeeze(self.model.predict(self.design["X"]))[
+                y_fitted = self._model_backend.predict(self.design["X"]).values.ravel()[
                     sorted_obs_indices
                 ]
                 ax.plot(
