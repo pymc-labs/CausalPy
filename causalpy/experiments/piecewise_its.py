@@ -31,9 +31,6 @@ from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments._response_type import (
     check_response_type,
     finish_response_plot,
-    independent_predict_seed,
-    log_response_type_once,
-    note_prediction_summary,
     quantity_for,
 )
 from causalpy.experiments._results import CausalResult
@@ -457,7 +454,7 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
     ) -> CausalResult:
         """Return ``bundle`` or a draw-only copy using posterior predictive draws.
 
-        The effect is fitted minus counterfactual, matching :meth:`_finalize`.
+        Only outcome predictions change; structural effects retain their expectation contrast.
         The stored result is not mutated.
         """
         if check_response_type(response_type) == "expectation":
@@ -470,31 +467,21 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
         X_cf = X.copy()
         for idx in self._interruption_cols:
             X_cf[:, idx] = 0
-        with independent_predict_seed(getattr(self._model_backend, "_model", None)):
-            y_counterfactual = self._model_backend.predict_response(
-                X=X_cf, quantity=quantity, group=group
-            )
-        effect = predictions.isel(treated_units=0) - y_counterfactual.isel(
-            treated_units=0
+        y_counterfactual = self._model_backend.predict_response(
+            X=X_cf, quantity=quantity, group=group
         )
         post_indices = np.where(
-            np.asarray(self.data[self.time_col] >= self.interruption_times[0])
+            np.asarray(self.data[self.time_col] >= self._earliest_interruption_time())
         )[0]
         predictions_post = (
             y_counterfactual.isel(obs_ind=post_indices)
             .assign_coords(obs_ind=self.datapost.index)
             .transpose(..., "obs_ind", "treated_units")
         )
-        impact_post = effect.isel(obs_ind=post_indices).assign_coords(
-            obs_ind=self.datapost.index
-        )
         return replace(
             bundle,
             predictions_pre=predictions,
             predictions_post=predictions_post,
-            impact_pre=effect,
-            impact_post=impact_post,
-            impact_post_cumulative=impact_post.cumsum(dim="obs_ind"),
         )
 
     def plot(
@@ -546,9 +533,10 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
             Number of posterior draws when ``kind="spaghetti"``. Defaults
             to 50. Ignored for other kinds.
         response_type : {"expectation", "prediction"}, default "expectation"
-            Which quantity the uncertainty bands represent.
+            Which quantity the outcome bands represent. Structural-effect
+            and cumulative-effect panels retain their expectation contrast.
             ``"expectation"`` uses the conditional mean ``mu`` and excludes
-            observation noise. ``"prediction"`` uses posterior predictive
+            observation noise. ``"prediction"`` uses predictive
             ``y_hat`` and includes observation noise. Stored results stay on
             ``mu``. Point-estimate backends reject ``"prediction"``.
         show_response_annotation : bool, optional
@@ -571,9 +559,9 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : list[matplotlib.axes.Axes]
+        ax : list of :class:`~matplotlib.axes.Axes`
             The three axes (top: observed, fitted and counterfactual;
             middle: causal effect; bottom: cumulative effect).
         """
@@ -632,9 +620,9 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
 
         Returns
         -------
-        fig : plt.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The matplotlib figure.
-        ax : list[plt.Axes]
+        ax : list of :class:`~matplotlib.axes.Axes`
             List of axes objects.
         """
         bundle = self._bundle_for_response(
@@ -655,6 +643,7 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
             return finish_response_plot(
                 fig,
                 ax,
+                group=group,
                 response_type=response_type,
                 ci_prob=ci_prob,
                 ci_kind=ci_kind,
@@ -794,6 +783,7 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
         return finish_response_plot(
             fig,
             ax,
+            group=group,
             response_type=response_type,
             ci_prob=ci_prob,
             ci_kind=ci_kind,
@@ -963,7 +953,6 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
         treated_unit: str | None = None,
         period: Literal["intervention", "post", "comparison"] | None = None,
         prefix: str = "Post-period",
-        response_type: Literal["expectation", "prediction"] = "expectation",
     ) -> EffectSummary:
         """Generate a decision-ready summary of PiecewiseITS causal effects.
 
@@ -994,11 +983,6 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
             Not supported by PiecewiseITS; pass ``None``.
         prefix : str, default "Post-period"
             Prefix for prose generation.
-        response_type : {"expectation", "prediction"}, default "expectation"
-            ``"prediction"`` summarizes a posterior predictive contrast
-            (includes observation noise). The returned text says so. Stored
-            results stay on ``mu``. Point-estimate backends reject
-            ``"prediction"``.
         """
         from causalpy.reporting import (
             _effect_summary_timeseries,
@@ -1013,13 +997,7 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
             )
 
         # Resolve the group's bundle once; helpers consume containers.
-        bundle = self._bundle_for_response(
-            self._require_bundle(group),
-            response_type=response_type,
-            group=group,
-        )
-        if has_posterior_draws(bundle.predictions_post):
-            log_response_type_once("summary")
+        bundle = self._require_bundle(group)
 
         windowed_impact, window_coords = _extract_window(
             bundle.impact_post,
@@ -1030,7 +1008,7 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
         counterfactual = _extract_counterfactual(
             bundle.predictions_post, window_coords, treated_unit=treated_unit
         )
-        summary = _effect_summary_timeseries(
+        return _effect_summary_timeseries(
             windowed_impact,
             counterfactual,
             window_coords,
@@ -1043,5 +1021,3 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
             experiment_type="piecewise_its",
             group=group,
         )
-        summary.text = note_prediction_summary(summary.text, response_type)
-        return summary

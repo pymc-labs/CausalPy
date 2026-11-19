@@ -445,7 +445,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
         response_type : {"expectation", "prediction"}, default "expectation"
             Which quantity the uncertainty bands represent.
             ``"expectation"`` uses the conditional mean ``mu`` and excludes
-            observation noise. ``"prediction"`` uses posterior predictive
+            observation noise. ``"prediction"`` uses predictive
             ``y_hat`` and includes observation noise. The reported treatment
             effect stays the stored coefficient. Point-estimate backends
             reject ``"prediction"``.
@@ -469,9 +469,9 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : list[matplotlib.axes.Axes]
+        ax : list of :class:`~matplotlib.axes.Axes`
             The two axes (top: scatter and posterior predictive bands,
             bottom: estimated treatment effect posterior).
         """
@@ -544,6 +544,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             return finish_response_plot(
                 fig,
                 ax,
+                group=group,
                 response_type=response_type,
                 ci_prob=ci_prob,
                 ci_kind=ci_kind,
@@ -613,6 +614,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
         return finish_response_plot(
             fig,
             ax,
+            group=group,
             response_type=response_type,
             ci_prob=ci_prob,
             ci_kind=ci_kind,

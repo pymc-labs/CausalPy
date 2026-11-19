@@ -75,7 +75,11 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
     **Lazy lifecycle**
 
     Construction validates the inputs, builds the design matrices, and runs
-    the deterministic OLS/2SLS reference fits — no sampling happens. Call
+    the deterministic OLS/2SLS reference fits — no sampling happens.
+    ``instruments_data`` and ``data`` must have the same index in the same
+    order. A reversed or shuffled instrument index raises ``ValueError``
+    before the deterministic 2SLS fit, because first-stage fitted values are
+    written into the outcome frame by position. Call
     :meth:`fit` to build the model graph and draw posterior samples. Prior
     predictive sampling is unavailable: the
     :class:`~causalpy.pymc_models.InstrumentalVariableRegression` backend
@@ -295,7 +299,16 @@ class InstrumentalVariable(BaseExperiment[ResultBundle]):
         return self
 
     def input_validation(self) -> None:
-        """Validate the input data and model formula for correctness."""
+        """Validate the input data and model formula for correctness.
+
+        ``instruments_data`` and ``data`` must share the same index in the
+        same order. Two-stage least squares writes first-stage fitted values
+        into the outcome frame by position.
+        """
+        if not self.instruments_data.index.equals(self.data.index):
+            raise ValueError(
+                "instruments_data.index must equal data.index in the same order."
+            )
         if self.instrument_variable_name not in self._x_design_info.term_name_slices:
             raise DataException(
                 f"Treatment term '{self.instrument_variable_name}' from the instrument "

@@ -197,24 +197,7 @@ bibtex_default_style = "unsrt"
 bibtex_reference_style = "author_year"
 
 
-# numpydoc and autodoc typehints config
-numpydoc_show_class_members = False
-numpydoc_xref_param_type = True
-# fmt: off
-numpydoc_xref_ignore = {
-    "of", "or", "optional", "default", "numeric", "type", "scalar", "1D", "2D", "3D", "nD", "array",
-    "instance", "M", "N"
-}
-# fmt: on
-numpydoc_xref_aliases = {
-    "TensorVariable": ":class:`~pytensor.tensor.TensorVariable`",
-    "RandomVariable": ":class:`~pytensor.tensor.random.RandomVariable`",
-    "ndarray": ":class:`~numpy.ndarray`",
-    "InferenceData": ":class:`~arviz.InferenceData`",
-    "Model": ":class:`~pymc.Model`",
-    "tensor_like": ":term:`tensor_like`",
-    "unnamed_distribution": ":term:`unnamed_distribution`",
-}
+# autodoc typehints config
 # don't add a return type section, use standard return with type info
 typehints_document_rtype = False
 

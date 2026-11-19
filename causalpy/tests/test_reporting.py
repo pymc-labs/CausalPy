@@ -133,152 +133,28 @@ def test_prior_summary_labels_probabilities_and_rope_mass(summary_kind, directio
     assert prose.count("prior mass") == (2 if summary_kind == "timeseries" else 1)
 
 
-@pytest.mark.integration
-def test_effect_summary_basic(mock_pymc_sample, its_data):
-    """Test basic effect_summary functionality with ITS."""
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
+def _assert_windowed_average_matches_selected_impact(result, stats, selected_index):
+    """Public average is the mean impact on the selected index, not the full post period.
 
-    stats = result.effect_summary()
-
-    # Check return type
-    assert isinstance(stats, EffectSummary)
-    assert hasattr(stats, "table")
-    assert hasattr(stats, "text")
-
-    # Check table structure
-    assert isinstance(stats.table, pd.DataFrame)
-    assert "average" in stats.table.index
-    assert "mean" in stats.table.columns
-    assert "median" in stats.table.columns
-    assert "hdi_lower" in stats.table.columns
-    assert "hdi_upper" in stats.table.columns
-
-    # Check text is a string
-    assert isinstance(stats.text, str)
-    assert len(stats.text) > 0
-
-
-@pytest.mark.integration
-def test_effect_summary_with_cumulative(mock_pymc_sample, its_data):
-    """Test effect_summary with cumulative effects."""
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(cumulative=True)
-
-    assert "average" in stats.table.index
-    assert "cumulative" in stats.table.index
-
-
-@pytest.mark.integration
-def test_effect_summary_without_cumulative(mock_pymc_sample, its_data):
-    """Test effect_summary without cumulative effects."""
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(cumulative=False)
-
-    assert "average" in stats.table.index
-    assert "cumulative" not in stats.table.index
-
-
-@pytest.mark.integration
-def test_effect_summary_with_relative(mock_pymc_sample, its_data):
-    """Test effect_summary with relative effects."""
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(relative=True)
-
-    assert "relative_mean" in stats.table.columns
-    assert "relative_hdi_lower" in stats.table.columns
-    assert "relative_hdi_upper" in stats.table.columns
-
-
-@pytest.mark.integration
-def test_effect_summary_direction_increase(mock_pymc_sample, its_data):
-    """Test effect_summary with direction='increase'."""
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(direction="increase")
-
-    assert "p_gt_0" in stats.table.columns
-    assert 0 <= stats.table.loc["average", "p_gt_0"] <= 1
-
-
-@pytest.mark.integration
-def test_effect_summary_direction_decrease(mock_pymc_sample, its_data):
-    """Test effect_summary with direction='decrease'."""
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(direction="decrease")
-
-    assert "p_lt_0" in stats.table.columns
-    assert 0 <= stats.table.loc["average", "p_lt_0"] <= 1
-
-
-@pytest.mark.integration
-def test_effect_summary_direction_two_sided(mock_pymc_sample, its_data):
-    """Test effect_summary with direction='two-sided'."""
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(direction="two-sided")
-
-    assert "p_two_sided" in stats.table.columns
-    assert "prob_of_effect" in stats.table.columns
-    assert 0 <= stats.table.loc["average", "p_two_sided"] <= 1
-    assert 0 <= stats.table.loc["average", "prob_of_effect"] <= 1
+    ``selected_index`` uses the documented window bounds (inclusive tuple, exclusive
+    numeric slice stop). Ignoring ``window`` reports the full-post mean and fails.
+    """
+    impact = result.result.impact_post
+    time_dims = [dim for dim in impact.dims if dim != "obs_ind"]
+    per_time = np.asarray(impact.mean(dim=time_dims))
+    assert not np.allclose(per_time, per_time.reshape(-1)[0])
+    selected = list(selected_index)
+    assert 0 < len(selected) < impact.sizes["obs_ind"]
+    reported = float(stats.table.loc["average", "mean"])
+    selected_mean = float(impact.sel(obs_ind=selected).mean())
+    full_mean = float(impact.mean())
+    assert reported == pytest.approx(selected_mean)
+    assert reported != pytest.approx(full_mean)
 
 
 @pytest.mark.integration
 def test_effect_summary_window_datetime(mock_pymc_sample, its_data):
-    """Test effect_summary with datetime window."""
+    """A datetime window average is the mean impact on that index, not the full post mean."""
     df = its_data
     treatment_time = pd.to_datetime("2017-01-01")
     result = cp.InterruptedTimeSeries(
@@ -288,32 +164,25 @@ def test_effect_summary_window_datetime(mock_pymc_sample, its_data):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    # Get post-period dates
     post_dates = result.datapost.index
     window_start = post_dates[0]
-    window_end = post_dates[len(post_dates) // 2]
+    window_end = post_dates[min(4, len(post_dates) - 2)]
+    selected = post_dates[(post_dates >= window_start) & (post_dates <= window_end)]
 
     stats = result.effect_summary(window=(window_start, window_end))
-
-    assert isinstance(stats, EffectSummary)
-    assert (
-        window_start.strftime("%Y-%m-%d") in stats.text
-        or str(window_start) in stats.text
-    )
+    _assert_windowed_average_matches_selected_impact(result, stats, selected)
 
 
 @pytest.mark.integration
 def test_effect_summary_window_integer(mock_pymc_sample):
-    """Test effect_summary with integer index window."""
-    # Create data with integer index
-    rng = np.random.default_rng(42)
+    """Integer tuple and slice windows average impact on the selected index only."""
     n_pre = 50
     n_post = 30
     t_pre = np.arange(n_pre)
     t_post = np.arange(n_pre, n_pre + n_post)
-
-    y_pre = 10 + 0.5 * t_pre + rng.normal(0, 1, n_pre)
-    y_post = 15 + 0.5 * t_post + rng.normal(0, 1, n_post)
+    # Non-constant post outcome so an ignored window cannot match by flatness.
+    y_pre = 10 + 0.5 * t_pre
+    y_post = 15 + 0.5 * t_post + np.linspace(-4.0, 6.0, n_post)
 
     df = pd.DataFrame(
         {
@@ -331,13 +200,20 @@ def test_effect_summary_window_integer(mock_pymc_sample):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    # Test with tuple window
-    stats1 = result.effect_summary(window=(55, 65))
-    assert isinstance(stats1, EffectSummary)
+    post_index = result.datapost.index
+    tuple_selected = post_index[(post_index >= 55) & (post_index <= 65)]
+    slice_selected = post_index[(post_index >= 55) & (post_index < 65)]
+    assert not tuple_selected.equals(slice_selected)
 
-    # Test with slice window
-    stats2 = result.effect_summary(window=slice(55, 65))
-    assert isinstance(stats2, EffectSummary)
+    stats_tuple = result.effect_summary(window=(55, 65))
+    _assert_windowed_average_matches_selected_impact(
+        result, stats_tuple, tuple_selected
+    )
+
+    stats_slice = result.effect_summary(window=slice(55, 65))
+    _assert_windowed_average_matches_selected_impact(
+        result, stats_slice, slice_selected
+    )
 
 
 @pytest.mark.integration
@@ -387,64 +263,9 @@ def test_effect_summary_rope(mock_pymc_sample, its_data):
 
 
 @pytest.mark.integration
-def test_effect_summary_ols_its(mock_pymc_sample, its_data):
-    """Test effect_summary with OLS model for ITS."""
-    from sklearn.linear_model import LinearRegression
-
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=LinearRegression(),
-    ).fit()
-
-    stats = result.effect_summary()
-
-    assert isinstance(stats, EffectSummary)
-    assert "average" in stats.table.index
-    assert "mean" in stats.table.columns
-    assert "ci_lower" in stats.table.columns
-    assert "ci_upper" in stats.table.columns
-    assert "p_value" in stats.table.columns
-    # OLS tables should NOT have posterior metrics
-    assert "median" not in stats.table.columns
-    assert "hdi_lower" not in stats.table.columns
-    assert "hdi_upper" not in stats.table.columns
-    assert "p_gt_0" not in stats.table.columns
-
-
-@pytest.mark.integration
-def test_effect_summary_ols_did(mock_pymc_sample, did_data):
-    """Test effect_summary with OLS model for DiD."""
-    from sklearn.linear_model import LinearRegression
-
-    df = did_data
-    result = cp.DifferenceInDifferences(
-        df,
-        formula="y ~ 1 + group * post_treatment",
-        time_variable_name="t",
-        group_variable_name="group",
-        model=LinearRegression(),
-    ).fit()
-
-    stats = result.effect_summary()
-
-    assert isinstance(stats, EffectSummary)
-    assert "treatment_effect" in stats.table.index
-    assert "mean" in stats.table.columns
-    assert "ci_lower" in stats.table.columns
-    assert "ci_upper" in stats.table.columns
-    assert "p_value" in stats.table.columns
-    # OLS tables should NOT have posterior metrics
-    assert "median" not in stats.table.columns
-    assert "hdi_lower" not in stats.table.columns
-    assert "hdi_upper" not in stats.table.columns
-
-
-@pytest.mark.integration
-def test_effect_summary_ols_did_residuals_are_per_observation(did_data):
+def test_effect_summary_ols_did_residuals_are_per_observation(
+    mock_pymc_sample, did_data
+):
     """``_compute_statistics_did_ols`` must compute one residual per
     observation, not an (n, n) array, and use the unbiased SSR/(n-p)
     estimator of the residual variance (matching the ``df = n - p`` already
@@ -515,7 +336,7 @@ def test_effect_summary_ols_did_residuals_are_per_observation(did_data):
 
 
 @pytest.mark.integration
-def test_effect_summary_ols_did_order_independent(did_data):
+def test_effect_summary_ols_did_order_independent(mock_pymc_sample, did_data):
     """``effect_summary()`` must not depend on which variable is written
     first in the DiD interaction term.
 
@@ -558,7 +379,7 @@ def test_effect_summary_ols_did_order_independent(did_data):
 
 
 @pytest.mark.integration
-def test_effect_summary_ols_did_categorical_group_spelling(did_data):
+def test_effect_summary_ols_did_categorical_group_spelling(mock_pymc_sample, did_data):
     """``effect_summary()`` must accept the ``C(group)`` categorical spelling
     of the DiD interaction.
 
@@ -599,79 +420,7 @@ def test_effect_summary_ols_did_categorical_group_spelling(did_data):
 
 
 @pytest.mark.integration
-def test_effect_summary_ols_sc(mock_pymc_sample, sc_data):
-    """Test effect_summary with OLS model for Synthetic Control."""
-    from sklearn.linear_model import LinearRegression
-
-    df = sc_data
-    treatment_time = 70
-    result = cp.SyntheticControl(
-        df,
-        treatment_time,
-        control_units=["a", "b", "c", "d", "e", "f", "g"],
-        treated_units=["actual"],
-        model=LinearRegression(),
-    ).fit()
-
-    stats = result.effect_summary(treated_unit="actual")
-
-    assert isinstance(stats, EffectSummary)
-    assert "average" in stats.table.index
-    assert "mean" in stats.table.columns
-    assert "ci_lower" in stats.table.columns
-    assert "ci_upper" in stats.table.columns
-    assert "p_value" in stats.table.columns
-
-
-@pytest.mark.integration
-def test_effect_summary_rd_pymc(mock_pymc_sample, rd_data):
-    """Test effect_summary with Regression Discontinuity (PyMC)."""
-    df = rd_data
-    result = cp.RegressionDiscontinuity(
-        df,
-        formula="y ~ 1 + x + treated + x:treated",
-        treatment_threshold=0.5,
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary()
-
-    assert isinstance(stats, EffectSummary)
-    assert "discontinuity" in stats.table.index
-    assert "mean" in stats.table.columns
-    assert "hdi_lower" in stats.table.columns
-    assert "hdi_upper" in stats.table.columns
-
-
-@pytest.mark.integration
-def test_effect_summary_rd_ols(mock_pymc_sample, rd_data):
-    """Test effect_summary with Regression Discontinuity (OLS)."""
-    from sklearn.linear_model import LinearRegression
-
-    df = rd_data
-    result = cp.RegressionDiscontinuity(
-        df,
-        formula="y ~ 1 + x + treated + x:treated",
-        treatment_threshold=0.5,
-        model=LinearRegression(),
-    ).fit()
-
-    stats = result.effect_summary()
-
-    assert isinstance(stats, EffectSummary)
-    assert "discontinuity" in stats.table.index
-    assert "mean" in stats.table.columns
-    assert "ci_lower" in stats.table.columns
-    assert "ci_upper" in stats.table.columns
-    assert "p_value" in stats.table.columns
-    # OLS tables should NOT have posterior metrics
-    assert "median" not in stats.table.columns
-    assert "hdi_lower" not in stats.table.columns
-    assert "hdi_upper" not in stats.table.columns
-
-
-@pytest.mark.integration
-def test_effect_summary_ols_rd_residuals_are_per_observation(rd_data):
+def test_effect_summary_ols_rd_residuals_are_per_observation(mock_pymc_sample, rd_data):
     """RD OLS residuals must have one value per fitted observation."""
     from sklearn.linear_model import LinearRegression
 
@@ -699,7 +448,9 @@ def test_effect_summary_ols_rd_residuals_are_per_observation(rd_data):
     ],
     ids=["interaction", "parallel_slopes"],
 )
-def test_effect_summary_ols_rd_matches_statsmodels_threshold_contrast(rd_data, formula):
+def test_effect_summary_ols_rd_matches_statsmodels_threshold_contrast(
+    mock_pymc_sample, rd_data, formula
+):
     """RD OLS summaries must match the exact threshold prediction contrast."""
     import statsmodels.formula.api as smf
     from patsy import build_design_matrices
@@ -747,116 +498,6 @@ def test_effect_summary_ols_rd_matches_statsmodels_threshold_contrast(rd_data, f
     assert row["p_value"] == pytest.approx(float(np.asarray(expected.pvalue).squeeze()))
 
 
-@pytest.mark.integration
-def test_effect_summary_rkink_pymc(mock_pymc_sample):
-    """Test effect_summary with Regression Kink (PyMC)."""
-    # Generate data for regression kink analysis
-    rng = np.random.default_rng(42)
-    kink_point = 0.5
-    beta = [1, 0.5, 0, 0.5, 0]  # Parameters for the piecewise function
-    N = 100
-    x = rng.uniform(-1, 1, N)
-    treated = (x >= kink_point).astype(int)
-    y = (
-        beta[0]
-        + beta[1] * x
-        + beta[2] * x**2
-        + beta[3] * (x - kink_point) * treated
-        + beta[4] * (x - kink_point) ** 2 * treated
-        + rng.normal(0, 0.1, N)
-    )
-    df = pd.DataFrame({"x": x, "y": y, "treated": treated})
-
-    result = cp.RegressionKink(
-        df,
-        formula="y ~ 1 + x + I(x**2) + I((x-0.5)*treated) + I(((x-0.5)**2)*treated)",
-        kink_point=kink_point,
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary()
-
-    assert isinstance(stats, EffectSummary)
-    assert "gradient_change" in stats.table.index
-    assert "mean" in stats.table.columns
-    assert "median" in stats.table.columns
-    assert "hdi_lower" in stats.table.columns
-    assert "hdi_upper" in stats.table.columns
-    assert "p_gt_0" in stats.table.columns
-
-
-@pytest.mark.integration
-def test_effect_summary_rkink_directions(mock_pymc_sample):
-    """Test effect_summary with Regression Kink with different directions."""
-    # Generate data
-    rng = np.random.default_rng(42)
-    kink_point = 0.5
-    beta = [1, 0.5, 0, -0.5, 0]  # Negative gradient change
-    N = 100
-    x = rng.uniform(-1, 1, N)
-    treated = (x >= kink_point).astype(int)
-    y = (
-        beta[0]
-        + beta[1] * x
-        + beta[2] * x**2
-        + beta[3] * (x - kink_point) * treated
-        + beta[4] * (x - kink_point) ** 2 * treated
-        + rng.normal(0, 0.1, N)
-    )
-    df = pd.DataFrame({"x": x, "y": y, "treated": treated})
-
-    result = cp.RegressionKink(
-        df,
-        formula="y ~ 1 + x + I(x**2) + I((x-0.5)*treated) + I(((x-0.5)**2)*treated)",
-        kink_point=kink_point,
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    # Test increase
-    stats_increase = result.effect_summary(direction="increase")
-    assert "p_gt_0" in stats_increase.table.columns
-
-    # Test decrease
-    stats_decrease = result.effect_summary(direction="decrease")
-    assert "p_lt_0" in stats_decrease.table.columns
-
-    # Test two-sided
-    stats_two_sided = result.effect_summary(direction="two-sided")
-    assert "p_two_sided" in stats_two_sided.table.columns
-    assert "prob_of_effect" in stats_two_sided.table.columns
-
-
-@pytest.mark.integration
-def test_effect_summary_rkink_rope(mock_pymc_sample):
-    """Test effect_summary with Regression Kink with ROPE."""
-    # Generate data
-    rng = np.random.default_rng(42)
-    kink_point = 0.5
-    beta = [1, 0.5, 0, 0.5, 0]
-    N = 100
-    x = rng.uniform(-1, 1, N)
-    treated = (x >= kink_point).astype(int)
-    y = (
-        beta[0]
-        + beta[1] * x
-        + beta[2] * x**2
-        + beta[3] * (x - kink_point) * treated
-        + beta[4] * (x - kink_point) ** 2 * treated
-        + rng.normal(0, 0.1, N)
-    )
-    df = pd.DataFrame({"x": x, "y": y, "treated": treated})
-
-    result = cp.RegressionKink(
-        df,
-        formula="y ~ 1 + x + I(x**2) + I((x-0.5)*treated) + I(((x-0.5)**2)*treated)",
-        kink_point=kink_point,
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(min_effect=0.2)
-    assert "p_rope" in stats.table.columns
-
-
 def test_effect_summary_rkink_ols_raises():
     """The OLS path for Regression Kink should raise NotImplementedError."""
     from types import SimpleNamespace
@@ -886,313 +527,6 @@ def test_effect_summary_empty_window_error(mock_pymc_sample, its_data):
     future_date = pd.to_datetime("2100-01-01")
     with pytest.raises(ValueError, match="no time points"):
         result.effect_summary(window=(future_date, future_date + pd.Timedelta(days=1)))
-
-
-@pytest.mark.integration
-def test_effect_summary_hdi_coverage(mock_pymc_sample, its_data):
-    """Test that HDI intervals are properly ordered."""
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary()
-
-    # Check HDI ordering
-    assert (
-        stats.table.loc["average", "hdi_lower"]
-        <= stats.table.loc["average", "hdi_upper"]
-    )
-    if "cumulative" in stats.table.index:
-        assert (
-            stats.table.loc["cumulative", "hdi_lower"]
-            <= stats.table.loc["cumulative", "hdi_upper"]
-        )
-
-
-@pytest.mark.integration
-def test_effect_summary_tail_probabilities_match(mock_pymc_sample, its_data):
-    """Test that tail probabilities match manual calculations."""
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(direction="increase")
-
-    # Manually calculate P(effect > 0)
-    avg_effect = result.result.impact_post.mean(dim="obs_ind")
-    manual_p_gt_0 = float((avg_effect > 0).mean().values)
-
-    # Should match (within floating point precision)
-    assert abs(stats.table.loc["average", "p_gt_0"] - manual_p_gt_0) < 1e-10
-
-
-@pytest.mark.integration
-def test_effect_summary_synthetic_control(mock_pymc_sample, sc_data):
-    """Test effect_summary with Synthetic Control experiment (single treated unit)."""
-    df = sc_data
-    treatment_time = 70
-    result = cp.SyntheticControl(
-        df,
-        treatment_time,
-        control_units=["a", "b", "c", "d", "e", "f", "g"],
-        treated_units=["actual"],
-        model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(treated_unit="actual")
-
-    assert isinstance(stats, EffectSummary)
-    assert "average" in stats.table.index
-    assert "cumulative" in stats.table.index
-    assert "mean" in stats.table.columns
-    assert "hdi_lower" in stats.table.columns
-    assert "hdi_upper" in stats.table.columns
-    assert isinstance(stats.text, str)
-    assert len(stats.text) > 0
-
-
-@pytest.mark.integration
-def test_effect_summary_synthetic_control_multi_unit(mock_pymc_sample):
-    """Test effect_summary with Synthetic Control experiment (multiple treated units)."""
-    # Create multi-unit synthetic control data
-    rng = np.random.default_rng(42)
-    n_obs = 60
-    n_control = 4
-    n_treated = 2
-
-    # Create time index
-    time_index = pd.date_range("2020-01-01", periods=n_obs, freq="D")
-    treatment_time = time_index[40]
-
-    # Control unit data
-    control_data = {}
-    for i in range(n_control):
-        control_data[f"control_{i}"] = rng.normal(10, 2, n_obs) + np.sin(
-            np.arange(n_obs) * 0.1
-        )
-
-    # Treated unit data
-    treated_data = {}
-    for j in range(n_treated):
-        weights = rng.dirichlet(np.ones(n_control))
-        base_signal = sum(
-            weights[i] * control_data[f"control_{i}"] for i in range(n_control)
-        )
-        treatment_effect = np.zeros(n_obs)
-        treatment_effect[40:] = rng.normal(5, 1, n_obs - 40)
-        treated_data[f"treated_{j}"] = (
-            base_signal + treatment_effect + rng.normal(0, 0.5, n_obs)
-        )
-
-    df = pd.DataFrame({**control_data, **treated_data}, index=time_index)
-    control_units = [f"control_{i}" for i in range(n_control)]
-    treated_units = [f"treated_{j}" for j in range(n_treated)]
-
-    result = cp.SyntheticControl(
-        df,
-        treatment_time,
-        control_units=control_units,
-        treated_units=treated_units,
-        model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    # Test with first treated unit
-    stats1 = result.effect_summary(treated_unit="treated_0")
-    assert isinstance(stats1, EffectSummary)
-    assert "average" in stats1.table.index
-
-    # Test with second treated unit
-    stats2 = result.effect_summary(treated_unit="treated_1")
-    assert isinstance(stats2, EffectSummary)
-    assert "average" in stats2.table.index
-
-    # Test without specifying unit (should use first)
-    stats3 = result.effect_summary()
-    assert isinstance(stats3, EffectSummary)
-
-
-@pytest.mark.integration
-def test_effect_summary_synthetic_control_window(mock_pymc_sample, sc_data):
-    """Test effect_summary with Synthetic Control using window specification."""
-    df = sc_data
-    treatment_time = 70
-    result = cp.SyntheticControl(
-        df,
-        treatment_time,
-        control_units=["a", "b", "c", "d", "e", "f", "g"],
-        treated_units=["actual"],
-        model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    # Test with integer window
-    post_indices = result.datapost.index
-    window_start = post_indices[0]
-    window_end = post_indices[10]  # First 11 post-period points
-
-    stats = result.effect_summary(
-        window=(window_start, window_end), treated_unit="actual"
-    )
-
-    assert isinstance(stats, EffectSummary)
-    assert str(window_start) in stats.text or str(int(window_start)) in stats.text
-
-
-@pytest.mark.integration
-def test_effect_summary_did(mock_pymc_sample, did_data):
-    """Test effect_summary with Difference-in-Differences experiment."""
-    df = did_data
-    result = cp.DifferenceInDifferences(
-        df,
-        formula="y ~ 1 + group * post_treatment",
-        time_variable_name="t",
-        group_variable_name="group",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary()
-
-    assert isinstance(stats, EffectSummary)
-    assert "treatment_effect" in stats.table.index
-    assert "mean" in stats.table.columns
-    assert "median" in stats.table.columns
-    assert "hdi_lower" in stats.table.columns
-    assert "hdi_upper" in stats.table.columns
-    assert isinstance(stats.text, str)
-    assert len(stats.text) > 0
-    # DiD should not have cumulative or relative effects
-    assert "cumulative" not in stats.table.index
-
-
-@pytest.mark.integration
-def test_effect_summary_did_direction_increase(mock_pymc_sample, did_data):
-    """Test effect_summary with DiD and direction='increase'."""
-    df = did_data
-    result = cp.DifferenceInDifferences(
-        df,
-        formula="y ~ 1 + group * post_treatment",
-        time_variable_name="t",
-        group_variable_name="group",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(direction="increase")
-
-    assert "p_gt_0" in stats.table.columns
-    assert 0 <= stats.table.loc["treatment_effect", "p_gt_0"] <= 1
-
-
-@pytest.mark.integration
-def test_effect_summary_did_direction_decrease(mock_pymc_sample, did_data):
-    """Test effect_summary with DiD and direction='decrease'."""
-    df = did_data
-    result = cp.DifferenceInDifferences(
-        df,
-        formula="y ~ 1 + group * post_treatment",
-        time_variable_name="t",
-        group_variable_name="group",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(direction="decrease")
-
-    assert "p_lt_0" in stats.table.columns
-    assert 0 <= stats.table.loc["treatment_effect", "p_lt_0"] <= 1
-
-
-@pytest.mark.integration
-def test_effect_summary_did_direction_two_sided(mock_pymc_sample, did_data):
-    """Test effect_summary with DiD and direction='two-sided'."""
-    df = did_data
-    result = cp.DifferenceInDifferences(
-        df,
-        formula="y ~ 1 + group * post_treatment",
-        time_variable_name="t",
-        group_variable_name="group",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(direction="two-sided")
-
-    assert "p_two_sided" in stats.table.columns
-    assert "prob_of_effect" in stats.table.columns
-    assert 0 <= stats.table.loc["treatment_effect", "p_two_sided"] <= 1
-    assert 0 <= stats.table.loc["treatment_effect", "prob_of_effect"] <= 1
-
-
-@pytest.mark.integration
-def test_effect_summary_did_rope(mock_pymc_sample, did_data):
-    """Test effect_summary with DiD and ROPE."""
-    df = did_data
-    result = cp.DifferenceInDifferences(
-        df,
-        formula="y ~ 1 + group * post_treatment",
-        time_variable_name="t",
-        group_variable_name="group",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(min_effect=1.0)
-
-    assert "p_rope" in stats.table.columns
-    assert 0 <= stats.table.loc["treatment_effect", "p_rope"] <= 1
-    assert "Using the closed ROPE [-1, 1]" in stats.text
-    assert "Posterior mass is" in stats.text
-
-
-@pytest.mark.integration
-def test_effect_summary_did_ols_error(mock_pymc_sample, did_data):
-    """Test that effect_summary works for DiD with OLS model (OLS is now supported)."""
-    from sklearn.linear_model import LinearRegression
-
-    df = did_data
-    ols_model = cp.skl_models.create_causalpy_compatible_class(LinearRegression)()
-    result = cp.DifferenceInDifferences(
-        df,
-        formula="y ~ 1 + group * post_treatment",
-        time_variable_name="t",
-        group_variable_name="group",
-        model=ols_model,
-    ).fit()
-
-    # OLS is now supported for DiD, so this should not raise an error
-    stats = result.effect_summary()
-    assert isinstance(stats, EffectSummary)
-    assert "treatment_effect" in stats.table.index
-    assert "mean" in stats.table.columns
-    assert "ci_lower" in stats.table.columns
-    assert "ci_upper" in stats.table.columns
-    assert "p_value" in stats.table.columns
-
-
-@pytest.mark.integration
-def test_effect_summary_did_hdi_coverage(mock_pymc_sample, did_data):
-    """Test that HDI intervals are properly ordered for DiD."""
-    df = did_data
-    result = cp.DifferenceInDifferences(
-        df,
-        formula="y ~ 1 + group * post_treatment",
-        time_variable_name="t",
-        group_variable_name="group",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary()
-
-    # Check HDI ordering
-    assert (
-        stats.table.loc["treatment_effect", "hdi_lower"]
-        <= stats.table.loc["treatment_effect", "hdi_upper"]
-    )
 
 
 # ==============================================================================
@@ -2268,7 +1602,9 @@ def test_compute_statistics_did_ols_missing_interaction_term(
 
 
 @pytest.mark.integration
-def test_compute_statistics_rd_ols_raises_when_threshold_design_is_missing(rd_data):
+def test_compute_statistics_rd_ols_raises_when_threshold_design_is_missing(
+    mock_pymc_sample, rd_data
+):
     """RD contrast inference requires the stored threshold design rows."""
     from sklearn.linear_model import LinearRegression
 
@@ -2309,7 +1645,7 @@ def test_compute_statistics_rd_ols_raises_when_threshold_design_is_missing(rd_da
     ],
 )
 def test_compute_statistics_rd_ols_raises_when_threshold_design_is_malformed(
-    rd_data, invalid_design
+    mock_pymc_sample, rd_data, invalid_design
 ):
     """RD contrast inference rejects stored design rows that cannot form c."""
     from sklearn.linear_model import LinearRegression
@@ -2329,7 +1665,9 @@ def test_compute_statistics_rd_ols_raises_when_threshold_design_is_malformed(
 
 
 @pytest.mark.integration
-def test_compute_statistics_rd_ols_raises_when_fitted_design_is_singular(rd_data):
+def test_compute_statistics_rd_ols_raises_when_fitted_design_is_singular(
+    mock_pymc_sample, rd_data
+):
     """RD contrast inference rejects singular normal equations."""
     from sklearn.linear_model import LinearRegression
 
@@ -2586,7 +1924,7 @@ def test_ols_zero_se_cumulative_p_value_is_zero(n_post, impact):
 
 
 @pytest.mark.parametrize("n_post", [3, 6])
-def test_effect_summary_ols_zero_se_cumulative_p_value(n_post):
+def test_effect_summary_ols_zero_se_cumulative_p_value(mock_pymc_sample, n_post):
     """Public OLS effect_summary reports cumulative p-value 0 for a constant impact."""
     from sklearn.linear_model import LinearRegression
 
@@ -2613,7 +1951,9 @@ def test_effect_summary_ols_zero_se_cumulative_p_value(n_post):
     assert row["p_value"] == 0.0
 
 
-def test_ols_cumulative_relative_effect_is_ratio_of_cumulative_totals():
+def test_ols_cumulative_relative_effect_is_ratio_of_cumulative_totals(
+    mock_pymc_sample,
+):
     """Cumulative relative effect is the percentage change of the totals.
 
     It is not the sum of per-period percentages. The interval is the cumulative
@@ -3897,283 +3237,6 @@ def test_prose_detailed_ols_no_observed_values():
 
     assert "estimated average causal effect" in prose
     assert "2.50" in prose
-
-
-# ==============================================================================
-# Integration tests for PrePostNEGD experiment
-# ==============================================================================
-
-
-@pytest.mark.integration
-def test_effect_summary_prepostnegd_pymc(mock_pymc_sample, anova1_data):
-    """Test effect_summary with PrePostNEGD experiment (PyMC)."""
-    df = anova1_data
-    result = cp.PrePostNEGD(
-        df,
-        formula="post ~ 1 + C(group) + pre",
-        group_variable_name="group",
-        pretreatment_variable_name="pre",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary()
-
-    assert isinstance(stats, EffectSummary)
-    assert "treatment_effect" in stats.table.index
-    assert "mean" in stats.table.columns
-    assert "median" in stats.table.columns
-    assert "hdi_lower" in stats.table.columns
-    assert "hdi_upper" in stats.table.columns
-    assert isinstance(stats.text, str)
-    assert len(stats.text) > 0
-    # PrePostNEGD should not have cumulative or relative effects (like DiD)
-    assert "cumulative" not in stats.table.index
-
-
-@pytest.mark.integration
-def test_effect_summary_prepostnegd_directions(mock_pymc_sample, anova1_data):
-    """Test effect_summary with PrePostNEGD with different directions."""
-    df = anova1_data
-    result = cp.PrePostNEGD(
-        df,
-        formula="post ~ 1 + C(group) + pre",
-        group_variable_name="group",
-        pretreatment_variable_name="pre",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    # Test increase
-    stats_increase = result.effect_summary(direction="increase")
-    assert "p_gt_0" in stats_increase.table.columns
-
-    # Test decrease
-    stats_decrease = result.effect_summary(direction="decrease")
-    assert "p_lt_0" in stats_decrease.table.columns
-
-    # Test two-sided
-    stats_two_sided = result.effect_summary(direction="two-sided")
-    assert "p_two_sided" in stats_two_sided.table.columns
-    assert "prob_of_effect" in stats_two_sided.table.columns
-
-
-@pytest.mark.integration
-def test_effect_summary_prepostnegd_rope(mock_pymc_sample, anova1_data):
-    """Test effect_summary with PrePostNEGD with ROPE."""
-    df = anova1_data
-    result = cp.PrePostNEGD(
-        df,
-        formula="post ~ 1 + C(group) + pre",
-        group_variable_name="group",
-        pretreatment_variable_name="pre",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(min_effect=0.5)
-
-    assert "p_rope" in stats.table.columns
-    assert 0 <= stats.table.loc["treatment_effect", "p_rope"] <= 1
-
-
-# ==============================================================================
-# Integration tests for additional parameter combinations
-# ==============================================================================
-
-
-@pytest.mark.integration
-def test_effect_summary_its_relative_false(mock_pymc_sample, its_data):
-    """Test effect_summary with ITS and relative=False."""
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(relative=False)
-
-    assert isinstance(stats, EffectSummary)
-    assert "relative_mean" not in stats.table.columns
-
-
-@pytest.mark.integration
-def test_effect_summary_ols_cumulative_false(mock_pymc_sample, its_data):
-    """Test effect_summary with OLS model and cumulative=False."""
-    from sklearn.linear_model import LinearRegression
-
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=LinearRegression(),
-    ).fit()
-
-    stats = result.effect_summary(cumulative=False)
-
-    assert isinstance(stats, EffectSummary)
-    assert "cumulative" not in stats.table.index
-    assert "average" in stats.table.index
-
-
-@pytest.mark.integration
-def test_effect_summary_ols_relative_false(mock_pymc_sample, its_data):
-    """Test effect_summary with OLS model and relative=False."""
-    from sklearn.linear_model import LinearRegression
-
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=LinearRegression(),
-    ).fit()
-
-    stats = result.effect_summary(relative=False)
-
-    assert isinstance(stats, EffectSummary)
-    assert "relative_mean" not in stats.table.columns
-
-
-@pytest.mark.integration
-def test_effect_summary_rope_with_two_sided_its(mock_pymc_sample, its_data):
-    """Test effect_summary with ROPE and two-sided direction for ITS."""
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(direction="two-sided", min_effect=1.0)
-
-    assert "p_rope" in stats.table.columns
-    assert 0 <= stats.table.loc["average", "p_rope"] <= 1
-    if "cumulative" in stats.table.index:
-        assert 0 <= stats.table.loc["cumulative", "p_rope"] <= 1
-
-
-@pytest.mark.integration
-def test_effect_summary_rope_with_two_sided_did(mock_pymc_sample, did_data):
-    """Test effect_summary with ROPE and two-sided direction for DiD."""
-    df = did_data
-    result = cp.DifferenceInDifferences(
-        df,
-        formula="y ~ 1 + group * post_treatment",
-        time_variable_name="t",
-        group_variable_name="group",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(direction="two-sided", min_effect=0.5)
-
-    assert "p_rope" in stats.table.columns
-    assert 0 <= stats.table.loc["treatment_effect", "p_rope"] <= 1
-
-
-@pytest.mark.integration
-def test_effect_summary_rd_two_sided_with_rope(mock_pymc_sample, rd_data):
-    """Test effect_summary with RD, two-sided direction, and ROPE."""
-    df = rd_data
-    result = cp.RegressionDiscontinuity(
-        df,
-        formula="y ~ 1 + x + treated + x:treated",
-        treatment_threshold=0.5,
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(direction="two-sided", min_effect=0.5)
-
-    assert "p_rope" in stats.table.columns
-    assert "p_two_sided" in stats.table.columns
-    assert "prob_of_effect" in stats.table.columns
-    assert 0 <= stats.table.loc["discontinuity", "p_rope"] <= 1
-
-
-@pytest.mark.integration
-def test_effect_summary_sc_cumulative_false(mock_pymc_sample, sc_data):
-    """Test effect_summary with Synthetic Control and cumulative=False."""
-    df = sc_data
-    treatment_time = 70
-    result = cp.SyntheticControl(
-        df,
-        treatment_time,
-        control_units=["a", "b", "c", "d", "e", "f", "g"],
-        treated_units=["actual"],
-        model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(cumulative=False, treated_unit="actual")
-
-    assert isinstance(stats, EffectSummary)
-    assert "cumulative" not in stats.table.index
-    assert "average" in stats.table.index
-
-
-@pytest.mark.integration
-def test_effect_summary_sc_relative_false(mock_pymc_sample, sc_data):
-    """Test effect_summary with Synthetic Control and relative=False."""
-    df = sc_data
-    treatment_time = 70
-    result = cp.SyntheticControl(
-        df,
-        treatment_time,
-        control_units=["a", "b", "c", "d", "e", "f", "g"],
-        treated_units=["actual"],
-        model=cp.pymc_models.WeightedSumFitter(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(relative=False, treated_unit="actual")
-
-    assert isinstance(stats, EffectSummary)
-    assert "relative_mean" not in stats.table.columns
-
-
-@pytest.mark.integration
-def test_effect_summary_ols_both_false(mock_pymc_sample, its_data):
-    """Test effect_summary with OLS model, cumulative=False and relative=False."""
-    from sklearn.linear_model import LinearRegression
-
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=LinearRegression(),
-    ).fit()
-
-    stats = result.effect_summary(cumulative=False, relative=False)
-
-    assert isinstance(stats, EffectSummary)
-    assert "cumulative" not in stats.table.index
-    assert "relative_mean" not in stats.table.columns
-    assert "average" in stats.table.index
-
-
-@pytest.mark.integration
-def test_effect_summary_pymc_both_false(mock_pymc_sample, its_data):
-    """Test effect_summary with PyMC model, cumulative=False and relative=False."""
-    df = its_data
-    treatment_time = pd.to_datetime("2017-01-01")
-    result = cp.InterruptedTimeSeries(
-        df,
-        treatment_time,
-        formula="y ~ 1 + t + C(month)",
-        model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
-    ).fit()
-
-    stats = result.effect_summary(cumulative=False, relative=False)
-
-    assert isinstance(stats, EffectSummary)
-    assert "cumulative" not in stats.table.index
-    assert "relative_mean" not in stats.table.columns
-    assert "average" in stats.table.index
 
 
 def test_staggered_effect_summary_does_not_pass_cancelling_pre_trends():

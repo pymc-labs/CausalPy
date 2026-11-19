@@ -29,8 +29,6 @@ from causalpy.experiments._panel_counterfactual import WidePanel, resolve_treate
 from causalpy.experiments._response_type import (
     check_response_type,
     finish_response_plot,
-    log_response_type_once,
-    note_prediction_summary,
     quantity_for,
 )
 from causalpy.experiments._results import CausalResult
@@ -519,7 +517,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             which selects the first treated unit.
         ci_prob : float
             Probability mass of the highest density interval drawn around the
-            posterior predictive, causal impact, and cumulative impact bands.
+            selected outcome, impact, and cumulative impact bands.
             Must be in ``(0, 1]``. Ignored for OLS models. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         kind : {"ribbon", "histogram", "spaghetti"}, optional
@@ -537,7 +535,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         response_type : {"expectation", "prediction"}, default "expectation"
             Which quantity the uncertainty bands represent.
             ``"expectation"`` uses the conditional mean ``mu`` and excludes
-            observation noise. ``"prediction"`` uses posterior predictive
+            observation noise. ``"prediction"`` uses predictive
             ``y_hat`` and includes observation noise. Stored results stay on
             ``mu``. Point-estimate backends reject ``"prediction"``.
         show_response_annotation : bool, optional
@@ -565,9 +563,9 @@ class SyntheticControl(BaseExperiment[CausalResult]):
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : list[matplotlib.axes.Axes] or numpy.ndarray
+        ax : list of :class:`~matplotlib.axes.Axes` or :class:`~numpy.ndarray`
             Posterior axes are the ndarray from ``plt.subplots`` (top:
             predictions, middle: causal impact, bottom: cumulative impact).
             Prior axes are a one-element list.
@@ -625,7 +623,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             If ``None``, plots the first treated unit.
         ci_prob : float, optional
             Probability mass of the credible interval drawn around the
-            posterior predictive, causal impact, and cumulative impact bands.
+            selected outcome, impact, and cumulative impact bands.
             Must be in ``(0, 1]``. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         plot_predictors : bool, optional
@@ -659,9 +657,24 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             figsize=figsize,
             plot_predictors=plot_predictors,
         )
+        if response_type == "prediction" and group == "posterior":
+            ax[1].set(title="Predictive difference", ylabel="Predictive\ndifference")
+            ax[2].set(
+                title="Cumulative predictive difference",
+                ylabel="Cumulative predictive\ndifference",
+            )
+            legend = ax[0].get_legend()
+            if legend is not None:
+                for label in legend.get_texts():
+                    label.set_text(
+                        label.get_text().replace(
+                            "Causal impact", "Predictive difference"
+                        )
+                    )
         return finish_response_plot(
             fig,
             ax,
+            group=group,
             response_type=response_type,
             ci_prob=ci_prob,
             ci_kind=ci_kind,
@@ -764,7 +777,6 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         treated_unit: str | None = None,
         period: Literal["intervention", "post", "comparison"] | None = None,
         prefix: str = "Post-period",
-        response_type: Literal["expectation", "prediction"] = "expectation",
     ) -> EffectSummary:
         """
         Generate a decision-ready summary of causal effects for Synthetic Control.
@@ -801,11 +813,6 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             Ignored for Synthetic Control (two-period design only).
         prefix : str, optional
             Prefix for prose generation. Defaults to "Post-period".
-        response_type : {"expectation", "prediction"}, default "expectation"
-            ``"prediction"`` summarizes a posterior predictive contrast
-            (includes observation noise). The returned text says so. Stored
-            results stay on ``mu``. Point-estimate backends reject
-            ``"prediction"``.
 
         Returns
         -------
@@ -822,15 +829,8 @@ class SyntheticControl(BaseExperiment[CausalResult]):
                 stacklevel=2,
             )
 
-        bundle = self._bundle_for_response(
+        return self._panel.effect_summary(
             self._require_bundle(group),
-            response_type=response_type,
-            group=group,
-        )
-        if has_posterior_draws(bundle.predictions_post):
-            log_response_type_once("summary")
-        summary = self._panel.effect_summary(
-            bundle,
             group=group,
             window=window,
             direction=direction,
@@ -842,5 +842,3 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             prefix=prefix,
             experiment_type="sc",
         )
-        summary.text = note_prediction_summary(summary.text, response_type)
-        return summary

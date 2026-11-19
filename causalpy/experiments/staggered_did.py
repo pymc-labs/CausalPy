@@ -30,6 +30,10 @@ from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import DataException, FormulaException
+from causalpy.experiments._response_type import (
+    check_response_type,
+    finish_response_plot,
+)
 from causalpy.experiments._results import StaggeredDifferenceInDifferencesResult
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
@@ -929,11 +933,51 @@ class StaggeredDifferenceInDifferences(
         print("\nModel coefficients:")
         self.print_coefficients(round_to)
 
+    def _bundle_for_response(
+        self,
+        bundle: StaggeredDifferenceInDifferencesResult,
+        *,
+        response_type: str,
+        group: Literal["prior", "posterior"],
+        hdi_prob: float | None = None,
+    ) -> StaggeredDifferenceInDifferencesResult:
+        """Select noisy outcomes and aggregate observed-minus-predictive draws.
+
+        Aggregation uses the same cohort eligibility and alignment as the
+        expectation result. The canonical result and its ATT summaries remain
+        unchanged. Existing aggregators produce equal-tailed intervals.
+        """
+        if check_response_type(response_type) == "expectation":
+            return bundle
+        X = xr.DataArray(
+            self.X_full,
+            dims=("obs_ind", "coeffs"),
+            coords={"obs_ind": bundle.y_pred.obs_ind, "coeffs": self.labels},
+        )
+        predictions = self._model_backend.predict_response(
+            X=X, quantity="y_hat", group=group
+        )
+        probability = bundle.hdi_prob if hdi_prob is None else hdi_prob
+        group_time, event_time, probability = self._aggregate_effects_bayesian(
+            y_pred=predictions,
+            treated_data=self.data.loc[~self.data["_is_untreated"]],
+            pretreatment_data=self.data.iloc[self._get_pretreatment_positions()],
+            hdi_prob=probability,
+        )
+        return StaggeredDifferenceInDifferencesResult(
+            y_pred=predictions,
+            att_group_time=group_time,
+            att_event_time=event_time,
+            hdi_prob=probability,
+        )
+
     def plot(
         self,
         *,
         group: Literal["prior", "posterior"] = "posterior",
         hdi_prob: float | None = None,
+        response_type: Literal["expectation", "prediction"] = "expectation",
+        show_response_annotation: bool | None = None,
         figsize: tuple[float, float] = (10, 6),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -957,6 +1001,14 @@ class StaggeredDifferenceInDifferences(
             the counterfactual band computed at plot time. Pass ``None`` (the
             default) to use the selected bundle's stored value. Ignored for
             OLS models.
+        response_type : {"expectation", "prediction"}, default "expectation"
+            ``"prediction"`` aggregates observed-minus-predictive differences,
+            including observation noise. Intervals are equal-tailed and are
+            recomputed at ``hdi_prob`` in predictive mode. Stored ATT summaries
+            remain expectation-based. Point-estimate backends reject this mode.
+        show_response_annotation : bool, optional
+            Add a target/interval note to draw-based plots by default.
+            ``False`` suppresses it.
         figsize : tuple of (float, float)
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to ``(10, 6)``.
@@ -971,9 +1023,9 @@ class StaggeredDifferenceInDifferences(
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : list[matplotlib.axes.Axes]
+        ax : list of :class:`~matplotlib.axes.Axes`
             A single-element list containing the event-study axes.
         """
         return self._render_plot(
@@ -981,6 +1033,8 @@ class StaggeredDifferenceInDifferences(
             legend_kwargs=legend_kwargs,
             group=group,
             hdi_prob=hdi_prob,
+            response_type=response_type,
+            show_response_annotation=show_response_annotation,
             figsize=figsize,
         )
 
@@ -989,6 +1043,8 @@ class StaggeredDifferenceInDifferences(
         *,
         group: Literal["prior", "posterior"] = "posterior",
         hdi_prob: float | None = None,
+        response_type: Literal["expectation", "prediction"] = "expectation",
+        show_response_annotation: bool | None = None,
         layout: Literal["facet", "overlay"] = "facet",
         x_axis: Literal["event_time", "calendar_time"] = "event_time",
         include_placebo: bool = True,
@@ -1027,6 +1083,14 @@ class StaggeredDifferenceInDifferences(
             Whether to include pre-treatment residual estimates for
             eventually-treated cohorts as placebo diagnostics. Defaults to
             ``True``.
+        response_type : {"expectation", "prediction"}, default "expectation"
+            ``"prediction"`` aggregates observed-minus-predictive differences,
+            including observation noise. Intervals are equal-tailed and are
+            recomputed at ``hdi_prob`` in predictive mode. Stored ATT summaries
+            remain expectation-based. Point-estimate backends reject this mode.
+        show_response_annotation : bool, optional
+            Add a target/interval note to draw-based plots by default.
+            ``False`` suppresses it.
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches, passed to
             :func:`matplotlib.pyplot.subplots`. Defaults to a height scaled by
@@ -1044,9 +1108,9 @@ class StaggeredDifferenceInDifferences(
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : list[matplotlib.axes.Axes]
+        ax : list of :class:`~matplotlib.axes.Axes`
             Axes containing the cohort trajectories. The list has one axes
             per cohort when ``layout="facet"`` and one axes when
             ``layout="overlay"``.
@@ -1056,6 +1120,8 @@ class StaggeredDifferenceInDifferences(
             legend_kwargs=legend_kwargs,
             group=group,
             hdi_prob=hdi_prob,
+            response_type=response_type,
+            show_response_annotation=show_response_annotation,
             layout=layout,
             x_axis=x_axis,
             include_placebo=include_placebo,
@@ -1068,6 +1134,8 @@ class StaggeredDifferenceInDifferences(
         *,
         group: Literal["prior", "posterior"] = "posterior",
         hdi_prob: float | None = None,
+        response_type: Literal["expectation", "prediction"] = "expectation",
+        show_response_annotation: bool | None = None,
         figsize: tuple[float, float] | None = (10, 6),
         view: Literal["event_time", "group_time"] = "event_time",
         layout: Literal["facet", "overlay"] = "facet",
@@ -1111,36 +1179,79 @@ class StaggeredDifferenceInDifferences(
 
         Returns
         -------
-        tuple[plt.Figure, list[plt.Axes]]
+        tuple of :class:`~matplotlib.figure.Figure` and list of :class:`~matplotlib.axes.Axes`
             Figure and axes objects.
         """
-        bundle = self._require_bundle(group)
+        bundle = self._bundle_for_response(
+            self._require_bundle(group),
+            response_type=response_type,
+            group=group,
+            hdi_prob=hdi_prob,
+        )
         if group == "prior":
-            return self._plot_prior_checks(
-                bundle=bundle, hdi_prob=hdi_prob, figsize=figsize
-            )
-
-        with_uncertainty = has_posterior_draws(bundle.y_pred)
-        if with_uncertainty and hdi_prob is not None and hdi_prob != bundle.hdi_prob:
-            raise ValueError(
-                "StaggeredDiD HDI bounds are computed during effect "
-                "aggregation, not at plot time. The stored HDI probability "
-                f"is {bundle.hdi_prob}, but plot() received hdi_prob="
-                f"{hdi_prob}. To plot at a different HDI probability, "
-                "re-fit the experiment so that aggregation uses the desired "
-                "value, or omit hdi_prob to use the stored value."
-            )
-        if view == "group_time":
-            return self._plot_group_time(
+            fig, axes = self._plot_prior_checks(
                 bundle=bundle,
+                hdi_prob=hdi_prob,
                 figsize=figsize,
-                layout=layout,
-                x_axis=x_axis,
-                include_placebo=include_placebo,
             )
-        if view != "event_time":
-            raise ValueError("view must be 'event_time' or 'group_time'")
+        else:
+            if (
+                has_posterior_draws(bundle.y_pred)
+                and hdi_prob is not None
+                and hdi_prob != bundle.hdi_prob
+            ):
+                raise ValueError(
+                    "StaggeredDiD HDI bounds are computed during effect aggregation. "
+                    f"The stored HDI probability is {bundle.hdi_prob}, but plot() received "
+                    f"hdi_prob={hdi_prob}. Omit it to use the stored value."
+                )
+            if view == "group_time":
+                fig, axes = self._plot_group_time(
+                    bundle=bundle,
+                    figsize=figsize,
+                    layout=layout,
+                    x_axis=x_axis,
+                    include_placebo=include_placebo,
+                )
+            elif view == "event_time":
+                fig, axes = self._plot_event_time(bundle=bundle, figsize=figsize)
+            else:
+                raise ValueError("view must be 'event_time' or 'group_time'")
+            for axis in axes:
+                if response_type == "prediction":
+                    axis.set_ylabel("Predictive difference")
+                    axis.set_title(
+                        axis.get_title().replace("ATT", "Predictive difference")
+                    )
+                legend = axis.get_legend()
+                if legend is not None:
+                    for label in legend.get_texts():
+                        label.set_text(label.get_text().replace("HDI", "ETI"))
+                        if response_type == "prediction":
+                            label.set_text(
+                                label.get_text().replace("ATT", "Predictive difference")
+                            )
+        return finish_response_plot(
+            fig,
+            axes,
+            response_type=response_type,
+            group=group,
+            target="difference" if group == "posterior" else "outcome",
+            ci_prob=bundle.hdi_prob if hdi_prob is None else hdi_prob,
+            ci_kind="eti" if group == "posterior" else "hdi",
+            kind="ribbon",
+            show_response_annotation=show_response_annotation,
+            has_draws=has_posterior_draws(bundle.y_pred),
+        )
 
+    def _plot_event_time(
+        self,
+        *,
+        bundle: StaggeredDifferenceInDifferencesResult,
+        figsize: tuple[float, float] | None,
+    ) -> tuple[plt.Figure, list[plt.Axes]]:
+        """Render the selected bundle's event-time estimates."""
+        with_uncertainty = has_posterior_draws(bundle.y_pred)
         fig, ax = plt.subplots(1, 1, figsize=figsize)
 
         att_et = bundle.att_event_time.copy()
@@ -1638,6 +1749,7 @@ class StaggeredDifferenceInDifferences(
         *,
         group: Literal["prior", "posterior"] = "posterior",
         hdi_prob: float = HDI_PROB,
+        response_type: Literal["expectation", "prediction"] = "expectation",
     ) -> pd.DataFrame:
         """Get event-time plotting data.
 
@@ -1653,6 +1765,12 @@ class StaggeredDifferenceInDifferences(
             bundle, the intervals are recomputed. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
 
+        response_type : {"expectation", "prediction"}, default "expectation"
+            ``"prediction"`` returns aggregated observed-minus-predictive
+            differences, including noise, with equal-tailed intervals. Existing
+            column names are retained; ``DataFrame.attrs`` records the target.
+            Stored ATT results and summaries remain expectation-based.
+
         Returns
         -------
         pd.DataFrame
@@ -1662,7 +1780,22 @@ class StaggeredDifferenceInDifferences(
             Includes both pre-treatment (placebo) and post-treatment
             effects. Not cached on the experiment.
         """
-        bundle = self._require_bundle(group)
+        bundle = self._bundle_for_response(
+            self._require_bundle(group),
+            response_type=response_type,
+            group=group,
+            hdi_prob=hdi_prob,
+        )
+        if response_type == "prediction":
+            frame = bundle.att_event_time.copy()
+            frame.attrs.update(
+                response_type=response_type,
+                group=group,
+                quantity="predictive difference",
+                interval_kind="eti",
+                interval_probability=hdi_prob,
+            )
+            return frame
         # If there are no draws, or the requested hdi_prob matches what was
         # used during aggregation, return the pre-computed results
         stored_hdi_prob = bundle.hdi_prob

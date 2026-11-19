@@ -480,7 +480,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         response_type : {"expectation", "prediction"}, default "expectation"
             Which quantity the uncertainty bands represent.
             ``"expectation"`` uses the conditional mean ``mu`` and excludes
-            observation noise. ``"prediction"`` uses posterior predictive
+            observation noise. ``"prediction"`` uses predictive
             ``y_hat`` and includes observation noise. The reported causal
             impact stays the stored treatment coefficient. Point-estimate
             backends reject ``"prediction"``.
@@ -506,9 +506,9 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : matplotlib.axes.Axes
+        ax : :class:`~matplotlib.axes.Axes`
             The axes object containing the plot.
         """
         return self._render_plot(
@@ -584,6 +584,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             return finish_response_plot(
                 fig,
                 ax,
+                group=group,
                 response_type=response_type,
                 ci_prob=ci_prob,
                 ci_kind=ci_kind,
@@ -776,6 +777,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         return finish_response_plot(
             fig,
             ax,
+            group=group,
             response_type=response_type,
             ci_prob=ci_prob,
             ci_kind=ci_kind,

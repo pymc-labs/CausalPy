@@ -354,7 +354,7 @@ def plot_scalar_posterior(
 
     Returns
     -------
-    plt.Axes
+    :class:`~matplotlib.axes.Axes`
         The axes supplied by the caller after drawing.
 
     Raises

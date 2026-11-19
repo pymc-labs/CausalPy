@@ -28,10 +28,11 @@ from sklearn.base import RegressorMixin
 from causalpy._arviz_compat import hdi_bound_arrays
 from causalpy.constants import HDI_PROB
 from causalpy.custom_exceptions import DataException
+from causalpy.experiments._response_type import check_response_type, quantity_for
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
-from causalpy.plot_utils import _plot_interval_band
+from causalpy.plot_utils import _plot_interval_band, has_posterior_draws
 from causalpy.pymc_models import PyMCModel
 from causalpy.reporting import EffectSummary
 
@@ -648,6 +649,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         *,
         group: Literal["prior", "posterior"] = "posterior",
         hdi_prob: float = HDI_PROB,
+        response_type: Literal["expectation", "prediction"] = "expectation",
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
     ) -> tuple[plt.Figure, plt.Axes]:
@@ -672,6 +674,9 @@ class PanelRegression(BaseExperiment[ResultBundle]):
             each posterior coefficient. Must be in ``(0, 1]``. Ignored for
             OLS models. Defaults to :data:`~causalpy.constants.HDI_PROB`
             (currently 0.94).
+        response_type : {"expectation", "prediction"}, default "expectation"
+            This coefficient-only view rejects ``"prediction"``. For outcome
+            predictions use :meth:`get_plot_data` or :meth:`plot_trajectories`.
         show : bool
             Whether to automatically display the plot. Defaults to ``True``.
         legend_kwargs : dict, optional
@@ -683,11 +688,17 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : matplotlib.axes.Axes
+        ax : :class:`~matplotlib.axes.Axes`
             The axes object containing the coefficient plot.
         """
+        if check_response_type(response_type) == "prediction":
+            raise ValueError(
+                "PanelRegression.plot() shows coefficients, not outcomes. "
+                "Use get_plot_data(response_type='prediction') or "
+                "plot_trajectories(interval_type='predictive') for noisy outcomes."
+            )
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
@@ -723,7 +734,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[plt.Figure, plt.Axes]
+        tuple of :class:`~matplotlib.figure.Figure` and :class:`~matplotlib.axes.Axes`
             Figure and axes objects
         """
         return self._plot_coefficients_internal(hdi_prob=hdi_prob, group=group)
@@ -806,9 +817,12 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         return fig, ax
 
     def get_plot_data(
-        self, *, group: Literal["prior", "posterior"] = "posterior"
+        self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+        response_type: Literal["expectation", "prediction"] = "expectation",
     ) -> pd.DataFrame:
-        """Get plot data with expected values from the requested draw group.
+        """Get fitted expectation or predictive outcomes from the requested draw group.
 
         Bayesian models additionally return ``y_fitted_lower`` /
         ``y_fitted_upper`` 95% credible-interval columns.
@@ -816,7 +830,12 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         Parameters
         ----------
         group : {"prior", "posterior"}, default "posterior"
-            Draw group used for expected outcomes and credible intervals.
+            Draw group used for outcomes and credible intervals.
+        response_type : {"expectation", "prediction"}, default "expectation"
+            ``"expectation"`` returns conditional means; ``"prediction"``
+            returns observation-level draws including noise. Both retain the
+            existing 95% equal-tailed bounds. Point-estimate backends reject
+            ``"prediction"``. Coefficient estimates and summaries are unchanged.
 
         Returns
         -------
@@ -832,21 +851,17 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         self._resolve_group(group)
         columns: dict[str, Any] = {"y_actual": self.design["y"].values.flatten()}
 
-        # ponytail: PanelRegression stores no canonical prediction container,
-        # so in-sample fitted values must come from backend-native objects
-        # (idata mu vs sklearn predict); the branch is isolated here. Upgrade
-        # path: store canonical in-sample predictions at fit time.
-        if self._model_backend.is_bayesian:
-            mu = self._model_backend.require_idata()[group].dataset["mu"]
-            columns["y_fitted"] = mu.mean(dim=["chain", "draw"]).values.flatten()
-            columns["y_fitted_lower"] = mu.quantile(
+        predictions = self._model_backend.predict_response(
+            X=self.design["X"], quantity=quantity_for(response_type), group=group
+        )
+        columns["y_fitted"] = predictions.mean(dim=["chain", "draw"]).values.flatten()
+        if has_posterior_draws(predictions):
+            columns["y_fitted_lower"] = predictions.quantile(
                 0.025, dim=["chain", "draw"]
             ).values.flatten()
-            columns["y_fitted_upper"] = mu.quantile(
+            columns["y_fitted_upper"] = predictions.quantile(
                 0.975, dim=["chain", "draw"]
             ).values.flatten()
-        else:
-            columns["y_fitted"] = np.squeeze(self.model.predict(self.design["X"]))
         columns[self.unit_fe_variable] = self.data[self.unit_fe_variable].values
 
         plot_data = pd.DataFrame(columns)
@@ -877,7 +892,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[plt.Figure, plt.Axes]
+        tuple of :class:`~matplotlib.figure.Figure` and :class:`~matplotlib.axes.Axes`
             Figure and axes objects
 
         Raises
@@ -904,7 +919,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[plt.Figure, plt.Axes]
+        tuple of :class:`~matplotlib.figure.Figure` and :class:`~matplotlib.axes.Axes`
             Figure and axes objects
 
         Raises
@@ -996,7 +1011,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[plt.Figure, np.ndarray]
+        tuple of :class:`~matplotlib.figure.Figure` and :class:`~numpy.ndarray`
             Figure and array of axes objects
 
         Raises
@@ -1183,7 +1198,7 @@ class PanelRegression(BaseExperiment[ResultBundle]):
 
         Returns
         -------
-        tuple[plt.Figure, plt.Axes]
+        tuple of :class:`~matplotlib.figure.Figure` and :class:`~matplotlib.axes.Axes`
             Figure and axes objects
         """
         plot_data = self.get_plot_data()

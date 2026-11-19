@@ -1,4 +1,4 @@
-#   Copyright 2022 - 2026 The PyMC Labs Developers
+#   Copyright 2026 - 2026 The PyMC Labs Developers
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -11,42 +11,14 @@
 #   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 #   See the License for the specific language governing permissions and
 #   limitations under the License.
-"""Shared wiring for expectation versus posterior-predictive uncertainty.
+"""Select and label expectation or observation-level predictive outcomes."""
 
-Stored experiment results stay on the conditional expectation ``mu``. Plot
-and summary callers opt into observation-noise draws (``y_hat``) without
-mutating that stored bundle.
-"""
-
-import hashlib
-import logging
-from collections.abc import Iterator
-from contextlib import contextmanager
 from typing import Any, Literal
 
-import numpy as np
 from matplotlib.figure import Figure
 
 ResponseType = Literal["expectation", "prediction"]
 Quantity = Literal["mu", "y_hat"]
-
-logger = logging.getLogger(__name__)
-
-_logged = {"emitted": False}
-
-_RESPONSE_LOG = (
-    "response_type selects the uncertainty quantity. "
-    "'expectation' (default) uses the conditional mean mu and excludes "
-    "observation noise. 'prediction' uses posterior predictive y_hat. "
-    "Where that series includes observation noise, intervals are wider. "
-    "Backends whose y_hat aliases mu reject prediction mode. "
-    "Stored impacts remain the conditional expectation."
-)
-
-_PREDICTION_SUMMARY_NOTE = (
-    " These intervals include observation noise (a posterior predictive "
-    "contrast of y_hat), not the default conditional-expectation impact."
-)
 
 
 def check_response_type(response_type: str) -> ResponseType:
@@ -87,127 +59,11 @@ def quantity_for(response_type: str) -> Quantity:
     return "mu" if checked == "expectation" else "y_hat"
 
 
-def reset_response_type_log() -> None:
-    """Clear the once-per-process plot and summary log flag. For tests."""
-    _logged["emitted"] = False
-
-
-def log_response_type_once(where: Literal["plot", "summary"]) -> None:
-    """Explain the response-type choice once per process.
-
-    The first plot or summary call consumes the flag. A later call site
-    does not log again.
-
-    Parameters
-    ----------
-    where : {"plot", "summary"}
-        Call site. Both values share one process-wide flag.
-    """
-    if where not in ("plot", "summary"):
-        raise ValueError(f"where must be 'plot' or 'summary', got {where!r}")
-    if _logged["emitted"]:
-        return
-    _logged["emitted"] = True
-    logger.info(_RESPONSE_LOG)
-
-
-def _replays_predictive_draws(seed: Any) -> bool:
-    """Return whether a second predict call would redraw the same noise.
-
-    ``sample_posterior_predictive`` restarts from ``random_seed`` unless it
-    is missing, ``None``, or a generator. Bool, float, integer, and
-    array-like seeds all replay, including ``True``.
-    """
-    if seed is None:
-        return False
-    return not isinstance(seed, (np.random.Generator, np.random.RandomState))
-
-
-def _seed_token(seed: Any) -> bytes:
-    """Return a stable digest input for one replayed predictive seed."""
-    if isinstance(seed, (bool, np.bool_)):
-        return b"b" + bytes([int(bool(seed))])
-    if isinstance(seed, (int, np.integer)):
-        value = int(seed)
-        nbytes = max(1, (value.bit_length() + 8) // 8)
-        return b"i" + value.to_bytes(nbytes, "little", signed=True)
-    if isinstance(seed, (float, np.floating)):
-        return b"f" + np.float64(seed).tobytes()
-    if isinstance(seed, str):
-        encoded = seed.encode()
-        return b"s" + len(encoded).to_bytes(4, "little") + encoded
-    if isinstance(seed, bytes):
-        return b"y" + len(seed).to_bytes(4, "little") + seed
-    if isinstance(seed, np.ndarray):
-        array = np.ascontiguousarray(seed)
-        if array.dtype == object:
-            return b"o" + _seed_token(array.tolist())
-        header = f"{array.dtype.str}:{array.shape}".encode()
-        return b"a" + len(header).to_bytes(4, "little") + header + array.tobytes()
-    if isinstance(seed, (list, tuple)):
-        parts = [_seed_token(item) for item in seed]
-        body = b"".join(len(part).to_bytes(4, "little") + part for part in parts)
-        kind = b"l" if isinstance(seed, list) else b"t"
-        return kind + body
-    encoded = repr(seed).encode()
-    return b"r" + type(seed).__name__.encode() + b":" + encoded
-
-
-def _counterfactual_generator(seed: Any) -> np.random.Generator:
-    """Build a generator PyMC will not restart from the caller's seed.
-
-    The digest is salted, so the counterfactual sequence is not the fitted
-    predict's sequence. The same seed always yields the same generator state.
-    """
-    digest = hashlib.sha256(b"causalpy-response-counterfactual\0" + _seed_token(seed))
-    entropy = np.frombuffer(digest.digest(), dtype=np.uint32).copy()
-    return np.random.default_rng(entropy)
-
-
-@contextmanager
-def independent_predict_seed(model: Any) -> Iterator[None]:
-    """Replace a replayed predictive seed for one call, then restore it.
-
-    ``PyMCModel.predict`` reseeds posterior-predictive sampling from
-    ``sample_kwargs["random_seed"]`` on every call. Two equal-length
-    designs therefore share one observation-noise sequence, and a
-    fitted-minus-counterfactual contrast cancels that noise. A replayed
-    seed is replaced with a generator built from a salted digest of that
-    seed. A generator is not replayed, and rebuilding it from the same
-    digest makes the counterfactual draw repeatable. The caller's seed is
-    restored on exit. Missing seeds and generators are left alone.
-    Passing ``None`` is not used: ``sample_posterior_predictive`` treats
-    that as fresh entropy, so two seeded summaries would disagree.
-
-    Parameters
-    ----------
-    model : object
-        Object with ``sample_kwargs["random_seed"]``. Other objects are ignored.
-
-    Yields
-    ------
-    None
-        Control returns with a replayed seed replaced. The original seed is
-        restored on exit, including when the body raises.
-    """
-    kwargs = getattr(model, "sample_kwargs", None)
-    if not isinstance(kwargs, dict) or "random_seed" not in kwargs:
-        yield
-        return
-    seed = kwargs["random_seed"]
-    if not _replays_predictive_draws(seed):
-        yield
-        return
-    kwargs["random_seed"] = _counterfactual_generator(seed)
-    try:
-        yield
-    finally:
-        kwargs["random_seed"] = seed
-
-
 def annotation_text(
     *,
     response_type: str,
+    group: Literal["prior", "posterior"] = "posterior",
+    target: str = "outcome",
     ci_prob: float,
     ci_kind: str,
     kind: str,
@@ -217,6 +73,10 @@ def annotation_text(
 
     Parameters
     ----------
+    target : str
+        Predictive quantity named in the note: outcome or difference.
+    group : {"prior", "posterior"}
+        Conditioning draws used for the displayed outcomes.
     response_type : str
         ``"expectation"`` or ``"prediction"``.
     ci_prob : float
@@ -237,62 +97,41 @@ def annotation_text(
         return "Point prediction (no observation-noise interval)."
     checked = check_response_type(response_type)
     if checked == "expectation":
-        label = "conditional expectation (excludes observation noise)"
+        label = f"{group} conditional expectation (excludes observation noise)"
     else:
-        label = "posterior predictive (includes observation noise)"
+        label = f"{group} predictive {target} (includes observation noise)"
     if kind != "ribbon":
         return f"Drawn uncertainty: {label}"
     interval = "ETI" if ci_kind == "eti" else "HDI"
     percent = f"{ci_prob * 100:g}%"
-    return f"Shaded band: {percent} {interval} of the {label}"
+    return f"Intervals: {percent} {interval} of the {label}"
 
 
-def should_annotate(
-    *,
-    show_response_annotation: bool | None,
-    kind: str,
-    has_draws: bool,
-) -> bool:
-    """Whether a figure note should be added.
-
-    Parameters
-    ----------
-    show_response_annotation : bool or None
-        ``None`` annotates Bayesian ribbon plots. ``True`` always annotates.
-        ``False`` never does.
-    kind : str
-        Plot kind. The default annotates only ``"ribbon"``.
-    has_draws : bool
-        Whether the plotted quantity has more than one draw.
-
-    Returns
-    -------
-    bool
-        Whether to add the figure note.
-    """
-    if show_response_annotation is False:
-        return False
-    if show_response_annotation is True:
-        return True
-    return has_draws and kind == "ribbon"
-
-
-def annotate_response(
+def finish_response_plot(
     fig: Figure,
+    axes: Any,
     *,
     response_type: str,
+    group: Literal["prior", "posterior"] = "posterior",
+    target: str = "outcome",
     ci_prob: float,
     ci_kind: str,
     kind: str,
     show_response_annotation: bool | None,
     has_draws: bool,
-) -> None:
-    """Add the response-type note when the call asks for it.
+) -> tuple[Figure, Any]:
+    """Optionally label outcome uncertainty without changing effect estimands.
 
     Parameters
     ----------
     fig : matplotlib.figure.Figure
-        Figure to annotate. The note is figure text, not an axis title.
+        Figure to annotate.
+    axes : Any
+        Axes returned with the figure, unchanged.
+    target : str
+        Predictive quantity named in the note: outcome or difference.
+    group : {"prior", "posterior"}
+        Conditioning draws used for the displayed outcomes.
     response_type : str
         ``"expectation"`` or ``"prediction"``.
     ci_prob : float
@@ -302,23 +141,27 @@ def annotate_response(
     kind : str
         Plot kind.
     show_response_annotation : bool or None
-        See :func:`should_annotate`.
+        ``None`` labels draw-based ribbons; ``True`` always labels and
+        ``False`` suppresses the note.
     has_draws : bool
         Whether the plotted quantity has more than one draw.
+
+    Returns
+    -------
+    tuple of (matplotlib.figure.Figure, Any)
+        The same figure and axes, after the optional note.
     """
-    if not should_annotate(
-        show_response_annotation=show_response_annotation,
-        kind=kind,
-        has_draws=has_draws,
+    if show_response_annotation is False or (
+        show_response_annotation is None and (not has_draws or kind != "ribbon")
     ):
-        return
-    # Figure coordinates, not subplots_adjust: experiment plots already called
-    # tight_layout, and adjusting afterwards warns and can be ignored.
+        return fig, axes
     fig.text(
         0.01,
         0.01,
         annotation_text(
             response_type=response_type,
+            group=group,
+            target=target,
             ci_prob=ci_prob,
             ci_kind=ci_kind,
             kind=kind,
@@ -328,77 +171,6 @@ def annotate_response(
         va="bottom",
         fontsize=8,
     )
-
-
-def finish_response_plot(
-    fig: Figure,
-    axes: Any,
-    *,
-    response_type: str,
-    ci_prob: float,
-    ci_kind: str,
-    kind: str,
-    show_response_annotation: bool | None,
-    has_draws: bool,
-) -> tuple[Figure, Any]:
-    """Log the quantity choice once and optionally label the figure.
-
-    Parameters
-    ----------
-    fig : matplotlib.figure.Figure
-        Figure to annotate.
-    axes : Any
-        Axes returned with the figure, unchanged.
-    response_type : str
-        ``"expectation"`` or ``"prediction"``.
-    ci_prob : float
-        Credible-interval probability, used only for ribbon notes.
-    ci_kind : str
-        ``"hdi"`` or ``"eti"``.
-    kind : str
-        Plot kind.
-    show_response_annotation : bool or None
-        See :func:`should_annotate`.
-    has_draws : bool
-        Whether the plotted quantity has more than one draw. Logging is
-        skipped for point estimates.
-
-    Returns
-    -------
-    tuple of (matplotlib.figure.Figure, Any)
-        The same figure and axes, after the optional note.
-    """
-    if has_draws:
-        log_response_type_once("plot")
-    annotate_response(
-        fig,
-        response_type=response_type,
-        ci_prob=ci_prob,
-        ci_kind=ci_kind,
-        kind=kind,
-        show_response_annotation=show_response_annotation,
-        has_draws=has_draws,
-    )
+    # Reserve space for the note and lay out labels added after the panels.
+    fig.set_layout_engine("tight", rect=(0, 0.065, 1, 1))
     return fig, axes
-
-
-def note_prediction_summary(text: str, response_type: str) -> str:
-    """Append an observation-noise warning when a summary used ``y_hat``.
-
-    Parameters
-    ----------
-    text : str
-        Summary prose. Returned unchanged for ``"expectation"``.
-    response_type : str
-        ``"expectation"`` or ``"prediction"``.
-
-    Returns
-    -------
-    str
-        Summary text, with the observation-noise note when required.
-    """
-    if check_response_type(response_type) != "prediction":
-        return text
-    if _PREDICTION_SUMMARY_NOTE.strip() in text:
-        return text
-    return text.rstrip() + _PREDICTION_SUMMARY_NOTE

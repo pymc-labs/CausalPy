@@ -120,6 +120,7 @@ class UpDownGeoLift(SyntheticControl):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        response_type: Literal["expectation", "prediction"] = "expectation",
         plot_predictors: bool = False,
         figsize: tuple[float, float] = (7, 8),
         **kwargs: Any,
@@ -133,6 +134,7 @@ class UpDownGeoLift(SyntheticControl):
             kind=kind,
             ci_kind=ci_kind,
             num_samples=num_samples,
+            response_type=response_type,
             plot_predictors=plot_predictors,
             figsize=figsize,
             **kwargs,
@@ -144,11 +146,14 @@ class UpDownGeoLift(SyntheticControl):
             cumulative_unit = (
                 self.outcome_unit.rsplit("/", 1)[0] if self.outcome_unit else None
             )
-            axes[1].set_ylabel(f"Impact{period_unit}")
+            impact_label = (
+                "Predictive\ndifference" if response_type == "prediction" else "Impact"
+            )
+            axes[1].set_ylabel(f"{impact_label}{period_unit}")
             axes[2].set_ylabel(
-                f"Cumulative impact ({cumulative_unit})"
+                f"Cumulative {impact_label.lower()} ({cumulative_unit})"
                 if cumulative_unit
-                else "Cumulative impact"
+                else f"Cumulative {impact_label.lower()}"
             )
         if self.outcome_unit and self.outcome_unit.startswith("USD"):
             for axis in axes:

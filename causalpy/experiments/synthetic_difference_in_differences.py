@@ -31,6 +31,7 @@ from causalpy.date_utils import (
     format_date_axes,
     validate_treatment_time_against_index,
 )
+from causalpy.experiments._response_type import check_response_type
 from causalpy.experiments._results import SyntheticDifferenceInDifferencesResult
 from causalpy.input_data import DataFrameLike, to_pandas_with_time_index
 from causalpy.plot_utils import _PosteriorPlotStyle, plot_posterior_over_x
@@ -652,6 +653,7 @@ class SyntheticDifferenceInDifferences(
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        response_type: Literal["expectation", "prediction"] = "expectation",
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
     ) -> tuple[plt.Figure, np.ndarray]:
@@ -672,7 +674,7 @@ class SyntheticDifferenceInDifferences(
             2. Use ``None`` for raw values.
         ci_prob : float
             Probability mass of the highest density interval drawn around the
-            posterior predictive, causal impact, and cumulative impact bands.
+            expected synthetic outcome, causal impact, and cumulative impact bands.
             Must be in ``(0, 1]``. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         kind : {"ribbon", "histogram", "spaghetti"}, optional
@@ -688,6 +690,10 @@ class SyntheticDifferenceInDifferences(
             Number of posterior draws when ``kind="spaghetti"``. Defaults
             to 50. Ignored for other kinds.
 
+        response_type : {"expectation", "prediction"}, default "expectation"
+            The weight model supplies expected synthetic outcomes only.
+            ``"prediction"`` raises ``ValueError`` because observation-level
+            outcome noise is not modeled.
         show : bool, optional
             Whether to call :func:`matplotlib.pyplot.show` after drawing.
             Defaults to ``True``.
@@ -700,11 +706,16 @@ class SyntheticDifferenceInDifferences(
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure containing the three stacked panels.
-        ax : numpy.ndarray
-            Array of the three :class:`matplotlib.axes.Axes` instances.
+        ax : :class:`~numpy.ndarray`
+            Array of the three :class:`~matplotlib.axes.Axes` instances.
         """
+        if check_response_type(response_type) == "prediction":
+            raise ValueError(
+                "SyntheticDifferenceInDifferences models weights, not observation-level "
+                "outcome noise; response_type='prediction' is unsupported."
+            )
         return self._render_plot(
             show=show,
             legend_kwargs=legend_kwargs,
@@ -763,9 +774,9 @@ class SyntheticDifferenceInDifferences(
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The matplotlib figure containing the plots.
-        ax : list of matplotlib.axes.Axes
+        ax : list of :class:`~matplotlib.axes.Axes`
             The three axes (counterfactual, impact, cumulative impact).
         """
         bundle = self._require_bundle(group)

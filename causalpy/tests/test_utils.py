@@ -15,6 +15,8 @@
 Tests for utility functions
 """
 
+from types import SimpleNamespace
+
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
@@ -343,104 +345,82 @@ def sc_result_multi_unit():
     ).fit()
 
 
-def test_extract_lift_for_mmm_single_unit(sc_result_single_unit):
-    """Test extract_lift_for_mmm with a single treated unit."""
-    result = extract_lift_for_mmm(
-        sc_result_single_unit,
-        channel="tv_campaign",
-        x=0.0,
-        delta_x=50000,
-        aggregate="mean",
+def _frozen_lift_impact() -> np.ndarray:
+    """Post-period impacts with shape (chain, draw, obs_ind, treated_units).
+
+    Two geos, two chains, and an uneven time path keep the mean of per-period
+    means, the mean of per-period sums, and the raw standard deviation apart.
+    """
+    north = np.array(
+        [
+            [[1.0, 2.0, 9.0], [3.0, 5.0, 1.0]],
+            [[0.0, 4.0, 2.0], [6.0, 1.0, 2.0]],
+        ]
     )
-
-    # Check that we get a DataFrame with the right structure
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) == 1  # One treated unit
-    assert list(result.columns) == [
-        "channel",
-        "geo",
-        "x",
-        "delta_x",
-        "delta_y",
-        "sigma",
-    ]
-
-    # Check values
-    assert result.iloc[0]["channel"] == "tv_campaign"
-    assert result.iloc[0]["geo"] == "actual"
-    assert result.iloc[0]["x"] == 0.0
-    assert result.iloc[0]["delta_x"] == 50000
-
-    # delta_y and sigma should be floats
-    assert isinstance(result.iloc[0]["delta_y"], float)
-    assert isinstance(result.iloc[0]["sigma"], float)
-
-    # sigma should be positive (it's a std)
-    assert result.iloc[0]["sigma"] > 0
-
-
-def test_extract_lift_for_mmm_multi_unit(sc_result_multi_unit):
-    """Test extract_lift_for_mmm with multiple treated units."""
-    result = extract_lift_for_mmm(
-        sc_result_multi_unit,
-        channel="radio",
-        x=1000.0,
-        delta_x=5000,
-        aggregate="mean",
+    south = np.array(
+        [
+            [[10.0, 0.0, 1.0], [2.0, 2.0, 8.0]],
+            [[4.0, 4.0, 4.0], [1.0, 0.0, 5.0]],
+        ]
     )
-
-    # Check that we get a DataFrame with one row per treated unit
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) == 2  # Two treated units (t1, t2)
-    assert list(result.columns) == [
-        "channel",
-        "geo",
-        "x",
-        "delta_x",
-        "delta_y",
-        "sigma",
-    ]
-
-    # Check that both geos are represented
-    geos = set(result["geo"])
-    assert geos == {"t1", "t2"}
-
-    # Check that channel and spend values are correct for all rows
-    for _, row in result.iterrows():
-        assert row["channel"] == "radio"
-        assert row["x"] == 1000.0
-        assert row["delta_x"] == 5000
-        assert isinstance(row["delta_y"], float)
-        assert isinstance(row["sigma"], float)
-        assert row["sigma"] > 0
+    return np.stack([north, south], axis=-1)
 
 
-def test_extract_lift_for_mmm_sum_aggregate(sc_result_single_unit):
-    """Test extract_lift_for_mmm with sum aggregation."""
-    result_mean = extract_lift_for_mmm(
-        sc_result_single_unit,
-        channel="tv",
-        x=0.0,
-        delta_x=1000,
-        aggregate="mean",
+def _expected_aggregated_lift(
+    impact: np.ndarray, unit: int, aggregate: str
+) -> tuple[float, float]:
+    values = impact[:, :, :, unit]
+    reduced = values.mean(axis=-1) if aggregate == "mean" else values.sum(axis=-1)
+    return float(reduced.mean()), float(reduced.std())
+
+
+def test_extract_lift_for_mmm_delta_y_matches_impact_aggregation():
+    """delta_y and sigma follow the requested time aggregation of impact_post."""
+    impact = _frozen_lift_impact()
+    south, north = 1, 0
+    south_mean, south_mean_sigma = _expected_aggregated_lift(impact, south, "mean")
+    south_sum, _south_sum_sigma = _expected_aggregated_lift(impact, south, "sum")
+    north_mean, _north_mean_sigma = _expected_aggregated_lift(impact, north, "mean")
+    raw_sigma = float(impact[:, :, :, south].std())
+    assert south_mean == pytest.approx(3.4166666666666665)
+    assert south_sum == pytest.approx(10.25)
+    assert south_mean != pytest.approx(south_sum)
+    assert south_mean != pytest.approx(north_mean)
+    assert south_mean != pytest.approx(float(impact[:, :, 0, south].mean()))
+    assert south_mean_sigma != pytest.approx(raw_sigma)
+
+    impact_post = xr.DataArray(
+        impact,
+        dims=["chain", "draw", "obs_ind", "treated_units"],
+        coords={
+            "chain": [0, 1],
+            "draw": [0, 1],
+            "obs_ind": [0, 1, 2],
+            "treated_units": ["north", "south"],
+        },
     )
-
-    result_sum = extract_lift_for_mmm(
-        sc_result_single_unit,
-        channel="tv",
-        x=0.0,
-        delta_x=1000,
-        aggregate="sum",
+    # Row order follows treated_units, which is not the array coordinate order.
+    sc_result = SimpleNamespace(
+        result=SimpleNamespace(impact_post=impact_post),
+        treated_units=["south", "north"],
     )
-
-    # Sum should be larger than mean (assuming multiple post-intervention periods)
-    # The sum aggregates all periods, mean averages them
-    n_post_periods = len(sc_result_single_unit.datapost)
-    assert n_post_periods > 1
-
-    # The sum of lift should roughly equal mean * n_periods
-    # (with some tolerance for numerical precision)
-    assert abs(result_sum.iloc[0]["delta_y"]) > abs(result_mean.iloc[0]["delta_y"])
+    for aggregate, south_delta in (("mean", south_mean), ("sum", south_sum)):
+        table = extract_lift_for_mmm(
+            sc_result,
+            channel="tv",
+            x=0.0,
+            delta_x=1.0,
+            aggregate=aggregate,
+        )
+        assert list(table["geo"]) == ["south", "north"]
+        for row, unit in ((0, south), (1, north)):
+            delta_y, sigma = _expected_aggregated_lift(impact, unit, aggregate)
+            assert table.iloc[row]["delta_y"] == pytest.approx(delta_y)
+            assert table.iloc[row]["sigma"] == pytest.approx(sigma)
+        assert table.iloc[0]["delta_y"] == pytest.approx(south_delta)
+        assert table.iloc[0]["delta_y"] != pytest.approx(
+            north_mean if aggregate == "mean" else south_mean
+        )
 
 
 def test_extract_lift_for_mmm_raises_for_ols():

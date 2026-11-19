@@ -32,7 +32,7 @@ from causalpy.steps.report import GenerateReport
 
 
 @pytest.fixture
-def its_context() -> PipelineContext:
+def its_context(mock_pymc_sample) -> PipelineContext:
     """PipelineContext with a fitted OLS ITS experiment and effect summary."""
     np.random.seed(42)
     n = 100
@@ -222,6 +222,36 @@ class TestGenerateReport:
         assert "data:image/png;base64," not in ctx.report
 
 
+def test_ols_html_report_contains_known_relative_effect(mock_pymc_sample):
+    """The cited constant-impact OLS fit renders formatted relative effect 20, not 200."""
+    df = pd.DataFrame(
+        {
+            "t": np.arange(30),
+            "y": np.concatenate([np.full(20, 5.0), np.full(10, 6.0)]),
+        }
+    )
+    cited = InterruptedTimeSeries(
+        df,
+        treatment_time=20,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+    stats = cited.effect_summary(relative=True, cumulative=True)
+    assert stats.table.loc["cumulative", "relative_mean"] == pytest.approx(20.0)
+    assert stats.table.loc["cumulative", "relative_mean"] != pytest.approx(200.0)
+
+    ctx = PipelineContext(data=df)
+    ctx.experiment = cited
+    ctx.effect_summary = stats
+    rendered = GenerateReport(include_plots=False).run(ctx)
+    # Prose formats only the average relative change as ``20.00%``. The
+    # cumulative cell is the table token ``<td>20.0</td>``; summing per-period
+    # percentages emits ``<td>200.0</td>``, which ``20.00%`` does not reject.
+    assert "20.00%" in rendered.report
+    assert "<td>20.0</td>" in rendered.report
+    assert "<td>200.0</td>" not in rendered.report
+
+
 # ---------------------------------------------------------------------------
 # Pipeline integration
 # ---------------------------------------------------------------------------
@@ -230,7 +260,7 @@ class TestGenerateReport:
 class TestGenerateReportPipelineIntegration:
     """Integration tests for GenerateReport within a full pipeline."""
 
-    def test_full_pipeline(self):
+    def test_full_pipeline(self, mock_pymc_sample):
         np.random.seed(42)
         n = 100
         df = pd.DataFrame({"t": np.arange(n), "y": np.random.normal(size=n)})
@@ -263,7 +293,7 @@ class TestStandaloneGenerateReport:
     """Tests for BaseExperiment.generate_report() convenience method."""
 
     @pytest.fixture
-    def experiment(self):
+    def experiment(self, mock_pymc_sample):
         """Return a fitted OLS ITS experiment."""
         np.random.seed(42)
         n = 100

@@ -13,7 +13,6 @@
 # limitations under the License.
 """Expectation versus posterior-predictive response selection."""
 
-import logging
 import warnings
 
 import numpy as np
@@ -25,18 +24,13 @@ from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
 from causalpy.experiments._response_type import (
-    annotate_response,
     annotation_text,
     check_response_type,
-    independent_predict_seed,
-    log_response_type_once,
-    note_prediction_summary,
-    reset_response_type_log,
+    finish_response_plot,
 )
 from causalpy.experiments._results import CausalResult
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.experiments.model_adapter import PyMCModelAdapter
-from causalpy.experiments.piecewise_its import PiecewiseITS
 
 
 def _draws(values, name):
@@ -88,8 +82,9 @@ def test_annotation_lands_on_the_figure_and_can_be_suppressed():
     """The note is a figure text, not a title, and False removes nothing else."""
     fig, ax = plt.subplots()
     ax.set_title("keep me")
-    annotate_response(
+    finish_response_plot(
         fig,
+        None,
         response_type="prediction",
         ci_prob=0.94,
         ci_kind="hdi",
@@ -103,8 +98,9 @@ def test_annotation_lands_on_the_figure_and_can_be_suppressed():
     plt.close(fig)
 
     fig, _ax = plt.subplots()
-    annotate_response(
+    finish_response_plot(
         fig,
+        None,
         response_type="prediction",
         ci_prob=0.94,
         ci_kind="hdi",
@@ -114,26 +110,6 @@ def test_annotation_lands_on_the_figure_and_can_be_suppressed():
     )
     assert fig.texts == []
     plt.close(fig)
-
-
-def test_response_type_log_fires_once_per_process(caplog):
-    """The first plot or summary explains the choice; the other call site stays quiet."""
-    reset_response_type_log()
-    logger_name = "causalpy.experiments._response_type"
-    with caplog.at_level(logging.INFO, logger=logger_name):
-        log_response_type_once("plot")
-        log_response_type_once("summary")
-    messages = [
-        record.getMessage() for record in caplog.records if record.name == logger_name
-    ]
-    assert len(messages) == 1
-    assert "expectation" in messages[0]
-    assert "prediction" in messages[0]
-    assert note_prediction_summary("Impact is 1.", "expectation") == "Impact is 1."
-    noted = note_prediction_summary("Impact is 1.", "prediction")
-    assert "observation noise" in noted
-    assert note_prediction_summary(noted, "prediction") == noted
-    reset_response_type_log()
 
 
 def test_pymc_predict_response_selects_mu_or_y_hat_without_changing_predict():
@@ -194,36 +170,6 @@ def test_aliased_y_hat_with_nan_is_rejected():
         adapter.predict_response(np.ones((2, 1)), quantity="y_hat", group="posterior")
 
 
-def test_independent_predict_seed_replaces_replayed_seeds_with_a_stable_generator():
-    """A replayed seed becomes the same generator twice; a generator is left."""
-
-    class _Model:
-        def __init__(self, seed):
-            self.sample_kwargs = {"random_seed": seed}
-
-    draws = {}
-    for seed in (1, True, 7.0, np.int64(7), [11], np.array([[11]]), "1", np.True_):
-        model = _Model(seed)
-        seen = []
-        for _ in range(2):
-            with independent_predict_seed(model):
-                used = model.sample_kwargs["random_seed"]
-                assert isinstance(used, np.random.Generator)
-                seen.append(int(used.integers(1_000_000)))
-            assert model.sample_kwargs["random_seed"] is seed
-        assert seen[0] == seen[1]
-        draws[repr(seed)] = seen[0]
-    assert draws[repr(1)] != draws[repr(True)]
-    assert draws[repr(True)] == draws[repr(np.True_)]
-    generator = np.random.default_rng(0)
-    model = _Model(generator)
-    with independent_predict_seed(model):
-        assert model.sample_kwargs["random_seed"] is generator
-    model = _Model(None)
-    with independent_predict_seed(model):
-        assert model.sample_kwargs["random_seed"] is None
-
-
 def test_its_prediction_bundle_uses_y_hat_and_leaves_the_stored_result():
     """Prediction mode rebuilds impact; expectation mode reuses the stored bundle."""
     mu = _draws([[4.0, 4.0], [4.0, 4.0]], "mu")
@@ -271,136 +217,6 @@ def test_its_prediction_bundle_uses_y_hat_and_leaves_the_stored_result():
     ]
 
 
-@pytest.mark.parametrize("seed", [1, True, np.int64(7), [11], 7.0])
-def test_piecewise_prediction_contrast_keeps_independent_observation_noise(seed):
-    """Equal-length fitted and counterfactual draws must not share one noise sequence."""
-    n = 4
-    design = np.column_stack(
-        [np.arange(n, dtype=float), np.array([0.0, 0.0, 1.0, 1.0])]
-    )
-
-    class _Model:
-        def __init__(self):
-            self.sample_kwargs = {"random_seed": seed}
-
-    class _Backend:
-        def __init__(self):
-            self._model = _Model()
-
-        def predict_response(self, X, *, quantity, group, out_of_sample=False):
-            used = self._model.sample_kwargs["random_seed"]
-            if isinstance(used, np.random.Generator):
-                noise_seed = 1000.0 + float(used.integers(0, 1000))
-            elif isinstance(used, (list, tuple, np.ndarray)):
-                noise_seed = float(np.asarray(used).reshape(-1)[0])
-            else:
-                noise_seed = float(used)
-            mu = np.asarray(X, dtype=float)[:, 0]
-            noise = 0.0 if quantity == "mu" else noise_seed
-            values = np.broadcast_to(
-                (mu + noise)[None, None, :, None], (1, 1, n, 1)
-            ).copy()
-            return xr.DataArray(
-                values,
-                dims=("chain", "draw", "obs_ind", "treated_units"),
-                coords={
-                    "chain": [0],
-                    "draw": [0],
-                    "obs_ind": np.arange(n),
-                    "treated_units": ["unit_0"],
-                },
-            )
-
-    backend = _Backend()
-    experiment = PiecewiseITS.__new__(PiecewiseITS)
-    experiment.design = {"X": design}
-    experiment._interruption_cols = [1]
-    experiment.time_col = "t"
-    experiment.interruption_times = [2]
-    experiment.data = pd.DataFrame({"t": np.arange(n)})
-    experiment.datapost = experiment.data.iloc[2:]
-    experiment._model_backend = backend
-    stored = CausalResult(
-        predictions_pre=None,
-        predictions_post=None,
-        impact_pre=None,
-        impact_post=None,
-        impact_post_cumulative=None,
-        score=None,
-    )
-    first = experiment._bundle_for_response(
-        stored, response_type="prediction", group="posterior"
-    )
-    second = experiment._bundle_for_response(
-        stored, response_type="prediction", group="posterior"
-    )
-    # Same seed would cancel and leave a zero contrast, because the mean
-    # depends only on the unshifted column. The replacement generator uses
-    # a value that cannot equal the fitted seed.
-    xr.testing.assert_equal(first.impact_pre, second.impact_pre)
-    assert np.max(np.abs(first.impact_pre.values)) >= 1000
-    assert backend._model.sample_kwargs["random_seed"] is seed
-
-
-def test_piecewise_prediction_contrasts_are_reproducible_and_keep_noise():
-    """Two seeded prediction contrasts match, and neither is the mu contrast."""
-    n = 8
-    obs = np.arange(n)
-    design = np.column_stack([np.ones(n), obs.astype(float), (obs >= 4).astype(float)])
-    X = xr.DataArray(
-        design,
-        dims=("obs_ind", "coeffs"),
-        coords={"obs_ind": obs, "coeffs": ["intercept", "t", "interrupt"]},
-    )
-    y = xr.DataArray(
-        (0.4 * obs + 0.2)[:, None],
-        dims=("obs_ind", "treated_units"),
-        coords={"obs_ind": obs, "treated_units": ["unit_0"]},
-    )
-    model = cp.pymc_models.LinearRegression(
-        sample_kwargs={
-            "draws": 20,
-            "tune": 10,
-            "chains": 1,
-            "cores": 1,
-            "progressbar": False,
-            "compute_convergence_checks": False,
-            "random_seed": 1,
-        }
-    )
-    model.fit(X, y)
-    experiment = PiecewiseITS.__new__(PiecewiseITS)
-    experiment.design = {"X": design}
-    experiment._interruption_cols = [2]
-    experiment.time_col = "t"
-    experiment.interruption_times = [4]
-    experiment.data = pd.DataFrame({"t": obs})
-    experiment.datapost = experiment.data.iloc[4:]
-    experiment._model_backend = PyMCModelAdapter(model)
-    stored = CausalResult(
-        predictions_pre=None,
-        predictions_post=None,
-        impact_pre=None,
-        impact_post=None,
-        impact_post_cumulative=None,
-        score=None,
-    )
-    first = experiment._bundle_for_response(
-        stored, response_type="prediction", group="posterior"
-    )
-    second = experiment._bundle_for_response(
-        stored, response_type="prediction", group="posterior"
-    )
-    xr.testing.assert_allclose(first.impact_pre, second.impact_pre)
-    mu = experiment._model_backend.predict_response(design, quantity="mu")
-    design_cf = design.copy()
-    design_cf[:, 2] = 0
-    mu_cf = experiment._model_backend.predict_response(design_cf, quantity="mu")
-    mu_effect = mu.isel(treated_units=0) - mu_cf.isel(treated_units=0)
-    assert not np.allclose(first.impact_pre.values, mu_effect.values)
-    assert model.sample_kwargs["random_seed"] == 1
-
-
 def _sklearn_its():
     dates = pd.date_range("2020-01-01", periods=16, freq="D")
     data = pd.DataFrame(
@@ -436,8 +252,6 @@ def test_sklearn_its_rejects_prediction_mode_and_keeps_default_plots_unlabeled()
 
     with pytest.raises(ValueError, match="no observation-noise draws"):
         experiment.plot(show=False, response_type="prediction")
-    with pytest.raises(ValueError, match="no observation-noise draws"):
-        experiment.effect_summary(response_type="prediction")
     xr.testing.assert_equal(experiment.result.predictions_post, stored)
     assert "observation noise" not in experiment.effect_summary().text
 

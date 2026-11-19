@@ -10,19 +10,40 @@ Gaussian models with an identity link make the linear predictor, conditional exp
 | --- | --- | --- | --- | --- |
 | Linear predictor / latent state | model-specific (e.g. ``eta``) | Link scale | No | No |
 | Conditional expected outcome | ``mu`` | Outcome / response scale | No | **Yes** |
-| Posterior predictive draw | ``y_hat`` | Outcome scale | Yes | No. Stored impact stays ``y - mu``. Plot and summary callers can opt into ``y_hat`` with ``response_type="prediction"``. |
+| Posterior predictive draw | ``y_hat`` | Outcome scale | Yes | No. Stored impact stays ``y - mu``. Outcome plots and plot-data exports can opt into ``y_hat`` with ``response_type="prediction"``. |
 
-**Impact** uses the middle row: draw-level contrasts ``y - mu`` are computed in outcome units, then summarized. **Plots and effect summaries** use the same contrast unless the caller passes ``response_type="prediction"`` or the method documents a different estimand (for example link-scale regression coefficients).
+**Impact** uses the middle row: draw-level contrasts ``y - mu`` are computed in outcome units, then summarized. **Effect summaries** retain their documented estimand. Selecting a plotting target does not change stored results or a later summary call. Methods based on coefficients or structural contrasts retain those estimands in their effect panels as well.
 
 ## Optional observation-noise bands
 
-Stored results stay on ``mu``. The default of ``plot``, ``get_plot_data``, ``effect_summary``, and ``analyze_persistence`` does too. Pass ``response_type="prediction"`` to rebuild the drawn or summarized contrast from posterior predictive ``y_hat``. Where that series includes observation noise, the intervals are wider and are not the default causal impact. The stored result is left unchanged.
+Use the keyword-only ``response_type="expectation"`` (the default) for uncertainty in the conditional expected outcome, or ``response_type="prediction"`` for observation-level predictive outcomes. ``group="prior"`` versus ``group="posterior"`` independently selects the conditioning draws. Backends without observation-level predictive draws raise ``ValueError`` instead of substituting expectation intervals.
 
-Coefficient experiments (difference-in-differences, pretest/posttest, regression discontinuity, and regression kink) switch only the outcome bands. The reported coefficient or threshold contrast stays the stored conditional-expectation estimate.
+For example, after fitting an interrupted time series:
 
-Point-estimate backends have no observation-noise draws and raise ``ValueError``. State-space models store the same series as ``mu`` and ``y_hat``, so ``response_type="prediction"`` raises there too rather than labeling the conditional expectation as observation noise. Bayesian ribbon plots name the quantity and the interval by default, including the credible-interval kind (HDI or ETI) and its probability. Histogram and spaghetti plots stay unlabeled unless ``show_response_annotation=True``. Pass ``show_response_annotation=False`` to omit the ribbon note.
+```python
+fig, axes = result.plot(response_type="prediction", ci_prob=0.94)
+predictive_data = result.get_plot_data(response_type="prediction", hdi_prob=0.94)
+```
 
-The first Bayesian plot or summary call in a process logs the same distinction once. A later call site does not log again.
+ITS and synthetic control show predictive outcome bands in both periods and **predictive difference intervals** for observed minus counterfactual ``y_hat``. Cumulative difference intervals sum each draw's trajectory before taking its interval; summing marginal interval endpoints gives a different and generally incorrect result. Predictive differences include observation noise. Their tail probabilities are not posterior probabilities about the expected causal effect, and wider outcome bands do not establish causal-identification assumptions. The {doc}`../notebooks/interrupted-time-series-pymc` example compares both targets.
+
+Draws may be generated anew on each predictive call. The target, alignment and interval definition agree between plots and exports; exact finite-sample values need not agree across unseeded calls. For custom visualizations, use the exported values together rather than mixing results from separate random draws.
+
+| Experiment/view | Meaning of ``response_type="prediction"`` |
+| --- | --- |
+| Interrupted time series, synthetic control, inherited UpDownGeoLift | Noisy outcomes and observed-minus-predictive difference panels/exports; stored expectation impacts remain unchanged. |
+| Piecewise ITS | Noisy fitted/counterfactual outcome bands; structural-effect and cumulative-effect panels/exports retain their expectation contrast. |
+| Difference-in-differences, pretest/posttest, regression discontinuity, regression kink | Noisy outcome bands; coefficient/threshold-effect estimates retain their existing estimand. |
+| Staggered DiD event/cohort plots and event-time export | Aggregate observed-minus-predictive differences with the existing cohort eligibility rules and equal-tailed intervals. Export column names remain unchanged; ``DataFrame.attrs`` identifies the predictive-difference target and interval. Stored ATT tables and summaries remain expectation-based. |
+| Panel regression ``get_plot_data`` | Noisy fitted outcomes with the existing 95% equal-tailed bounds. Its coefficient-only ``plot`` rejects predictive mode and directs callers to the outcome export or the existing ``plot_trajectories(interval_type="predictive")``. |
+| Synthetic DiD | Unsupported: the weight model has no observation-level outcome likelihood. |
+| Experimental interactive fixed effects | Unsupported: the reconstructed untreated trajectory exposes expectation draws, but no treated predictive-outcome sampler. |
+
+The synthetic DiD, interactive fixed-effects and native state-space capabilities require model-specific follow-up work tracked in [issue #1459](https://github.com/pymc-labs/CausalPy/issues/1459). Panel coefficient plots, IV's unimplemented ``plot`` and IPW's dedicated treatment-effect/balance diagnostics do not depict noisy outcome trajectories; an outcome selector is not an appropriate replacement for their estimands. Augmented synthetic control currently provides fitting but no public plot/export view to extend.
+
+Point-estimate backends have no observation-noise draws and reject predictive requests. Native state-space models currently alias ``mu`` and ``y_hat``; predictive mode rejects that alias rather than mislabeling expectation uncertainty. The optional forecasting backend supports predictive outcomes through its normalized ``y_hat`` output, with posterior conditioning only.
+
+Bayesian ribbon plots name the outcome target, conditioning group, interval kind (HDI or ETI) and probability by default. Histogram and spaghetti plots can be labeled with ``show_response_annotation=True``; ``False`` suppresses the note. Coefficient and structural-effect panels retain their own labels. Summaries and persistence calculations remain expectation-based and do not accept an outcome-target selector.
 
 Posterior transformations for nonlinear models must be applied **draw by draw** before contrasts or averages. In general, ``inverse_link(mean(eta))`` differs from ``mean(inverse_link(eta))``; g-computation averages unit-level potential outcomes on the response scale. See {doc}`estimands` for how this relates to empirical estimands. A worked tutorial notebook is tracked in `CausalPy#1017 <https://github.com/pymc-labs/CausalPy/issues/1017>`_.
 
