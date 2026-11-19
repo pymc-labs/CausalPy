@@ -89,7 +89,9 @@ class GenerateReport:
         buf.seek(0)
         return base64.b64encode(buf.read()).decode("utf-8")
 
-    def _render_plot(self, experiment: Any) -> list[str]:
+    def _render_plot(
+        self, experiment: Any, *, prediction_interval_prob: float | None = None
+    ) -> list[str]:
         """Render experiment plots as base64-encoded PNG strings.
 
         Experiments are lazy: ``plot()`` requires fitted state, so any
@@ -104,7 +106,12 @@ class GenerateReport:
         import matplotlib.pyplot as plt
 
         try:
-            fig, _ = experiment.plot()
+            plot_options = (
+                {"ci_prob": prediction_interval_prob}
+                if prediction_interval_prob is not None
+                else {}
+            )
+            fig, _ = experiment.plot(**plot_options)
         except NotImplementedError as exc:
             logger.debug(
                 "plot() not implemented for %s; omitting the experiment "
@@ -157,16 +164,22 @@ class GenerateReport:
 
         effect_summary = None
         effect_summary_table_html = None
+        prediction_interval_prob = None
         if self.include_effect_summary and context.effect_summary is not None:
             effect_summary = context.effect_summary
             if effect_summary.table is not None:
+                prediction_interval_prob = effect_summary.table.attrs.get(
+                    "prediction_interval_prob"
+                )
                 effect_summary_table_html = effect_summary.table.to_html(
-                    classes="", index=False, border=0
+                    classes="", index=prediction_interval_prob is not None, border=0
                 )
 
         plots: list[str] = []
         if self.include_plots and context.experiment is not None:
-            plots = self._render_plot(context.experiment)
+            plots = self._render_plot(
+                context.experiment, prediction_interval_prob=prediction_interval_prob
+            )
 
         sensitivity_results: list[dict[str, Any]] = []
         if self.include_sensitivity and context.sensitivity_results:

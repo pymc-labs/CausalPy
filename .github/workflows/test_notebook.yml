@@ -47,6 +47,7 @@ jobs:
             pattern: "*-sklearn.ipynb"
             exclude_one: ""
             exclude_two: ""
+            optional-extra: ",skforecast"
           - name: gallery-other
             collection: gallery
             pattern: ""
@@ -81,7 +82,7 @@ jobs:
         run: |
           uv venv --python 3.12
           uv pip install -r docs/requirements.txt
-          uv pip install -e ".[test,docs]"
+          uv pip install -e ".[test,docs${{ matrix.optional-extra }}]"
 
       - name: Run notebooks
         env:

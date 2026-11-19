@@ -358,6 +358,10 @@ def test_effect_summary_intervention_period(datetime_data, mock_pymc_sample):
     assert hasattr(stats, "table")
     assert hasattr(stats, "text")
     assert "intervention" in stats.text.lower() or "during" in stats.text.lower()
+    pd.testing.assert_frame_equal(
+        stats.table,
+        result.effect_summary(period="intervention", window=slice(0, 0)).table,
+    )
 
 
 @pytest.mark.integration
@@ -378,6 +382,9 @@ def test_effect_summary_post_period(datetime_data, mock_pymc_sample):
     assert hasattr(stats, "table")
     assert hasattr(stats, "text")
     assert "post" in stats.text.lower()
+    pd.testing.assert_frame_equal(
+        stats.table, result.effect_summary(period="post", window=slice(0, 0)).table
+    )
 
 
 @pytest.mark.integration

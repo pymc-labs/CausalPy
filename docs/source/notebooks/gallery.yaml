@@ -74,6 +74,8 @@ groups:
         cards:
           - title: Interrupted Time Series (ITS) with `pymc` models
             notebook: interrupted-time-series-pymc
+          - title: Interrupted time series with regression and recursive forecasting
+            notebook: interrupted-time-series-sklearn
           - title: Interrupted Time Series for fixed-period interventions
             notebook: interrupted-time-series-post-intervention-analysis
           - title: Estimating excess deaths during COVID-19 in England and Wales
@@ -160,7 +162,7 @@ groups:
 
   - title: Non-Bayesian OLS
     intro: |
-      These notebooks fit scikit-learn models instead of PyMC models. Coverage is partial: only synthetic control, difference in differences, interrupted time series, and regression discontinuity have a scikit-learn example. Most of those fits are ordinary least squares. The sharp regression discontinuity notebook also includes a Gaussian process fit. Bayesian examples stay in the method sections above.
+      These examples use scikit-learn for synthetic control, difference in differences, and regression discontinuity. Most fits are ordinary least squares. The sharp regression discontinuity notebook also includes a Gaussian process fit.
     categories:
       - title: scikit-learn examples
         toctree_caption: Non-Bayesian OLS
@@ -169,8 +171,6 @@ groups:
             notebook: synthetic-control-sklearn
           - title: Difference in Differences with scikit-learn models
             notebook: difference-in-differences-sklearn
-          - title: Interrupted Time Series (ITS) with scikit-learn models
-            notebook: interrupted-time-series-sklearn
           - title: Sharp regression discontinuity with scikit-learn models
             notebook: regression-discontinuity-sklearn
           - title: Drinking age with a scikit-learn model

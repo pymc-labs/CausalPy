@@ -56,6 +56,10 @@ class CausalResult:
     the full observation window and ``predictions_post`` / ``impact_post`` /
     ``impact_post_cumulative`` carry the post-first-interruption slices consumed
     by the reporting helpers.
+
+    ``counterfactual_paths``, when supplied by a forecasting backend, carries
+    response-scale untreated realizations on ``(simulation, obs_ind,
+    treated_units)``. Simulation coordinates identify whole trajectories.
     """
 
     predictions_pre: xr.DataArray
@@ -64,6 +68,7 @@ class CausalResult:
     impact_post: xr.DataArray
     impact_post_cumulative: xr.DataArray
     score: pd.Series | None = None
+    counterfactual_paths: xr.DataArray | None = field(default=None, kw_only=True)
 
 
 @dataclass(frozen=True)

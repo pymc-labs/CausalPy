@@ -184,6 +184,7 @@ def test_workflow_shards_are_exhaustive_and_non_overlapping(
             "pattern": "*-sklearn.ipynb",
             "exclude_one": "",
             "exclude_two": "",
+            "optional-extra": ",skforecast",
         },
         {
             "name": "gallery-other",

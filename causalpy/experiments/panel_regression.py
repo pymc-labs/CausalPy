@@ -15,7 +15,7 @@
 
 import re
 import warnings
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -846,7 +846,8 @@ class PanelRegression(BaseExperiment[ResultBundle]):
                 0.975, dim=["chain", "draw"]
             ).values.flatten()
         else:
-            columns["y_fitted"] = np.squeeze(self.model.predict(self.design["X"]))
+            model = cast(RegressorMixin, self.model)
+            columns["y_fitted"] = np.squeeze(model.predict(self.design["X"]))
         columns[self.unit_fe_variable] = self.data[self.unit_fe_variable].values
 
         plot_data = pd.DataFrame(columns)
@@ -1146,7 +1147,8 @@ class PanelRegression(BaseExperiment[ResultBundle]):
                 )
             else:
                 # OLS: get fitted values for this unit
-                y_fitted = np.squeeze(self.model.predict(self.design["X"]))[
+                model = cast(RegressorMixin, self.model)
+                y_fitted = np.squeeze(model.predict(self.design["X"]))[
                     sorted_obs_indices
                 ]
                 ax.plot(

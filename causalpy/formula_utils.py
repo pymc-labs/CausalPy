@@ -25,12 +25,15 @@ from patsy import (
     ModelDesc,
     Term,
     dmatrices,
+    dmatrix,
 )
 from patsy import (
     build_design_matrices as patsy_build_design_matrices,
 )
 
 from causalpy.transforms import elapsed, ramp, step
+
+_FORMULA_TRANSFORMS = {"elapsed": elapsed, "ramp": ramp, "step": step}
 
 
 def _datetime_columns(data: pd.DataFrame) -> set[str]:
@@ -187,12 +190,22 @@ def build_formula_matrices(
         Keyword arguments forwarded to :func:`patsy.dmatrices`.
     """
     data_for_patsy = _normalize_patsy_data(data)
-    eval_env = EvalEnvironment.capture(1).with_outer_namespace(
-        {"elapsed": elapsed, "ramp": ramp, "step": step}
-    )
+    eval_env = EvalEnvironment.capture(1).with_outer_namespace(_FORMULA_TRANSFORMS)
     return dmatrices(
         datetime_continuous_formula(formula, data_for_patsy),
         data_for_patsy,
         eval_env=eval_env,
         **kwargs,
+    )
+
+
+def _build_formula_predictors(description: ModelDesc, data: pd.DataFrame) -> Any:
+    """Fit only the Patsy RHS using the same formula normalization."""
+    data_for_patsy = _normalize_patsy_data(data)
+    # The data frame supplies columns. Only explicitly supported expression
+    # helpers enter the namespace retained by Patsy's fitted design.
+    eval_env = EvalEnvironment([_FORMULA_TRANSFORMS | {"np": np, "pd": pd}])
+    terms = _rewrite_datetime_terms(description.rhs_termlist, _datetime_columns(data))
+    return dmatrix(
+        ModelDesc([], terms), data_for_patsy, eval_env=eval_env, NA_action="raise"
     )
