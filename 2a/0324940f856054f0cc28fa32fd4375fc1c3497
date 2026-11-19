@@ -1,0 +1,41 @@
+ARCHITECTURE.md
+  s_54718c9468824b::t_ba48f1c1f7ecb0 74
+causalpy/pymc_forecast_models.py
+  s_54718c9468824b::t_b8c5b25e6cad58 79,117
+causalpy/tests/test_coefficient_contract.py
+  s_54718c9468824b::t_9f9c8f616e2ced 242-243,246
+causalpy/tests/test_prior_phase.py
+  s_54718c9468824b::t_c5cd4abd9ca19c 638-639,642
+causalpy/tests/test_pymc_forecast_adapter.py
+  s_54718c9468824b::t_63eea3b3d88971 38-39,42,782
+causalpy/tests/test_pymc_forecast_damped_trend.py
+  s_54718c9468824b::t_d9b0a3bc3e0c71 27-29
+causalpy/tests/test_pymc_forecast_dependency.py
+  s_54718c9468824b::t_2505cd3d0c5820 32,40-43,45-48,61,78,86,98,103
+docs/source/knowledgebase/prediction-contract.md
+  s_54718c9468824b::t_8f29347aeec7d1 27
+docs/source/notebooks/interrupted-time-series-covid.ipynb
+  s_54718c9468824b::t_8e406ca379921e 936
+environment.yml
+  s_54718c9468824b::t_c89c779ce0a5ce 53
+pyproject.toml
+  s_54718c9468824b::t_69108c63b77900 82,136
+uv.lock
+  s_54718c9468824b::t_31ba2918f14e27 650-651,4280,4289,4291
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.15",
+  "base_commit_sha": "2a0324940f856054f0cc28fa32fd4375fc1c3497",
+  "prompts": {},
+  "sessions": {
+    "s_54718c9468824b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d07dc960-7962-4140-b66f-62d0c16456d1",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "root <root@e2b.local>"
+    }
+  }
+}
