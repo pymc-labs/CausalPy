@@ -1,0 +1,1503 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Interrupted time series — CausalPy</title>
+    <style>
+      :root {
+  color-scheme: dark;
+  --bg: #102331;
+  --line: #2a3d4a;
+  --muted: #9bb1bf;
+  --white: #f0f5f5;
+  --accent: #81c240; /* Labs Sphinx theme secondary/logo green. */
+  --amber: #ffc278;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  background: transparent;
+  color: var(--white);
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
+main {
+  margin: 0;
+  padding: 0;
+}
+.card {
+  background: var(--bg);
+  border: 1px solid #213c48;
+  border-radius: 20px;
+  overflow: hidden;
+}
+.steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr) 62px;
+  border-bottom: 1px solid var(--line);
+}
+button {
+  font: inherit;
+  cursor: pointer;
+  color: inherit;
+  border: 0;
+  background: none;
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 3px solid var(--amber);
+  outline-offset: -4px;
+}
+.step {
+  position: relative;
+  text-align: left;
+  padding: 13px 20px 15px;
+  border-right: 1px solid var(--line);
+  color: var(--muted);
+  min-height: 76px;
+}
+.step small {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 1.8px;
+  font-weight: 650;
+  margin-bottom: 5px;
+}
+.step strong {
+  font-size: 15px;
+  line-height: 1.3;
+  font-weight: 620;
+}
+.step.active {
+  background: #172f3b;
+  color: var(--white);
+}
+.step.active small {
+  color: var(--accent);
+}
+.track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: #233b48;
+}
+.fill {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+.play {
+  font-size: 19px;
+  color: var(--accent);
+}
+.scene {
+  padding: 24px 28px 0;
+}
+.scene-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.legend {
+  display: flex;
+  gap: 19px;
+  font-size: 12px;
+  color: #c6d5dd;
+  flex-wrap: wrap;
+}
+.legend span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.swatch {
+  height: 2px;
+  width: 20px;
+  background: #dce8ec;
+  display: inline-block;
+}
+.swatch.model {
+  background: var(--accent);
+}
+.swatch.impact {
+  width: 7px;
+  height: 12px;
+  background: var(--accent);
+}
+svg {
+  display: block;
+  width: 100%;
+  overflow: visible;
+}
+svg text {
+  font-family: inherit;
+  font-size: 11px;
+  fill: var(--muted);
+}
+.narrative {
+  padding: 0 28px 23px;
+  display: grid;
+  grid-template-columns: 1fr 195px;
+  gap: 30px;
+  align-items: center;
+  min-height: 125px;
+}
+h2 {
+  font-size: 21px;
+  letter-spacing: -0.4px;
+  margin: 0 0 8px;
+}
+.description {
+  color: #afc2cc;
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 0;
+  max-width: 600px;
+}
+.metric {
+  border-left: 1px solid var(--line);
+  padding-left: 24px;
+}
+.metric strong {
+  display: block;
+  font-size: 34px;
+  letter-spacing: -1px;
+  color: var(--accent);
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+}
+.metric span {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+#metric-interval {
+  display: block;
+  min-height: 1.5em;
+  color: var(--white);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 14px 28px;
+  border-top: 1px solid var(--line);
+  background: #0d1e29;
+}
+.transport button {
+  font-size: 12px;
+  color: #c8d8dd;
+  white-space: nowrap;
+  padding: 7px 0;
+}
+.transport label {
+  font-size: 11px;
+  color: var(--muted);
+}
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  height: 3px;
+  cursor: pointer;
+}
+.time {
+  font:
+    11px ui-monospace,
+    monospace;
+  color: var(--muted);
+  white-space: nowrap;
+}
+noscript {
+  display: block;
+  padding: 30px;
+  color: #17313b;
+}
+@media (max-width: 600px) {
+  .card {
+    border-radius: 14px;
+  }
+  .steps {
+    grid-template-columns: repeat(3, 1fr) 40px;
+  }
+  .step {
+    padding: 12px 10px 14px;
+    min-height: 82px;
+  }
+  .step small {
+    font-size: 9px;
+    letter-spacing: 1px;
+  }
+  .step strong {
+    font-size: 13px;
+  }
+  .scene {
+    padding: 20px 14px 0;
+  }
+  .scene-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .legend {
+    font-size: 10px;
+    gap: 12px;
+  }
+  .narrative {
+    padding: 0 18px 20px;
+    grid-template-columns: 1fr;
+    gap: 15px;
+    min-height: 223px;
+  }
+  h2 {
+    font-size: 19px;
+  }
+  .description {
+    font-size: 13px;
+  }
+  .metric {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding: 12px 0 0;
+    display: flex;
+    gap: 12px;
+    align-items: center;
+  }
+  .metric strong {
+    font-size: 27px;
+  }
+  .transport {
+    padding: 12px 16px;
+    gap: 12px;
+  }
+  .transport label {
+    display: none;
+  }
+}
+.swatch.observed {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="card" aria-label="Interrupted time series animation">
+        <div class="steps" role="group" aria-label="Animation stages">
+          <button class="step active" data-step="0">
+            <small>01 / FIT</small><strong>Learn from the past</strong
+            ><span class="track"><i class="fill"></i></span>
+          </button>
+          <button class="step" data-step="1">
+            <small>02 / FORECAST</small><strong>Imagine no intervention</strong
+            ><span class="track"><i class="fill"></i></span>
+          </button>
+          <button class="step" data-step="2">
+            <small>03 / COMPARE</small><strong>Estimate the impact</strong
+            ><span class="track"><i class="fill"></i></span>
+          </button>
+          <button class="play" id="play" aria-label="Pause animation">Ⅱ</button>
+        </div>
+        <div class="scene">
+          <div class="scene-heading">
+            <div class="legend">
+              <span><i class="swatch observed"></i>Observed</span
+              ><span><i class="swatch model"></i>Model + 94% band</span
+              ><span><i class="swatch impact"></i>Impact + 94% interval</span>
+            </div>
+          </div>
+          <svg
+            id="chart"
+            role="img"
+            aria-labelledby="chart-title chart-desc"
+          ></svg>
+          <svg
+            id="impact-chart"
+            role="img"
+            aria-label="Monthly impact, observed outcome minus counterfactual; with 94% credible error bars; zero means no estimated effect"
+          ></svg>
+        </div>
+        <div class="narrative">
+          <div aria-live="polite">
+            <h2 id="headline"></h2>
+            <p class="description" id="description"></p>
+          </div>
+          <div class="metric">
+            <div class="metric-estimate">
+              <strong id="metric">48</strong>
+              <span id="metric-interval"></span>
+            </div>
+            <span id="metric-label"
+              >months used to fit<br />the untreated pattern</span
+            >
+          </div>
+        </div>
+        <div class="transport">
+          <button id="replay" aria-label="Replay from the beginning">
+            ↺ Replay</button
+          ><label for="scrub">Explore</label
+          ><input
+            id="scrub"
+            aria-label="Animation progress"
+            type="range"
+            min="0"
+            max="24"
+            value="0"
+            step="0.01"
+          /><span class="time" id="time">00 / 24 s</span>
+        </div>
+      </section>
+      <noscript
+        >JavaScript is required to play the animation. The accompanying
+        documentation explains the fit, forecast and comparison
+        stages.</noscript
+      >
+    </main>
+    <script id="data" type="application/json">
+      {
+  "dates": [
+    "Jan 2020",
+    "Feb 2020",
+    "Mar 2020",
+    "Apr 2020",
+    "May 2020",
+    "Jun 2020",
+    "Jul 2020",
+    "Aug 2020",
+    "Sep 2020",
+    "Oct 2020",
+    "Nov 2020",
+    "Dec 2020",
+    "Jan 2021",
+    "Feb 2021",
+    "Mar 2021",
+    "Apr 2021",
+    "May 2021",
+    "Jun 2021",
+    "Jul 2021",
+    "Aug 2021",
+    "Sep 2021",
+    "Oct 2021",
+    "Nov 2021",
+    "Dec 2021",
+    "Jan 2022",
+    "Feb 2022",
+    "Mar 2022",
+    "Apr 2022",
+    "May 2022",
+    "Jun 2022",
+    "Jul 2022",
+    "Aug 2022",
+    "Sep 2022",
+    "Oct 2022",
+    "Nov 2022",
+    "Dec 2022",
+    "Jan 2023",
+    "Feb 2023",
+    "Mar 2023",
+    "Apr 2023",
+    "May 2023",
+    "Jun 2023",
+    "Jul 2023",
+    "Aug 2023",
+    "Sep 2023",
+    "Oct 2023",
+    "Nov 2023",
+    "Dec 2023",
+    "Jan 2024",
+    "Feb 2024",
+    "Mar 2024",
+    "Apr 2024",
+    "May 2024",
+    "Jun 2024",
+    "Jul 2024",
+    "Aug 2024",
+    "Sep 2024",
+    "Oct 2024",
+    "Nov 2024",
+    "Dec 2024",
+    "Jan 2025",
+    "Feb 2025",
+    "Mar 2025",
+    "Apr 2025",
+    "May 2025",
+    "Jun 2025",
+    "Jul 2025",
+    "Aug 2025",
+    "Sep 2025",
+    "Oct 2025",
+    "Nov 2025",
+    "Dec 2025"
+  ],
+  "observed": [
+    46.165152984522,
+    47.193455625707244,
+    52.70177186281087,
+    54.128378904361796,
+    51.39903658786494,
+    49.697980782217286,
+    46.728757771661876,
+    43.31370726248476,
+    41.140213184812986,
+    42.581763376587,
+    43.14756269118005,
+    45.097367079953244,
+    47.91900412871274,
+    52.128459911078764,
+    54.99524694997173,
+    58.924391808595274,
+    57.833388767193405,
+    51.94821744251948,
+    52.99051909338533,
+    47.935467608818584,
+    45.382878568525214,
+    47.37035023010627,
+    48.40793708472803,
+    52.15913402382953,
+    53.11758446350258,
+    56.239565098267654,
+    61.351789475396345,
+    61.3620689024431,
+    60.89963339219678,
+    60.51471747269532,
+    51.493652426543456,
+    49.476171605199774,
+    48.84744210041686,
+    48.92271347132643,
+    50.52423775751131,
+    50.671027202746004,
+    60.67294624314926,
+    62.34082441861861,
+    65.35904604341756,
+    68.16735453943376,
+    60.11192650477882,
+    63.32079299496794,
+    61.69828570704549,
+    57.61613780971548,
+    51.31155223949342,
+    54.89410240044555,
+    52.88798392115804,
+    58.00767700735258,
+    78.58205968114206,
+    81.74477576577586,
+    87.02715423941129,
+    86.59267666278973,
+    85.04625203663608,
+    86.96061887126554,
+    81.29753135819053,
+    78.18122540183883,
+    72.7729179851815,
+    77.5548310974505,
+    74.22809664505907,
+    82.29620348960165,
+    86.01165248312621,
+    89.47662127179163,
+    91.68948218288557,
+    91.31791437535657,
+    90.88860274585724,
+    86.51535743780693,
+    86.29069532729737,
+    83.78619176247405,
+    80.02142716343415,
+    83.96782774214019,
+    79.98330831334081,
+    83.1468562467033
+  ],
+  "split": 48,
+  "truth": {
+    "intercept": 45.0,
+    "slope": 0.35,
+    "seasonality": 7.0,
+    "effect": 18.0,
+    "sigma": 1.8
+  },
+  "hdi_prob": 0.94,
+  "metadata": {
+    "interval_target": "expectation",
+    "interval_probability": 0.94,
+    "formula": "y ~ 1 + t + season",
+    "backend": "causalpy.pymc_models.LinearRegression",
+    "causalpy_version": "1.0.0rc1",
+    "note": "Synthetic observations; Pointwise HDIs from get_plot_data(); running-average HDIs from effect_summary(). Predictive intervals await issue #295."
+  },
+  "prediction": [
+    45.08143417044881,
+    48.983718295798404,
+    51.93230519921009,
+    53.22904005918751,
+    52.61838047528871,
+    50.35586884795571,
+    47.13965999868422,
+    43.92345114941324,
+    41.66093952208008,
+    41.05027993818117,
+    42.347014798158526,
+    45.295601701570185,
+    49.19788582691973,
+    53.100169952269646,
+    56.04875685568135,
+    57.34549171565878,
+    56.73483213175974,
+    54.472320504426584,
+    51.256111655155436,
+    48.03990280588427,
+    45.77739117855122,
+    45.16673159465231,
+    46.463466454629696,
+    49.41205335804132,
+    53.31433748339113,
+    57.21662160874093,
+    60.16520851215239,
+    61.46194337212958,
+    60.85128378823094,
+    58.5887721608978,
+    55.372563311626784,
+    52.15635446235541,
+    49.893842835022284,
+    49.28318325112369,
+    50.57991811110101,
+    53.52850501451248,
+    57.43078913986235,
+    61.333073265211944,
+    64.28166016862343,
+    65.578395028601,
+    64.96773544470192,
+    62.70522381736908,
+    59.48901496809773,
+    56.27280611882669,
+    54.01029449149358,
+    53.39963490759455,
+    54.696369767572016,
+    57.64495667098363,
+    61.547240796333355,
+    65.44952492168312,
+    68.39811182509457,
+    69.69484668507216,
+    69.0841871011733,
+    66.82167547384024,
+    63.6054666245691,
+    60.3892577752975,
+    58.126746147964724,
+    57.516086564065745,
+    58.812821424043136,
+    61.76140832745471,
+    65.6636924528046,
+    69.56597657815426,
+    72.51456348156579,
+    73.8112983415431,
+    73.20063875764406,
+    70.93812713031126,
+    67.72191828104002,
+    64.50570943176878,
+    62.24319780443588,
+    61.632538220536894,
+    62.92927308051433,
+    65.87785998392593
+  ],
+  "impact": [
+    1.0837188140732128,
+    -1.790262670091273,
+    0.7694666636007774,
+    0.8993388451742877,
+    -1.2193438874236788,
+    -0.6578880657382777,
+    -0.4109022270224842,
+    -0.6097438869283959,
+    -0.5207263372671168,
+    1.5314834384057865,
+    0.8005478930214245,
+    -0.1982346216169558,
+    -1.278881698207188,
+    -0.9717100411908993,
+    -1.0535099057095074,
+    1.5789000929366226,
+    1.098556635433645,
+    -2.5241030619072222,
+    1.7344074382298298,
+    -0.1044351970657202,
+    -0.39451261002602883,
+    2.203618635453915,
+    1.9444706300982684,
+    2.7470806657882028,
+    -0.19675301988849078,
+    -0.9770565104731516,
+    1.1865809632439641,
+    -0.09987446968669411,
+    0.04834960396587341,
+    1.9259453117974672,
+    -3.8789108850832013,
+    -2.680182857155678,
+    -1.0464007346055322,
+    -0.36046977979706707,
+    -0.055680353589604305,
+    -2.857477811766487,
+    3.2421571032870475,
+    1.0077511534066732,
+    1.0773858747940475,
+    2.5889595108328165,
+    -4.855808939923233,
+    0.6155691775989206,
+    2.2092707389476947,
+    1.3433316908888904,
+    -2.698742252000116,
+    1.494467492850903,
+    -1.808385846413999,
+    0.36272033636894685,
+    17.03481888480869,
+    16.295250844092802,
+    18.629042414316604,
+    16.897829977717638,
+    15.962064935462871,
+    20.138943397425408,
+    17.69206473362156,
+    17.791967626541158,
+    14.646171837216848,
+    20.038744533384765,
+    15.415275221015873,
+    20.53479516214685,
+    20.34796003032174,
+    19.910644693637405,
+    19.174918701319793,
+    17.506616033813426,
+    17.687963988212854,
+    15.577230307495707,
+    18.56877704625732,
+    19.280482330705176,
+    17.778229358998296,
+    22.335289521603208,
+    17.054035232826426,
+    17.268996262777332
+  ],
+  "pred_lower": [
+    44.12114622782041,
+    48.05147747316147,
+    50.908628904774886,
+    52.14963116501863,
+    51.59285033123946,
+    49.514339512779976,
+    46.31410124123874,
+    43.01692923749705,
+    40.60040798303686,
+    39.981978725593926,
+    41.35835790777999,
+    44.457200506196564,
+    48.52512355955119,
+    52.379114001658714,
+    55.18863215133714,
+    56.4363792111293,
+    55.95718967575042,
+    53.83585791639464,
+    50.71602268543253,
+    47.39078518517376,
+    44.96088160696281,
+    44.352448699739085,
+    45.711299692431965,
+    48.82311941933018,
+    52.84286956531723,
+    56.590138537157074,
+    59.4070644484024,
+    60.60988951040496,
+    60.05855606718508,
+    57.91516355297408,
+    54.855721732087815,
+    51.50640106043511,
+    49.10240741343815,
+    48.406148274155825,
+    49.73007732802742,
+    52.83133735485843,
+    56.78591351652512,
+    60.47319539877126,
+    63.31385519659402,
+    64.53480506404422,
+    63.91767576641107,
+    61.77494837917129,
+    58.668543990980815,
+    55.386334973229474,
+    52.98196140136753,
+    52.29731885497855,
+    53.62551808753317,
+    56.67881678445231,
+    60.525568724412445,
+    64.29620370781245,
+    67.09632638924417,
+    68.29785429627522,
+    67.63256399782469,
+    65.55421844679155,
+    62.43789791308545,
+    59.19117010848376,
+    56.845304193214226,
+    56.185715614696655,
+    57.495666656110416,
+    60.42402562444525,
+    64.30520720599998,
+    68.0646153703675,
+    70.91812694718907,
+    72.10163685914566,
+    71.549989626021,
+    69.22381360649591,
+    66.14796560355991,
+    62.895710310091296,
+    60.688800092917,
+    59.89599670836585,
+    61.31817093127323,
+    64.12534159827605
+  ],
+  "pred_upper": [
+    46.07068982782706,
+    49.98004773246768,
+    52.962698419409,
+    54.25317345263053,
+    53.56520060666772,
+    51.22872558224328,
+    47.90786715546645,
+    44.75422995123362,
+    42.61899575921464,
+    42.074813631124904,
+    43.28424011308293,
+    46.01688667596715,
+    49.812797025905425,
+    53.75257838465086,
+    56.799740826111396,
+    58.152858591246684,
+    57.53141981218327,
+    55.0657747234425,
+    51.78171917906337,
+    48.66369452845027,
+    46.548370692977656,
+    46.062166693559696,
+    47.25952758566316,
+    50.01772428893983,
+    53.82943147253869,
+    57.79149805406045,
+    60.96968523149772,
+    62.33468886204368,
+    61.66616523676453,
+    59.2064860694875,
+    55.96132183058584,
+    52.76058726606551,
+    50.67570369695271,
+    50.13532779376532,
+    51.358465490197915,
+    54.230496282961774,
+    58.129794543188886,
+    62.08257624686614,
+    65.28909315787075,
+    66.69401750734261,
+    65.98585493791354,
+    63.591547189166654,
+    60.31622088075431,
+    57.15761458387248,
+    54.98376564106437,
+    54.4400022145492,
+    55.7162344399858,
+    58.659318370048545,
+    62.52999877703954,
+    66.57217318473172,
+    69.6946315526236,
+    71.06538528138816,
+    70.35127713527923,
+    68.07743902456828,
+    64.81347218994736,
+    61.650960348014536,
+    59.45874516165972,
+    58.92849459675739,
+    60.23160475755087,
+    63.13401427021962,
+    67.07198091730679,
+    71.09287144526705,
+    74.22789690443524,
+    75.57411302279984,
+    74.98478136059423,
+    72.52380682159874,
+    69.31707451062653,
+    66.12860951127158,
+    64.07354221427606,
+    63.367875758001915,
+    64.82653844550106,
+    67.61259414998523
+  ],
+  "impact_lower": [
+    0.09446315669494254,
+    -2.7865921067604376,
+    -0.2609265565981289,
+    -0.12479454826873138,
+    -2.1661640188027818,
+    -1.5307448000259924,
+    -1.1791093838045725,
+    -1.4405226887488567,
+    -1.4787825744016558,
+    0.5069497454620944,
+    -0.13667742190288124,
+    -0.919519596013906,
+    -1.8937928971926823,
+    -1.6241184735720964,
+    -1.8044938761396665,
+    0.7715332173485905,
+    0.3019689550101319,
+    -3.117557280923023,
+    1.2087999143219577,
+    -0.7282269196316875,
+    -1.1654921244524417,
+    1.3081835365465722,
+    1.1484094990648757,
+    2.1414097348896988,
+    -0.7118470090361058,
+    -1.5519329557927932,
+    0.38210424389862396,
+    -0.9726199596005785,
+    -0.7665318445677443,
+    1.3082314032078202,
+    -4.4676694040423826,
+    -3.284415660865733,
+    -1.828261596535846,
+    -1.2126143224388883,
+    -0.8342277326866068,
+    -3.55946908021577,
+    2.543151699960376,
+    0.25824817175247006,
+    0.06995288554681167,
+    1.4733370320911519,
+    -5.873928433134722,
+    -0.27075419419871594,
+    1.3820648262911845,
+    0.45852322584300254,
+    -3.67221340157095,
+    0.45410018589634404,
+    -2.8282505188277582,
+    -0.651641362695969,
+    16.052060904102518,
+    15.172602581044131,
+    17.332522686787684,
+    15.527291381401568,
+    14.694974901356844,
+    18.88317984669726,
+    16.484059168243164,
+    16.530265053824294,
+    13.314172823521773,
+    18.626336500693114,
+    13.9964918875082,
+    19.16218921938203,
+    18.939671565819424,
+    18.38374982652458,
+    17.46158527845033,
+    15.74380135255673,
+    15.903821385263015,
+    13.991550616208187,
+    16.973620816670845,
+    17.65758225120247,
+    15.947884949158095,
+    20.599951984138272,
+    15.156769867839756,
+    15.534262096718066
+  ],
+  "impact_upper": [
+    2.0440067567015916,
+    -0.8580218474542249,
+    1.7931429580359861,
+    1.978747739343163,
+    -0.19381374337451973,
+    0.18364126943730952,
+    0.4146565304231373,
+    0.29677802498770944,
+    0.5398052017761259,
+    2.5997846509930724,
+    1.7892047834000593,
+    0.6401665737566802,
+    -0.6061194308384472,
+    -0.2506540905799497,
+    -0.19338520136540893,
+    2.488012597465975,
+    1.8761990914429845,
+    -1.8876404738751589,
+    2.274496407952803,
+    0.5446824236448222,
+    0.4219969615624066,
+    3.0179015303671832,
+    2.6966373922960685,
+    3.336014604499347,
+    0.27471489818535133,
+    -0.3505734388894197,
+    1.9447250269939431,
+    0.752179392038137,
+    0.8410773250117032,
+    2.599553919721238,
+    -3.3620693055443596,
+    -2.030229455235336,
+    -0.25496531302128744,
+    0.5165651971706069,
+    0.7941604294838882,
+    -2.160310152112423,
+    3.887032726624142,
+    1.8676290198473495,
+    2.0451908468235445,
+    3.6325494753895384,
+    -3.8057492616322506,
+    1.5458446157966463,
+    3.0297417160646773,
+    2.2298028364860087,
+    -1.6704091618741046,
+    2.596783545466998,
+    -0.7375341663751342,
+    1.3288602229002677,
+    18.05649095672961,
+    17.448572057963403,
+    19.93082785016712,
+    18.29482236651451,
+    17.413688038811387,
+    21.406400424473986,
+    18.859633445105075,
+    18.99005529335507,
+    15.927613791967268,
+    21.36911548275385,
+    16.732429988948653,
+    21.872177865156402,
+    21.706445277126235,
+    21.412005901424124,
+    20.771355235696504,
+    19.21627751621091,
+    19.33861311983624,
+    17.291543831311017,
+    20.14272972373746,
+    20.89048145238275,
+    19.332627070517155,
+    24.071831033774338,
+    18.665137382067584,
+    19.021514648427242
+  ],
+  "running_impact": [
+    {
+      "mean": 17.0348188848087,
+      "lower": 16.052060904102518,
+      "upper": 18.05649095672961
+    },
+    {
+      "mean": 16.66503486445074,
+      "lower": 15.584859676225317,
+      "upper": 17.69533035147312
+    },
+    {
+      "mean": 17.319704047739368,
+      "lower": 16.191499818599663,
+      "upper": 18.438414017230226
+    },
+    {
+      "mean": 17.214235530233935,
+      "lower": 16.071497954755273,
+      "upper": 18.426030229360475
+    },
+    {
+      "mean": 16.963801411279725,
+      "lower": 15.762130597673899,
+      "upper": 18.18621522763278
+    },
+    {
+      "mean": 17.492991742304003,
+      "lower": 16.325906646497767,
+      "upper": 18.76821878835551
+    },
+    {
+      "mean": 17.521430741063657,
+      "lower": 16.34089729718581,
+      "upper": 18.755356608784894
+    },
+    {
+      "mean": 17.55524785174834,
+      "lower": 16.353691816199333,
+      "upper": 18.727355146364054
+    },
+    {
+      "mean": 17.23201718346706,
+      "lower": 16.043282861053292,
+      "upper": 18.370582977849242
+    },
+    {
+      "mean": 17.512689918458825,
+      "lower": 16.283007586923475,
+      "upper": 18.601763274725574
+    },
+    {
+      "mean": 17.32201585505492,
+      "lower": 16.146066823659893,
+      "upper": 18.471063651973985
+    },
+    {
+      "mean": 17.58974746397925,
+      "lower": 16.39337715387252,
+      "upper": 18.74013270388774
+    },
+    {
+      "mean": 17.80191766139021,
+      "lower": 16.59391209601179,
+      "upper": 18.969486372873696
+    },
+    {
+      "mean": 17.952541020836442,
+      "lower": 16.726364984005553,
+      "upper": 19.13769498502458
+    },
+    {
+      "mean": 18.034032866201994,
+      "lower": 16.752477370259715,
+      "upper": 19.217133419962966
+    },
+    {
+      "mean": 18.001069314177702,
+      "lower": 16.700061635084364,
+      "upper": 19.213862569207777
+    },
+    {
+      "mean": 17.982651353826835,
+      "lower": 16.68998197646405,
+      "upper": 19.247394279526162
+    },
+    {
+      "mean": 17.849016851252877,
+      "lower": 16.539057815866258,
+      "upper": 19.13531196609274
+    },
+    {
+      "mean": 17.886898966779427,
+      "lower": 16.563673265120304,
+      "upper": 19.184800756769494
+    },
+    {
+      "mean": 17.95657813497571,
+      "lower": 16.627026262558708,
+      "upper": 19.2725487090746
+    },
+    {
+      "mean": 17.948085336119647,
+      "lower": 16.604151262850827,
+      "upper": 19.26187689624296
+    },
+    {
+      "mean": 18.147503708187084,
+      "lower": 16.79124075040742,
+      "upper": 19.46563193317016
+    },
+    {
+      "mean": 18.09996160056271,
+      "lower": 16.730761975026184,
+      "upper": 19.431072524325394
+    },
+    {
+      "mean": 18.065338044821655,
+      "lower": 16.680187451544025,
+      "upper": 19.410878478170748
+    }
+  ]
+}
+
+    </script>
+    <script>
+      "use strict";
+const D = JSON.parse(document.getElementById("data").textContent),
+  N = D.observed.length,
+  S = D.split;
+const $ = (id) => document.getElementById(id),
+  clamp = (v) => Math.max(0, Math.min(1, v));
+const steps = [...document.querySelectorAll(".step")],
+  fills = [...document.querySelectorAll(".fill")];
+const copy = [
+  [
+    "Fit only the pre-intervention data.",
+    "The model learns the trend and seasonal pattern from 48 untreated months. The shaded band shows 94% uncertainty in the fitted mean.",
+  ],
+  [
+    "Forecast the world without the intervention.",
+    "Extend the fitted pattern beyond January 2024. The shaded band carries uncertainty in that untreated mean into the forecast.",
+  ],
+  [
+    "The gap is the estimated impact.",
+    "Subtract the counterfactual from each observed outcome. Error bars show the resulting 94% credible intervals.",
+  ],
+];
+let position = 0,
+  playing =
+    window.parent === window &&
+    !matchMedia("(prefers-reduced-motion: reduce)").matches,
+  last = null,
+  currentStage = -1,
+  geometry;
+const ns = "http://www.w3.org/2000/svg";
+function el(tag, attrs = {}, parent = $("chart")) {
+  const e = document.createElementNS(ns, tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  parent.appendChild(e);
+  return e;
+}
+function label(txt, x, y, attrs = {}, parent = $("chart")) {
+  const e = el("text", { x, y, ...attrs }, parent);
+  e.textContent = txt;
+  return e;
+}
+function path(values, from, to, y) {
+  return values
+    .slice(from, to)
+    .map(
+      (v, j) =>
+        (j ? "L" : "M") +
+        geometry.x(from + j).toFixed(2) +
+        "," +
+        y(v).toFixed(2),
+    )
+    .join(" ");
+}
+function draw() {
+  const chart = $("chart"),
+    impact = $("impact-chart");
+  chart.replaceChildren();
+  impact.replaceChildren();
+  const w = Math.round(chart.getBoundingClientRect().width),
+    mobile = w < 550,
+    h = mobile ? 300 : 330,
+    L = 36,
+    R = 16,
+    T = 42,
+    B = h - 32;
+  chart.setAttribute("viewBox", `0 0 ${w} ${h}`);
+  impact.setAttribute("viewBox", `0 0 ${w} 112`);
+  const x = (i) => L + ((w - L - R) * i) / (N - 1),
+    y = (v) => B - ((v - 30) / 75) * (B - T),
+    iy = (v) => 78 - v * 1.8;
+  geometry = { w, h, x, y, iy, cut: x(S - 0.5), B };
+  const title = el("title", { id: "chart-title" });
+  title.textContent = "Fit, forecast, then estimate intervention impact";
+  const desc = el("desc", { id: "chart-desc" });
+  desc.textContent =
+    "A model is fitted to the first 48 months. Its counterfactual forecast is compared with 24 months of observed post-intervention data. Green bands show 94% credible intervals for the expected untreated outcome.";
+  el("rect", {
+    x: geometry.cut,
+    y: T,
+    width: w - R - geometry.cut,
+    height: B - T,
+    fill: "var(--accent)",
+    opacity: 0.035,
+  });
+  [40, 60, 80, 100].forEach((v) => {
+    el("line", { x1: L, x2: w - R, y1: y(v), y2: y(v), stroke: "#263c49" });
+    label(v, L - 9, y(v) + 4, { "text-anchor": "end" });
+  });
+  [0, 24, 48, 71].forEach((i, j) =>
+    label(["2020", "2022", "2024", "2025"][j], x(i), B + 22, {
+      "text-anchor": i === 71 ? "end" : "middle",
+    }),
+  );
+  el("line", {
+    x1: geometry.cut,
+    x2: geometry.cut,
+    y1: 29,
+    y2: B,
+    stroke: "#819ba9",
+    "stroke-dasharray": "4 5",
+  });
+  label("INTERVENTION", geometry.cut + 7, 20, {
+    "font-size": 9,
+    "letter-spacing": 1,
+    style: "fill:#d4e2e8",
+  });
+  label(mobile ? "PRE" : "PRE-INTERVENTION", L, 20, {
+    "font-size": 9,
+    "letter-spacing": 1,
+  });
+  const defs = el("defs"),
+    pre = el("clipPath", { id: "pre-clip" }, defs),
+    post = el("clipPath", { id: "post-clip" }, defs);
+  el("rect", { id: "pre-reveal", x: L - 3, y: 0, width: 0, height: h }, pre);
+  el(
+    "rect",
+    { id: "post-reveal", x: x(S - 1), y: 0, width: 0, height: h },
+    post,
+  );
+
+  const bandPoints = (from, to) =>
+    D.pred_upper
+      .slice(from, to)
+      .map((v, j) => `${x(from + j)},${y(v)}`)
+      .concat(
+        D.pred_lower
+          .slice(from, to)
+          .map((v, j) => `${x(from + j)},${y(v)}`)
+          .reverse(),
+      )
+      .join(" ");
+  el("polygon", {
+    id: "fit-band",
+    points: bandPoints(0, S),
+    fill: "var(--accent)",
+    opacity: 0.28,
+    "clip-path": "url(#pre-clip)",
+  });
+  el("polygon", {
+    id: "forecast-band",
+    points: bandPoints(S - 1, N),
+    fill: "var(--accent)",
+    opacity: 0.28,
+    "clip-path": "url(#post-clip)",
+  });
+  el("path", {
+    id: "fit",
+    d: path(D.prediction, 0, S, y),
+    fill: "none",
+    stroke: "var(--accent)",
+    "stroke-width": 2.6,
+    "clip-path": "url(#pre-clip)",
+  });
+  el("path", {
+    id: "forecast",
+    d: path(D.prediction, S - 1, N, y),
+    fill: "none",
+    stroke: "var(--accent)",
+    "stroke-width": 2.6,
+    "stroke-dasharray": "5 4",
+    "clip-path": "url(#post-clip)",
+  });
+  const prePoints = el("g", { id: "observed-pre" });
+  for (let i = 0; i < S; i++)
+    el(
+      "circle",
+      { cx: x(i), cy: y(D.observed[i]), r: 2.5, fill: "#ffffff" },
+      prePoints,
+    );
+  const postPoints = el("g", { id: "observed-post" });
+  for (let i = S; i < N; i++)
+    el(
+      "circle",
+      { cx: x(i), cy: y(D.observed[i]), r: 2.5, fill: "#ffffff" },
+      postPoints,
+    );
+  label(
+    mobile ? "IMPACT" : "POINTWISE IMPACT",
+    L,
+    16,
+    { "font-size": 9, "letter-spacing": 1 },
+    impact,
+  );
+  label(
+    "observed − counterfactual",
+    w - R,
+    16,
+    { "text-anchor": "end", "font-size": 9 },
+    impact,
+  );
+  el(
+    "line",
+    {
+      x1: L,
+      x2: w - R,
+      y1: iy(0),
+      y2: iy(0),
+      stroke: "#52707e",
+      "stroke-dasharray": "3 4",
+    },
+    impact,
+  );
+  label("0", L - 10, iy(0) + 4, { "text-anchor": "end" }, impact);
+  el(
+    "line",
+    {
+      x1: geometry.cut,
+      x2: geometry.cut,
+      y1: 26,
+      y2: 90,
+      stroke: "#52707e",
+      "stroke-dasharray": "4 5",
+    },
+    impact,
+  );
+  const idefs = el("defs", {}, impact),
+    iclip = el("clipPath", { id: "impact-clip" }, idefs);
+  el(
+    "rect",
+    { id: "impact-reveal", x: x(S) - 5, y: 25, width: 0, height: 70 },
+    iclip,
+  );
+  const bars = el(
+    "g",
+    { id: "impact-intervals", "clip-path": "url(#impact-clip)" },
+    impact,
+  );
+  for (let i = S; i < N; i++) {
+    const barWidth = Math.max(2, ((w - L - R) / (N - 1)) * 0.6);
+    el(
+      "rect",
+      {
+        x: x(i) - barWidth / 2,
+        y: Math.min(iy(0), iy(D.impact[i])),
+        width: barWidth,
+        height: Math.abs(iy(0) - iy(D.impact[i])),
+        fill: "var(--accent)",
+      },
+      bars,
+    );
+    const lower = iy(D.impact_lower[i]),
+      upper = iy(D.impact_upper[i]);
+    el(
+      "line",
+      {
+        x1: x(i),
+        x2: x(i),
+        y1: lower,
+        y2: upper,
+        stroke: "#ffffff",
+        "stroke-width": 1.5,
+      },
+      bars,
+    );
+  }
+
+  label(
+    "The comparison appears in stage 03.",
+    L,
+    48,
+    { id: "impact-placeholder", "font-size": 11 },
+    impact,
+  );
+  render();
+}
+function render() {
+  if (!geometry) return;
+  const stage = Math.min(2, Math.floor(position / 8));
+  fills.forEach(
+    (e, i) => (e.style.transform = `scaleX(${clamp((position - i * 8) / 8)})`),
+  );
+  if (stage !== currentStage) {
+    steps.forEach((b, i) => {
+      b.classList.toggle("active", i === stage);
+      b.setAttribute("aria-pressed", i === stage ? "true" : "false");
+    });
+    $("headline").textContent = copy[stage][0];
+    $("description").textContent = copy[stage][1];
+    currentStage = stage;
+  }
+  const pre = clamp(position / 5.5),
+    forecast = clamp((position - 8) / 5.5),
+    observed = clamp((position - 16) / 5.5);
+  $("pre-reveal").setAttribute(
+    "width",
+    (geometry.x(S - 1) - geometry.x(0) + 6) * pre,
+  );
+  $("post-reveal").setAttribute(
+    "width",
+    (geometry.x(N - 1) - geometry.x(S - 1) + 3) * forecast,
+  );
+  const impactWidth = (geometry.x(N - 1) - geometry.x(S) + 10) * observed;
+  $("impact-reveal").setAttribute("width", impactWidth);
+  $("impact-placeholder").style.opacity = 1 - clamp((position - 16) * 2);
+  // Include a month as the wipe reaches its bar center and white interval.
+  const revealRight = geometry.x(S) - 5 + impactWidth;
+  const monthsShown = Math.max(
+    0,
+    Math.min(
+      N - S,
+      1 +
+        Math.floor(
+          (revealRight - geometry.x(S)) / (geometry.x(S + 1) - geometry.x(S)),
+        ),
+    ),
+  );
+  const average = monthsShown ? D.running_impact[monthsShown - 1] : null;
+  $("metric").textContent =
+    stage === 0
+      ? "48"
+      : stage === 1
+        ? "24"
+        : average
+          ? `${average.mean >= 0 ? "+" : ""}${average.mean.toFixed(1)}`
+          : "—";
+  $("metric-interval").textContent = average
+    ? `94% HDI [${average.lower.toFixed(1)}, ${average.upper.toFixed(1)}]`
+    : "";
+  $("metric-label").innerHTML =
+    stage === 0
+      ? "months used to fit<br>the untreated pattern"
+      : stage === 1
+        ? "months forecast<br>without intervention"
+        : `average monthly impact<br>${monthsShown} ${monthsShown === 1 ? "month" : "months"} · outcome units`;
+  $("scrub").value = position;
+  $("time").textContent =
+    `${String(Math.floor(position)).padStart(2, "0")} / 24 s`;
+  $("play").textContent = playing ? "Ⅱ" : "▶";
+  $("play").setAttribute(
+    "aria-label",
+    playing ? "Pause animation" : "Play animation",
+  );
+}
+function setPlay(value) {
+  playing = value;
+  last = null;
+  render();
+}
+$("play").addEventListener("click", () => {
+  if (position >= 24) position = 0;
+  setPlay(!playing);
+});
+$("replay").addEventListener("click", () => {
+  position = 0;
+  setPlay(true);
+});
+steps.forEach((b, i) =>
+  b.addEventListener("click", () => {
+    position = i * 8 + 6;
+    setPlay(false);
+  }),
+);
+$("scrub").addEventListener("input", (e) => {
+  position = Number(e.target.value);
+  setPlay(false);
+});
+document.addEventListener("visibilitychange", () => {
+  last = null;
+});
+function frame(now) {
+  if (playing && !document.hidden) {
+    if (last !== null) position = Math.min(24, position + (now - last) / 1000);
+    if (position >= 24) playing = false;
+    render();
+  }
+  last = now;
+  requestAnimationFrame(frame);
+}
+new ResizeObserver(draw).observe($("chart"));
+if (matchMedia("(prefers-reduced-motion: reduce)").matches) position = 24;
+requestAnimationFrame(frame);
+
+// The docs host starts playback once the player is in view. User controls take precedence.
+let userInteracted = false;
+document.addEventListener("pointerdown", () => {
+  userInteracted = true;
+});
+document.addEventListener("keydown", () => {
+  userInteracted = true;
+});
+window.addEventListener("message", (event) => {
+  if (event.source !== window.parent || event.origin !== window.location.origin)
+    return;
+  if (
+    event.data?.type === "causalpy-animation-start" &&
+    !userInteracted &&
+    !matchMedia("(prefers-reduced-motion: reduce)").matches
+  )
+    setPlay(true);
+});
+;
+    </script>
+  </body>
+</html>
