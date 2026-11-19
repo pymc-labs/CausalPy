@@ -1085,3 +1085,32 @@ def test_native_rolling_features_see_observed_clock(forecaster_class):
         ).result.counterfactual_paths,
         fit(RollingFeatures(stats="mean", window_sizes=2)).result.counterfactual_paths,
     )
+
+
+@pytest.mark.parametrize("clock_fallback", [False, True])
+def test_transformed_exog_rejects_reordered_observation_labels(
+    forecaster_class, clock_fallback
+):
+    from sklearn.preprocessing import FunctionTransformer
+
+    from causalpy.custom_exceptions import BadIndexException
+
+    index = pd.date_range("2019-01-01 04:00", periods=90, freq="MS", tz="UTC")
+    if clock_fallback:
+        index = index.tz_convert("America/New_York")
+    t = np.arange(len(index))
+    data = pd.DataFrame({"y": 30 + 8 * t, "t": t}, index=index)
+    model = SkforecastModel(
+        forecaster_class(
+            estimator=Ridge(),
+            lags=1,
+            transformer_exog=FunctionTransformer(lambda frame: frame.iloc[::-1]),
+        ),
+        calibration_size=16,
+        n_boot=25,
+    )
+    experiment = cp.InterruptedTimeSeries(data, index[64], "y ~ t", model=model)
+    with pytest.raises(
+        BadIndexException, match="keep their observation labels in order"
+    ):
+        experiment.fit()

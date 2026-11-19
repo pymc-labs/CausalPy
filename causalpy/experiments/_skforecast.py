@@ -155,22 +155,24 @@ class _PreprocessorOnObservedIndex:
     def __init__(
         self,
         preprocessor: Any,
-        to_observed: Callable[[pd.Index], pd.Index],
-        to_model: Callable[[pd.Index], pd.Index] | None = None,
+        to_observed: Callable[[pd.Index], pd.Index] | None,
+        output: Callable[[Any, pd.Index], Any] | None = None,
     ) -> None:
         self._preprocessor = preprocessor
         self._to_observed = to_observed
-        self._to_model = to_model
+        self._output = output
 
     def _apply(self, method: Callable, data: Any) -> Any:
-        if isinstance(data, pd.Index):
+        if isinstance(data, pd.Index) and self._to_observed is not None:
             return method(self._to_observed(data))
         if isinstance(data, (pd.Series, pd.DataFrame)):
-            transformed = method(data.set_axis(self._to_observed(data.index)))
-            if self._to_model is not None and isinstance(
+            if self._to_observed is not None:
+                data = data.set_axis(self._to_observed(data.index))
+            transformed = method(data)
+            if self._output is not None and isinstance(
                 transformed, (pd.Series, pd.DataFrame)
             ):
-                return transformed.set_axis(self._to_model(transformed.index))
+                return self._output(transformed, data.index)
             return transformed
         return method(data)
 
@@ -187,36 +189,58 @@ class _PreprocessorOnObservedIndex:
         return getattr(object.__getattribute__(self, "_preprocessor"), name)
 
 
-def _use_observed_index(forecaster: Any, grid: pd.Index, observed: pd.Index) -> None:
-    """Keep the native preprocessing inputs on the caller's clock."""
-    to_observed = partial(_translate_index, source=grid, target=observed)
-    to_model = partial(_translate_index, source=observed, target=grid)
-    # skforecast needs model-grid outputs for the outcome and window features.
-    # Transformed exogenous and calendar features are consumed by row position.
-    for name, output_index in (
-        ("calendar_features", None),
-        ("transformer_exog", None),
-        ("transformer_y", to_model),
-    ):
-        preprocessor = getattr(forecaster, name)
-        if preprocessor is not None:
-            setattr(
-                forecaster,
-                name,
-                _PreprocessorOnObservedIndex(preprocessor, to_observed, output_index),
+def _validate_transformed_exog(data: Any, input_index: pd.Index) -> Any:
+    index = data.index
+    positional = (
+        isinstance(index, pd.RangeIndex)
+        and index.name is None
+        and len(index) == len(input_index)
+        and index.equals(pd.RangeIndex(len(data)))
+    )
+    if not positional and not _same_labels(index, input_index):
+        raise BadIndexException(
+            "Transformed exogenous covariates must keep their observation labels in order."
+        )
+    return data
+
+
+def _configure_native_preprocessors(
+    forecaster: Any, grid: pd.Index, observed: pd.Index
+) -> None:
+    """Keep caller timestamps at the native preprocessing boundary."""
+    to_observed = None
+    if not grid.equals(observed):
+        to_observed = partial(_translate_index, source=grid, target=observed)
+
+        def on_model_grid(data: Any, _input_index: pd.Index) -> Any:
+            return data.set_axis(
+                _translate_index(data.index, source=observed, target=grid)
             )
-    if forecaster.window_features is not None:
-        forecaster.window_features = [
-            _PreprocessorOnObservedIndex(features, to_observed, to_model)
-            for features in forecaster.window_features
-        ]
-    if forecaster.weight_func is not None:
-        weight_func = forecaster.weight_func
 
-        def observed_weights(index: pd.Index) -> np.ndarray:
-            return weight_func(to_observed(index))
+        if forecaster.calendar_features is not None:
+            forecaster.calendar_features = _PreprocessorOnObservedIndex(
+                forecaster.calendar_features, to_observed
+            )
+        if forecaster.transformer_y is not None:
+            forecaster.transformer_y = _PreprocessorOnObservedIndex(
+                forecaster.transformer_y, to_observed, on_model_grid
+            )
+        if forecaster.window_features is not None:
+            forecaster.window_features = [
+                _PreprocessorOnObservedIndex(features, to_observed, on_model_grid)
+                for features in forecaster.window_features
+            ]
+        if forecaster.weight_func is not None:
+            weight_func = forecaster.weight_func
 
-        forecaster.weight_func = observed_weights
+            def observed_weights(index: pd.Index) -> np.ndarray:
+                return weight_func(to_observed(index))
+
+            forecaster.weight_func = observed_weights
+    if forecaster.transformer_exog is not None:
+        forecaster.transformer_exog = _PreprocessorOnObservedIndex(
+            forecaster.transformer_exog, to_observed, _validate_transformed_exog
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -297,8 +321,7 @@ class _SkforecastAdapter(ModelAdapter):
         if not isinstance(full_index, pd.Index):
             raise ValueError("SkforecastModel requires the full ITS observation index.")
         grid = _regular_index(full_index, len(pre_index), window_size)
-        if not grid.equals(full_index):
-            _use_observed_index(forecaster, grid, full_index)
+        _configure_native_preprocessors(forecaster, grid, full_index)
         index = grid[: len(pre_index)]
         outcome = pd.Series(
             y.values[:, 0], index=index, name=(coords or {}).get("outcome_name", "y")
