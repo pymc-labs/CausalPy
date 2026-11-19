@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Interrupted Time Series Analysis."""
 
+import ast
 from typing import Any, Literal
 
 import numpy as np
@@ -115,6 +116,10 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         post-intervention period (uses ``>=`` comparison).
     formula : str
         A statistical model formula using patsy syntax (e.g., "y ~ 1 + t + C(month)").
+        For skforecast, supply RHS covariates whose untreated values are
+        known throughout the forecast. Configure outcome lags on the
+        recursive forecaster. Observed post-intervention outcome lags and
+        treatment mediators carry intervention information into the forecast.
     model : PyMCModel, RegressorMixin, PyMCForecastModel, or SkforecastModel, optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, defaults to a PyMC
         LinearRegression model. Alternatively, a
@@ -349,6 +354,16 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             ):
                 raise ValueError(
                     "SkforecastModel requires a single continuous outcome."
+                )
+            outcomes = {factor.name() for factor in y_info.factor_infos}
+            if y_info.factor_infos.keys() & x_info.factor_infos.keys() or any(
+                isinstance(node, ast.Name) and node.id in outcomes
+                for factor in x_info.factor_infos
+                for node in ast.walk(ast.parse(factor.name(), mode="eval"))
+            ):
+                raise ValueError(
+                    "SkforecastModel cannot use the observed outcome as a formula predictor. "
+                    "Configure outcome lags on ForecasterRecursive instead."
                 )
             pre_y, pre_x = build_design_matrices([y_info, x_info], pre, **na_action)
         post_y, post_x = build_design_matrices([y_info, x_info], post, **na_action)

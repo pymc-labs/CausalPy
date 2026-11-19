@@ -667,3 +667,63 @@ def test_single_level_categorical_outcome_is_rejected(series, forecast_model):
     series["status"] = "closed"
     with pytest.raises(ValueError, match="single continuous outcome"):
         cp.InterruptedTimeSeries(series, 70, "status ~ 1", model=forecast_model)
+
+
+@pytest.mark.parametrize("cadence", ["D", "W-MON", "MS", "24h"])
+def test_native_calendar_features_keep_source_timezone(forecaster_class, cadence):
+    from skforecast.preprocessing import CalendarFeatures
+
+    index = pd.date_range("2026-02-15", periods=90, freq=cadence, tz="UTC").tz_convert(
+        "America/New_York"
+    )
+    y = pd.Series(
+        8 * index.hour + np.random.default_rng(13).normal(size=len(index)), index=index
+    )
+    train, pre = 48, 63
+    template = forecaster_class(
+        estimator=Ridge(),
+        lags=1,
+        calendar_features=CalendarFeatures(features=["hour"], encoding=None),
+    )
+    # Compare the configured hour feature and the exact simulated paths to the
+    # upstream API on the same timestamp grid and observed history.
+    native = forecaster_class(
+        estimator=Ridge(),
+        lags=1,
+        calendar_features=CalendarFeatures(features=["hour"], encoding=None),
+    )
+    native.fit(y.iloc[:train])
+    predicted = pd.concat(
+        [
+            native.predict(steps=1, last_window=y.iloc[i - 1 : i])
+            for i in range(train, pre)
+        ]
+    )
+    native.set_out_sample_residuals(y.iloc[train:pre], predicted)
+    expected = native.predict_bootstrapping(
+        steps=len(y) - pre,
+        last_window=y.iloc[pre - 1 : pre],
+        n_boot=20,
+        random_state=55,
+        use_in_sample_residuals=False,
+        use_binned_residuals=False,
+    )
+    exp = cp.InterruptedTimeSeries(
+        y.to_frame(name="y"),
+        index[pre],
+        "y ~ 1",
+        model=SkforecastModel(template, pre - train, n_boot=20, random_state=55),
+    ).fit()
+    paths = exp.result.counterfactual_paths
+    assert paths.obs_ind.to_index().equals(expected.index)
+    np.testing.assert_allclose(paths.values[:, :, 0], expected.to_numpy().T)
+
+
+@pytest.mark.parametrize("formula", ["y ~ 1 + y", "y ~ I(y.shift(1, fill_value=0))"])
+def test_observed_outcome_is_rejected_as_forecast_predictor(
+    series, forecast_model, formula
+):
+    with pytest.raises(
+        ValueError, match="Configure outcome lags on ForecasterRecursive"
+    ):
+        cp.InterruptedTimeSeries(series, 70, formula, model=forecast_model)

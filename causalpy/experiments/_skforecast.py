@@ -29,23 +29,69 @@ from causalpy.experiments.model_adapter import ModelAdapter
 from causalpy.skl_models import SkforecastModel, _validate_recursive_forecaster
 
 
-def _regular_index(index: pd.Index) -> pd.DatetimeIndex | pd.RangeIndex:
+def _dated_grid(index: pd.DatetimeIndex) -> pd.DatetimeIndex | None:
+    if index.freq is not None:
+        return index
+    clocks = (index,) if index.tz is None else (index, index.tz_convert("UTC"))
+    for clock in clocks:
+        if clock.inferred_freq is not None:
+            try:
+                dated = pd.DatetimeIndex(clock, freq=clock.inferred_freq)
+            except ValueError:
+                continue
+            return dated if index.tz is None else dated.tz_convert(index.tz)
+    return None
+
+
+def _native_calendar_matches(
+    index: pd.DatetimeIndex, pre_size: int, window_size: int
+) -> bool:
+    from skforecast.utils import expand_index
+
+    # Some timezone-aware calendar grids are interpreted differently by
+    # skforecast depending on which timestamps its lag window contains.
+    for end in range(window_size, pre_size + 1):
+        stop = end + 1 if end < pre_size else len(index)
+        if not expand_index(index[end - window_size : end], stop - end).equals(
+            index[end:stop]
+        ):
+            return False
+    return True
+
+
+def _regular_index(
+    index: pd.Index, pre_size: int, window_size: int
+) -> pd.DatetimeIndex | pd.RangeIndex:
     if isinstance(index, pd.DatetimeIndex):
-        inferred = index.inferred_freq
-        freq = pd.tseries.frequencies.to_offset(index.freq or inferred)
-        if index.tz is not None:
-            utc = index.tz_convert("UTC")
-            if inferred is None and utc.inferred_freq is not None:
-                return pd.DatetimeIndex(utc, freq=freq or utc.inferred_freq)
-            if freq is not None and (
-                not isinstance(freq, pd.offsets.Tick)
-                or isinstance(freq, pd.offsets.Day)
+        dated = _dated_grid(index)
+        if dated is not None:
+            freq = dated.freq
+            if (
+                dated.tz is None
+                or (
+                    isinstance(freq, pd.offsets.Tick)
+                    and not isinstance(freq, pd.offsets.Day)
+                )
+                or _native_calendar_matches(dated, pre_size, window_size)
             ):
-                # Give the native calendar a stable wall clock. Lag suffixes
-                # alone cannot distinguish local time from a UTC calendar.
-                index = index.tz_localize(None)
-        if freq is not None:
-            return pd.DatetimeIndex(index, freq=freq)
+                return dated
+
+            # Preserve the original feature clock when the grid is an elapsed
+            # day. Calendar offsets can also be represented on their stable
+            # wall clock or UTC clock, with public coordinates carried separately.
+            clocks = [
+                (dated.tz_localize(None), freq),
+                (dated.tz_convert("UTC"), freq),
+            ]
+            if isinstance(freq, pd.offsets.Day):
+                clocks.insert(0, (dated, pd.offsets.Hour(24 * freq.n)))
+            for clock, offset in clocks:
+                try:
+                    return pd.DatetimeIndex(
+                        pd.DatetimeIndex(clock, freq=None), freq=offset
+                    )
+                except ValueError:
+                    continue
     elif pd.api.types.is_integer_dtype(index.dtype):
         start, second, last = map(int, (index[0], index[1], index[-1]))
         step = second - start
@@ -149,7 +195,9 @@ class _SkforecastAdapter(ModelAdapter):
             )
         pre_index = y.get_index("obs_ind")
         full_index = (coords or {}).get("forecast_index", pre_index)
-        index = _regular_index(full_index)[: len(pre_index)]
+        index = _regular_index(full_index, len(pre_index), window_size)[
+            : len(pre_index)
+        ]
         outcome = pd.Series(y.values[:, 0], index=index, name="y")
         if not np.isfinite(outcome).all():
             raise ValueError(
