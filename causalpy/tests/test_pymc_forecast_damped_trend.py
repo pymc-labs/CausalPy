@@ -24,9 +24,9 @@ from pytensor import scan
 import causalpy as cp
 from causalpy.pymc_forecast_models import PyMCForecastModel
 
-pf = pytest.importorskip("pymc_forecast", minversion="0.3")
-if not SpecifierSet(">=0.3,<0.4").contains(pf.__version__, prereleases=False):
-    pytest.skip("requires pymc-forecast>=0.3,<0.4", allow_module_level=True)
+pf = pytest.importorskip("pymc_forecast", minversion="0.4")
+if not SpecifierSet(">=0.4,<0.5").contains(pf.__version__, prereleases=False):
+    pytest.skip("requires pymc-forecast>=0.4,<0.5", allow_module_level=True)
 
 LEVEL_SCALE = 0.15
 SLOPE_SCALE = 0.1

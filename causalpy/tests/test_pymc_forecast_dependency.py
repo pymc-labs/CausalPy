@@ -29,7 +29,7 @@ from causalpy.pymc_forecast_models import PyMCForecastModel, _import_pymc_foreca
 def forecast_dependency(monkeypatch):
     package = ModuleType("pymc_forecast")
     monkeypatch.setitem(sys.modules, "pymc_forecast", package)
-    get_version = Mock(return_value="0.3.0")
+    get_version = Mock(return_value="0.4.0")
     monkeypatch.setattr(metadata, "version", get_version)
     return package, get_version
 
@@ -37,15 +37,15 @@ def forecast_dependency(monkeypatch):
 @pytest.mark.parametrize(
     ("installed_version", "supported"),
     [
-        ("0.2.0", False),
-        ("0.3.0", True),
-        ("0.3.0.post1", True),
-        ("0.3.0+local", True),
-        ("0.3.0rc1", False),
-        ("0.3.1rc1", False),
+        ("0.3.0", False),
+        ("0.4.0", True),
+        ("0.4.0.post1", True),
+        ("0.4.0+local", True),
         ("0.4.0rc1", False),
-        ("0.4.0", False),
-        ("0.30.0", False),
+        ("0.4.1rc1", False),
+        ("0.5.0rc1", False),
+        ("0.5.0", False),
+        ("0.40.0", False),
     ],
 )
 def test_forecast_version_requirement(
@@ -58,7 +58,7 @@ def test_forecast_version_requirement(
     else:
         forecaster = Mock()
         with pytest.raises(
-            ImportError, match="requires pymc-forecast>=0.3,<0.4"
+            ImportError, match="requires pymc-forecast>=0.4,<0.5"
         ) as error:
             PyMCForecastModel(Mock(), forecaster=forecaster)
         assert installed_version in str(error.value)
@@ -75,7 +75,7 @@ def test_forecast_version_metadata_errors(forecast_dependency, installed_version
         get_version.return_value = installed_version
     with pytest.raises(ImportError, match="version") as error:
         _import_pymc_forecast()
-    assert ">=0.3,<0.4" in str(error.value)
+    assert ">=0.4,<0.5" in str(error.value)
     assert "pip install" in str(error.value)
 
 
@@ -83,7 +83,7 @@ def test_missing_forecast_extra_has_actionable_install_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "pymc_forecast", None)
     with pytest.raises(ImportError, match=r"pip install causalpy\[forecast\]") as error:
         _import_pymc_forecast()
-    assert "pymc-forecast[extras]>=0.3,<0.4" in str(error.value)
+    assert "pymc-forecast[extras]>=0.4,<0.5" in str(error.value)
 
 
 @pytest.mark.parametrize(
@@ -95,12 +95,12 @@ def test_forecast_integration_version_skips(
 ):
     package, _ = forecast_dependency
     module_path = str(Path(__file__).with_name(module_name))
-    for installed_version in ("0.2.0", "0.3.1rc1", "0.4.0"):
+    for installed_version in ("0.3.0", "0.4.1rc1", "0.5.0"):
         package.__version__ = installed_version
         with pytest.raises(pytest.skip.Exception):
             runpy.run_path(module_path)
 
-    package.__version__ = "0.3.0"
+    package.__version__ = "0.4.0"
     for name in ("ForecastingModel", "Forecaster", "PathfinderForecaster"):
         monkeypatch.setattr(package, name, object, raising=False)
     guard = Mock(side_effect=ImportError("guard regression"))

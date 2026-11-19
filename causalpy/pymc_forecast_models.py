@@ -76,7 +76,7 @@ __all__ = ["PyMCForecastModel"]
 
 def _import_pymc_forecast():
     """Import a supported ``pymc_forecast`` lazily, before any fitting."""
-    supported_versions = ">=0.3,<0.4"
+    supported_versions = ">=0.4,<0.5"
     install_instructions = (
         "Install it with `pip install causalpy[forecast]` or "
         f"`pip install --upgrade 'pymc-forecast[extras]{supported_versions}'`."
@@ -114,7 +114,7 @@ class PyMCForecastModel:
     Parameters
     ----------
     model_fn : callable or pymc_forecast.ForecastingModel
-        The upstream 0.3 forecasting model body ``(covariates, data=None) -> None`` or a :class:`pymc_forecast.ForecastingModel` instance. Priors flow through this object (pymc-extras ``Prior``), preserving the transparent-prior ethos.
+        The upstream 0.4 forecasting model body ``(covariates, data=None) -> None`` or a :class:`pymc_forecast.ForecastingModel` instance. Priors flow through this object (pymc-extras ``Prior``), preserving the transparent-prior ethos.
     forecaster : type, optional
         The ``pymc_forecast`` forecaster class used to fit the model. Defaults
         to :class:`pymc_forecast.HMCForecaster` (NUTS), matching CausalPy's
