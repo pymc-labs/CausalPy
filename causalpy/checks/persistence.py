@@ -31,6 +31,7 @@ from causalpy.constants import HDI_PROB
 from causalpy.experiments.base import BaseExperiment
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
 from causalpy.pipeline import PipelineContext
+from causalpy.reporting import _format_probability_as_percent
 
 
 class PersistenceCheck:
@@ -123,7 +124,8 @@ class PersistenceCheck:
                 table[bound] = [persistence[f"{metric}_{bound}"] for metric in metrics]
             if not isfinite(ratio):
                 text = "The persistence ratio is unavailable because the intervention impact denominator is unstable."
-            text += f" Intervals are {self.hdi_prob:.1%} bootstrap prediction intervals for realized impact."
+            level = _format_probability_as_percent(self.hdi_prob)
+            text += f" Intervals are {level} bootstrap prediction intervals for realized impact."
 
         return CheckResult(
             check_name="PersistenceCheck",

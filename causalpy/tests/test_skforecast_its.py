@@ -302,6 +302,39 @@ def test_path_intervals_agree_across_plot_data_summary_persistence_and_report(
     assert all(key not in report for key in ("p_value", "hdi_lower", "ROPE"))
 
 
+@pytest.mark.parametrize(
+    ("level", "percent"), [(0.29, "29"), (0.9999, "99.99"), (1.0, "100")]
+)
+def test_prediction_interval_labels_match_requested_level(
+    series, forecast_model, level, percent, capsys
+):
+    from matplotlib import pyplot as plt
+
+    from causalpy.checks.persistence import PersistenceCheck
+    from causalpy.pipeline import PipelineContext
+
+    exp = cp.InterruptedTimeSeries(
+        series, 66, "y ~ 1", model=forecast_model, treatment_end_time=76
+    ).fit()
+    fig, axes = exp.plot(ci_prob=level, show=False)
+    _, labels = axes[0].get_legend_handles_labels()
+    plt.close(fig)
+    assert f"{percent}% bootstrap prediction interval" in labels
+
+    plot_data = exp.get_plot_data(hdi_prob=level)
+    assert {column for column in plot_data if "_pi_" in column} == {
+        f"{name}_pi_{bound}_{percent}"
+        for name in ("pred", "impact", "cumulative_impact")
+        for bound in ("lower", "upper")
+    }
+
+    result = PersistenceCheck(hdi_prob=level).run(
+        exp, PipelineContext(data=series, experiment=exp)
+    )
+    assert f"{percent}% bootstrap prediction intervals" in result.text
+    assert f"{percent}% bootstrap prediction intervals" in capsys.readouterr().out
+
+
 def test_shifted_outcomes_shift_intervals_and_window_total(series, forecast_model):
     start, stop = 70, 77
     shift = np.arange(len(series) - start) + 3

@@ -55,7 +55,11 @@ from causalpy.plot_utils import (
 )
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import LinearRegression, PyMCModel
-from causalpy.reporting import EffectSummary, _apply_prior_grouping
+from causalpy.reporting import (
+    EffectSummary,
+    _apply_prior_grouping,
+    _format_probability_as_percent,
+)
 from causalpy.skl_models import SkforecastModel
 from causalpy.utils import _as_scalar
 
@@ -598,10 +602,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
         else:
             # OLS: Compute statistics for both periods
-            from causalpy.reporting import (
-                _compute_statistics_ols,
-                _format_probability_as_percent,
-            )
+            from causalpy.reporting import _compute_statistics_ols
 
             intervention_stats = _compute_statistics_ols(
                 np.asarray(intervention_impact).ravel(),
@@ -1056,7 +1057,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
         if paths is not None:
             series = _predictive_plot_series(paths, post_y)
-            label = f"{ci_prob:.1%} bootstrap prediction interval"
+            label = f"{_format_probability_as_percent(ci_prob)} bootstrap prediction interval"
             for i, samples in enumerate(series.values()):
                 lower, upper = _prediction_interval(samples, ci_prob)
                 kwargs = {"color": "C1", "label": label if i == 0 else None}
@@ -1245,6 +1246,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             )
 
         if bundle.counterfactual_paths is not None:
+            pi_pct = _format_probability_as_percent(hdi_prob).removesuffix("%")
             post_y = self.post_design["y"].isel(treated_units=0, drop=True)
             pre_data["cumulative_impact"] = np.nan
             post_data["cumulative_impact"] = bundle.impact_post_cumulative.mean(
@@ -1254,8 +1256,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 bundle.counterfactual_paths, post_y
             ).items():
                 lower, upper = _prediction_interval(series, hdi_prob)
-                lower_col = f"{name}_pi_lower_{hdi_pct}"
-                upper_col = f"{name}_pi_upper_{hdi_pct}"
+                lower_col = f"{name}_pi_lower_{pi_pct}"
+                upper_col = f"{name}_pi_upper_{pi_pct}"
                 pre_data[[lower_col, upper_col]] = np.nan
                 post_data[lower_col] = lower.values
                 post_data[upper_col] = upper.values
