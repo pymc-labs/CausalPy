@@ -173,6 +173,11 @@ class PyMCModel(pm.Model):
     #: :meth:`sample_prior_predictive`.
     supports_prior_predictive: bool = True
 
+    #: Whether ``predict()`` returns observation-level noise in ``y_hat``.
+    #: Models exposing expected observations under both output names must
+    #: disable this capability instead of relying on sampled-value equality.
+    supports_observation_noise: bool = True
+
     def priors_from_data(self, X, y) -> dict[str, Any]:
         """
         Generate priors dynamically based on the input data.
@@ -3340,6 +3345,7 @@ class StateSpaceTimeSeries(PyMCModel):
     #: The Kalman smoothing/forecast path has no prior equivalent yet; a
     #: prior phase for this backend is tracked as a follow-up (issue #1092).
     supports_prior_predictive = False
+    supports_observation_noise = False
 
     def build(
         self,

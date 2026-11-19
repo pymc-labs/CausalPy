@@ -15,20 +15,24 @@
 
 import re  # noqa: I001
 import warnings
+from dataclasses import replace
 from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.font_manager import FontProperties
 from plotnine import (
     aes,
+    element_text,
     geom_line,
     geom_point,
     ggplot,
     guides,
     labs,
     scale_color_manual,
+    theme,
 )
 from patsy import ModelDesc
 from sklearn.base import RegressorMixin
@@ -36,6 +40,13 @@ from sklearn.base import RegressorMixin
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.experiments._results import DiscontinuityResult
+from causalpy.experiments._response_type import (
+    _NOTE_FONT_SIZE,
+    annotation_text,
+    check_response_type,
+    finish_response_plot,
+    quantity_for,
+)
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.custom_exceptions import (
     DataException,
@@ -374,6 +385,27 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         print("\n")
         self.print_coefficients(round_to)
 
+    def _bundle_for_response(
+        self,
+        bundle: DiscontinuityResult,
+        *,
+        response_type: str,
+        group: Literal["prior", "posterior"],
+    ) -> DiscontinuityResult:
+        """Return ``bundle`` or a copy whose curve uses ``y_hat``.
+
+        ``discontinuity_at_threshold`` stays the stored conditional-expectation
+        contrast. The stored result is not mutated.
+        """
+        if check_response_type(response_type) == "expectation":
+            return bundle
+        quantity = quantity_for(response_type)
+        (new_x,) = build_design_matrices([self._x_design_info], self.x_pred)
+        predictions = self._model_backend.predict_response(
+            X=np.asarray(new_x), quantity=quantity, group=group
+        )
+        return replace(bundle, predictions=predictions)
+
     def plot(
         self,
         *,
@@ -383,6 +415,8 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        response_type: Literal["expectation", "prediction"] = "expectation",
+        show_response_annotation: bool | None = None,
         figsize: tuple[float, float] | None = None,
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -420,6 +454,18 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         num_samples : int, optional
             Number of posterior draws when ``kind="spaghetti"``. Defaults
             to 50. Ignored for other kinds.
+        response_type : {"expectation", "prediction"}, default "expectation"
+            Which quantity the fitted curve represents. ``"expectation"``
+            uses the conditional mean ``mu`` and excludes observation noise.
+            ``"prediction"`` uses predictive ``y_hat`` and includes
+            observation noise. The reported discontinuity stays the stored
+            conditional-expectation contrast. Point-estimate backends reject
+            ``"prediction"``.
+        show_response_annotation : bool, optional
+            Whether to add a small figure note naming the quantity and, for
+            ribbon plots, the interval. ``None`` (default) annotates Bayesian
+            ribbon plots and leaves histogram, spaghetti, and point-estimate
+            figures unlabeled. ``True`` always annotates; ``False`` never does.
 
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches, passed to
@@ -450,6 +496,8 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
             kind=kind,
             ci_kind=ci_kind,
             num_samples=num_samples,
+            response_type=response_type,
+            show_response_annotation=show_response_annotation,
             figsize=figsize,
         )
 
@@ -462,6 +510,8 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        response_type: Literal["expectation", "prediction"] = "expectation",
+        show_response_annotation: bool | None = None,
         figsize: tuple[float, float] | None = None,
         **kwargs: Any,
     ) -> tuple[plt.Figure, plt.Axes]:
@@ -492,7 +542,11 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
-        bundle = self._require_bundle(group)
+        bundle = self._bundle_for_response(
+            self._require_bundle(group),
+            response_type=response_type,
+            group=group,
+        )
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
@@ -500,7 +554,20 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
             "num_samples": num_samples,
         }
         if group == "prior":
-            return self._plot_prior_checks(bundle=bundle, style=style, figsize=figsize)
+            fig, ax = self._plot_prior_checks(
+                bundle=bundle, style=style, figsize=figsize
+            )
+            return finish_response_plot(
+                fig,
+                ax,
+                group=group,
+                response_type=response_type,
+                ci_prob=ci_prob,
+                ci_kind=ci_kind,
+                kind=kind,
+                show_response_annotation=show_response_annotation,
+                has_draws=has_posterior_draws(bundle.predictions),
+            )
 
         with_uncertainty = has_posterior_draws(bundle.predictions)
         has_exclusion = len(self.fit_data) < len(self.data)
@@ -564,11 +631,36 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         if self.donut_hole > 0:
             color_values["donut boundary"] = "orange"
 
+        if figsize is not None:
+            p += theme(figure_size=figsize)
+        width = p.theme.getp("figure_size")[0]
+        margins = p.theme.getp("plot_margin_left") + p.theme.getp("plot_margin_right")
+        note = annotation_text(
+            response_type=response_type,
+            group=group,
+            ci_prob=ci_prob,
+            ci_kind=ci_kind,
+            kind=kind,
+            has_draws=with_uncertainty,
+            show_response_annotation=show_response_annotation,
+            width_inches=width * (1 - margins),
+        )
+        font = FontProperties(size=_NOTE_FONT_SIZE)
         fig = (
             p
             + scale_color_manual(values=color_values)
             + guides(color=False)
-            + labs(title=title, x=xcol, y=ycol)
+            + labs(title=title, x=xcol, y=ycol, caption=note)
+            + theme(
+                plot_caption_position="plot",
+                plot_caption=element_text(
+                    size=_NOTE_FONT_SIZE,
+                    ha="left",
+                    family=font.get_family(),
+                    style=font.get_style(),
+                    weight=font.get_weight(),
+                ),
+            )
         ).draw()
         # ``draw()`` closes the figure on exit, which unregisters it from
         # pyplot; re-register it so ``plt.show()`` and Jupyter display it.
@@ -630,7 +722,9 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
             ],
             fontsize=LEGEND_FONT_SIZE,
         )
-        return (fig, ax)
+        # The plotnine caption participates in its own layout; replacing that
+        # engine with Matplotlib tight layout cannot handle p9GridSpec.
+        return fig, ax
 
     def _plot_prior_checks(
         self,

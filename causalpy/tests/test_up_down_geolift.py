@@ -404,3 +404,34 @@ def test_up_down_mmm_export_rejects_zero_lift(fitted_up_down_mock, monkeypatch):
             spend_unit="USD/week",
             outcome_unit="USD/week",
         )
+
+
+@pytest.mark.parametrize("group", ["prior", "posterior"])
+def test_up_down_predictive_plot_and_export_keep_geo_alignment(
+    fitted_up_down_mock, group
+):
+    """Inherited selectors preserve treated geo names, dates, units and effect summaries."""
+    simulated, result = fitted_up_down_mock
+    unit = simulated.arms["down"][0]
+    stored = result._require_bundle(group)
+    summary = result.effect_summary(treated_unit=unit).table.copy()
+    frame = result.get_plot_data(
+        group=group, treated_unit=unit, response_type="prediction", hdi_prob=0.5
+    )
+    assert frame.index.equals(result.data.index)
+    assert frame.filter(like="hdi").notna().all().all()
+    fig, axes = result.plot(
+        group=group,
+        treated_unit=unit,
+        response_type="prediction",
+        ci_prob=0.5,
+        show=False,
+    )
+    assert any(f"{group} predictive outcome" in text.get_text() for text in fig.texts)
+    if group == "posterior":
+        assert "Predictive difference" in axes[1].get_title()
+    assert result._require_bundle(group) is stored
+    pd.testing.assert_frame_equal(
+        result.effect_summary(treated_unit=unit).table, summary
+    )
+    plt.close(fig)

@@ -26,6 +26,7 @@ import pymc as pm
 import pytensor.tensor as pt
 import pytest
 import xarray as xr
+from matplotlib import pyplot as plt
 from packaging.specifiers import SpecifierSet
 
 import causalpy as cp
@@ -1029,3 +1030,18 @@ def test_scheduled_descriptive_forecast_placebos_use_template_without_refitting_
         )
         assert diagnostics["diagnostics_status"] == "available"
     assert fold_models[0] is not fold_models[1]
+
+
+def test_forecast_predictive_display_preserves_expectation_summary(forecast_result):
+    """Actual forecast outcomes support pre/post predictive bands without changing estimands."""
+    experiment = forecast_result
+    stored = experiment.result
+    summary = experiment.effect_summary().table.copy()
+    frame = experiment.get_plot_data(response_type="prediction", hdi_prob=0.5)
+    assert frame.index.equals(experiment.data.index)
+    assert frame.filter(like="hdi").notna().all().all()
+    fig, axes = experiment.plot(response_type="prediction", ci_prob=0.5, show=False)
+    assert "Predictive difference" in axes[1].get_title()
+    assert experiment.result is stored
+    pd.testing.assert_frame_equal(experiment.effect_summary().table, summary)
+    plt.close(fig)

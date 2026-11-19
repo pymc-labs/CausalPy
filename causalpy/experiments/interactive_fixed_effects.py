@@ -46,6 +46,7 @@ from matplotlib import pyplot as plt
 from causalpy.constants import HDI_PROB
 from causalpy.date_utils import validate_treatment_time_against_index
 from causalpy.experiments._panel_counterfactual import WidePanel, resolve_treated_unit
+from causalpy.experiments._response_type import check_response_type
 from causalpy.experiments._results import CausalResult
 from causalpy.plot_utils import _PosteriorPlotStyle, format_r2_score
 from causalpy.utils import _bayesian_r2_score
@@ -331,6 +332,7 @@ class InteractiveFixedEffectsSyntheticControl:
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        response_type: Literal["expectation", "prediction"] = "expectation",
         plot_predictors: bool = False,
         figsize: tuple[float, float] = (7, 8),
         show: bool = True,
@@ -356,6 +358,10 @@ class InteractiveFixedEffectsSyntheticControl:
             Interval type when ``kind="ribbon"``.
         num_samples : int, default 50
             Draw lines when ``kind="spaghetti"``.
+        response_type : {"expectation", "prediction"}, default "expectation"
+            The reconstructed factor trajectory exposes expectation draws.
+            ``"prediction"`` raises ``ValueError``; observation-level treated
+            outcome sampling is not exposed by this experimental model.
         plot_predictors : bool, default False
             Overlay donor trajectories on the counterfactual panel.
         figsize : tuple of float, default (7, 8)
@@ -368,6 +374,11 @@ class InteractiveFixedEffectsSyntheticControl:
         tuple of :class:`~matplotlib.figure.Figure` and :class:`~numpy.ndarray`
             Three panels: untreated trajectory, point impact, cumulative impact.
         """
+        if check_response_type(response_type) == "prediction":
+            raise ValueError(
+                "Interactive fixed effects exposes expectation trajectories only; "
+                "response_type='prediction' requires treated observation-noise draws."
+            )
         if self.result is None:
             raise RuntimeError("Call fit() before plot().")
         style: _PosteriorPlotStyle = {

@@ -14,6 +14,7 @@
 """Synthetic Control Experiment."""
 
 import warnings
+from dataclasses import replace
 from typing import Any, Literal
 
 import numpy as np
@@ -25,6 +26,11 @@ from sklearn.base import RegressorMixin
 from causalpy.constants import HDI_PROB
 from causalpy.date_utils import validate_treatment_time_against_index
 from causalpy.experiments._panel_counterfactual import WidePanel, resolve_treated_unit
+from causalpy.experiments._response_type import (
+    check_response_type,
+    finish_response_plot,
+    quantity_for,
+)
 from causalpy.experiments._results import CausalResult
 from causalpy.experiments.model_adapter import PyMCModelAdapter, build_coords
 from causalpy.input_data import DataFrameLike, to_pandas_with_time_index
@@ -439,6 +445,39 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         for unit, r in corrs.items():
             print(f"Pre-treatment correlation ({unit}): {r:.4f}")
 
+    def _bundle_for_response(
+        self,
+        bundle: CausalResult,
+        *,
+        response_type: str,
+        group: Literal["prior", "posterior"],
+    ) -> CausalResult:
+        """Return ``bundle`` or a draw-only copy using posterior predictive draws.
+
+        Impact is rebuilt with :meth:`WidePanel.impacts`, matching
+        :meth:`_finalize`. The stored result is not mutated.
+        """
+        if check_response_type(response_type) == "expectation":
+            return bundle
+        quantity = quantity_for(response_type)
+        predictions_pre = self._model_backend.predict_response(
+            X=self.pre_design["control"], quantity=quantity, group=group
+        )
+        predictions_post = self._model_backend.predict_response(
+            X=self.post_design["control"], quantity=quantity, group=group
+        )
+        impact_pre, impact_post, impact_post_cumulative = self._panel.impacts(
+            predictions_pre, predictions_post
+        )
+        return replace(
+            bundle,
+            predictions_pre=predictions_pre,
+            predictions_post=predictions_post,
+            impact_pre=impact_pre,
+            impact_post=impact_post,
+            impact_post_cumulative=impact_post_cumulative,
+        )
+
     def plot(
         self,
         *,
@@ -449,6 +488,8 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        response_type: Literal["expectation", "prediction"] = "expectation",
+        show_response_annotation: bool | None = None,
         plot_predictors: bool = False,
         figsize: tuple[float, float] = (7, 8),
         show: bool = True,
@@ -476,7 +517,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             which selects the first treated unit.
         ci_prob : float
             Probability mass of the highest density interval drawn around the
-            posterior predictive, causal impact, and cumulative impact bands.
+            selected outcome, impact, and cumulative impact bands.
             Must be in ``(0, 1]``. Ignored for OLS models. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         kind : {"ribbon", "histogram", "spaghetti"}, optional
@@ -491,6 +532,17 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         num_samples : int, optional
             Number of posterior draws when ``kind="spaghetti"``. Defaults
             to 50. Ignored for other kinds.
+        response_type : {"expectation", "prediction"}, default "expectation"
+            Which quantity the uncertainty bands represent.
+            ``"expectation"`` uses the conditional mean ``mu`` and excludes
+            observation noise. ``"prediction"`` uses predictive
+            ``y_hat`` and includes observation noise. Stored results stay on
+            ``mu``. Point-estimate backends reject ``"prediction"``.
+        show_response_annotation : bool, optional
+            Whether to add a small figure note naming the quantity and, for
+            ribbon plots, the interval. ``None`` (default) annotates Bayesian
+            ribbon plots and leaves histogram, spaghetti, and point-estimate
+            figures unlabeled. ``True`` always annotates; ``False`` never does.
 
         plot_predictors : bool
             Whether to overlay the donor (control) unit trajectories on the
@@ -528,6 +580,8 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             kind=kind,
             ci_kind=ci_kind,
             num_samples=num_samples,
+            response_type=response_type,
+            show_response_annotation=show_response_annotation,
             plot_predictors=plot_predictors,
             figsize=figsize,
         )
@@ -542,6 +596,8 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        response_type: Literal["expectation", "prediction"] = "expectation",
+        show_response_annotation: bool | None = None,
         plot_predictors: bool = False,
         figsize: tuple[float, float] = (7, 8),
         **kwargs: Any,
@@ -567,7 +623,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             If ``None``, plots the first treated unit.
         ci_prob : float, optional
             Probability mass of the credible interval drawn around the
-            posterior predictive, causal impact, and cumulative impact bands.
+            selected outcome, impact, and cumulative impact bands.
             Must be in ``(0, 1]``. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         plot_predictors : bool, optional
@@ -575,7 +631,11 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
-        bundle = self._require_bundle(group)
+        bundle = self._bundle_for_response(
+            self._require_bundle(group),
+            response_type=response_type,
+            group=group,
+        )
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
@@ -588,7 +648,8 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             if group == "posterior"
             else ""
         )
-        return self._panel.plot(
+        predictive = response_type == "prediction"
+        fig, ax = self._panel.plot(
             bundle,
             group=group,
             treated_unit=treated_unit,
@@ -596,6 +657,24 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             style=style,
             figsize=figsize,
             plot_predictors=plot_predictors,
+            impact_label="Predictive difference" if predictive else "Causal impact",
+            impact_title="Predictive difference" if predictive else "Causal Impact",
+            cumulative_title="Cum. predictive difference"
+            if predictive
+            else "Cumulative Causal Impact",
+            impact_ylabel="Difference" if predictive else "",
+            cumulative_ylabel="Cum.\ndifference" if predictive else "",
+        )
+        return finish_response_plot(
+            fig,
+            ax,
+            group=group,
+            response_type=response_type,
+            ci_prob=ci_prob,
+            ci_kind=ci_kind,
+            kind=kind,
+            show_response_annotation=show_response_annotation,
+            has_draws=has_posterior_draws(bundle.predictions_pre),
         )
 
     def get_plot_data(
@@ -604,6 +683,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         group: Literal["prior", "posterior"] = "posterior",
         hdi_prob: float = HDI_PROB,
         treated_unit: str | None = None,
+        response_type: Literal["expectation", "prediction"] = "expectation",
     ) -> pd.DataFrame:
         """
         Recover the data of the experiment along with the prediction and causal impact information.
@@ -625,6 +705,11 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         treated_unit : str, optional
             Which treated unit to extract data for. Must be a string name
             of the treated unit. If ``None``, uses the first treated unit.
+        response_type : {"expectation", "prediction"}, default "expectation"
+            Which quantity the returned prediction and impact columns use.
+            ``"prediction"`` rebuilds them from posterior predictive draws,
+            which include observation noise. Stored results stay on ``mu``.
+            Point-estimate backends reject ``"prediction"``.
 
         Returns
         -------
@@ -635,7 +720,11 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             ``prediction``, ``impact``, and HDI columns stay computed even
             when the input frame already uses those names.
         """
-        bundle = self._require_bundle(group)
+        bundle = self._bundle_for_response(
+            self._require_bundle(group),
+            response_type=response_type,
+            group=group,
+        )
         frame = self._panel.plot_data(
             bundle,
             treated_unit=treated_unit,

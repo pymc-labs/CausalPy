@@ -319,6 +319,11 @@ class WidePanel:
         style: _PosteriorPlotStyle,
         figsize: tuple[float, float],
         plot_predictors: bool,
+        impact_label: str = "Causal impact",
+        impact_title: str = "Causal Impact",
+        cumulative_title: str = "Cumulative Causal Impact",
+        impact_ylabel: str = "",
+        cumulative_ylabel: str = "",
     ) -> tuple[plt.Figure, list[plt.Axes]] | tuple[plt.Figure, np.ndarray]:
         """Draw the prior-check figure or the three-panel posterior figure.
 
@@ -344,6 +349,13 @@ class WidePanel:
             Figure size in inches.
         plot_predictors : bool
             Whether to overlay donor trajectories.
+
+        impact_label : str
+            Artist and legend text for the observed-minus-counterfactual difference.
+        impact_title, cumulative_title : str
+            Titles for the difference panels.
+        impact_ylabel, cumulative_ylabel : str
+            Axis labels for the difference panels.
 
         Returns
         -------
@@ -395,6 +407,11 @@ class WidePanel:
             style=style,
             figsize=figsize,
             plot_predictors=plot_predictors,
+            impact_label=impact_label,
+            impact_title=impact_title,
+            cumulative_title=cumulative_title,
+            impact_ylabel=impact_ylabel,
+            cumulative_ylabel=cumulative_ylabel,
         )
 
     def plot_data(
@@ -649,6 +666,11 @@ def _plot_counterfactual(
     style: _PosteriorPlotStyle,
     figsize: tuple[float, float],
     plot_predictors: bool,
+    impact_label: str,
+    impact_title: str,
+    cumulative_title: str,
+    impact_ylabel: str,
+    cumulative_ylabel: str,
 ) -> tuple[plt.Figure, np.ndarray]:
     """Render the three-panel counterfactual, impact, and cumulative figure.
 
@@ -708,11 +730,11 @@ def _plot_counterfactual(
         y2=post_treated.values,
         color="C0",
         alpha=0.25,
-        label="Causal impact",
+        label=impact_label,
     )
     if with_uncertainty:
         handles.append(h)
-        labels.append("Causal impact")
+        labels.append(impact_label)
 
     ax[0].set(title=title)
 
@@ -745,9 +767,9 @@ def _plot_counterfactual(
         y1=post_impact.mean(dim=["chain", "draw"]),
         color="C0",
         alpha=0.25,
-        label="Causal impact",
+        label=impact_label,
     )
-    ax[1].set(title="Causal Impact")
+    ax[1].set(title=impact_title, ylabel=impact_ylabel)
 
     if with_uncertainty:
         plot_posterior_over_x(
@@ -764,7 +786,7 @@ def _plot_counterfactual(
             c="k",
         )
     ax[2].axhline(y=0, c="k")
-    ax[2].set(title="Cumulative Causal Impact")
+    ax[2].set(title=cumulative_title, ylabel=cumulative_ylabel)
 
     for i in [0, 1, 2]:
         converted = _convert_treatment_time_for_axis(ax[i], treatment_time)

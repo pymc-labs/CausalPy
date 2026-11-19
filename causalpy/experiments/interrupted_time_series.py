@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Interrupted Time Series Analysis."""
 
+from dataclasses import replace
 from typing import Any, Literal
 
 import numpy as np
@@ -29,11 +30,17 @@ from causalpy.date_utils import (
     format_date_axes,
     validate_treatment_time_against_index,
 )
+from causalpy.experiments._response_type import (
+    check_response_type,
+    finish_response_plot,
+    quantity_for,
+)
 from causalpy.experiments._results import CausalResult
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas_with_time_index
 from causalpy.plot_utils import (
+    _interval_bound_values,
     _PosteriorPlotStyle,
     format_r2_score,
     get_hdi_to_df,
@@ -564,6 +571,43 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         print(f"Formula: {self.formula}")
         self.print_coefficients(round_to)
 
+    def _bundle_for_response(
+        self,
+        bundle: CausalResult,
+        *,
+        response_type: str,
+        group: Literal["prior", "posterior"],
+    ) -> CausalResult:
+        """Return ``bundle`` or a draw-only copy using posterior predictive draws.
+
+        The stored result is not mutated. ``"expectation"`` is the stored
+        conditional mean. ``"prediction"`` re-predicts ``y_hat`` on the same
+        design matrices and rebuilds impact as observed minus that draw.
+        """
+        if check_response_type(response_type) == "expectation":
+            return bundle
+        pre_pred = self._model_backend.predict_response(
+            X=self.pre_design["X"],
+            quantity=quantity_for(response_type),
+            group=group,
+        )
+        post_pred = self._model_backend.predict_response(
+            X=self.post_design["X"],
+            quantity=quantity_for(response_type),
+            group=group,
+            out_of_sample=True,
+        )
+        impact_pre = (self.pre_design["y"] - pre_pred).squeeze("treated_units")
+        impact_post = (self.post_design["y"] - post_pred).squeeze("treated_units")
+        return replace(
+            bundle,
+            predictions_pre=pre_pred,
+            predictions_post=post_pred,
+            impact_pre=impact_pre,
+            impact_post=impact_post,
+            impact_post_cumulative=impact_post.cumsum(dim="obs_ind"),
+        )
+
     def plot(
         self,
         *,
@@ -573,6 +617,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        response_type: Literal["expectation", "prediction"] = "expectation",
+        show_response_annotation: bool | None = None,
         figsize: tuple[float, float] = (7, 8),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
@@ -595,7 +641,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             ``None`` to render raw numbers.
         ci_prob : float
             Probability mass of the credible interval drawn around the
-            posterior predictive, causal impact, and cumulative impact bands.
+            selected outcome, impact, and cumulative impact bands.
             Must be in ``(0, 1]``. Ignored for OLS models. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         kind : {"ribbon", "histogram", "spaghetti"}, optional
@@ -610,6 +656,17 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         num_samples : int, optional
             Number of posterior draws when ``kind="spaghetti"``. Defaults
             to 50. Ignored for other kinds.
+        response_type : {"expectation", "prediction"}, default "expectation"
+            Which quantity the uncertainty bands represent.
+            ``"expectation"`` uses the conditional mean ``mu`` and excludes
+            observation noise. ``"prediction"`` uses predictive
+            ``y_hat`` and includes observation noise. Stored results stay on
+            ``mu``. Point-estimate backends reject ``"prediction"``.
+        show_response_annotation : bool, optional
+            Whether to add a small figure note naming the quantity and, for
+            ribbon plots, the interval. ``None`` (default) annotates Bayesian
+            ribbon plots and leaves histogram, spaghetti, and point-estimate
+            figures unlabeled. ``True`` always annotates; ``False`` never does.
 
         figsize : tuple of (float, float)
             Width and height of the figure in inches, passed to
@@ -642,6 +699,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             kind=kind,
             ci_kind=ci_kind,
             num_samples=num_samples,
+            response_type=response_type,
+            show_response_annotation=show_response_annotation,
             figsize=figsize,
         )
 
@@ -652,8 +711,9 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         Y: xr.DataArray,
         color: str,
         hdi_prob: float = HDI_PROB,
+        ci_kind: Literal["hdi", "eti"] = "hdi",
     ) -> Any:
-        """Overlay a median dot + HDI errorbar for a single post-period datum.
+        """Overlay a median dot + selected interval errorbar for a single post-period datum.
 
         When ``plot_posterior_over_x`` is called with ``kind="ribbon"`` and
         HDI intervals, ``arviz.plot_hdi`` renders a degenerate zero-area polygon
@@ -666,21 +726,26 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         Y_plot = Y
         if "treated_units" in Y_plot.dims:
             Y_plot = Y_plot.isel(treated_units=0)
-        if "obs_ind" in Y_plot.dims:
-            if Y_plot.sizes["obs_ind"] != 1:
-                msg = (
-                    "Singleton HDI marker requires exactly one obs_ind; "
-                    f"got size {Y_plot.sizes['obs_ind']}"
-                )
-                raise ValueError(msg)
-            Y_plot = Y_plot.isel(obs_ind=0)
+        if "obs_ind" in Y_plot.dims and Y_plot.sizes["obs_ind"] != 1:
+            msg = (
+                "Singleton HDI marker requires exactly one obs_ind; "
+                f"got size {Y_plot.sizes['obs_ind']}"
+            )
+            raise ValueError(msg)
         median = float(np.asarray(Y_plot.median(("chain", "draw")).values).item())
-        lower, upper = hdi_bounds(Y_plot, prob=hdi_prob)
+        if "obs_ind" not in Y_plot.dims:
+            Y_plot = Y_plot.expand_dims(obs_ind=[0])
+        lower, upper = _interval_bound_values(
+            x, Y_plot, ci_prob=hdi_prob, ci_kind=ci_kind
+        )
+        midpoint = (lower + upper) / 2
+        half_width = (upper - lower) / 2
+        ax.plot(x, [median], "o", color=color, zorder=3)
         return ax.errorbar(
             x,
-            [median],
-            yerr=[[median - lower], [upper - median]],
-            fmt="o",
+            midpoint,
+            yerr=half_width,
+            fmt="none",
             color=color,
             ecolor=color,
             capsize=4,
@@ -696,6 +761,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
         ci_kind: Literal["hdi", "eti"] = "hdi",
         num_samples: int = 50,
+        response_type: Literal["expectation", "prediction"] = "expectation",
+        show_response_annotation: bool | None = None,
         figsize: tuple[float, float] = (7, 8),
         **kwargs: Any,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
@@ -717,22 +784,42 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             to return raw numbers.
         ci_prob : float, optional
             Probability mass of the credible interval drawn around the
-            posterior predictive, causal impact, and cumulative impact bands.
+            selected outcome, impact, and cumulative impact bands.
             Must be in ``(0, 1]``. Defaults to
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
         figsize : tuple of (float, float), optional
             Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
-        bundle = self._require_bundle(group)
+        bundle = self._bundle_for_response(
+            self._require_bundle(group),
+            response_type=response_type,
+            group=group,
+        )
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
             "ci_kind": ci_kind,
             "num_samples": num_samples,
         }
+        has_draws = has_posterior_draws(bundle.predictions_pre)
         if group == "prior":
-            return self._plot_prior_checks(bundle=bundle, style=style, figsize=figsize)
+            fig, ax = self._plot_prior_checks(
+                bundle=bundle, style=style, figsize=figsize
+            )
+            return finish_response_plot(
+                fig,
+                ax,
+                group=group,
+                response_type=response_type,
+                ci_prob=ci_prob,
+                ci_kind=ci_kind,
+                kind=kind,
+                show_response_annotation=show_response_annotation,
+                has_draws=has_draws,
+            )
 
+        predictive = response_type == "prediction"
+        impact_label = "Predictive difference" if predictive else "Causal impact"
         counterfactual_label = "Counterfactual"
         pre_pred_all = bundle.predictions_pre
         post_pred_all = bundle.predictions_post
@@ -777,14 +864,19 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 **style,
                 plot_hdi_kwargs={"color": "C1"},
             )
-            if single_post_obs:
+            if single_post_obs and kind == "ribbon":
                 # plot_posterior_over_x's HDI ribbon collapses to a zero-area polygon for a
                 # single post-period datum; overlay an explicit median + HDI
                 # errorbar so the counterfactual is still visible. Use the
                 # errorbar artist itself as the legend handle so the legend
                 # matches what is actually drawn.
                 errbar = self._draw_singleton_hdi_marker(
-                    ax[0], self.datapost.index, post_pred, color="C1", hdi_prob=ci_prob
+                    ax[0],
+                    self.datapost.index,
+                    post_pred,
+                    color="C1",
+                    hdi_prob=ci_prob,
+                    ci_kind=ci_kind,
                 )
                 handles.append(errbar)
             else:
@@ -818,11 +910,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             y2=post_y,
             color="C0",
             alpha=0.25,
-            label="Causal impact",
+            label=impact_label,
         )
         if with_uncertainty and not single_post_obs:
             handles.append(h)
-            labels.append("Causal impact")
+            labels.append(impact_label)
 
         ax[0].set(
             title=format_r2_score(
@@ -848,13 +940,14 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 **style,
                 plot_hdi_kwargs={"color": "C1"},
             )
-            if single_post_obs:
+            if single_post_obs and kind == "ribbon":
                 self._draw_singleton_hdi_marker(
                     ax[1],
                     self.datapost.index,
                     bundle.impact_post,
                     color="C1",
                     hdi_prob=ci_prob,
+                    ci_kind=ci_kind,
                 )
         else:
             ax[1].plot(
@@ -872,9 +965,12 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             y1=bundle.impact_post.mean(("chain", "draw")),
             color="C0",
             alpha=0.25,
-            label="Causal impact",
+            label=impact_label,
         )
-        ax[1].set(title="Causal Impact")
+        ax[1].set(
+            title="Predictive difference" if predictive else "Causal Impact",
+            ylabel="Difference" if predictive else "",
+        )
 
         # BOTTOM PLOT -----------------------------------------------
         if with_uncertainty:
@@ -885,13 +981,14 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 **style,
                 plot_hdi_kwargs={"color": "C1"},
             )
-            if single_post_obs:
+            if single_post_obs and kind == "ribbon":
                 self._draw_singleton_hdi_marker(
                     ax[2],
                     self.datapost.index,
                     bundle.impact_post_cumulative,
                     color="C1",
                     hdi_prob=ci_prob,
+                    ci_kind=ci_kind,
                 )
         else:
             ax[2].plot(
@@ -900,7 +997,12 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 c="k",
             )
         ax[2].axhline(y=0, c="k")
-        ax[2].set(title="Cumulative Causal Impact")
+        ax[2].set(
+            title="Cum. predictive difference"
+            if predictive
+            else "Cumulative Causal Impact",
+            ylabel="Cum.\ndifference" if predictive else "",
+        )
 
         # Intervention lines. Use a thin dashed black style and a zorder just
         # below the data so the treatment marker reads as a neutral
@@ -946,7 +1048,17 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             )
             format_date_axes(ax, full_index)
 
-        return fig, ax
+        return finish_response_plot(
+            fig,
+            ax,
+            group=group,
+            response_type=response_type,
+            ci_prob=ci_prob,
+            ci_kind=ci_kind,
+            kind=kind,
+            show_response_annotation=show_response_annotation,
+            has_draws=has_posterior_draws(bundle.predictions_pre),
+        )
 
     def _plot_prior_checks(
         self,
@@ -1008,6 +1120,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         *,
         group: Literal["prior", "posterior"] = "posterior",
         hdi_prob: float = HDI_PROB,
+        response_type: Literal["expectation", "prediction"] = "expectation",
     ) -> pd.DataFrame:
         """
         Recover the data of the experiment along with the prediction and causal impact information.
@@ -1026,6 +1139,10 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             Probability mass of the highest density interval. Defaults to the
             project-wide :data:`~causalpy.constants.HDI_PROB` (currently 0.94).
             Ignored when the prediction container has no draws.
+        response_type : {"expectation", "prediction"}, default "expectation"
+            Which quantity the returned prediction and impact columns use.
+            ``"prediction"`` rebuilds them from posterior predictive draws,
+            which include observation noise. Stored results stay on ``mu``.
 
         Returns
         -------
@@ -1033,7 +1150,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             Observed data with ``prediction`` and ``impact`` columns plus HDI
             bounds when draws are available. Not cached on the experiment.
         """
-        bundle = self._require_bundle(group)
+        bundle = self._bundle_for_response(
+            self._require_bundle(group),
+            response_type=response_type,
+            group=group,
+        )
         with_uncertainty = has_posterior_draws(bundle.predictions_pre)
         hdi_pct = int(round(hdi_prob * 100))
 

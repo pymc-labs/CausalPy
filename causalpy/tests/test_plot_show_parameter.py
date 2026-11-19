@@ -255,10 +255,10 @@ def test_legend_kwargs_changes_location_pymc(mock_pymc_sample, did_data):
 
 
 @pytest.mark.integration
-def test_legend_kwargs_bbox_to_anchor_triggers_layout(mock_pymc_sample, did_data):
-    """
-    Test that bbox_to_anchor triggers fig.tight_layout() to avoid clipping.
-    """
+def test_legend_kwargs_bbox_to_anchor_preserves_response_note(
+    mock_pymc_sample, did_data
+):
+    """Outside legends relayout without replacing the response-note reservation."""
     result = cp.DifferenceInDifferences(
         did_data,
         formula="y ~ 1 + group*post_treatment",
@@ -266,17 +266,17 @@ def test_legend_kwargs_bbox_to_anchor_triggers_layout(mock_pymc_sample, did_data
         group_variable_name="group",
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
-
-    with (
-        patch("matplotlib.pyplot.show"),
-        patch("matplotlib.figure.Figure.tight_layout") as mock_tl,
-    ):
+    with patch("matplotlib.pyplot.show"):
         fig, ax = result.plot(
             legend_kwargs={"loc": "upper left", "bbox_to_anchor": (1.04, 1)},
         )
-    assert isinstance(fig, plt.Figure)
-    assert ax.get_legend() is not None
-    mock_tl.assert_called_once()
+    renderer = fig.canvas.get_renderer()
+    legend = ax.get_legend()
+    assert legend is not None
+    note = next(text for text in fig.texts if "observation" in text.get_text())
+    bounds = note.get_window_extent(renderer)
+    assert not bounds.overlaps(ax.get_tightbbox(renderer))
+    assert legend.get_window_extent(renderer).x1 <= fig.bbox.width
     plt.close("all")
 
 
@@ -452,3 +452,28 @@ def test_rd_plot_figure_registered_with_pyplot(rd_data):
     fig, _ = result.plot(show=False)
     assert fig.number in plt.get_fignums()
     plt.close("all")
+
+
+@pytest.mark.integration
+def test_outside_legend_without_response_annotation_remains_on_canvas(did_data):
+    """Point-estimate plots reserve room for an external legend without a footer."""
+    result = cp.DifferenceInDifferences(
+        did_data,
+        formula="y ~ 1 + group*post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(fit_intercept=False),
+    ).fit()
+    figure, axis = result.plot(
+        show=False,
+        legend_kwargs={"loc": "upper left", "bbox_to_anchor": (1.04, 1)},
+    )
+    figure.canvas.draw()
+    legend = axis.get_legend()
+    assert legend is not None
+    assert legend.get_texts()
+    assert (
+        legend.get_window_extent(figure.canvas.get_renderer()).x1 <= figure.bbox.width
+    )
+    assert not figure.texts
+    plt.close(figure)
