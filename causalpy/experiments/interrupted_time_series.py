@@ -818,6 +818,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 has_draws=has_draws,
             )
 
+        predictive = response_type == "prediction"
+        impact_label = "Predictive difference" if predictive else "Causal impact"
         counterfactual_label = "Counterfactual"
         pre_pred_all = bundle.predictions_pre
         post_pred_all = bundle.predictions_post
@@ -908,11 +910,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             y2=post_y,
             color="C0",
             alpha=0.25,
-            label="Causal impact",
+            label=impact_label,
         )
         if with_uncertainty and not single_post_obs:
             handles.append(h)
-            labels.append("Causal impact")
+            labels.append(impact_label)
 
         ax[0].set(
             title=format_r2_score(
@@ -963,9 +965,12 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             y1=bundle.impact_post.mean(("chain", "draw")),
             color="C0",
             alpha=0.25,
-            label="Causal impact",
+            label=impact_label,
         )
-        ax[1].set(title="Causal Impact")
+        ax[1].set(
+            title="Predictive difference" if predictive else "Causal Impact",
+            ylabel="Difference" if predictive else "",
+        )
 
         # BOTTOM PLOT -----------------------------------------------
         if with_uncertainty:
@@ -992,7 +997,12 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 c="k",
             )
         ax[2].axhline(y=0, c="k")
-        ax[2].set(title="Cumulative Causal Impact")
+        ax[2].set(
+            title="Cum. predictive difference"
+            if predictive
+            else "Cumulative Causal Impact",
+            ylabel="Cum.\ndifference" if predictive else "",
+        )
 
         # Intervention lines. Use a thin dashed black style and a zorder just
         # below the data so the treatment marker reads as a neutral
@@ -1038,20 +1048,6 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             )
             format_date_axes(ax, full_index)
 
-        if response_type == "prediction" and group == "posterior":
-            ax[1].set(title="Predictive difference", ylabel="Difference")
-            ax[2].set(
-                title="Cum. predictive difference",
-                ylabel="Cum.\ndifference",
-            )
-            legend = ax[0].get_legend()
-            if legend is not None:
-                for label in legend.get_texts():
-                    label.set_text(
-                        label.get_text().replace(
-                            "Causal impact", "Predictive difference"
-                        )
-                    )
         return finish_response_plot(
             fig,
             ax,

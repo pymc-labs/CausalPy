@@ -1205,6 +1205,10 @@ class StaggeredDifferenceInDifferences(
                     f"The stored HDI probability is {bundle.hdi_prob}, but plot() received "
                     f"hdi_prob={hdi_prob}. Omit it to use the stored value."
                 )
+            estimate_label = (
+                "Predictive difference" if response_type == "prediction" else "ATT"
+            )
+            ylabel = "Predictive difference" if response_type == "prediction" else None
             if view == "group_time":
                 fig, axes = self._plot_group_time(
                     bundle=bundle,
@@ -1212,25 +1216,18 @@ class StaggeredDifferenceInDifferences(
                     layout=layout,
                     x_axis=x_axis,
                     include_placebo=include_placebo,
+                    estimate_label=estimate_label,
+                    ylabel=ylabel,
                 )
             elif view == "event_time":
-                fig, axes = self._plot_event_time(bundle=bundle, figsize=figsize)
+                fig, axes = self._plot_event_time(
+                    bundle=bundle,
+                    figsize=figsize,
+                    estimate_label=estimate_label,
+                    ylabel=ylabel or "Effect Estimate",
+                )
             else:
                 raise ValueError("view must be 'event_time' or 'group_time'")
-            for axis in axes:
-                if response_type == "prediction":
-                    axis.set_ylabel("Predictive difference")
-                    axis.set_title(
-                        axis.get_title().replace("ATT", "Predictive difference")
-                    )
-                legend = axis.get_legend()
-                if legend is not None:
-                    for label in legend.get_texts():
-                        label.set_text(label.get_text().replace("HDI", "ETI"))
-                        if response_type == "prediction":
-                            label.set_text(
-                                label.get_text().replace("ATT", "Predictive difference")
-                            )
         return finish_response_plot(
             fig,
             axes,
@@ -1249,6 +1246,8 @@ class StaggeredDifferenceInDifferences(
         *,
         bundle: StaggeredDifferenceInDifferencesResult,
         figsize: tuple[float, float] | None,
+        estimate_label: str,
+        ylabel: str,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Render the selected bundle's event-time estimates."""
         with_uncertainty = has_posterior_draws(bundle.y_pred)
@@ -1262,7 +1261,7 @@ class StaggeredDifferenceInDifferences(
 
         for frame, marker, color, label, size, alpha in (
             (pre_treatment, "s", "gray", "Placebo estimate", 7, 0.7),
-            (post_treatment, "o", "C0", "ATT estimate", 8, 1.0),
+            (post_treatment, "o", "C0", f"{estimate_label} estimate", 8, 1.0),
         ):
             if len(frame) == 0:
                 continue
@@ -1322,7 +1321,7 @@ class StaggeredDifferenceInDifferences(
 
         # Labels and formatting
         ax.set_xlabel("Event Time (periods relative to treatment)", fontsize=12)
-        ax.set_ylabel("Effect Estimate", fontsize=12)
+        ax.set_ylabel(ylabel, fontsize=12)
         ax.set_title("Staggered DiD Event Study", fontsize=14)
         ax.legend(fontsize=LEGEND_FONT_SIZE)
 
@@ -1399,6 +1398,8 @@ class StaggeredDifferenceInDifferences(
         layout: Literal["facet", "overlay"] = "facet",
         x_axis: Literal["event_time", "calendar_time"] = "event_time",
         include_placebo: bool = True,
+        estimate_label: str = "ATT",
+        ylabel: str | None = None,
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot cohort-time ``ATT(g, t)`` trajectories."""
         att_gt, x_col, x_label, y_label = self._get_group_time_plot_data(
@@ -1434,7 +1435,11 @@ class StaggeredDifferenceInDifferences(
                 x_col=x_col,
                 line_type="ATT",
                 color="C0" if layout == "facet" else f"C{cohort_idx % 10}",
-                label="ATT estimate" if layout == "facet" else f"Cohort {cohort} ATT",
+                label=(
+                    f"{estimate_label} estimate"
+                    if layout == "facet"
+                    else f"Cohort {cohort} {estimate_label}"
+                ),
             )
             self._format_group_time_axis(
                 ax=ax,
@@ -1446,7 +1451,7 @@ class StaggeredDifferenceInDifferences(
                     axis_index=cohort_idx,
                     n_axes=len(cohort_groups),
                 ),
-                y_label=y_label,
+                y_label=ylabel or y_label,
                 x_axis=x_axis,
                 treatment_time=cohort,
             )

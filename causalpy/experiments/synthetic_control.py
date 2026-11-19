@@ -648,6 +648,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             if group == "posterior"
             else ""
         )
+        predictive = response_type == "prediction"
         fig, ax = self._panel.plot(
             bundle,
             group=group,
@@ -656,21 +657,14 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             style=style,
             figsize=figsize,
             plot_predictors=plot_predictors,
+            impact_label="Predictive difference" if predictive else "Causal impact",
+            impact_title="Predictive difference" if predictive else "Causal Impact",
+            cumulative_title="Cum. predictive difference"
+            if predictive
+            else "Cumulative Causal Impact",
+            impact_ylabel="Difference" if predictive else "",
+            cumulative_ylabel="Cum.\ndifference" if predictive else "",
         )
-        if response_type == "prediction" and group == "posterior":
-            ax[1].set(title="Predictive difference", ylabel="Difference")
-            ax[2].set(
-                title="Cum. predictive difference",
-                ylabel="Cum.\ndifference",
-            )
-            legend = ax[0].get_legend()
-            if legend is not None:
-                for label in legend.get_texts():
-                    label.set_text(
-                        label.get_text().replace(
-                            "Causal impact", "Predictive difference"
-                        )
-                    )
         return finish_response_plot(
             fig,
             ax,

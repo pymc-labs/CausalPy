@@ -260,10 +260,25 @@ def test_staggered_predictive_exports_match_both_views_and_preserve_att(
     exported = experiment.get_plot_data(response_type="prediction", hdi_prob=0.5)
     assert exported.attrs["quantity"] == "predictive difference"
     assert exported.attrs["interval_kind"] == "eti"
-    for view in (experiment.plot, experiment.plot_group_time):
-        fig, axes = view(response_type="prediction", hdi_prob=0.5, show=False)
+    for view, options in (
+        (experiment.plot, {}),
+        (experiment.plot_group_time, {"layout": "facet"}),
+        (experiment.plot_group_time, {"layout": "overlay"}),
+    ):
+        fig, axes = view(
+            response_type="prediction", hdi_prob=0.5, show=False, **options
+        )
         assert "Predictive difference" in axes[0].get_ylabel()
         assert "50% ETI" in fig.texts[0].get_text()
+        for axis in axes:
+            _handles, labels = axis.get_legend_handles_labels()
+            assert any("Predictive difference" in label for label in labels)
+            assert all("ATT" not in label for label in labels)
+            axis.legend()
+            assert any(
+                "Predictive difference" in text.get_text()
+                for text in axis.get_legend().get_texts()
+            )
         plt.close(fig)
     expected = experiment._bundle_for_response(
         stored, response_type="prediction", group="posterior", hdi_prob=0.5
@@ -713,4 +728,24 @@ def test_legend_anchor_preserves_native_rd_caption_layout(rd_data, tmp_path):
     )
     figure.savefig(tmp_path / "rd-note-legend.png")
     assert any("Point prediction" in note.get_text() for note in figure.texts)
+    plt.close(figure)
+
+
+@pytest.mark.parametrize("outcome_experiment", ["its", "synthetic"], indirect=True)
+@pytest.mark.parametrize("response_type", ["expectation", "prediction"])
+def test_difference_artist_labels_survive_legend_regeneration(
+    outcome_experiment, response_type
+):
+    experiment = outcome_experiment
+    figure, axes = experiment.plot(response_type=response_type, show=False)
+    expected = (
+        "Predictive difference" if response_type == "prediction" else "Causal impact"
+    )
+    for axis in axes[:2]:
+        _handles, labels = axis.get_legend_handles_labels()
+        assert expected in labels
+        axis.legend()
+        assert expected in [text.get_text() for text in axis.get_legend().get_texts()]
+        if response_type == "prediction":
+            assert all("causal" not in label.lower() for label in labels)
     plt.close(figure)
