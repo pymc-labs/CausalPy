@@ -24,7 +24,6 @@ https://causalpy.readthedocs.io/en/latest/knowledgebase/reporting_statistics.htm
 """
 
 from dataclasses import dataclass
-from decimal import Decimal, localcontext
 from typing import Literal, TypedDict
 
 import numpy as np
@@ -268,9 +267,7 @@ def _format_number(x: float, decimals: int = 2) -> str:
 
 def _format_probability_as_percent(probability: float) -> str:
     """Format a probability as a percentage without truncating its precision."""
-    with localcontext(prec=28):
-        percent = Decimal(str(probability)).scaleb(2).normalize()
-    return f"{percent:f}%"
+    return f"{np.format_float_positional(probability * 100, unique=True, trim='-')}%"
 
 
 def _format_rope_bound(value: float) -> str:

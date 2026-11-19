@@ -14,7 +14,6 @@
 """Interrupted Time Series Analysis."""
 
 import ast
-from decimal import Decimal, localcontext
 from typing import Any, Literal
 
 import numpy as np
@@ -29,6 +28,7 @@ from causalpy._predictive_intervals import (
     _analyze_realized_persistence,
     _calibration_text,
     _compare_realized_effects,
+    _format_prediction_level,
     _prediction_interval,
     _summarize_realized_effect,
 )
@@ -56,11 +56,7 @@ from causalpy.plot_utils import (
 )
 from causalpy.pymc_forecast_models import PyMCForecastModel
 from causalpy.pymc_models import LinearRegression, PyMCModel
-from causalpy.reporting import (
-    EffectSummary,
-    _apply_prior_grouping,
-    _format_probability_as_percent,
-)
+from causalpy.reporting import EffectSummary, _apply_prior_grouping
 from causalpy.skl_models import SkforecastModel
 from causalpy.utils import _as_scalar
 
@@ -603,7 +599,10 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
         else:
             # OLS: Compute statistics for both periods
-            from causalpy.reporting import _compute_statistics_ols
+            from causalpy.reporting import (
+                _compute_statistics_ols,
+                _format_probability_as_percent,
+            )
 
             intervention_stats = _compute_statistics_ols(
                 np.asarray(intervention_impact).ravel(),
@@ -1058,7 +1057,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
         if paths is not None:
             series = _predictive_plot_series(paths, post_y)
-            label = f"{_format_probability_as_percent(ci_prob)} bootstrap prediction interval"
+            label = f"{_format_prediction_level(ci_prob)} bootstrap prediction interval"
             for i, samples in enumerate(series.values()):
                 lower, upper = _prediction_interval(samples, ci_prob)
                 kwargs = {"color": "C1", "label": label if i == 0 else None}
@@ -1205,7 +1204,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             bounds when draws are available. For skforecast, includes
             ``cumulative_impact`` and ``*_pi_lower_*`` / ``*_pi_upper_*`` columns
             for prediction, impact, and cumulative impact after intervention.
-            Pre-intervention bounds are missing.
+            Bounds generated at the requested level are missing before intervention.
         """
         bundle = self._require_bundle(group)
         with_uncertainty = has_posterior_draws(bundle.predictions_pre)
@@ -1247,7 +1246,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             )
 
         if bundle.counterfactual_paths is not None:
-            pi_pct = _format_probability_as_percent(hdi_prob).removesuffix("%")
+            pi_pct = _format_prediction_level(hdi_prob).removesuffix("%")
             post_y = self.post_design["y"].isel(treated_units=0, drop=True)
             pre_data["cumulative_impact"] = np.nan
             post_data["cumulative_impact"] = bundle.impact_post_cumulative.mean(
@@ -1549,8 +1548,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         if paths is not None:
             if not 0 <= alpha < 1:
                 raise ValueError("Prediction interval alpha must be in [0, 1).")
-            with localcontext(prec=28):
-                prob = float(1 - Decimal(str(alpha)))
+            prob = 1 - alpha
             coords = self.datapost.index
             end = self.treatment_end_time
             if end is not None and period in ("intervention", "post"):

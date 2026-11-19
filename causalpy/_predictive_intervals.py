@@ -32,6 +32,17 @@ _ASSUMPTIONS = (
 )
 
 
+def _format_prediction_level(prob: float) -> str:
+    """Format a predictive level consistently when specified as mass or alpha."""
+    # The binary complement of alpha can differ slightly from a direct probability.
+    percent = np.format_float_positional(
+        prob * 100, precision=12, unique=False, trim="-"
+    )
+    if percent in ("0", "100") and 0 < prob < 1:
+        return _format_probability_as_percent(prob)
+    return f"{percent}%"
+
+
 def _prediction_interval(
     samples: xr.DataArray, prob: float
 ) -> tuple[xr.DataArray, xr.DataArray]:
@@ -120,7 +131,7 @@ def _prediction_summary(
     paths: xr.DataArray,
     prob: float,
 ) -> EffectSummary:
-    level = _format_probability_as_percent(prob)
+    level = _format_prediction_level(prob)
     table = pd.DataFrame.from_dict(rows, orient="index")
     table.attrs["prediction_interval_prob"] = prob
     text = "\n\n".join(
@@ -250,7 +261,7 @@ def _analyze_realized_persistence(
 ) -> dict[str, float]:
     during, post = _split_realized_periods(observed - paths, treatment_end_time)
     result = {}
-    level = _format_probability_as_percent(prob)
+    level = _format_prediction_level(prob)
     print(
         f"Effect persistence with {level} bootstrap prediction intervals for realized impact."
     )

@@ -162,7 +162,7 @@ def forecast_model(forecaster_class):
     )
 
 
-@pytest.mark.parametrize("prob", [0.29, 0.8, 0.95])
+@pytest.mark.parametrize("prob", [0.07, 0.29, 0.8, 0.95])
 def test_path_intervals_agree_across_plot_data_summary_persistence_and_report(
     series, forecast_model, prob, monkeypatch
 ):
@@ -303,7 +303,14 @@ def test_path_intervals_agree_across_plot_data_summary_persistence_and_report(
 
 
 @pytest.mark.parametrize(
-    ("level", "percent"), [(0.29, "29"), (0.9999, "99.99"), (1.0, "100")]
+    ("level", "percent"),
+    [
+        (0.07, "7"),
+        (0.29, "29"),
+        (0.9999, "99.99"),
+        (np.nextafter(1.0, 0.0), "99.99999999999999"),
+        (1.0, "100"),
+    ],
 )
 def test_prediction_interval_labels_match_requested_level(
     series, forecast_model, level, percent, capsys
