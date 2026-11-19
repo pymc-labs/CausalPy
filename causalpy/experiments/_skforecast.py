@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import warnings
+from collections.abc import Callable
 from copy import deepcopy
 from typing import Any, Literal
 
@@ -143,30 +144,46 @@ class _CalendarFeaturesOnObservedIndex:
     def __init__(
         self,
         features: Any,
-        model_index: pd.DatetimeIndex,
-        observed_index: pd.DatetimeIndex,
+        observed_dates: Callable[[pd.DatetimeIndex], pd.DatetimeIndex],
     ) -> None:
         self._features = features
-        self._model_index = model_index
-        self._observed_index = observed_index
-
-    def _timestamps(self, index: pd.DatetimeIndex) -> pd.DatetimeIndex:
-        positions = self._model_index.get_indexer(index)
-        if (positions < 0).any():
-            raise BadIndexException(
-                "Calendar feature dates must align to the forecast grid."
-            )
-        return self._observed_index.take(positions)
+        self._observed_dates = observed_dates
 
     @property
     def feature_names_out_(self) -> list[str]:
         return self._features.feature_names_out_
 
     def fit_transform(self, index: pd.DatetimeIndex) -> pd.DataFrame:
-        return self._features.fit_transform(self._timestamps(index))
+        return self._features.fit_transform(self._observed_dates(index))
 
     def transform(self, index: pd.DatetimeIndex) -> pd.DataFrame:
-        return self._features.transform(self._timestamps(index))
+        return self._features.transform(self._observed_dates(index))
+
+
+def _use_observed_dates(
+    forecaster: Any, grid: pd.DatetimeIndex, observed: pd.DatetimeIndex
+) -> None:
+    """Keep calendar features and training weights on the caller's clock."""
+
+    def observed_dates(index: pd.DatetimeIndex) -> pd.DatetimeIndex:
+        positions = grid.get_indexer(index)
+        if (positions < 0).any():
+            raise BadIndexException(
+                "Model dates must align to the observed forecast grid."
+            )
+        return observed.take(positions)
+
+    if forecaster.calendar_features is not None:
+        forecaster.calendar_features = _CalendarFeaturesOnObservedIndex(
+            forecaster.calendar_features, observed_dates
+        )
+    if forecaster.weight_func is not None:
+        weight_func = forecaster.weight_func
+
+        def observed_weights(index: pd.DatetimeIndex) -> np.ndarray:
+            return weight_func(observed_dates(index))
+
+        forecaster.weight_func = observed_weights
 
 
 class _SkforecastAdapter(ModelAdapter):
@@ -243,11 +260,8 @@ class _SkforecastAdapter(ModelAdapter):
             isinstance(grid, pd.DatetimeIndex)
             and isinstance(full_index, pd.DatetimeIndex)
             and grid.tz != full_index.tz
-            and forecaster.calendar_features is not None
         ):
-            forecaster.calendar_features = _CalendarFeaturesOnObservedIndex(
-                forecaster.calendar_features, grid, full_index
-            )
+            _use_observed_dates(forecaster, grid, full_index)
         index = grid[: len(pre_index)]
         outcome = pd.Series(y.values[:, 0], index=index, name="y")
         if not np.isfinite(outcome).all():

@@ -1228,6 +1228,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
         if bundle.counterfactual_paths is not None:
             post_y = self.post_design["y"].isel(treated_units=0, drop=True)
+            pre_data["cumulative_impact"] = np.nan
             post_data["cumulative_impact"] = bundle.impact_post_cumulative.mean(
                 ("chain", "draw")
             ).values
@@ -1235,8 +1236,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 bundle.counterfactual_paths, post_y
             ).items():
                 lower, upper = _prediction_interval(series, hdi_prob)
-                post_data[f"{name}_pi_lower_{hdi_pct}"] = lower.values
-                post_data[f"{name}_pi_upper_{hdi_pct}"] = upper.values
+                lower_col = f"{name}_pi_lower_{hdi_pct}"
+                upper_col = f"{name}_pi_upper_{hdi_pct}"
+                pre_data[[lower_col, upper_col]] = np.nan
+                post_data[lower_col] = lower.values
+                post_data[upper_col] = upper.values
 
         return pd.concat([pre_data, post_data])
 

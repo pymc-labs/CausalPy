@@ -852,3 +852,54 @@ def test_fallback_calendar_still_uses_observed_local_hour(
     np.testing.assert_allclose(
         paths.values, reference.result.counterfactual_paths.values
     )
+
+
+def test_fallback_uses_observed_timestamps_for_training_weights(forecaster_class):
+    utc = pd.date_range("2019-01-01 04:00", periods=90, freq="MS", tz="UTC")
+    local = utc.tz_convert("America/New_York")
+    values = np.random.default_rng(233).normal(size=len(utc))
+
+    def local_weights(index):
+        return np.where(index.day == 1, 1.0, 12.0)
+
+    def utc_weights(index):
+        return local_weights(index.tz_convert(local.tz))
+
+    def fit(index, weight_func):
+        data = pd.DataFrame({"y": values}, index=index)
+        model = SkforecastModel(
+            forecaster_class(estimator=Ridge(), lags=1, weight_func=weight_func),
+            calibration_size=16,
+            n_boot=25,
+        )
+        return cp.InterruptedTimeSeries(data, index[64], "y ~ 1", model=model).fit()
+
+    result = fit(local, local_weights).result
+    reference = fit(utc, utc_weights).result
+    np.testing.assert_array_equal(
+        result.counterfactual_paths.values, reference.counterfactual_paths.values
+    )
+
+
+def test_plot_data_clears_predictive_columns_when_refit_changes_origin(
+    series, forecast_model
+):
+    initial = cp.InterruptedTimeSeries(
+        series, 60, "y ~ 1 + t", model=forecast_model
+    ).fit()
+    initial_data = initial.get_plot_data(hdi_prob=0.8)
+    generated = ["cumulative_impact"] + [
+        column for column in initial_data if "_pi_" in column
+    ]
+    assert initial_data.loc[60:69, generated].notna().all().all()
+    result = cp.InterruptedTimeSeries(
+        initial_data, 70, "y ~ 1 + t", model=forecast_model
+    ).fit()
+    clean = cp.InterruptedTimeSeries(
+        series, 70, "y ~ 1 + t", model=forecast_model
+    ).fit()
+    data = result.get_plot_data(hdi_prob=0.8)
+    assert data.loc[:69, generated].isna().all().all()
+    pd.testing.assert_frame_equal(
+        data[generated], clean.get_plot_data(hdi_prob=0.8)[generated]
+    )
