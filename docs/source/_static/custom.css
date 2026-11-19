@@ -170,3 +170,50 @@
 .bd-article img {
   height: auto;
 }
+
+/* The homepage's featured example and its supporting calculation details. */
+.cp-animation-frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 20px;
+  margin: 0.75rem 0 0;
+  background: #102331;
+}
+
+.cp-animation-details {
+  font-size: 0.85rem;
+  line-height: 1.6;
+  margin: 0.8rem 0 1.5rem;
+  color: var(--pst-color-text-muted);
+}
+
+.cp-animation-details summary {
+  cursor: pointer;
+  width: fit-content;
+  margin-bottom: 0.75rem;
+}
+
+.cp-methods-pill {
+  display: inline-block;
+  padding: 0.1rem 0.65rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.cp-example-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--pst-color-text-muted);
+  margin: 1.5rem 0 0.35rem;
+}
+
+.cp-contributor-note {
+  font-size: 0.7rem;
+  line-height: 1.6;
+  color: var(--pst-color-text-muted);
+}
