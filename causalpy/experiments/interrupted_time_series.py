@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import DesignInfo, PatsyError, Term
+from patsy import DesignInfo, ModelDesc, PatsyError, Term
 from sklearn.base import RegressorMixin
 
 from causalpy._arviz_compat import hdi_bounds
@@ -40,7 +40,11 @@ from causalpy.date_utils import (
 )
 from causalpy.experiments._results import CausalResult
 from causalpy.experiments.model_adapter import ModelAdapter, build_coords
-from causalpy.formula_utils import build_design_matrices, build_formula_matrices
+from causalpy.formula_utils import (
+    _build_formula_predictors,
+    build_design_matrices,
+    build_formula_matrices,
+)
 from causalpy.input_data import DataFrameLike, to_pandas_with_time_index
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
@@ -92,43 +96,60 @@ def _predictive_plot_series(
     }
 
 
-def _formula_column_references(design: DesignInfo, columns: pd.Index) -> set[str]:
-    """Find data columns named directly or through Patsy's literal Q() syntax."""
-    references: set[str] = set()
-    for factor in design.factor_infos:
-        for node in ast.walk(ast.parse(factor.name(), mode="eval")):
-            match node:
-                case ast.Name(id=name):
-                    references.add(name)
-                case (
-                    ast.Call(
-                        func=ast.Name(id="Q") | ast.Attribute(attr="Q"),
-                        args=[ast.Constant(value=str() as quoted)],
-                    )
-                    | ast.Call(
-                        func=ast.Name(id="Q") | ast.Attribute(attr="Q"),
-                        keywords=[
-                            ast.keyword(
-                                arg="name", value=ast.Constant(value=str() as quoted)
-                            )
-                        ],
-                    )
-                ):
-                    references.add(quoted)
-    return references.intersection(columns)
+def _skforecast_outcome_column(description: ModelDesc, data: pd.DataFrame) -> str:
+    """Resolve a single outcome column in its original units."""
+    terms = description.lhs_termlist
+    outcome = None
+    if len(terms) == 1 and len(terms[0].factors) == 1:
+        expression = ast.parse(terms[0].factors[0].name(), mode="eval").body
+        match expression:
+            case ast.Name(id=name):
+                outcome = name
+            case (
+                ast.Call(
+                    func=ast.Name(id="Q"), args=[ast.Constant(value=str() as name)]
+                )
+                | ast.Call(
+                    func=ast.Name(id="Q"),
+                    keywords=[
+                        ast.keyword(arg="name", value=ast.Constant(value=str() as name))
+                    ],
+                )
+            ):
+                outcome = name
+    if outcome is not None and outcome in data:
+        dtype = data[outcome].dtype if isinstance(data[outcome], pd.Series) else None
+        if (
+            pd.api.types.is_numeric_dtype(dtype)
+            and not pd.api.types.is_bool_dtype(dtype)
+            and not pd.api.types.is_complex_dtype(dtype)
+        ):
+            return outcome
+    raise ValueError(
+        "SkforecastModel requires a single continuous outcome column in its original units. "
+        "Use a column name or Patsy's literal Q() syntax on the left-hand side."
+    )
 
 
-def _replay_forecast_design(
-    y_info: DesignInfo,
-    x_info: DesignInfo,
-    data: pd.DataFrame,
-    outcome_columns: set[str],
-) -> tuple[Any, Any]:
-    """Replay the fitted Patsy outcome and predictor designs on separate inputs."""
-    (outcome,) = build_design_matrices([y_info], data, NA_action="raise")
+def _skforecast_predictors(
+    formula: str, pre: pd.DataFrame, post: pd.DataFrame, calibration_size: int
+) -> tuple[str, np.ndarray, np.ndarray, DesignInfo]:
+    """Fit the predictor design on the prefix, without the observed outcome."""
+    if len(pre) <= calibration_size:
+        raise ValueError("calibration_size must leave a nonempty training prefix.")
+    description = ModelDesc.from_formula(formula)
+    outcome = _skforecast_outcome_column(description, pre)
+    covariates = pre.drop(columns=outcome)
     try:
-        (predictors,) = build_design_matrices(
-            [x_info], data.drop(columns=list(outcome_columns)), NA_action="raise"
+        training = _build_formula_predictors(
+            description, covariates.iloc[:-calibration_size]
+        )
+        info = training.design_info
+        (calibration,) = build_design_matrices(
+            [info], covariates.iloc[-calibration_size:], NA_action="raise"
+        )
+        (future,) = build_design_matrices(
+            [info], post.drop(columns=outcome), NA_action="raise"
         )
     except PatsyError as exc:
         raise ValueError(
@@ -136,7 +157,7 @@ def _replay_forecast_design(
             "Configure outcome lags on ForecasterRecursive instead. "
             f"{exc}"
         ) from exc
-    return outcome, predictors
+    return outcome, np.concatenate([training, calibration]), np.asarray(future), info
 
 
 class InterruptedTimeSeries(BaseExperiment[CausalResult]):
@@ -163,9 +184,13 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         post-intervention period (uses ``>=`` comparison).
     formula : str
         A statistical model formula using patsy syntax (e.g., "y ~ 1 + t + C(month)").
-        For skforecast, supply RHS covariates whose untreated values are
-        known throughout the forecast. Configure outcome lags on the
-        recursive forecaster. Observed post-intervention outcome lags and
+        For skforecast, name a single observed outcome column on the left
+        (including Patsy's literal ``Q()`` syntax). Use the forecaster's
+        ``transformer_y`` for a reversible response transformation. Supply
+        RHS covariates whose untreated values are known throughout the
+        forecast. Use a Patsy stateful transform such as ``center(t)`` when
+        preprocessing should learn only from the training prefix. Configure
+        outcome lags on the recursive forecaster. Observed outcome lags and
         treatment mediators carry intervention information into the forecast.
     model : PyMCModel, RegressorMixin, PyMCForecastModel, or SkforecastModel, optional
         A PyMC (Bayesian) or sklearn (OLS) model. If None, defaults to a PyMC
@@ -389,32 +414,22 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
     def _build_design_matrices(self, calibration_size: int | None) -> None:
         """Learn Patsy state on the fitting rows and apply it to later observations."""
         pre, post = self.datapre, self.datapost
-        training = pre if calibration_size is None else pre.iloc[:-calibration_size]
-        if calibration_size is not None and training.empty:
-            raise ValueError("calibration_size must leave a nonempty training prefix.")
-        na_action = {} if calibration_size is None else {"NA_action": "raise"}
-        pre_y, pre_x = build_formula_matrices(self.formula, training, **na_action)
-        y_info, x_info = pre_y.design_info, pre_x.design_info
-        if calibration_size is not None:
-            if len(y_info.column_names) != 1 or any(
-                factor.type != "numerical" for factor in y_info.factor_infos.values()
-            ):
-                raise ValueError(
-                    "SkforecastModel requires a single continuous outcome."
-                )
-            outcomes = _formula_column_references(y_info, training.columns)
-            if not outcomes:
-                raise ValueError(
-                    "SkforecastModel requires a formula outcome that names its observed data column."
-                )
-            pre_y, pre_x = _replay_forecast_design(y_info, x_info, pre, outcomes)
-            post_y, post_x = _replay_forecast_design(y_info, x_info, post, outcomes)
-        else:
+        if calibration_size is None:
+            pre_y, pre_x = build_formula_matrices(self.formula, pre)
+            y_info, x_info = pre_y.design_info, pre_x.design_info
+            outcome = y_info.column_names[0]
             post_y, post_x = build_design_matrices([y_info, x_info], post)
-        if calibration_size is not None and not np.isfinite(post_y).all():
-            raise ValueError(
-                "SkforecastModel requires finite post-intervention outcomes."
+        else:
+            y_info = None
+            outcome, pre_x, post_x, x_info = _skforecast_predictors(
+                self.formula, pre, post, calibration_size
             )
+            pre_y = pre[[outcome]].to_numpy(dtype=float, na_value=np.nan)
+            post_y = post[[outcome]].to_numpy(dtype=float, na_value=np.nan)
+            if not np.isfinite(post_y).all():
+                raise ValueError(
+                    "SkforecastModel requires finite post-intervention outcomes."
+                )
 
         labels = list(x_info.column_names)
         intercept = (
@@ -431,7 +446,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             np.asarray(post_x), np.asarray(post_y), obs_ind=post.index, coeffs=labels
         )
         # Publish the design only after both periods have been validated.
-        self.outcome_variable_name = y_info.column_names[0]
+        self.outcome_variable_name = outcome
         self._y_design_info, self._x_design_info = y_info, x_info
         self.labels = labels
         self.pre_design, self.post_design = pre_design, post_design

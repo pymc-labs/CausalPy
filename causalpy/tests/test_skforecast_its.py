@@ -730,7 +730,6 @@ def test_native_calendar_features_keep_source_timezone(forecaster_class, cadence
         'y ~ Q(name="y")',
         'Q(name="y") ~ y',
         'y ~ Q("" + "y")',
-        "np.log(y) ~ y",
     ],
 )
 def test_observed_outcome_is_rejected_as_forecast_predictor(
@@ -902,4 +901,61 @@ def test_plot_data_clears_predictive_columns_when_refit_changes_origin(
     assert data.loc[:69, generated].isna().all().all()
     pd.testing.assert_frame_equal(
         data[generated], clean.get_plot_data(hdi_prob=0.8)[generated]
+    )
+
+
+def test_held_out_covariates_cannot_change_training_preprocessing(
+    series, forecast_model
+):
+    start = 70
+    split = start - forecast_model.calibration_size
+    changed = series.copy()
+    changed.loc[split : start - 1, "t"] += 20 * np.arange(1, start - split + 1)
+    formula = "y ~ I(t - t.mean())"
+    reference = cp.InterruptedTimeSeries(
+        series, start, formula, model=forecast_model
+    ).fit()
+    exp = cp.InterruptedTimeSeries(changed, start, formula, model=forecast_model).fit()
+    train = slice(0, split)
+    learner_values = series.t.iloc[train].to_numpy(dtype=float)
+    np.testing.assert_array_equal(
+        exp.pre_design.X.isel(obs_ind=train).values[:, 0],
+        learner_values - learner_values.mean(),
+    )
+    np.testing.assert_array_equal(
+        reference.result.predictions_pre.isel(obs_ind=train),
+        exp.result.predictions_pre.isel(obs_ind=train),
+    )
+
+
+@pytest.mark.parametrize(
+    "formula", ["I(y-y.mean()) ~ 1", "np.log(y) ~ 1", "np.log(y) ~ y"]
+)
+def test_skforecast_requires_original_outcome_units(series, forecast_model, formula):
+    with pytest.raises(ValueError, match="outcome column in its original units"):
+        cp.InterruptedTimeSeries(series, 70, formula, model=forecast_model)
+
+
+def test_quoted_outcome_with_native_transformer_stays_on_original_scale(
+    series, forecaster_class
+):
+    from sklearn.preprocessing import StandardScaler
+
+    model = SkforecastModel(
+        forecaster_class(estimator=Ridge(), lags=2, transformer_y=StandardScaler()),
+        calibration_size=20,
+        n_boot=50,
+    )
+    named = series.rename(columns={"y": "observed result"})
+    exp = cp.InterruptedTimeSeries(
+        named, 70, 'Q(name="observed result") ~ 1', model=model
+    ).fit()
+    expected = cp.InterruptedTimeSeries(series, 70, "y ~ 1", model=model).fit()
+    np.testing.assert_array_equal(
+        exp.result.counterfactual_paths.values,
+        expected.result.counterfactual_paths.values,
+    )
+    np.testing.assert_allclose(
+        exp.result.impact_post.values.ravel(),
+        series.y.iloc[70:].to_numpy() - exp.result.predictions_post.values.ravel(),
     )
