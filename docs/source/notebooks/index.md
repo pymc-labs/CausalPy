@@ -189,6 +189,13 @@ A quasi-experimental design that uses time series methods to generate counterfac
 :link-type: doc
 :::
 
+:::{grid-item-card} Interrupted time series with regression and recursive forecasting
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/interrupted-time-series-sklearn.png
+:link: interrupted-time-series-sklearn
+:link-type: doc
+:::
+
 :::{grid-item-card} Interrupted Time Series for fixed-period interventions
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/interrupted-time-series-post-intervention-analysis.png
@@ -397,7 +404,7 @@ Every CausalPy experiment can produce a self-contained HTML report summarising t
 
 ## Non-Bayesian OLS
 
-These notebooks fit scikit-learn models instead of PyMC models. Coverage is partial: only synthetic control, difference in differences, interrupted time series, and regression discontinuity have a scikit-learn example. Most of those fits are ordinary least squares. The sharp regression discontinuity notebook also includes a Gaussian process fit. Bayesian examples stay in the method sections above.
+These examples use scikit-learn for synthetic control, difference in differences, and regression discontinuity. Most fits are ordinary least squares. The sharp regression discontinuity notebook also includes a Gaussian process fit.
 
 ## scikit-learn examples
 
@@ -415,13 +422,6 @@ These notebooks fit scikit-learn models instead of PyMC models. Coverage is part
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/difference-in-differences-sklearn.png
 :link: difference-in-differences-sklearn
-:link-type: doc
-:::
-
-:::{grid-item-card} Interrupted Time Series (ITS) with scikit-learn models
-:class-card: sd-card-h-100
-:img-top: ../_static/thumbnails/interrupted-time-series-sklearn.png
-:link: interrupted-time-series-sklearn
 :link-type: doc
 :::
 
@@ -500,6 +500,7 @@ staggered-difference-in-differences-pymc.ipynb
 :maxdepth: 1
 
 interrupted-time-series-pymc.ipynb
+interrupted-time-series-sklearn.ipynb
 interrupted-time-series-post-intervention-analysis.ipynb
 interrupted-time-series-covid.ipynb
 interrupted-time-series-lift-test.ipynb
@@ -590,7 +591,6 @@ reporting-demo.ipynb
 
 synthetic-control-sklearn.ipynb
 difference-in-differences-sklearn.ipynb
-interrupted-time-series-sklearn.ipynb
 regression-discontinuity-sklearn.ipynb
 regression-discontinuity-drinking-sklearn.ipynb
 :::
