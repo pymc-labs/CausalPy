@@ -139,18 +139,14 @@ def test_piecewise_prediction_preserves_structural_effects_and_earliest_window(
         return mean.isel(draw=0, drop=True) + noise
 
     monkeypatch.setattr(experiment._model_backend, "predict_response", noisy)
-    selected = experiment._bundle_for_response(
+    fitted, counterfactual = experiment._response_predictions(
         stored, response_type="prediction", group="posterior"
     )
-    assert selected.predictions_post.sizes["obs_ind"] == 6
-    xr.testing.assert_equal(
-        selected.predictions_post.obs_ind, stored.predictions_post.obs_ind
-    )
-    xr.testing.assert_equal(selected.impact_pre, stored.impact_pre)
-    xr.testing.assert_equal(
-        selected.impact_post_cumulative, stored.impact_post_cumulative
-    )
-    assert selected.predictions_pre.sizes["draw"] == 4
+    assert counterfactual.sel(obs_ind=experiment.datapost.index).sizes["obs_ind"] == 6
+    assert fitted.sizes["draw"] == 4
+    assert experiment.result is stored
+    frame = experiment.get_plot_data(response_type="prediction")
+    np.testing.assert_allclose(frame.effect, stored.impact_pre.mean(("chain", "draw")))
 
 
 def test_its_predictive_export_and_render_share_aligned_draw_trajectories(monkeypatch):
@@ -347,3 +343,133 @@ def test_forecast_adapter_selects_outcomes_and_rejects_prior():
     )
     with pytest.raises(cp.GroupNotSampledException):
         adapter.predict_response(None, quantity="y_hat", group="prior")
+
+
+@pytest.mark.parametrize("group", ["prior", "posterior"])
+def test_piecewise_uses_genuine_counterfactual_outcomes_in_plots_and_export(
+    monkeypatch, group, mock_pymc_sample
+):
+    from causalpy.experiments import piecewise_its as module
+
+    data = pd.DataFrame({"t": range(8), "y": [1, 1, 5, 5, 5, 5, 9, 9]})
+    experiment = cp.PiecewiseITS(
+        data,
+        formula="y ~ 1 + step(t, 6) + step(t, 2)",
+        model=cp.pymc_models.LinearRegression(
+            sample_kwargs={"draws": 20, "tune": 20, "chains": 2, "cores": 1}
+        ),
+    ).fit()
+    stored = experiment._require_bundle(group)
+
+    def discrete(X, **kwargs):
+        # Distinct factual/counterfactual laws expose subtraction of an expected effect from factual noise.
+        is_counterfactual = not np.asarray(X)[:, experiment._interruption_cols].any()
+        values = np.full((1, 8, len(X), 1), int(is_counterfactual), dtype=float)
+        return xr.DataArray(
+            values,
+            dims=("chain", "draw", "obs_ind", "treated_units"),
+            coords={"obs_ind": X.obs_ind, "treated_units": ["unit_0"]},
+        )
+
+    monkeypatch.setattr(experiment._model_backend, "predict_response", discrete)
+    exported = experiment.get_plot_data(
+        group=group, response_type="prediction", hdi_prob=0.5
+    )
+    np.testing.assert_array_equal(exported.counterfactual, 1)
+    np.testing.assert_array_equal(exported.counterfactual_hdi_lower_50, 1)
+    np.testing.assert_array_equal(exported.counterfactual_hdi_upper_50, 1)
+    captured = []
+    original = module.plot_posterior_over_x
+
+    def capture(x, draws, **kwargs):
+        captured.append(draws.copy())
+        return original(x, draws, **kwargs)
+
+    monkeypatch.setattr(module, "plot_posterior_over_x", capture)
+    fig, _axes = experiment.plot(
+        group=group, response_type="prediction", ci_prob=0.5, show=False
+    )
+    np.testing.assert_array_equal(captured[1], 1)
+    assert experiment._require_bundle(group) is stored
+    plt.close(fig)
+
+
+def test_staggered_predictive_interval_can_exclude_its_mean(
+    staggered_experiment, monkeypatch
+):
+    experiment = staggered_experiment
+    monkeypatch.setattr(
+        experiment, "_observed_outcome", pd.Series(0.0, index=experiment.data.index)
+    )
+
+    def rare(X, **kwargs):
+        values = np.zeros((1, 100, len(X), 1))
+        values[:, -1] = 1
+        return xr.DataArray(
+            values,
+            dims=("chain", "draw", "obs_ind", "treated_units"),
+            coords={"obs_ind": X.obs_ind, "treated_units": ["unit_0"]},
+        )
+
+    monkeypatch.setattr(experiment._model_backend, "predict_response", rare)
+    frame = experiment.get_plot_data(response_type="prediction")
+    assert (frame.att < frame.att_lower).all()
+    fig, axes = experiment.plot(response_type="prediction", show=False)
+    # Vertical interval segments stay at zero while the separately drawn mean is negative.
+    segments = [
+        segment
+        for collection in axes[0].collections
+        if hasattr(collection, "get_segments")
+        for segment in collection.get_segments()
+        if len(segment)
+    ]
+    assert segments
+    assert all(np.allclose(segment[:, 1], 0) for segment in segments)
+    assert any(
+        np.any(line.get_ydata() < 0) for line in axes[0].lines if len(line.get_ydata())
+    )
+    plt.close(fig)
+
+
+def test_equal_poisson_samples_do_not_disable_observation_noise():
+    from causalpy.experiments.model_adapter import PyMCModelAdapter, build_coords
+    from causalpy.tests.test_prediction_contract import PoissonLogLinkModel
+
+    X = xr.DataArray(
+        np.zeros((2, 1)),
+        dims=("obs_ind", "coeffs"),
+        coords={"obs_ind": [0, 1], "coeffs": ["Intercept"]},
+    )
+    y = xr.DataArray(
+        np.ones((2, 1)),
+        dims=("obs_ind", "treated_units"),
+        coords={"obs_ind": [0, 1], "treated_units": ["unit_0"]},
+    )
+    model = PoissonLogLinkModel(sample_kwargs={"random_seed": 0})
+    model.build(X, y, build_coords(["Intercept"], 2))
+    model.sample_prior_predictive(draws=2, random_seed=0)
+    draws = PyMCModelAdapter(model).predict_response(
+        X.isel(obs_ind=[0]), quantity="y_hat", group="prior"
+    )
+    # Poisson(1) has variance one, even when this finite draw happens to equal its mean.
+    np.testing.assert_array_equal(draws, 1)
+    assert not cp.pymc_models.StateSpaceTimeSeries.supports_observation_noise
+
+
+@pytest.mark.parametrize("ci_kind", ["hdi", "eti"])
+def test_singleton_marker_renders_requested_interval_endpoints(ci_kind):
+    from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
+    from causalpy.plot_utils import _interval_bound_values
+
+    draws = xr.DataArray(
+        np.array([0, 0, 0, 0, 2, 3, 5, 9]).reshape(1, 8, 1),
+        dims=("chain", "draw", "obs_ind"),
+    )
+    expected = _interval_bound_values([0], draws, ci_prob=0.5, ci_kind=ci_kind)
+    fig, ax = plt.subplots()
+    errorbar = InterruptedTimeSeries._draw_singleton_hdi_marker(
+        ax, [0], draws, color="C0", hdi_prob=0.5, ci_kind=ci_kind
+    )
+    segment = errorbar.lines[2][0].get_segments()[0]
+    np.testing.assert_allclose(segment[:, 1], np.array(expected).ravel())
+    plt.close(fig)

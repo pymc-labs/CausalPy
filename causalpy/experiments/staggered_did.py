@@ -1260,88 +1260,49 @@ class StaggeredDifferenceInDifferences(
         pre_treatment = att_et[att_et["event_time"] < 0]
         post_treatment = att_et[att_et["event_time"] >= 0]
 
-        # Plot pre-treatment placebo estimates (different style)
-        if len(pre_treatment) > 0:
+        for frame, marker, color, label, size, alpha in (
+            (pre_treatment, "s", "gray", "Placebo estimate", 7, 0.7),
+            (post_treatment, "o", "C0", "ATT estimate", 8, 1.0),
+        ):
+            if len(frame) == 0:
+                continue
             if with_uncertainty:
+                midpoint = (frame["att_lower"] + frame["att_upper"]) / 2
+                half_width = (frame["att_upper"] - frame["att_lower"]) / 2
                 ax.errorbar(
-                    pre_treatment["event_time"],
-                    pre_treatment["att"],
-                    yerr=[
-                        pre_treatment["att"] - pre_treatment["att_lower"],
-                        pre_treatment["att_upper"] - pre_treatment["att"],
-                    ],
-                    fmt="s",  # Square markers for placebo
+                    frame["event_time"],
+                    midpoint,
+                    yerr=half_width,
+                    fmt="none",
                     capsize=4,
                     capthick=2,
-                    markersize=7,
-                    color="gray",
-                    alpha=0.7,
-                    label=f"Placebo estimate ({int(bundle.hdi_prob * 100)}% HDI)",
+                    color=color,
+                    alpha=alpha,
                 )
-            else:
-                ax.scatter(
-                    pre_treatment["event_time"],
-                    pre_treatment["att"],
-                    s=60,
-                    color="gray",
-                    marker="s",  # Square markers for placebo
-                    zorder=3,
-                    alpha=0.7,
-                    label="Placebo estimate",
-                )
-                # Add error bars if std available
-                if "att_std" in pre_treatment.columns:
-                    se = pre_treatment["att_std"] / np.sqrt(pre_treatment["n_obs"])
-                    ax.errorbar(
-                        pre_treatment["event_time"],
-                        pre_treatment["att"],
-                        yerr=1.96 * se,
-                        fmt="none",
-                        capsize=4,
-                        capthick=2,
-                        color="gray",
-                        alpha=0.5,
-                    )
-
-        # Plot post-treatment ATT estimates
-        if len(post_treatment) > 0:
-            if with_uncertainty:
+                label += f" ({int(bundle.hdi_prob * 100)}% ETI)"
+            elif "att_std" in frame.columns:
+                se = frame["att_std"] / np.sqrt(frame["n_obs"])
                 ax.errorbar(
-                    post_treatment["event_time"],
-                    post_treatment["att"],
-                    yerr=[
-                        post_treatment["att"] - post_treatment["att_lower"],
-                        post_treatment["att_upper"] - post_treatment["att"],
-                    ],
-                    fmt="o",
+                    frame["event_time"],
+                    frame["att"],
+                    yerr=1.96 * se,
+                    fmt="none",
                     capsize=4,
                     capthick=2,
-                    markersize=8,
-                    color="C0",
-                    label=f"ATT estimate ({int(bundle.hdi_prob * 100)}% HDI)",
+                    color=color,
+                    alpha=0.5,
                 )
-            else:
-                ax.scatter(
-                    post_treatment["event_time"],
-                    post_treatment["att"],
-                    s=80,
-                    color="C0",
-                    zorder=3,
-                    label="ATT estimate",
-                )
-                # Add error bars if std available
-                if "att_std" in post_treatment.columns:
-                    se = post_treatment["att_std"] / np.sqrt(post_treatment["n_obs"])
-                    ax.errorbar(
-                        post_treatment["event_time"],
-                        post_treatment["att"],
-                        yerr=1.96 * se,
-                        fmt="none",
-                        capsize=4,
-                        capthick=2,
-                        color="C0",
-                        alpha=0.7,
-                    )
+            ax.plot(
+                frame["event_time"],
+                frame["att"],
+                marker=marker,
+                linestyle="none",
+                markersize=size,
+                color=color,
+                alpha=alpha,
+                label=label,
+                zorder=3,
+            )
 
         # Add horizontal line at zero
         ax.axhline(y=0, color="black", linestyle="--", linewidth=1, alpha=0.7)

@@ -1275,7 +1275,7 @@ def test_plot_forwards_ci_prob_to_all_singleton_hdi_markers(monkeypatch):
     def fake_plot_posterior(x, posterior, *, ax, **kwargs):
         return ax.plot([], [])[0], ax.fill_between([], [], [])
 
-    def fake_singleton_marker(ax, x, posterior, *, color, hdi_prob):
+    def fake_singleton_marker(ax, x, posterior, *, color, hdi_prob, ci_kind):
         probabilities.append(hdi_prob)
         return ax.plot([], [])[0]
 

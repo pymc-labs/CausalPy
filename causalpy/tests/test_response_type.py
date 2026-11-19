@@ -120,6 +120,8 @@ def test_pymc_predict_response_selects_mu_or_y_hat_without_changing_predict():
     tree["posterior_predictive"] = xr.Dataset({"mu": mu, "y_hat": y_hat})
 
     class _Model:
+        supports_observation_noise = True
+
         def predict(self, X, *, coords=None, out_of_sample=False, group="posterior"):
             return tree
 
@@ -134,19 +136,21 @@ def test_pymc_predict_response_selects_mu_or_y_hat_without_changing_predict():
         adapter.predict_response(np.ones((2, 1)), quantity="missing", group="posterior")
 
 
-def test_aliased_y_hat_is_rejected_instead_of_labeled_as_noise():
+def test_declared_noise_free_backend_rejects_prediction():
     """A backend that stores mu under both names must not claim observation noise."""
     mu = _draws([[4.0, 4.0], [4.0, 4.0]], "mu")
     tree = xr.DataTree()
     tree["posterior_predictive"] = xr.Dataset({"mu": mu, "y_hat": mu.copy()})
 
     class _Model:
+        supports_observation_noise = False
+
         def predict(self, X, *, coords=None, out_of_sample=False, group="posterior"):
             return tree
 
     adapter = PyMCModelAdapter.__new__(PyMCModelAdapter)
     adapter._model = _Model()
-    with pytest.raises(ValueError, match="aliases mu"):
+    with pytest.raises(ValueError, match="no observation-noise draws"):
         adapter.predict_response(np.ones((2, 1)), quantity="y_hat", group="posterior")
     xr.testing.assert_equal(
         adapter.predict_response(np.ones((2, 1)), quantity="mu", group="posterior"),
@@ -154,19 +158,21 @@ def test_aliased_y_hat_is_rejected_instead_of_labeled_as_noise():
     )
 
 
-def test_aliased_y_hat_with_nan_is_rejected():
+def test_declared_noise_free_backend_rejects_nan_predictions():
     """NaN positions still mean the two names are one series."""
     mu = _draws([[4.0, np.nan], [4.0, 4.0]], "mu")
     tree = xr.DataTree()
     tree["posterior_predictive"] = xr.Dataset({"mu": mu, "y_hat": mu.copy()})
 
     class _Model:
+        supports_observation_noise = False
+
         def predict(self, X, *, coords=None, out_of_sample=False, group="posterior"):
             return tree
 
     adapter = PyMCModelAdapter.__new__(PyMCModelAdapter)
     adapter._model = _Model()
-    with pytest.raises(ValueError, match="aliases mu"):
+    with pytest.raises(ValueError, match="no observation-noise draws"):
         adapter.predict_response(np.ones((2, 1)), quantity="y_hat", group="posterior")
 
 

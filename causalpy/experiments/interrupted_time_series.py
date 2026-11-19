@@ -40,6 +40,7 @@ from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas_with_time_index
 from causalpy.plot_utils import (
+    _interval_bound_values,
     _PosteriorPlotStyle,
     format_r2_score,
     get_hdi_to_df,
@@ -710,8 +711,9 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         Y: xr.DataArray,
         color: str,
         hdi_prob: float = HDI_PROB,
+        ci_kind: Literal["hdi", "eti"] = "hdi",
     ) -> Any:
-        """Overlay a median dot + HDI errorbar for a single post-period datum.
+        """Overlay a median dot + selected interval errorbar for a single post-period datum.
 
         When ``plot_posterior_over_x`` is called with ``kind="ribbon"`` and
         HDI intervals, ``arviz.plot_hdi`` renders a degenerate zero-area polygon
@@ -724,21 +726,26 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         Y_plot = Y
         if "treated_units" in Y_plot.dims:
             Y_plot = Y_plot.isel(treated_units=0)
-        if "obs_ind" in Y_plot.dims:
-            if Y_plot.sizes["obs_ind"] != 1:
-                msg = (
-                    "Singleton HDI marker requires exactly one obs_ind; "
-                    f"got size {Y_plot.sizes['obs_ind']}"
-                )
-                raise ValueError(msg)
-            Y_plot = Y_plot.isel(obs_ind=0)
+        if "obs_ind" in Y_plot.dims and Y_plot.sizes["obs_ind"] != 1:
+            msg = (
+                "Singleton HDI marker requires exactly one obs_ind; "
+                f"got size {Y_plot.sizes['obs_ind']}"
+            )
+            raise ValueError(msg)
         median = float(np.asarray(Y_plot.median(("chain", "draw")).values).item())
-        lower, upper = hdi_bounds(Y_plot, prob=hdi_prob)
+        if "obs_ind" not in Y_plot.dims:
+            Y_plot = Y_plot.expand_dims(obs_ind=[0])
+        lower, upper = _interval_bound_values(
+            x, Y_plot, ci_prob=hdi_prob, ci_kind=ci_kind
+        )
+        midpoint = (lower + upper) / 2
+        half_width = (upper - lower) / 2
+        ax.plot(x, [median], "o", color=color, zorder=3)
         return ax.errorbar(
             x,
-            [median],
-            yerr=[[median - lower], [upper - median]],
-            fmt="o",
+            midpoint,
+            yerr=half_width,
+            fmt="none",
             color=color,
             ecolor=color,
             capsize=4,
@@ -855,14 +862,19 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 **style,
                 plot_hdi_kwargs={"color": "C1"},
             )
-            if single_post_obs:
+            if single_post_obs and kind == "ribbon":
                 # plot_posterior_over_x's HDI ribbon collapses to a zero-area polygon for a
                 # single post-period datum; overlay an explicit median + HDI
                 # errorbar so the counterfactual is still visible. Use the
                 # errorbar artist itself as the legend handle so the legend
                 # matches what is actually drawn.
                 errbar = self._draw_singleton_hdi_marker(
-                    ax[0], self.datapost.index, post_pred, color="C1", hdi_prob=ci_prob
+                    ax[0],
+                    self.datapost.index,
+                    post_pred,
+                    color="C1",
+                    hdi_prob=ci_prob,
+                    ci_kind=ci_kind,
                 )
                 handles.append(errbar)
             else:
@@ -926,13 +938,14 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 **style,
                 plot_hdi_kwargs={"color": "C1"},
             )
-            if single_post_obs:
+            if single_post_obs and kind == "ribbon":
                 self._draw_singleton_hdi_marker(
                     ax[1],
                     self.datapost.index,
                     bundle.impact_post,
                     color="C1",
                     hdi_prob=ci_prob,
+                    ci_kind=ci_kind,
                 )
         else:
             ax[1].plot(
@@ -963,13 +976,14 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 **style,
                 plot_hdi_kwargs={"color": "C1"},
             )
-            if single_post_obs:
+            if single_post_obs and kind == "ribbon":
                 self._draw_singleton_hdi_marker(
                     ax[2],
                     self.datapost.index,
                     bundle.impact_post_cumulative,
                     color="C1",
                     hdi_prob=ci_prob,
+                    ci_kind=ci_kind,
                 )
         else:
             ax[2].plot(

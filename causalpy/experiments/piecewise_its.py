@@ -15,7 +15,6 @@
 
 import ast
 import re
-from dataclasses import replace
 from typing import Any, Literal
 
 import numpy as np
@@ -31,7 +30,6 @@ from causalpy.custom_exceptions import FormulaException
 from causalpy.experiments._response_type import (
     check_response_type,
     finish_response_plot,
-    quantity_for,
 )
 from causalpy.experiments._results import CausalResult
 from causalpy.experiments.model_adapter import build_coords
@@ -445,44 +443,33 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
         print(f"Interruption times: {self.interruption_times}")
         self.print_coefficients(round_to)
 
-    def _bundle_for_response(
+    def _response_predictions(
         self,
         bundle: CausalResult,
         *,
         response_type: str,
         group: Literal["prior", "posterior"],
-    ) -> CausalResult:
-        """Return ``bundle`` or a draw-only copy using posterior predictive draws.
+    ) -> tuple[xr.DataArray, xr.DataArray]:
+        """Return fitted and full-window counterfactual outcomes.
 
-        Only outcome predictions change; structural effects retain their expectation contrast.
-        The stored result is not mutated.
+        Expected counterfactuals follow the stored structural contrast.
+        Predictive counterfactuals must be sampled on the zeroed design:
+        subtracting an expected effect from a noisy factual outcome does
+        not give the counterfactual outcome distribution for general models.
         """
         if check_response_type(response_type) == "expectation":
-            return bundle
-        quantity = quantity_for(response_type)
+            fitted = bundle.predictions_pre.isel(treated_units=0)
+            return fitted, fitted - bundle.impact_pre
         X = self.design["X"]
-        predictions = self._model_backend.predict_response(
-            X=X, quantity=quantity, group=group
-        )
+        fitted = self._model_backend.predict_response(
+            X=X, quantity="y_hat", group=group
+        ).isel(treated_units=0)
         X_cf = X.copy()
-        for idx in self._interruption_cols:
-            X_cf[:, idx] = 0
-        y_counterfactual = self._model_backend.predict_response(
-            X=X_cf, quantity=quantity, group=group
-        )
-        post_indices = np.where(
-            np.asarray(self.data[self.time_col] >= self._earliest_interruption_time())
-        )[0]
-        predictions_post = (
-            y_counterfactual.isel(obs_ind=post_indices)
-            .assign_coords(obs_ind=self.datapost.index)
-            .transpose(..., "obs_ind", "treated_units")
-        )
-        return replace(
-            bundle,
-            predictions_pre=predictions,
-            predictions_post=predictions_post,
-        )
+        X_cf[:, self._interruption_cols] = 0
+        counterfactual = self._model_backend.predict_response(
+            X=X_cf, quantity="y_hat", group=group
+        ).isel(treated_units=0)
+        return fitted, counterfactual
 
     def plot(
         self,
@@ -625,8 +612,9 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
         ax : list of :class:`~matplotlib.axes.Axes`
             List of axes objects.
         """
-        bundle = self._bundle_for_response(
-            self._require_bundle(group),
+        bundle = self._require_bundle(group)
+        y_pred_mu, y_cf_mu = self._response_predictions(
+            bundle,
             response_type=response_type,
             group=group,
         )
@@ -638,7 +626,10 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
         }
         if group == "prior":
             fig, ax = self._plot_prior_checks(
-                bundle=bundle, style=style, figsize=figsize
+                predictions=y_pred_mu,
+                counterfactual=y_cf_mu,
+                style=style,
+                figsize=figsize,
             )
             return finish_response_plot(
                 fig,
@@ -649,15 +640,11 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
                 ci_kind=ci_kind,
                 kind=kind,
                 show_response_annotation=show_response_annotation,
-                has_draws=has_posterior_draws(bundle.predictions_pre),
+                has_draws=has_posterior_draws(y_pred_mu),
             )
 
-        with_uncertainty = has_posterior_draws(bundle.predictions_pre)
+        with_uncertainty = has_posterior_draws(y_pred_mu)
         time_values = self.data[self.time_col].values
-        y_pred_mu = bundle.predictions_pre.isel(treated_units=0)
-        # No-intervention counterfactual over the FULL window, recovered
-        # exactly as fitted expectation minus pointwise effect.
-        y_cf_mu = y_pred_mu - bundle.impact_pre
         effect = bundle.impact_pre
         cumulative_effect = bundle.impact_pre.cumsum(dim="obs_ind")
 
@@ -789,13 +776,14 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
             ci_kind=ci_kind,
             kind=kind,
             show_response_annotation=show_response_annotation,
-            has_draws=has_posterior_draws(bundle.predictions_pre),
+            has_draws=has_posterior_draws(y_pred_mu),
         )
 
     def _plot_prior_checks(
         self,
         *,
-        bundle: CausalResult,
+        predictions: xr.DataArray,
+        counterfactual: xr.DataArray,
         style: _PosteriorPlotStyle,
         figsize: tuple[float, float],
     ) -> tuple[plt.Figure, list[plt.Axes]]:
@@ -807,10 +795,7 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
         fitted and counterfactual series are plausible against the observed
         series — one panel suffices.
         """
-        y_pred_mu = bundle.predictions_pre.isel(treated_units=0)
-        # No-intervention counterfactual over the FULL window, recovered
-        # exactly as fitted expectation minus pointwise effect.
-        y_cf_mu = y_pred_mu - bundle.impact_pre
+        y_pred_mu, y_cf_mu = predictions, counterfactual
         time_values = self.data[self.time_col].values
 
         fig, ax = plt.subplots(1, 1, figsize=figsize)
@@ -878,8 +863,9 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
             :data:`~causalpy.constants.HDI_PROB` (currently 0.94). Ignored
             when the prediction container has no posterior draws.
         response_type : {"expectation", "prediction"}, default "expectation"
-            Which quantity the returned columns use. ``"prediction"`` rebuilds
-            them from posterior predictive draws, which include observation noise.
+            Which quantity the fitted/counterfactual columns use.
+            ``"prediction"`` includes observation noise; effect columns
+            retain their structural expectation contrast.
             Stored results stay on ``mu``.
             Point-estimate backends reject ``"prediction"``.
 
@@ -889,21 +875,17 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
             DataFrame containing observed data, predictions, and effects.
             Not cached on the experiment.
         """
-        bundle = self._bundle_for_response(
-            self._require_bundle(group),
+        bundle = self._require_bundle(group)
+        y_pred_mu, y_cf_mu = self._response_predictions(
+            bundle,
             response_type=response_type,
             group=group,
         )
-        with_uncertainty = has_posterior_draws(bundle.predictions_pre)
+        with_uncertainty = has_posterior_draws(y_pred_mu)
         hdi_pct = int(round(hdi_prob * 100))
 
         # Get time values
         time_values = self.data[self.time_col].values
-
-        # Extract predictions. The counterfactual over the FULL window is
-        # recovered exactly as fitted expectation minus pointwise effect.
-        y_pred_mu = bundle.predictions_pre.isel(treated_units=0)
-        y_cf_mu = y_pred_mu - bundle.impact_pre
 
         effect = bundle.impact_pre
         cumulative_effect = bundle.impact_pre.cumsum(dim="obs_ind")

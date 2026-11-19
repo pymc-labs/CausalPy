@@ -167,9 +167,9 @@ def _extract_response(
 
     ``mu`` is the conditional expected outcome. ``y_hat`` is the posterior
     predictive of the observed variable and includes observation noise when
-    the backend actually draws it. A series that aliases ``mu`` raises
-    rather than being returned under the prediction name. Both successful
-    results use the canonical prediction dimensions. Stray non-dimension
+    the backend declares that capability. Equal realized samples do not
+    imply zero observation noise. Both successful results use the canonical
+    prediction dimensions. Stray non-dimension
     coordinates are dropped so they cannot leak into impact containers.
     """
     if quantity not in ("mu", "y_hat"):
@@ -181,16 +181,6 @@ def _extract_response(
             "response_type='prediction' requires y_hat."
         )
     draws = group[quantity].transpose("chain", "draw", "obs_ind", "treated_units")
-    if quantity == "y_hat" and "mu" in group:
-        mu = group["mu"].transpose("chain", "draw", "obs_ind", "treated_units")
-        if draws.sizes == mu.sizes and np.array_equal(
-            draws.values, mu.values, equal_nan=True
-        ):
-            raise ValueError(
-                "y_hat aliases mu on this backend, so response_type='prediction' "
-                "has no observation-noise draws to show. State-space models store "
-                "the same series under both names."
-            )
     return draws.drop_vars([name for name in draws.coords if name not in draws.dims])
 
 
@@ -802,6 +792,11 @@ class PyMCModelAdapter(ModelAdapter):
         """
         if quantity not in ("mu", "y_hat"):
             raise ValueError(f"quantity must be 'mu' or 'y_hat', got {quantity!r}")
+        if quantity == "y_hat" and not self._model.supports_observation_noise:
+            raise ValueError(
+                "This model has no observation-noise draws to show; "
+                "response_type='prediction' is unsupported."
+            )
         return _extract_response(
             self._model.predict(
                 X=X, coords=coords, out_of_sample=out_of_sample, group=group
