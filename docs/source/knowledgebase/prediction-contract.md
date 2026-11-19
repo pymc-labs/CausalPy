@@ -47,7 +47,7 @@ This is a user-visible change for sklearn experiments: ``experiment.result.score
 
 With skforecast, `unit_0_r2` scores one-step predictions across the held-out calibration tail. The preceding training rows and post-intervention rows are outside the scoring window.
 
-The adapter infers cadence from the complete time axis when the frequency is undeclared. For a timezone-aware grid that follows a regular UTC calendar across a clock change, the native forecaster runs on that UTC calendar. Formula covariates and returned observation coordinates retain the supplied timestamps.
+The adapter infers cadence from the complete time axis when the frequency is undeclared. Across clock changes, the native forecaster uses the calendar that defines a regular grid, on UTC for UTC-anchored series and on local wall time for local-calendar series. Formula covariates and returned observation coordinates retain the supplied timestamps.
 
 For direct adapter callers, ``SklearnModelAdapter.score()`` keyword arguments follow :func:`sklearn.metrics.r2_score` (for example ``sample_weight``), not the underlying estimator's ``score`` method. ``multioutput`` is fixed to ``"raw_values"`` so each treated unit keeps its own ``unit_{i}_r2`` entry.
 

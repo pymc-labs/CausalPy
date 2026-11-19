@@ -31,13 +31,19 @@ from causalpy.skl_models import SkforecastModel, _validate_recursive_forecaster
 
 def _regular_index(index: pd.Index) -> pd.DatetimeIndex | pd.RangeIndex:
     if isinstance(index, pd.DatetimeIndex):
-        freq = index.freq or index.inferred_freq
-        if index.tz is not None and index.inferred_freq is None:
+        inferred = index.inferred_freq
+        freq = pd.tseries.frequencies.to_offset(index.freq or inferred)
+        if index.tz is not None:
             utc = index.tz_convert("UTC")
-            if utc.inferred_freq is not None:
-                # Short lag windows can hide a DST transition and make the
-                # upstream forecaster choose the wrong calendar convention.
+            if inferred is None and utc.inferred_freq is not None:
                 return pd.DatetimeIndex(utc, freq=freq or utc.inferred_freq)
+            if freq is not None and (
+                not isinstance(freq, pd.offsets.Tick)
+                or isinstance(freq, pd.offsets.Day)
+            ):
+                # Give the native calendar a stable wall clock. Lag suffixes
+                # alone cannot distinguish local time from a UTC calendar.
+                index = index.tz_localize(None)
         if freq is not None:
             return pd.DatetimeIndex(index, freq=freq)
     elif pd.api.types.is_integer_dtype(index.dtype):
@@ -58,9 +64,12 @@ def _exog(X: xr.DataArray, index: pd.Index) -> pd.DataFrame | None:
         isinstance(original, pd.DatetimeIndex)
         and isinstance(index, pd.DatetimeIndex)
         and original.tz is not None
-        and index.tz is not None
     ):
-        original = original.tz_convert(index.tz)
+        original = (
+            original.tz_localize(None)
+            if index.tz is None
+            else original.tz_convert(index.tz)
+        )
     if not original.equals(index):
         raise BadIndexException(
             "Observations and exogenous inputs must align to the regular forecast grid."

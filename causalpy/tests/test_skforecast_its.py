@@ -641,3 +641,29 @@ def test_calibration_reporting_distinguishes_upstream_pool_cap(forecaster_class)
     text = exp.effect_summary(relative=False).text
     assert f"measured {size} finite one-step errors" in text
     assert "sampled from a pool of 10000" in text
+
+
+def test_local_calendar_uses_wall_time_across_dst(series, forecaster_class):
+    local = pd.date_range(
+        "2026-02-01 19:00", periods=len(series), freq="D", tz="America/New_York"
+    )
+    wall_clock = local.tz_localize(None)
+    model = SkforecastModel(forecaster_class(estimator=Ridge(), lags=1), 10, n_boot=10)
+    exp = cp.InterruptedTimeSeries(
+        series.set_axis(local), local[55], "y ~ 1 + t", model=model
+    ).fit()
+    reference = cp.InterruptedTimeSeries(
+        series.set_axis(wall_clock), wall_clock[55], "y ~ 1 + t", model=model
+    ).fit()
+    paths = exp.result.counterfactual_paths
+    assert paths.obs_ind.to_index().equals(local[55:])
+    np.testing.assert_allclose(
+        paths.values, reference.result.counterfactual_paths.values
+    )
+    assert exp.get_plot_data().index.equals(local)
+
+
+def test_single_level_categorical_outcome_is_rejected(series, forecast_model):
+    series["status"] = "closed"
+    with pytest.raises(ValueError, match="single continuous outcome"):
+        cp.InterruptedTimeSeries(series, 70, "status ~ 1", model=forecast_model)

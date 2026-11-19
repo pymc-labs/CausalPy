@@ -344,7 +344,9 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         pre_y, pre_x = build_formula_matrices(self.formula, training, **na_action)
         y_info, x_info = pre_y.design_info, pre_x.design_info
         if calibration_size is not None:
-            if len(y_info.column_names) != 1:
+            if len(y_info.column_names) != 1 or any(
+                factor.type != "numerical" for factor in y_info.factor_infos.values()
+            ):
                 raise ValueError(
                     "SkforecastModel requires a single continuous outcome."
                 )
