@@ -988,7 +988,8 @@ def test_explicit_formula_namespace_supports_stateful_and_numpy_terms(
     )
 
 
-def test_native_exog_transformer_sees_observed_clock(forecaster_class):
+@pytest.mark.parametrize("preserve_index", [True, False])
+def test_native_exog_transformer_sees_observed_clock(forecaster_class, preserve_index):
     from sklearn.preprocessing import FunctionTransformer
 
     utc = pd.date_range("2019-01-01 04:00", periods=90, freq="MS", tz="UTC")
@@ -1003,7 +1004,8 @@ def test_native_exog_transformer_sees_observed_clock(forecaster_class):
     )
 
     def local_hour(frame):
-        return frame.assign(hour=frame.index.hour.astype(float))
+        transformed = frame.assign(hour=frame.index.hour.astype(float))
+        return transformed if preserve_index else transformed.reset_index(drop=True)
 
     def fit(transformer):
         model = SkforecastModel(

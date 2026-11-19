@@ -156,7 +156,7 @@ class _PreprocessorOnObservedIndex:
         self,
         preprocessor: Any,
         to_observed: Callable[[pd.Index], pd.Index],
-        to_model: Callable[[pd.Index], pd.Index],
+        to_model: Callable[[pd.Index], pd.Index] | None = None,
     ) -> None:
         self._preprocessor = preprocessor
         self._to_observed = to_observed
@@ -167,7 +167,9 @@ class _PreprocessorOnObservedIndex:
             return method(self._to_observed(data))
         if isinstance(data, (pd.Series, pd.DataFrame)):
             transformed = method(data.set_axis(self._to_observed(data.index)))
-            if isinstance(transformed, (pd.Series, pd.DataFrame)):
+            if self._to_model is not None and isinstance(
+                transformed, (pd.Series, pd.DataFrame)
+            ):
                 return transformed.set_axis(self._to_model(transformed.index))
             return transformed
         return method(data)
@@ -189,13 +191,19 @@ def _use_observed_index(forecaster: Any, grid: pd.Index, observed: pd.Index) -> 
     """Keep the native preprocessing inputs on the caller's clock."""
     to_observed = partial(_translate_index, source=grid, target=observed)
     to_model = partial(_translate_index, source=observed, target=grid)
-    for name in ("calendar_features", "transformer_y", "transformer_exog"):
+    # skforecast needs model-grid outputs for the outcome and window features.
+    # Transformed exogenous and calendar features are consumed by row position.
+    for name, output_index in (
+        ("calendar_features", None),
+        ("transformer_exog", None),
+        ("transformer_y", to_model),
+    ):
         preprocessor = getattr(forecaster, name)
         if preprocessor is not None:
             setattr(
                 forecaster,
                 name,
-                _PreprocessorOnObservedIndex(preprocessor, to_observed, to_model),
+                _PreprocessorOnObservedIndex(preprocessor, to_observed, output_index),
             )
     if forecaster.window_features is not None:
         forecaster.window_features = [
