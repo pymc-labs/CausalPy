@@ -1005,7 +1005,8 @@ class PanelRegression(BaseExperiment[ResultBundle]):
             - "mean": HDI of the requested group's ``mu``
               (uncertainty in expected value)
             - "predictive": HDI of its predictive ``y_hat``
-              (includes observation noise)
+              (includes observation noise). Backends without observation-level
+              draws reject this request, matching :meth:`get_plot_data`.
         group : {"prior", "posterior"}, default "posterior"
             Draw group used for expected and predictive trajectories.
 
@@ -1029,9 +1030,17 @@ class PanelRegression(BaseExperiment[ResultBundle]):
         if interval_type not in {"mean", "predictive"}:
             raise ValueError("interval_type must be 'mean' or 'predictive'")
 
-        # Backend-identity branch is justified: in-sample mu / y_hat draws
-        # live in backend-native idata (PanelRegression stores no canonical
-        # prediction container; see the ponytail note in get_plot_data).
+        if (
+            interval_type == "predictive"
+            and not self._model_backend.supports_observation_noise
+        ):
+            raise ValueError(
+                "interval_type='predictive' requires observation-noise draws; "
+                "this backend supports expectation trajectories only."
+            )
+
+        # This existing view retains its stored in-sample draws. The native
+        # idata branch stays isolated here; capability rejection uses the adapter.
         is_bayesian = self._model_backend.is_bayesian
 
         # Get requested draws for HDI plotting (Bayesian only).

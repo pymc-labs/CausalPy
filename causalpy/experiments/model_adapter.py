@@ -318,6 +318,11 @@ class ModelAdapter(ABC):
         return self.kind == "sklearn"
 
     @property
+    def supports_observation_noise(self) -> bool:
+        """Whether observation-level predictive outcomes are available."""
+        return False
+
+    @property
     def supports_idata(self) -> bool:
         """Whether the backend exposes an inference-result DataTree."""
         return self.kind in ("pymc", "pymc-forecast")
@@ -636,6 +641,11 @@ class PyMCModelAdapter(ModelAdapter):
         return idata is not None and "prior" in idata.children
 
     @property
+    def supports_observation_noise(self) -> bool:
+        """Whether the native model declares observation-level predictive noise."""
+        return self._model.supports_observation_noise
+
+    @property
     def supports_prior_predictive(self) -> bool:
         """Whether the wrapped PyMC model exposes a prior predictive phase."""
         return bool(getattr(self._model, "supports_prior_predictive", True))
@@ -792,7 +802,7 @@ class PyMCModelAdapter(ModelAdapter):
         """
         if quantity not in ("mu", "y_hat"):
             raise ValueError(f"quantity must be 'mu' or 'y_hat', got {quantity!r}")
-        if quantity == "y_hat" and not self._model.supports_observation_noise:
+        if quantity == "y_hat" and not self.supports_observation_noise:
             raise ValueError(
                 "This model has no observation-noise draws to show; "
                 "response_type='prediction' is unsupported."
@@ -1215,6 +1225,11 @@ class PyMCForecastAdapter(ModelAdapter):
     def kind(self) -> BackendKind:
         """Backend identifier."""
         return "pymc-forecast"
+
+    @property
+    def supports_observation_noise(self) -> bool:
+        """Whether the accepted forecaster provides predictive observations."""
+        return True
 
     @property
     def idata(self) -> xr.DataTree | None:

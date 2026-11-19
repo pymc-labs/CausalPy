@@ -566,8 +566,9 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             Width and height of the figure in inches. Defaults to ``None``
             (use matplotlib's default).
         """
+        expectation_bundle = self._require_bundle(group)
         bundle = self._bundle_for_response(
-            self._require_bundle(group),
+            expectation_bundle,
             response_type=response_type,
             group=group,
         )
@@ -716,12 +717,14 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             )
 
         # arrow to label the causal impact: drawn between the counterfactual
-        # and the post-period treatment-group prediction (posterior means for
+        # and the post-period treatment-group expectation (posterior means for
         # containers with draws; the point estimates coincide for singletons)
         y_pred_treatment_scalar = _as_scalar(
-            y_pred_treatment.isel(obs_ind=1).mean().data
+            expectation_bundle.scenario_treated.prediction.isel(obs_ind=1).mean().data
         )
-        y_pred_counterfactual_scalar = _as_scalar(y_pred_counterfactual.mean().data)
+        y_pred_counterfactual_scalar = _as_scalar(
+            expectation_bundle.scenario_counterfactual.prediction.mean().data
+        )
         if with_uncertainty:
             # Note that we force to be float to avoid a type error using np.ptp
             # with boolean values

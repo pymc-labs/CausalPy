@@ -294,6 +294,8 @@ def test_panel_export_selects_noisy_outcomes_and_coefficient_plot_rejects_them(
         experiment.get_plot_data(response_type="prediction")
     with pytest.raises(ValueError, match="shows coefficients"):
         experiment.plot(response_type="prediction")
+    with pytest.raises(ValueError, match="observation-noise draws"):
+        experiment.plot_trajectories(interval_type="predictive", units=["a"])
 
     def selected(X, **kwargs):
         mean = experiment._model_backend.predict(X).isel(draw=0, drop=True)
@@ -473,3 +475,62 @@ def test_singleton_marker_renders_requested_interval_endpoints(ci_kind):
     segment = errorbar.lines[2][0].get_segments()[0]
     np.testing.assert_allclose(segment[:, 1], np.array(expected).ravel())
     plt.close(fig)
+
+
+def test_did_causal_arrow_keeps_expectation_endpoints_under_predictive_noise(
+    monkeypatch,
+):
+    from matplotlib.text import Annotation
+
+    rows = [
+        {
+            "group": group,
+            "unit": f"u{group}-{i}",
+            "t": post,
+            "post_treatment": post,
+            "y": 1.0 + group + post + group * post,
+        }
+        for group in (0, 1)
+        for post in (0, 1)
+        for i in range(4)
+    ]
+    experiment = cp.DifferenceInDifferences(
+        pd.DataFrame(rows),
+        formula="y ~ 1 + group*post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(),
+    ).fit()
+
+    def endpoints(axis):
+        arrow = next(
+            text
+            for text in axis.texts
+            if isinstance(text, Annotation)
+            and text.get_text() == ""
+            and text.arrow_patch is not None
+        )
+        return arrow.xy[1], arrow.xyann[1]
+
+    figure, axis = experiment.plot(show=False)
+    expected = endpoints(axis)
+    assert expected[1] - expected[0] == pytest.approx(1)
+    plt.close(figure)
+    rng = np.random.default_rng(11)
+    noises = []
+
+    def noisy(X, **kwargs):
+        mean = experiment._model_backend.predict(X).isel(draw=0, drop=True)
+        noise = xr.DataArray(
+            rng.normal(0, 10, (8, len(X))),
+            dims=("draw", "obs_ind"),
+            coords={"draw": range(8), "obs_ind": mean.obs_ind},
+        )
+        noises.append(float(noise.mean()))
+        return (mean + noise).transpose("chain", "draw", "obs_ind", "treated_units")
+
+    monkeypatch.setattr(experiment._model_backend, "predict_response", noisy)
+    figure, axis = experiment.plot(response_type="prediction", show=False)
+    assert max(np.abs(noises)) > 1
+    np.testing.assert_allclose(endpoints(axis), expected)
+    plt.close(figure)
