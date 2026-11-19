@@ -108,6 +108,7 @@ def test_outcome_plots_select_target_without_changing_effect_results(
     fig, _axes = experiment.plot(
         group=group, response_type="prediction", ci_prob=0.5, show=False
     )
+    fig.canvas.draw()
     assert any(f"{group} predictive outcome" in note.get_text() for note in fig.texts)
     assert experiment._require_bundle(group) is stored
     pd.testing.assert_frame_equal(experiment.effect_summary().table, summary)
@@ -533,4 +534,43 @@ def test_did_causal_arrow_keeps_expectation_endpoints_under_predictive_noise(
     figure, axis = experiment.plot(response_type="prediction", show=False)
     assert max(np.abs(noises)) > 1
     np.testing.assert_allclose(endpoints(axis), expected)
+    plt.close(figure)
+
+
+@pytest.mark.parametrize("kind", ["ribbon", "histogram", "spaghetti"])
+@pytest.mark.parametrize("response_type", ["expectation", "prediction"])
+def test_rd_response_notes_save_with_renderer_owned_layout(
+    mock_pymc_sample, rd_data, tmp_path, kind, response_type
+):
+    experiment = cp.RegressionDiscontinuity(
+        rd_data,
+        formula="y ~ 1 + x + treated",
+        treatment_threshold=0.5,
+        model=cp.pymc_models.LinearRegression(
+            sample_kwargs={"draws": 20, "tune": 20, "chains": 2, "cores": 1}
+        ),
+    ).fit()
+    figure, _axis = experiment.plot(
+        response_type=response_type,
+        kind=kind,
+        show_response_annotation=True,
+        show=False,
+    )
+    output = tmp_path / "rd-annotated.png"
+    figure.savefig(output)
+    assert output.stat().st_size > 0
+    assert any("observation noise" in note.get_text() for note in figure.texts)
+    plt.close(figure)
+
+
+def test_rd_point_response_note_saves_with_native_caption(rd_data, tmp_path):
+    experiment = cp.RegressionDiscontinuity(
+        rd_data,
+        formula="y ~ 1 + x + treated",
+        treatment_threshold=0.5,
+        model=LinearRegression(),
+    ).fit()
+    figure, _axis = experiment.plot(show_response_annotation=True, show=False)
+    figure.savefig(tmp_path / "rd-point.png")
+    assert any("Point prediction" in note.get_text() for note in figure.texts)
     plt.close(figure)

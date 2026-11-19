@@ -43,7 +43,7 @@ The synthetic DiD, interactive fixed-effects and native state-space capabilities
 
 Point-estimate backends have no observation-noise draws and reject predictive requests. Native state-space models currently alias ``mu`` and ``y_hat`` and declare ``supports_observation_noise=False``; predictive mode rejects that unsupported capability. Native model authors must set this flag to ``False`` when their output lacks observation noise. Capability is never inferred from equality of finite samples: valid count or binary predictive draws can happen to equal their conditional means. The optional forecasting backend supports predictive outcomes through its normalized ``y_hat`` output, with posterior conditioning only.
 
-Bayesian ribbon plots name the outcome target, conditioning group, interval kind (HDI or ETI) and probability by default. Histogram and spaghetti plots can be labeled with ``show_response_annotation=True``; ``False`` suppresses the note. Coefficient and structural-effect panels retain their own labels. Summaries and persistence calculations remain expectation-based and do not accept an outcome-target selector.
+For supported outcome views, Bayesian ribbon plots name the outcome target, conditioning group, interval kind (HDI or ETI) and probability by default. Histogram and spaghetti plots can be labeled with ``show_response_annotation=True``; ``False`` suppresses the note. Coefficient and structural-effect panels retain their own labels. Summaries and persistence calculations remain expectation-based and do not accept an outcome-target selector.
 
 Posterior transformations for nonlinear models must be applied **draw by draw** before contrasts or averages. In general, ``inverse_link(mean(eta))`` differs from ``mean(inverse_link(eta))``; g-computation averages unit-level potential outcomes on the response scale. See {doc}`estimands` for how this relates to empirical estimands. A worked tutorial notebook is tracked in `CausalPy#1017 <https://github.com/pymc-labs/CausalPy/issues/1017>`_.
 
@@ -99,3 +99,7 @@ Fast regression tests in ``causalpy/tests/test_prediction_contract.py`` encode t
 - CausalPy #1017 (g-computation tutorial notebook)
 - `pymc-forecast#52 <https://github.com/pymc-labs/pymc-forecast/issues/52>`_ — explicit expected-observation outputs
 - `pymc-forecast#50 <https://github.com/pymc-labs/pymc-forecast/issues/50>`_ — statespace expected observations
+
+:::{note}
+Posterior histogram/spaghetti legends have a pre-existing rendering limitation in ITS, piecewise ITS, DiD, pretest/posttest and regression kink, tracked in [issue #1462](https://github.com/pymc-labs/CausalPy/issues/1462). Use the default ribbon view for these experiments while that renderer work is pending. Selecting an outcome target does not repair the legacy legend construction.
+:::

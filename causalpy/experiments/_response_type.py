@@ -68,7 +68,8 @@ def annotation_text(
     ci_kind: str,
     kind: str,
     has_draws: bool,
-) -> str:
+    show_response_annotation: bool | None = True,
+) -> str | None:
     """Figure note naming the drawn quantity and, for ribbons, the interval.
 
     Parameters
@@ -85,14 +86,21 @@ def annotation_text(
         ``"hdi"`` or ``"eti"``. The note uses the selected label.
     kind : str
         Plot kind. Only ``"ribbon"`` includes an interval percentage.
+    show_response_annotation : bool or None
+        ``None`` labels draw-based ribbons; ``True`` always labels and
+        ``False`` suppresses the note.
     has_draws : bool
         ``False`` names a point prediction instead of an interval.
 
     Returns
     -------
-    str
-        The figure note.
+    str or None
+        The figure note, or ``None`` when no annotation was requested.
     """
+    if show_response_annotation is False or (
+        show_response_annotation is None and (not has_draws or kind != "ribbon")
+    ):
+        return None
     if not has_draws:
         return "Point prediction (no observation-noise interval)."
     checked = check_response_type(response_type)
@@ -151,26 +159,19 @@ def finish_response_plot(
     tuple of (matplotlib.figure.Figure, Any)
         The same figure and axes, after the optional note.
     """
-    if show_response_annotation is False or (
-        show_response_annotation is None and (not has_draws or kind != "ribbon")
-    ):
-        return fig, axes
-    fig.text(
-        0.01,
-        0.01,
-        annotation_text(
-            response_type=response_type,
-            group=group,
-            target=target,
-            ci_prob=ci_prob,
-            ci_kind=ci_kind,
-            kind=kind,
-            has_draws=has_draws,
-        ),
-        ha="left",
-        va="bottom",
-        fontsize=8,
+    note = annotation_text(
+        response_type=response_type,
+        group=group,
+        target=target,
+        ci_prob=ci_prob,
+        ci_kind=ci_kind,
+        kind=kind,
+        has_draws=has_draws,
+        show_response_annotation=show_response_annotation,
     )
+    if note is None:
+        return fig, axes
+    fig.text(0.01, 0.01, note, ha="left", va="bottom", fontsize=8)
     # Reserve space for the note and lay out labels added after the panels.
     fig.set_layout_engine("tight", rect=(0, 0.065, 1, 1))
     return fig, axes

@@ -24,12 +24,14 @@ from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 from plotnine import (
     aes,
+    element_text,
     geom_line,
     geom_point,
     ggplot,
     guides,
     labs,
     scale_color_manual,
+    theme,
 )
 from patsy import ModelDesc
 from sklearn.base import RegressorMixin
@@ -38,6 +40,7 @@ from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.experiments._results import DiscontinuityResult
 from causalpy.experiments._response_type import (
+    annotation_text,
     check_response_type,
     finish_response_plot,
     quantity_for,
@@ -626,11 +629,21 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         if self.donut_hole > 0:
             color_values["donut boundary"] = "orange"
 
+        note = annotation_text(
+            response_type=response_type,
+            group=group,
+            ci_prob=ci_prob,
+            ci_kind=ci_kind,
+            kind=kind,
+            has_draws=with_uncertainty,
+            show_response_annotation=show_response_annotation,
+        )
         fig = (
             p
             + scale_color_manual(values=color_values)
             + guides(color=False)
-            + labs(title=title, x=xcol, y=ycol)
+            + labs(title=title, x=xcol, y=ycol, caption=note)
+            + theme(plot_caption=element_text(size=8, ha="left"))
         ).draw()
         # ``draw()`` closes the figure on exit, which unregisters it from
         # pyplot; re-register it so ``plt.show()`` and Jupyter display it.
@@ -692,17 +705,9 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
             ],
             fontsize=LEGEND_FONT_SIZE,
         )
-        return finish_response_plot(
-            fig,
-            ax,
-            group=group,
-            response_type=response_type,
-            ci_prob=ci_prob,
-            ci_kind=ci_kind,
-            kind=kind,
-            show_response_annotation=show_response_annotation,
-            has_draws=has_posterior_draws(bundle.predictions),
-        )
+        # The plotnine caption participates in its own layout; replacing that
+        # engine with Matplotlib tight layout cannot handle p9GridSpec.
+        return fig, ax
 
     def _plot_prior_checks(
         self,
