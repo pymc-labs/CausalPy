@@ -719,7 +719,17 @@ def test_native_calendar_features_keep_source_timezone(forecaster_class, cadence
     np.testing.assert_allclose(paths.values[:, :, 0], expected.to_numpy().T)
 
 
-@pytest.mark.parametrize("formula", ["y ~ 1 + y", "y ~ I(y.shift(1, fill_value=0))"])
+@pytest.mark.parametrize(
+    "formula",
+    [
+        "y ~ 1 + y",
+        "y ~ I(y.shift(1, fill_value=0))",
+        'y ~ 1 + Q("y")',
+        'Q("y") ~ y',
+        'y ~ I(Q("y").shift(1, fill_value=0))',
+        "np.log(y) ~ y",
+    ],
+)
 def test_observed_outcome_is_rejected_as_forecast_predictor(
     series, forecast_model, formula
 ):
@@ -727,3 +737,53 @@ def test_observed_outcome_is_rejected_as_forecast_predictor(
         ValueError, match="Configure outcome lags on ForecasterRecursive"
     ):
         cp.InterruptedTimeSeries(series, 70, formula, model=forecast_model)
+
+
+@pytest.mark.parametrize("dtype", ["Int64", "UInt64", "int64[pyarrow]"])
+def test_nullable_integer_time_column_uses_its_logical_grid(
+    series, forecast_model, dtype
+):
+    grid = pd.RangeIndex(100, 100 + 2 * len(series), 2)
+    data = series.assign(week=pd.array(grid, dtype=dtype))
+    start = grid[70]
+    exp = cp.InterruptedTimeSeries(
+        data, start, "y ~ 1 + t", time_column="week", model=forecast_model
+    ).fit()
+    reference = cp.InterruptedTimeSeries(
+        series.set_axis(grid), start, "y ~ 1 + t", model=forecast_model
+    ).fit()
+    paths = exp.result.counterfactual_paths
+    assert paths.obs_ind.to_index().dtype == data.week.dtype
+    np.testing.assert_array_equal(paths.obs_ind.to_index().to_numpy(), grid[70:])
+    np.testing.assert_array_equal(
+        paths.values, reference.result.counterfactual_paths.values
+    )
+
+
+@pytest.mark.parametrize("formula", ["y ~ 1", "y ~ 1 + t"])
+def test_arrow_microsecond_time_column_preserves_labels(
+    series, forecast_model, formula
+):
+    import pyarrow as pa
+
+    grid = pd.date_range("2026-01-01", periods=len(series), freq="D")
+    data = pa.table(
+        {
+            "date": pa.array(
+                grid.to_numpy(dtype="datetime64[us]"), type=pa.timestamp("us")
+            ),
+            "y": series.y,
+            "t": series.t,
+        }
+    )
+    exp = cp.InterruptedTimeSeries(
+        data, grid[70], formula, time_column="date", model=forecast_model
+    ).fit()
+    reference = cp.InterruptedTimeSeries(
+        series.set_axis(grid), grid[70], formula, model=forecast_model
+    ).fit()
+    paths = exp.result.counterfactual_paths
+    assert paths.obs_ind.to_index().equals(grid[70:].as_unit("us"))
+    np.testing.assert_array_equal(
+        paths.values, reference.result.counterfactual_paths.values
+    )

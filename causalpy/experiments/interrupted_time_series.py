@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import Term
+from patsy import DesignInfo, Term
 from sklearn.base import RegressorMixin
 
 from causalpy._arviz_compat import hdi_bounds
@@ -90,6 +90,22 @@ def _predictive_plot_series(
         "impact": impact,
         "cumulative_impact": impact.cumsum("obs_ind"),
     }
+
+
+def _formula_column_references(design: DesignInfo, columns: pd.Index) -> set[str]:
+    """Find data columns named directly or through Patsy's literal Q() syntax."""
+    references: set[str] = set()
+    for factor in design.factor_infos:
+        for node in ast.walk(ast.parse(factor.name(), mode="eval")):
+            match node:
+                case ast.Name(id=name):
+                    references.add(name)
+                case ast.Call(
+                    func=ast.Name(id="Q") | ast.Attribute(attr="Q"),
+                    args=[ast.Constant(value=str() as quoted)],
+                ):
+                    references.add(quoted)
+    return references.intersection(columns)
 
 
 class InterruptedTimeSeries(BaseExperiment[CausalResult]):
@@ -355,12 +371,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 raise ValueError(
                     "SkforecastModel requires a single continuous outcome."
                 )
-            outcomes = {factor.name() for factor in y_info.factor_infos}
-            if y_info.factor_infos.keys() & x_info.factor_infos.keys() or any(
-                isinstance(node, ast.Name) and node.id in outcomes
-                for factor in x_info.factor_infos
-                for node in ast.walk(ast.parse(factor.name(), mode="eval"))
-            ):
+            outcomes = _formula_column_references(y_info, training.columns)
+            if outcomes & _formula_column_references(x_info, training.columns):
                 raise ValueError(
                     "SkforecastModel cannot use the observed outcome as a formula predictor. "
                     "Configure outcome lags on ForecasterRecursive instead."

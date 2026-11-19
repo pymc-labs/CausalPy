@@ -43,6 +43,11 @@ def _dated_grid(index: pd.DatetimeIndex) -> pd.DatetimeIndex | None:
     return None
 
 
+def _same_labels(left: pd.Index, right: pd.Index) -> bool:
+    """Compare ordered observation labels independently of pandas storage dtype."""
+    return len(left) == len(right) and bool((left == right).all())
+
+
 def _native_calendar_matches(
     index: pd.DatetimeIndex, pre_size: int, window_size: int
 ) -> bool:
@@ -52,8 +57,8 @@ def _native_calendar_matches(
     # skforecast depending on which timestamps its lag window contains.
     for end in range(window_size, pre_size + 1):
         stop = end + 1 if end < pre_size else len(index)
-        if not expand_index(index[end - window_size : end], stop - end).equals(
-            index[end:stop]
+        if not _same_labels(
+            expand_index(index[end - window_size : end], stop - end), index[end:stop]
         ):
             return False
     return True
@@ -97,7 +102,7 @@ def _regular_index(
         step = second - start
         if step > 0:
             candidate = pd.RangeIndex(start, last + step, step, name=index.name)
-            if candidate.equals(index):
+            if _same_labels(candidate, index):
                 return candidate
     raise BadIndexException(
         "SkforecastModel requires a regular datetime or integer grid without gaps."
@@ -116,7 +121,7 @@ def _exog(X: xr.DataArray, index: pd.Index) -> pd.DataFrame | None:
             if index.tz is None
             else original.tz_convert(index.tz)
         )
-    if not original.equals(index):
+    if not _same_labels(original, index):
         raise BadIndexException(
             "Observations and exogenous inputs must align to the regular forecast grid."
         )
@@ -216,7 +221,7 @@ class _SkforecastAdapter(ModelAdapter):
                 last_window=outcome.iloc[i - window_size : i],
                 exog=None if exog is None else exog.iloc[i : i + 1],
             )
-            if not prediction.index.equals(index[i : i + 1]):
+            if not _same_labels(prediction.index, index[i : i + 1]):
                 raise BadIndexException(
                     "One-step prediction is misaligned to its observation."
                 )
@@ -297,7 +302,7 @@ class _SkforecastAdapter(ModelAdapter):
             use_in_sample_residuals=False,
             use_binned_residuals=False,
         )
-        if not paths.index.equals(future_grid):
+        if not _same_labels(paths.index, future_grid):
             raise BadIndexException(
                 "Simulated paths are misaligned to the observation grid."
             )
