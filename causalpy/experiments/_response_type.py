@@ -16,9 +16,12 @@
 from typing import Any, Literal
 
 from matplotlib.figure import Figure
+from matplotlib.font_manager import FontProperties
+from matplotlib.textpath import TextToPath
 
 ResponseType = Literal["expectation", "prediction"]
 Quantity = Literal["mu", "y_hat"]
+_NOTE_FONT_SIZE = 8
 
 
 def check_response_type(response_type: str) -> ResponseType:
@@ -59,6 +62,24 @@ def quantity_for(response_type: str) -> Quantity:
     return "mu" if checked == "expectation" else "y_hat"
 
 
+def _wrap_response_note(note: str, width_inches: float) -> str:
+    """Wrap fixed-size notes using actual font widths in physical points."""
+    font = FontProperties(size=_NOTE_FONT_SIZE)
+    metrics = TextToPath()
+    lines: list[str] = []
+    line = ""
+    for word in note.split():
+        candidate = f"{line} {word}".strip()
+        width, _, _ = metrics.get_text_width_height_descent(candidate, font, False)
+        if line and width > width_inches * 72:
+            lines.append(line)
+            line = word
+        else:
+            line = candidate
+    lines.append(line)
+    return "\n".join(lines)
+
+
 def annotation_text(
     *,
     response_type: str,
@@ -69,6 +90,7 @@ def annotation_text(
     kind: str,
     has_draws: bool,
     show_response_annotation: bool | None = True,
+    width_inches: float | None = None,
 ) -> str | None:
     """Figure note naming the drawn quantity and, for ribbons, the interval.
 
@@ -89,6 +111,8 @@ def annotation_text(
     show_response_annotation : bool or None
         ``None`` labels draw-based ribbons; ``True`` always labels and
         ``False`` suppresses the note.
+    width_inches : float, optional
+        Available note width. Wrap using the fixed note font when provided.
     has_draws : bool
         ``False`` names a point prediction instead of an interval.
 
@@ -102,17 +126,26 @@ def annotation_text(
     ):
         return None
     if not has_draws:
-        return "Point prediction (no observation-noise interval)."
-    checked = check_response_type(response_type)
-    if checked == "expectation":
-        label = f"{group} conditional expectation (excludes observation noise)"
+        note = "Point prediction (no observation-noise interval)."
     else:
-        label = f"{group} predictive {target} (includes observation noise)"
-    if kind != "ribbon":
-        return f"Drawn uncertainty: {label}"
-    interval = "ETI" if ci_kind == "eti" else "HDI"
-    percent = f"{ci_prob * 100:g}%"
-    return f"Intervals: {percent} {interval} of the {label}"
+        checked = check_response_type(response_type)
+        if checked == "expectation":
+            label = (
+                "expected difference"
+                if target == "difference"
+                else "conditional expectation"
+            )
+            label = f"{group} {label} (excludes observation noise)"
+        else:
+            label = f"{group} predictive {target} (includes observation noise)"
+        subject = "Difference" if target == "difference" else "Outcome"
+        if kind != "ribbon":
+            note = f"{subject} uncertainty: {label}"
+        else:
+            interval = "ETI" if ci_kind == "eti" else "HDI"
+            percent = f"{ci_prob * 100:g}%"
+            note = f"{subject} intervals: {percent} {interval} of the {label}"
+    return note if width_inches is None else _wrap_response_note(note, width_inches)
 
 
 def finish_response_plot(
@@ -168,10 +201,14 @@ def finish_response_plot(
         kind=kind,
         has_draws=has_draws,
         show_response_annotation=show_response_annotation,
+        width_inches=fig.get_figwidth() * 0.98,
     )
     if note is None:
         return fig, axes
-    fig.text(0.01, 0.01, note, ha="left", va="bottom", fontsize=8)
-    # Reserve space for the note and lay out labels added after the panels.
-    fig.set_layout_engine("tight", rect=(0, 0.065, 1, 1))
+    artist = fig.text(
+        0.01, 0.01, note, ha="left", va="bottom", fontsize=_NOTE_FONT_SIZE
+    )
+    # Reserve the wrapped note's actual height before laying out panel labels.
+    bounds = artist.get_window_extent().transformed(fig.transFigure.inverted())
+    fig.set_layout_engine("tight", rect=(0, bounds.y1 + 0.015, 1, 1))
     return fig, axes

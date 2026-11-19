@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
+from matplotlib.font_manager import FontProperties
 from plotnine import (
     aes,
     element_text,
@@ -40,6 +41,7 @@ from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.experiments._results import DiscontinuityResult
 from causalpy.experiments._response_type import (
+    _NOTE_FONT_SIZE,
     annotation_text,
     check_response_type,
     finish_response_plot,
@@ -629,6 +631,10 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         if self.donut_hole > 0:
             color_values["donut boundary"] = "orange"
 
+        if figsize is not None:
+            p += theme(figure_size=figsize)
+        width = p.theme.getp("figure_size")[0]
+        margins = p.theme.getp("plot_margin_left") + p.theme.getp("plot_margin_right")
         note = annotation_text(
             response_type=response_type,
             group=group,
@@ -637,13 +643,24 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
             kind=kind,
             has_draws=with_uncertainty,
             show_response_annotation=show_response_annotation,
+            width_inches=width * (1 - margins),
         )
+        font = FontProperties(size=_NOTE_FONT_SIZE)
         fig = (
             p
             + scale_color_manual(values=color_values)
             + guides(color=False)
             + labs(title=title, x=xcol, y=ycol, caption=note)
-            + theme(plot_caption=element_text(size=8, ha="left"))
+            + theme(
+                plot_caption_position="plot",
+                plot_caption=element_text(
+                    size=_NOTE_FONT_SIZE,
+                    ha="left",
+                    family=font.get_family(),
+                    style=font.get_style(),
+                    weight=font.get_weight(),
+                ),
+            )
         ).draw()
         # ``draw()`` closes the figure on exit, which unregisters it from
         # pyplot; re-register it so ``plt.show()`` and Jupyter display it.

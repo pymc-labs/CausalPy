@@ -1041,7 +1041,7 @@ def test_forecast_predictive_display_preserves_expectation_summary(forecast_resu
     assert frame.index.equals(experiment.data.index)
     assert frame.filter(like="hdi").notna().all().all()
     fig, axes = experiment.plot(response_type="prediction", ci_prob=0.5, show=False)
-    assert "Predictive" in axes[1].get_ylabel()
+    assert "Predictive difference" in axes[1].get_title()
     assert experiment.result is stored
     pd.testing.assert_frame_equal(experiment.effect_summary().table, summary)
     plt.close(fig)

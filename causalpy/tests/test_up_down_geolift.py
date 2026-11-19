@@ -429,7 +429,7 @@ def test_up_down_predictive_plot_and_export_keep_geo_alignment(
     )
     assert any(f"{group} predictive outcome" in text.get_text() for text in fig.texts)
     if group == "posterior":
-        assert "Predictive" in axes[1].get_ylabel()
+        assert "Predictive difference" in axes[1].get_title()
     assert result._require_bundle(group) is stored
     pd.testing.assert_frame_equal(
         result.effect_summary(treated_unit=unit).table, summary

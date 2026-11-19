@@ -119,7 +119,7 @@ def test_outcome_plots_select_target_without_changing_effect_results(
         show=False,
         show_response_annotation=False,
     )
-    assert not any("Intervals:" in note.get_text() for note in fig.texts)
+    assert not any("intervals:" in note.get_text() for note in fig.texts)
     plt.close(fig)
 
 
@@ -209,7 +209,7 @@ def test_its_predictive_export_and_render_share_aligned_draw_trajectories(monkey
 
     monkeypatch.setattr(module, "plot_posterior_over_x", capture)
     fig, axes = experiment.plot(response_type="prediction", ci_prob=0.5, show=False)
-    assert "Predictive" in axes[1].get_ylabel()
+    assert "Predictive difference" in axes[1].get_title()
     assert any(
         np.array_equal(draws.values, selected.impact_post.values) for draws in plotted
     )
@@ -573,4 +573,90 @@ def test_rd_point_response_note_saves_with_native_caption(rd_data, tmp_path):
     figure, _axis = experiment.plot(show_response_annotation=True, show=False)
     figure.savefig(tmp_path / "rd-point.png")
     assert any("Point prediction" in note.get_text() for note in figure.texts)
+    plt.close(figure)
+
+
+@pytest.mark.parametrize("method", ["its", "did", "rd"])
+@pytest.mark.parametrize("response_type", ["expectation", "prediction"])
+def test_response_notes_fit_compact_saved_figures(
+    method, response_type, mock_pymc_sample, tmp_path
+):
+    # Mocked sampling exercises real public rendering and note geometry, not inference.
+    model = cp.pymc_models.LinearRegression(
+        sample_kwargs={"draws": 20, "tune": 20, "chains": 2, "cores": 1}
+    )
+    if method == "rd":
+        experiment = cp.RegressionDiscontinuity(
+            cp.load_data("rd"),
+            formula="y ~ 1 + x + treated",
+            treatment_threshold=0.5,
+            model=model,
+        ).fit()
+    elif method == "its":
+        data = pd.DataFrame(
+            {"t": range(16), "y": np.arange(16) + 2.0},
+            index=pd.date_range("2020-01-01", periods=16),
+        )
+        experiment = cp.InterruptedTimeSeries(
+            data,
+            data.index[8],
+            formula="y ~ 1 + t",
+            model=model,
+        ).fit()
+    else:
+        data = pd.DataFrame(
+            [
+                {
+                    "group": group,
+                    "unit": f"u{group}-{i}",
+                    "t": post,
+                    "post_treatment": post,
+                    "y": 1.0 + group + post + group * post,
+                }
+                for group in (0, 1)
+                for post in (0, 1)
+                for i in range(4)
+            ]
+        )
+        experiment = cp.DifferenceInDifferences(
+            data,
+            formula="y ~ 1 + group*post_treatment",
+            time_variable_name="t",
+            group_variable_name="group",
+            model=model,
+        ).fit()
+    figure, _axes = experiment.plot(
+        response_type=response_type,
+        figsize=(4, 4),
+        show_response_annotation=True,
+        show=False,
+    )
+    figure.savefig(tmp_path / f"{method}-compact.png")
+    renderer = figure.canvas.get_renderer()
+    note = next(text for text in figure.texts if "observation" in text.get_text())
+    bounds = note.get_window_extent(renderer)
+    assert bounds.x0 >= 0 and bounds.x1 <= figure.bbox.width
+    assert bounds.y0 >= 0 and bounds.y1 <= figure.bbox.height
+    assert all(
+        not bounds.overlaps(axis.get_tightbbox(renderer)) for axis in figure.axes
+    )
+    plt.close(figure)
+
+
+def test_staggered_default_note_names_expected_difference(staggered_experiment):
+    experiment = staggered_experiment
+    stored = experiment.result
+    draws = xr.concat([stored.y_pred] * 4, dim="draw")
+    # Reuse its numerical ATT table with draw-shaped estimates to exercise the uncertainty note.
+    event = stored.att_event_time.copy()
+    event["att_lower"] = event.att - 1
+    event["att_upper"] = event.att + 1
+    experiment._assign_bundle(
+        "posterior", replace(stored, y_pred=draws, att_event_time=event)
+    )
+    figure, _axes = experiment.plot(show=False)
+    note = " ".join(figure.texts[0].get_text().split())
+    assert note.startswith("Difference intervals:")
+    assert "expected difference" in note
+    assert "conditional expectation" not in note
     plt.close(figure)

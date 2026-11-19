@@ -1039,10 +1039,10 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             format_date_axes(ax, full_index)
 
         if response_type == "prediction" and group == "posterior":
-            ax[1].set(title="Predictive difference", ylabel="Predictive\ndifference")
+            ax[1].set(title="Predictive difference", ylabel="Difference")
             ax[2].set(
-                title="Cumulative predictive difference",
-                ylabel="Cumulative predictive\ndifference",
+                title="Cum. predictive difference",
+                ylabel="Cum.\ndifference",
             )
             legend = ax[0].get_legend()
             if legend is not None:
