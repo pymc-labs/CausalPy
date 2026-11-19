@@ -36,6 +36,7 @@ __all__ = [
     "CausalResult",
     "CoefficientResult",
     "DiscontinuityResult",
+    "EventStudyResult",
     "GroupComparisonScenario",
     "KinkResult",
     "ResultBundle",
@@ -137,6 +138,19 @@ class StaggeredDifferenceInDifferencesResult:
     score: pd.Series | None = None
 
 
+@dataclass(frozen=True)
+class EventStudyResult:
+    """Result bundle for :class:`~causalpy.experiments.event_study.EventStudy`.
+
+    ``event_time_effects`` has dimensions ``("chain", "draw", "event_time")``
+    and includes the reference event time as exact zeros. Nothing derived from
+    draws is stored on the experiment object.
+    """
+
+    event_time_effects: xr.DataArray
+    score: pd.Series | None = None
+
+
 #: Every bundle type the raising ``result`` / ``prior_result`` properties may
 #: return, one per experiment family. Experiments without bundles (IV, IPW,
 #: PanelRegression) never produce these.
@@ -144,6 +158,7 @@ ResultBundle = (
     CausalResult
     | CoefficientResult
     | DiscontinuityResult
+    | EventStudyResult
     | KinkResult
     | StaggeredDifferenceInDifferencesResult
     | SyntheticDifferenceInDifferencesResult

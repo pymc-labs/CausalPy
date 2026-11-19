@@ -20,7 +20,10 @@ import pandas as pd
 import pytest
 
 import causalpy as cp
-from causalpy.data.simulate_data import generate_staggered_did_data
+from causalpy.data.simulate_data import (
+    generate_event_study_data,
+    generate_staggered_did_data,
+)
 from causalpy.pymc_models import (
     InstrumentalVariableRegression,
     LinearRegression,
@@ -87,6 +90,20 @@ def sample_kwargs():
                 "formula": "y ~ 1 + group*post_treatment",
                 "time_variable_name": "t",
                 "group_variable_name": "group",
+            },
+            LinearRegression,
+        ),
+        (
+            cp.EventStudy,
+            {
+                "data": lambda: generate_event_study_data(
+                    n_units=8, n_time=8, treatment_time=4, seed=1
+                ),
+                "formula": "y ~ 1 + C(unit) + C(time)",
+                "unit_col": "unit",
+                "time_col": "time",
+                "treat_time_col": "treat_time",
+                "event_window": (-2, 2),
             },
             LinearRegression,
         ),
@@ -177,6 +194,7 @@ def sample_kwargs():
     ],
     ids=[
         "DifferenceInDifferences",
+        "EventStudy",
         "InterruptedTimeSeries",
         "RegressionDiscontinuity",
         "RegressionKink",
