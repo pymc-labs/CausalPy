@@ -30,7 +30,11 @@ from causalpy.experiments._response_type import (
 )
 from causalpy.experiments._results import CausalResult
 from causalpy.experiments.interrupted_time_series import InterruptedTimeSeries
-from causalpy.experiments.model_adapter import PyMCModelAdapter
+from causalpy.experiments.model_adapter import (
+    PyMCModelAdapter,
+    SklearnModelAdapter,
+    _extract_response,
+)
 
 
 def _draws(values, name):
@@ -288,3 +292,32 @@ def test_sklearn_did_prediction_mode_does_not_silently_reuse_mu_bands():
     with pytest.raises(ValueError, match="no observation-noise draws"):
         experiment.plot(response_type="prediction")
     assert experiment.result.causal_impact == stored
+
+
+def test_point_estimate_adapter_response_contract():
+    """Expected draws stay canonical; unsupported targets fail explicitly."""
+    X = xr.DataArray([[1.0, 0.0], [1.0, 1.0]], dims=("obs_ind", "coeffs"))
+    y = xr.DataArray([[2.0], [5.0]], dims=("obs_ind", "treated_units"))
+    adapter = SklearnModelAdapter(LinearRegression(fit_intercept=False))
+    adapter.fit(X, y)
+    expected = adapter.predict_response(X)
+    xr.testing.assert_equal(expected, adapter.predict(X))
+    assert expected.dims == ("chain", "draw", "obs_ind", "treated_units")
+    assert not adapter.supports_observation_noise
+    with pytest.raises(ValueError, match="no observation-noise draws"):
+        adapter.predict_response(X, quantity="y_hat")
+    with pytest.raises(ValueError, match="quantity must be"):
+        adapter.predict_response(X, quantity="misspelled")
+
+
+@pytest.mark.parametrize("quantity", ["mu", "y_hat"])
+def test_response_extractor_rejects_missing_target_instead_of_falling_back(quantity):
+    """A malformed backend container cannot silently substitute the other target."""
+    other = "y_hat" if quantity == "mu" else "mu"
+    tree = xr.DataTree.from_dict(
+        {"posterior_predictive": xr.Dataset({other: _draws([[1, 2], [3, 4]], other)})}
+    )
+    with pytest.raises(ValueError, match=f"no '{quantity}' draws"):
+        _extract_response(tree, quantity)
+    with pytest.raises(ValueError, match="quantity must be"):
+        _extract_response(tree, "misspelled")

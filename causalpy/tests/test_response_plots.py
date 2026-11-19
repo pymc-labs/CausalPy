@@ -355,12 +355,15 @@ def test_forecast_adapter_selects_outcomes_and_rejects_prior():
 
     adapter = PyMCForecastAdapter.__new__(PyMCForecastAdapter)
     adapter._model = Model()
+    assert adapter.supports_observation_noise
     xr.testing.assert_equal(
         adapter.predict_response(None, quantity="y_hat"),
         tree["posterior_predictive"]["y_hat"],
     )
     with pytest.raises(cp.GroupNotSampledException):
         adapter.predict_response(None, quantity="y_hat", group="prior")
+    with pytest.raises(ValueError, match="quantity must be"):
+        adapter.predict_response(np.ones((2, 1)), quantity="misspelled")
 
 
 @pytest.mark.parametrize("group", ["prior", "posterior"])

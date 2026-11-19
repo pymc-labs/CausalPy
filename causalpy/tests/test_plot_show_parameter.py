@@ -452,3 +452,28 @@ def test_rd_plot_figure_registered_with_pyplot(rd_data):
     fig, _ = result.plot(show=False)
     assert fig.number in plt.get_fignums()
     plt.close("all")
+
+
+@pytest.mark.integration
+def test_outside_legend_without_response_annotation_remains_on_canvas(did_data):
+    """Point-estimate plots reserve room for an external legend without a footer."""
+    result = cp.DifferenceInDifferences(
+        did_data,
+        formula="y ~ 1 + group*post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(fit_intercept=False),
+    ).fit()
+    figure, axis = result.plot(
+        show=False,
+        legend_kwargs={"loc": "upper left", "bbox_to_anchor": (1.04, 1)},
+    )
+    figure.canvas.draw()
+    legend = axis.get_legend()
+    assert legend is not None
+    assert legend.get_texts()
+    assert (
+        legend.get_window_extent(figure.canvas.get_renderer()).x1 <= figure.bbox.width
+    )
+    assert not figure.texts
+    plt.close(figure)
