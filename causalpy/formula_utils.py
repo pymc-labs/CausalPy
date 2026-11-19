@@ -202,7 +202,9 @@ def build_formula_matrices(
 def _build_formula_predictors(description: ModelDesc, data: pd.DataFrame) -> Any:
     """Fit only the Patsy RHS using the same formula normalization."""
     data_for_patsy = _normalize_patsy_data(data)
-    eval_env = EvalEnvironment.capture(1).with_outer_namespace(_FORMULA_TRANSFORMS)
+    # The data frame supplies columns. Only explicitly supported expression
+    # helpers enter the namespace retained by Patsy's fitted design.
+    eval_env = EvalEnvironment([_FORMULA_TRANSFORMS | {"np": np, "pd": pd}])
     terms = _rewrite_datetime_terms(description.rhs_termlist, _datetime_columns(data))
     return dmatrix(
         ModelDesc([], terms), data_for_patsy, eval_env=eval_env, NA_action="raise"

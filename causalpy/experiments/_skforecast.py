@@ -18,6 +18,7 @@ from __future__ import annotations
 import warnings
 from collections.abc import Callable
 from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import numpy as np
@@ -186,6 +187,18 @@ def _use_observed_dates(
         forecaster.weight_func = observed_weights
 
 
+@dataclass(frozen=True, slots=True)
+class _CalibratedForecast:
+    forecaster: Any
+    predictions_pre: xr.DataArray
+    last_window: pd.Series
+    future_grid: pd.Index
+    score: pd.Series
+    calibration_count: int
+    residual_pool_count: int
+    calibration_degenerate: bool
+
+
 class _SkforecastAdapter(ModelAdapter):
     def __init__(self, model: SkforecastModel) -> None:
         _validate_recursive_forecaster(model.forecaster)
@@ -194,13 +207,7 @@ class _SkforecastAdapter(ModelAdapter):
         self._fit_inputs: (
             tuple[xr.DataArray, xr.DataArray, dict[str, Any] | None] | None
         ) = None
-        self._forecaster: Any = None
-        self._pre_prediction: xr.DataArray
-        self._last_window: pd.Series
-        self._score: pd.Series
-        self._calibration_count: int
-        self._residual_pool_count: int
-        self._calibration_degenerate: bool
+        self._fitted: _CalibratedForecast | None = None
 
     @property
     def model(self) -> SkforecastModel:
@@ -224,7 +231,7 @@ class _SkforecastAdapter(ModelAdapter):
 
     @property
     def has_posterior(self) -> bool:
-        return self._forecaster is not None
+        return self._fitted is not None
 
     def build(
         self, X: xr.DataArray, y: xr.DataArray, *, coords: dict[str, Any] | None = None
@@ -254,7 +261,9 @@ class _SkforecastAdapter(ModelAdapter):
                 f"({self.calibration_size}) rows."
             )
         pre_index = y.get_index("obs_ind")
-        full_index = (coords or {}).get("forecast_index", pre_index)
+        full_index = (coords or {}).get("forecast_index")
+        if not isinstance(full_index, pd.Index):
+            raise ValueError("SkforecastModel requires the full ITS observation index.")
         grid = _regular_index(full_index, len(pre_index), window_size)
         if (
             isinstance(grid, pd.DatetimeIndex)
@@ -315,15 +324,19 @@ class _SkforecastAdapter(ModelAdapter):
                 UserWarning,
                 stacklevel=2,
             )
-        self._pre_prediction = y.copy(data=predictions.to_numpy()[:, None]).expand_dims(
+        predictions_pre = y.copy(data=predictions.to_numpy()[:, None]).expand_dims(
             chain=[0], draw=[0]
         )
-        self._last_window = outcome.iloc[-window_size:]
-        self._score = pd.Series({"unit_0_r2": r2_score(actual, predicted)})
-        self._calibration_count = len(actual)
-        self._residual_pool_count = residuals.size
-        self._calibration_degenerate = degenerate
-        self._forecaster = forecaster
+        self._fitted = _CalibratedForecast(
+            forecaster=forecaster,
+            predictions_pre=predictions_pre,
+            last_window=outcome.iloc[-window_size:],
+            future_grid=grid[len(pre_index) :],
+            score=pd.Series({"unit_0_r2": r2_score(actual, predicted)}),
+            calibration_count=len(actual),
+            residual_pool_count=residuals.size,
+            calibration_degenerate=degenerate,
+        )
 
     def predict(
         self,
@@ -335,34 +348,33 @@ class _SkforecastAdapter(ModelAdapter):
     ) -> xr.DataArray:
         if out_of_sample:
             return self.predict_counterfactual(X, group=group)[0]
-        self._require_fitted(group)
-        return self._pre_prediction
+        return self._require_fitted(group).predictions_pre
 
-    def _require_fitted(self, group: Literal["prior", "posterior"]) -> None:
-        if group != "posterior" or self._forecaster is None:
+    def _require_fitted(
+        self, group: Literal["prior", "posterior"]
+    ) -> _CalibratedForecast:
+        if group != "posterior" or self._fitted is None:
             raise GroupNotSampledException(
                 "SkforecastModel requires a successful fit() and has no prior draws.",
                 group=group,
             )
+        return self._fitted
 
     def predict_counterfactual(
         self, X: xr.DataArray, *, group: Literal["prior", "posterior"]
     ) -> tuple[xr.DataArray, xr.DataArray]:
-        from skforecast.utils import expand_index
-
-        self._require_fitted(group)
+        fitted = self._require_fitted(group)
         index = X.get_index("obs_ind")
-        future_grid = expand_index(self._last_window.index, steps=len(index))
-        paths = self._forecaster.predict_bootstrapping(
+        paths = fitted.forecaster.predict_bootstrapping(
             steps=len(index),
-            last_window=self._last_window,
-            exog=_exog(X, future_grid),
+            last_window=fitted.last_window,
+            exog=_exog(X, fitted.future_grid),
             n_boot=self._model.n_boot,
             random_state=self._model.random_state,
             use_in_sample_residuals=False,
             use_binned_residuals=False,
         )
-        if not _same_labels(paths.index, future_grid):
+        if not _same_labels(paths.index, fitted.future_grid):
             raise BadIndexException(
                 "Simulated paths are misaligned to the observation grid."
             )
@@ -377,15 +389,15 @@ class _SkforecastAdapter(ModelAdapter):
             coords={
                 "simulation": np.arange(self._model.n_boot),
                 "obs_ind": index,
-                "treated_units": self._pre_prediction.treated_units,
+                "treated_units": fitted.predictions_pre.treated_units,
             },
             attrs={
                 "calibration_size": self.calibration_size,
-                "calibration_count": self._calibration_count,
-                "residual_pool_count": self._residual_pool_count,
-                "calibration_degenerate": self._calibration_degenerate,
-                "forecaster": type(self._forecaster).__name__,
-                "estimator": type(self._forecaster.estimator).__name__,
+                "calibration_count": fitted.calibration_count,
+                "residual_pool_count": fitted.residual_pool_count,
+                "calibration_degenerate": fitted.calibration_degenerate,
+                "forecaster": type(fitted.forecaster).__name__,
+                "estimator": type(fitted.forecaster.estimator).__name__,
             },
         )
         point = trajectories.mean("simulation", keep_attrs=False).expand_dims(
@@ -396,8 +408,7 @@ class _SkforecastAdapter(ModelAdapter):
     def score(
         self, X: Any, y: Any, *, coords: dict[str, Any] | None = None
     ) -> pd.Series:
-        self._require_fitted("posterior")
-        return self._score
+        return self._require_fitted("posterior").score
 
     def coefficients(
         self, *, group: Literal["prior", "posterior"] = "posterior"

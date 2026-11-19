@@ -65,25 +65,24 @@ def _stable_ratio(
 
 def _effect_rows(
     impact: xr.DataArray,
-    paths: xr.DataArray,
     prob: float,
     *,
     cumulative: bool,
-    relative: bool,
+    counterfactual: xr.DataArray | None = None,
 ) -> dict[str, dict[str, float]]:
     average = _effect_interval(impact.mean("obs_ind"), prob)
     rows = {"average": average}
-    if relative:
+    if counterfactual is not None:
         # Match the sklearn average of period percentages, within each path.
-        average_lift = 100 * _stable_ratio(impact, paths, prob).mean(
+        average_lift = 100 * _stable_ratio(impact, counterfactual, prob).mean(
             "obs_ind", skipna=False
         )
         average.update(_effect_interval(average_lift, prob, prefix="relative_"))
     if cumulative:
         total = impact.sum("obs_ind")
         cumulative_row = _effect_interval(total, prob)
-        if relative:
-            total_lift = 100 * _stable_ratio(total, paths.sum("obs_ind"), prob)
+        if counterfactual is not None:
+            total_lift = 100 * _stable_ratio(total, counterfactual.sum("obs_ind"), prob)
             cumulative_row.update(
                 _effect_interval(total_lift, prob, prefix="relative_")
             )
@@ -160,7 +159,10 @@ def _summarize_realized_effect(
     prefix: str,
 ) -> EffectSummary:
     rows = _effect_rows(
-        observed - paths, paths, prob, cumulative=cumulative, relative=relative
+        observed - paths,
+        prob,
+        cumulative=cumulative,
+        counterfactual=paths if relative else None,
     )
     lines = [
         f"{prefix} includes {_observations_text(paths)}.",
@@ -208,10 +210,9 @@ def _compare_realized_effects(
     ):
         effects = _effect_rows(
             impact,
-            counterfactual,
             prob,
             cumulative=cumulative,
-            relative=relative,
+            counterfactual=counterfactual if relative else None,
         )
         rows[period] = effects["average"].copy()
         period_label = period.replace("_", "-")
@@ -258,11 +259,9 @@ def _analyze_realized_persistence(
         ("post", "Post-intervention", post),
     ):
         print(f"{label} period includes {_observations_text(impact)}.")
-        for metric, values in (
-            ("mean", impact.mean("obs_ind")),
-            ("total", impact.sum("obs_ind")),
-        ):
-            row = _effect_interval(values, prob)
+        effects = _effect_rows(impact, prob, cumulative=True)
+        for metric, estimand in (("mean", "average"), ("total", "cumulative")):
+            row = effects[estimand]
             key = f"{metric}_effect_{period}"
             result[key] = row["mean"]
             result[f"{key}_pi_lower"] = row["pi_lower"]

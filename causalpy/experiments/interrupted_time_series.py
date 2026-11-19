@@ -188,7 +188,9 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         (including Patsy's literal ``Q()`` syntax). Use the forecaster's
         ``transformer_y`` for a reversible response transformation. Supply
         RHS covariates whose untreated values are known throughout the
-        forecast. Use a Patsy stateful transform such as ``center(t)`` when
+        forecast. Predictor expressions can use the supplied covariate
+        columns, Patsy built-ins, ``np``, ``pd``, and CausalPy transforms.
+        Use a Patsy stateful transform such as ``center(t)`` when
         preprocessing should learn only from the training prefix. Configure
         outcome lags on the recursive forecaster. Observed outcome lags and
         treatment mediators carry intervention information into the forecast.

@@ -959,3 +959,30 @@ def test_quoted_outcome_with_native_transformer_stays_on_original_scale(
         exp.result.impact_post.values.ravel(),
         series.y.iloc[70:].to_numpy() - exp.result.predictions_post.values.ravel(),
     )
+
+
+def test_formula_namespace_does_not_include_experiment_locals(series, forecast_model):
+    with pytest.raises(ValueError, match="name 'pre' is not defined"):
+        cp.InterruptedTimeSeries(
+            series,
+            70,
+            "y ~ I(pd.concat([pre, post]).loc[t.index, 'y'])",
+            model=forecast_model,
+        )
+
+
+def test_explicit_formula_namespace_supports_stateful_and_numpy_terms(
+    series, forecast_model
+):
+    split = 70 - forecast_model.calibration_size
+    experiment = cp.InterruptedTimeSeries(
+        series, 70, "y ~ center(t) + I(np.sqrt(t))", model=forecast_model
+    )
+    np.testing.assert_allclose(
+        experiment.pre_design.X.sel(coeffs="center(t)").values,
+        series.t.iloc[:70] - series.t.iloc[:split].mean(),
+    )
+    np.testing.assert_allclose(
+        experiment.post_design.X.sel(coeffs="I(np.sqrt(t))").values,
+        np.sqrt(series.t.iloc[70:]),
+    )
