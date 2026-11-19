@@ -176,7 +176,7 @@ function draw() {
       postPoints,
     );
   label(
-    "POINTWISE IMPACT",
+    mobile ? "IMPACT" : "POINTWISE IMPACT",
     L,
     16,
     { "font-size": 9, "letter-spacing": 1 },
