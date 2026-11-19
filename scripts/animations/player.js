@@ -74,13 +74,13 @@ function draw() {
   title.textContent = "Fit, forecast, then estimate intervention impact";
   const desc = el("desc", { id: "chart-desc" });
   desc.textContent =
-    "A model is fitted to the first 48 months. Its counterfactual forecast is compared with 24 months of observed post-intervention data. Teal bands show 94% credible intervals for the expected untreated outcome.";
+    "A model is fitted to the first 48 months. Its counterfactual forecast is compared with 24 months of observed post-intervention data. Green bands show 94% credible intervals for the expected untreated outcome.";
   el("rect", {
     x: geometry.cut,
     y: T,
     width: w - R - geometry.cut,
     height: B - T,
-    fill: "#5ed8bf",
+    fill: "var(--accent)",
     opacity: 0.035,
   });
   [40, 60, 80, 100].forEach((v) => {
@@ -133,14 +133,14 @@ function draw() {
   el("polygon", {
     id: "fit-band",
     points: bandPoints(0, S),
-    fill: "#5ed8bf",
+    fill: "var(--accent)",
     opacity: 0.28,
     "clip-path": "url(#pre-clip)",
   });
   el("polygon", {
     id: "forecast-band",
     points: bandPoints(S - 1, N),
-    fill: "#5ed8bf",
+    fill: "var(--accent)",
     opacity: 0.28,
     "clip-path": "url(#post-clip)",
   });
@@ -148,7 +148,7 @@ function draw() {
     id: "fit",
     d: path(D.prediction, 0, S, y),
     fill: "none",
-    stroke: "#5ed8bf",
+    stroke: "var(--accent)",
     "stroke-width": 2.6,
     "clip-path": "url(#pre-clip)",
   });
@@ -156,7 +156,7 @@ function draw() {
     id: "forecast",
     d: path(D.prediction, S - 1, N, y),
     fill: "none",
-    stroke: "#5ed8bf",
+    stroke: "var(--accent)",
     "stroke-width": 2.6,
     "stroke-dasharray": "5 4",
     "clip-path": "url(#post-clip)",
@@ -236,7 +236,7 @@ function draw() {
         y: Math.min(iy(0), iy(D.impact[i])),
         width: barWidth,
         height: Math.abs(iy(0) - iy(D.impact[i])),
-        fill: "var(--mint)",
+        fill: "var(--accent)",
       },
       bars,
     );

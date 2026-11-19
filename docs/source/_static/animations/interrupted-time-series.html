@@ -11,7 +11,7 @@
   --line: #2a3d4a;
   --muted: #9bb1bf;
   --white: #f0f5f5;
-  --mint: #5ed8bf;
+  --accent: #81c240; /* Labs Sphinx theme secondary/logo green. */
   --amber: #ffc278;
 }
 * {
@@ -80,7 +80,7 @@ input:focus-visible {
   color: var(--white);
 }
 .step.active small {
-  color: var(--mint);
+  color: var(--accent);
 }
 .track {
   position: absolute;
@@ -93,13 +93,13 @@ input:focus-visible {
 .fill {
   display: block;
   height: 100%;
-  background: var(--mint);
+  background: var(--accent);
   transform: scaleX(0);
   transform-origin: left;
 }
 .play {
   font-size: 19px;
-  color: var(--mint);
+  color: var(--accent);
 }
 .scene {
   padding: 24px 28px 0;
@@ -134,13 +134,13 @@ input:focus-visible {
   background: #dce8ec;
   display: inline-block;
 }
-.swatch.mint {
-  background: var(--mint);
+.swatch.model {
+  background: var(--accent);
 }
 .swatch.impact {
   width: 7px;
   height: 12px;
-  background: var(--mint);
+  background: var(--accent);
 }
 svg {
   display: block;
@@ -180,7 +180,7 @@ h2 {
   display: block;
   font-size: 34px;
   letter-spacing: -1px;
-  color: var(--mint);
+  color: var(--accent);
   font-weight: 550;
 }
 .metric span {
@@ -208,7 +208,7 @@ h2 {
 }
 input[type="range"] {
   width: 100%;
-  accent-color: var(--mint);
+  accent-color: var(--accent);
   height: 3px;
   cursor: pointer;
 }
@@ -317,7 +317,7 @@ noscript {
             <span class="eyebrow">MONTHLY OUTCOME · SYNTHETIC DATA</span>
             <div class="legend">
               <span><i class="swatch observed"></i>Observed</span
-              ><span><i class="swatch mint"></i>Model + 94% band</span
+              ><span><i class="swatch model"></i>Model + 94% band</span
               ><span><i class="swatch impact"></i>Impact + 94% interval</span>
             </div>
           </div>
@@ -1056,13 +1056,13 @@ function draw() {
   title.textContent = "Fit, forecast, then estimate intervention impact";
   const desc = el("desc", { id: "chart-desc" });
   desc.textContent =
-    "A model is fitted to the first 48 months. Its counterfactual forecast is compared with 24 months of observed post-intervention data. Teal bands show 94% credible intervals for the expected untreated outcome.";
+    "A model is fitted to the first 48 months. Its counterfactual forecast is compared with 24 months of observed post-intervention data. Green bands show 94% credible intervals for the expected untreated outcome.";
   el("rect", {
     x: geometry.cut,
     y: T,
     width: w - R - geometry.cut,
     height: B - T,
-    fill: "#5ed8bf",
+    fill: "var(--accent)",
     opacity: 0.035,
   });
   [40, 60, 80, 100].forEach((v) => {
@@ -1115,14 +1115,14 @@ function draw() {
   el("polygon", {
     id: "fit-band",
     points: bandPoints(0, S),
-    fill: "#5ed8bf",
+    fill: "var(--accent)",
     opacity: 0.28,
     "clip-path": "url(#pre-clip)",
   });
   el("polygon", {
     id: "forecast-band",
     points: bandPoints(S - 1, N),
-    fill: "#5ed8bf",
+    fill: "var(--accent)",
     opacity: 0.28,
     "clip-path": "url(#post-clip)",
   });
@@ -1130,7 +1130,7 @@ function draw() {
     id: "fit",
     d: path(D.prediction, 0, S, y),
     fill: "none",
-    stroke: "#5ed8bf",
+    stroke: "var(--accent)",
     "stroke-width": 2.6,
     "clip-path": "url(#pre-clip)",
   });
@@ -1138,7 +1138,7 @@ function draw() {
     id: "forecast",
     d: path(D.prediction, S - 1, N, y),
     fill: "none",
-    stroke: "#5ed8bf",
+    stroke: "var(--accent)",
     "stroke-width": 2.6,
     "stroke-dasharray": "5 4",
     "clip-path": "url(#post-clip)",
@@ -1218,7 +1218,7 @@ function draw() {
         y: Math.min(iy(0), iy(D.impact[i])),
         width: barWidth,
         height: Math.abs(iy(0) - iy(D.impact[i])),
-        fill: "var(--mint)",
+        fill: "var(--accent)",
       },
       bars,
     );

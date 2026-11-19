@@ -4,7 +4,7 @@
   --line: #2a3d4a;
   --muted: #9bb1bf;
   --white: #f0f5f5;
-  --mint: #5ed8bf;
+  --accent: #81c240; /* Labs Sphinx theme secondary/logo green. */
   --amber: #ffc278;
 }
 * {
@@ -73,7 +73,7 @@ input:focus-visible {
   color: var(--white);
 }
 .step.active small {
-  color: var(--mint);
+  color: var(--accent);
 }
 .track {
   position: absolute;
@@ -86,13 +86,13 @@ input:focus-visible {
 .fill {
   display: block;
   height: 100%;
-  background: var(--mint);
+  background: var(--accent);
   transform: scaleX(0);
   transform-origin: left;
 }
 .play {
   font-size: 19px;
-  color: var(--mint);
+  color: var(--accent);
 }
 .scene {
   padding: 24px 28px 0;
@@ -127,13 +127,13 @@ input:focus-visible {
   background: #dce8ec;
   display: inline-block;
 }
-.swatch.mint {
-  background: var(--mint);
+.swatch.model {
+  background: var(--accent);
 }
 .swatch.impact {
   width: 7px;
   height: 12px;
-  background: var(--mint);
+  background: var(--accent);
 }
 svg {
   display: block;
@@ -173,7 +173,7 @@ h2 {
   display: block;
   font-size: 34px;
   letter-spacing: -1px;
-  color: var(--mint);
+  color: var(--accent);
   font-weight: 550;
 }
 .metric span {
@@ -201,7 +201,7 @@ h2 {
 }
 input[type="range"] {
   width: 100%;
-  accent-color: var(--mint);
+  accent-color: var(--accent);
   height: 3px;
   cursor: pointer;
 }
