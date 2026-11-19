@@ -727,6 +727,9 @@ def test_native_calendar_features_keep_source_timezone(forecaster_class, cadence
         'y ~ 1 + Q("y")',
         'Q("y") ~ y',
         'y ~ I(Q("y").shift(1, fill_value=0))',
+        'y ~ Q(name="y")',
+        'Q(name="y") ~ y',
+        'y ~ Q("" + "y")',
         "np.log(y) ~ y",
     ],
 )
@@ -785,5 +788,67 @@ def test_arrow_microsecond_time_column_preserves_labels(
     paths = exp.result.counterfactual_paths
     assert paths.obs_ind.to_index().equals(grid[70:].as_unit("us"))
     np.testing.assert_array_equal(
+        paths.values, reference.result.counterfactual_paths.values
+    )
+
+
+@pytest.mark.parametrize("origin", [20, 42])
+def test_nonexistent_native_wall_time_falls_back_to_elapsed_daily_grid(
+    series, forecaster_class, origin
+):
+    utc = pd.date_range("2026-03-01 01:30", periods=len(series), freq="D", tz="UTC")
+    local = utc.tz_convert("Europe/London")
+    model = SkforecastModel(forecaster_class(estimator=Ridge(), lags=1), 8, n_boot=10)
+    exp = cp.InterruptedTimeSeries(
+        series.set_axis(local), local[origin], "y ~ 1 + t", model=model
+    ).fit()
+    reference = cp.InterruptedTimeSeries(
+        series.set_axis(utc), utc[origin], "y ~ 1 + t", model=model
+    ).fit()
+    paths = exp.result.counterfactual_paths
+    assert paths.obs_ind.to_index().equals(local[origin:])
+    np.testing.assert_array_equal(
+        paths.values, reference.result.counterfactual_paths.values
+    )
+
+
+@pytest.mark.parametrize("time_of_day", ["04:00", "05:00"])
+def test_fallback_calendar_still_uses_observed_local_hour(
+    forecaster_class, time_of_day
+):
+    from skforecast.preprocessing import CalendarFeatures
+
+    index = pd.date_range(
+        f"2019-01-01 {time_of_day}", periods=90, freq="MS", tz="UTC"
+    ).tz_convert("America/New_York")
+    local_hour = index.hour.to_numpy(dtype=float)
+    data = pd.DataFrame(
+        {
+            "y": 30
+            + 8 * local_hour
+            + np.random.default_rng(186).normal(size=len(index)),
+            "local_hour": local_hour,
+        },
+        index=index,
+    )
+    wrapper = SkforecastModel(
+        forecaster_class(
+            estimator=Ridge(),
+            lags=1,
+            calendar_features=CalendarFeatures(features=["hour"], encoding=None),
+        ),
+        calibration_size=15,
+        n_boot=20,
+    )
+    manual = SkforecastModel(
+        forecaster_class(estimator=Ridge(), lags=1), calibration_size=15, n_boot=20
+    )
+    exp = cp.InterruptedTimeSeries(data, index[63], "y ~ 1", model=wrapper).fit()
+    reference = cp.InterruptedTimeSeries(
+        data, index[63], "y ~ 0 + local_hour", model=manual
+    ).fit()
+    paths = exp.result.counterfactual_paths
+    assert paths.obs_ind.to_index().equals(index[63:])
+    np.testing.assert_allclose(
         paths.values, reference.result.counterfactual_paths.values
     )

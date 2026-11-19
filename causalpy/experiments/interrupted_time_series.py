@@ -20,7 +20,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 from matplotlib import pyplot as plt
-from patsy import DesignInfo, Term
+from patsy import DesignInfo, PatsyError, Term
 from sklearn.base import RegressorMixin
 
 from causalpy._arviz_compat import hdi_bounds
@@ -100,12 +100,43 @@ def _formula_column_references(design: DesignInfo, columns: pd.Index) -> set[str
             match node:
                 case ast.Name(id=name):
                     references.add(name)
-                case ast.Call(
-                    func=ast.Name(id="Q") | ast.Attribute(attr="Q"),
-                    args=[ast.Constant(value=str() as quoted)],
+                case (
+                    ast.Call(
+                        func=ast.Name(id="Q") | ast.Attribute(attr="Q"),
+                        args=[ast.Constant(value=str() as quoted)],
+                    )
+                    | ast.Call(
+                        func=ast.Name(id="Q") | ast.Attribute(attr="Q"),
+                        keywords=[
+                            ast.keyword(
+                                arg="name", value=ast.Constant(value=str() as quoted)
+                            )
+                        ],
+                    )
                 ):
                     references.add(quoted)
     return references.intersection(columns)
+
+
+def _replay_forecast_design(
+    y_info: DesignInfo,
+    x_info: DesignInfo,
+    data: pd.DataFrame,
+    outcome_columns: set[str],
+) -> tuple[Any, Any]:
+    """Replay the fitted Patsy outcome and predictor designs on separate inputs."""
+    (outcome,) = build_design_matrices([y_info], data, NA_action="raise")
+    try:
+        (predictors,) = build_design_matrices(
+            [x_info], data.drop(columns=list(outcome_columns)), NA_action="raise"
+        )
+    except PatsyError as exc:
+        raise ValueError(
+            "SkforecastModel formula predictors must use untreated covariates. "
+            "Configure outcome lags on ForecasterRecursive instead. "
+            f"{exc}"
+        ) from exc
+    return outcome, predictors
 
 
 class InterruptedTimeSeries(BaseExperiment[CausalResult]):
@@ -372,13 +403,14 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                     "SkforecastModel requires a single continuous outcome."
                 )
             outcomes = _formula_column_references(y_info, training.columns)
-            if outcomes & _formula_column_references(x_info, training.columns):
+            if not outcomes:
                 raise ValueError(
-                    "SkforecastModel cannot use the observed outcome as a formula predictor. "
-                    "Configure outcome lags on ForecasterRecursive instead."
+                    "SkforecastModel requires a formula outcome that names its observed data column."
                 )
-            pre_y, pre_x = build_design_matrices([y_info, x_info], pre, **na_action)
-        post_y, post_x = build_design_matrices([y_info, x_info], post, **na_action)
+            pre_y, pre_x = _replay_forecast_design(y_info, x_info, pre, outcomes)
+            post_y, post_x = _replay_forecast_design(y_info, x_info, post, outcomes)
+        else:
+            post_y, post_x = build_design_matrices([y_info, x_info], post)
         if calibration_size is not None and not np.isfinite(post_y).all():
             raise ValueError(
                 "SkforecastModel requires finite post-intervention outcomes."

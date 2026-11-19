@@ -51,16 +51,23 @@ def _same_labels(left: pd.Index, right: pd.Index) -> bool:
 def _native_calendar_matches(
     index: pd.DatetimeIndex, pre_size: int, window_size: int
 ) -> bool:
+    from pytz.exceptions import InvalidTimeError
     from skforecast.utils import expand_index
 
     # Some timezone-aware calendar grids are interpreted differently by
     # skforecast depending on which timestamps its lag window contains.
-    for end in range(window_size, pre_size + 1):
-        stop = end + 1 if end < pre_size else len(index)
-        if not _same_labels(
-            expand_index(index[end - window_size : end], stop - end), index[end:stop]
-        ):
-            return False
+    try:
+        for end in range(window_size, pre_size + 1):
+            stop = end + 1 if end < pre_size else len(index)
+            if not _same_labels(
+                expand_index(index[end - window_size : end], stop - end),
+                index[end:stop],
+            ):
+                return False
+    except InvalidTimeError:
+        # Native expansion can reach a nonexistent or ambiguous wall time
+        # even when the supplied observations follow a regular grid.
+        return False
     return True
 
 
@@ -91,12 +98,11 @@ def _regular_index(
             if isinstance(freq, pd.offsets.Day):
                 clocks.insert(0, (dated, pd.offsets.Hour(24 * freq.n)))
             for clock, offset in clocks:
-                try:
-                    return pd.DatetimeIndex(
-                        pd.DatetimeIndex(clock, freq=None), freq=offset
-                    )
-                except ValueError:
-                    continue
+                candidate = pd.date_range(
+                    start=clock[0], periods=len(clock), freq=offset, name=clock.name
+                )
+                if _same_labels(candidate, clock):
+                    return candidate
     elif pd.api.types.is_integer_dtype(index.dtype):
         start, second, last = map(int, (index[0], index[1], index[-1]))
         step = second - start
@@ -129,6 +135,38 @@ def _exog(X: xr.DataArray, index: pd.Index) -> pd.DataFrame | None:
     if not np.isfinite(frame.to_numpy()).all():
         raise ValueError("SkforecastModel requires finite exogenous inputs.")
     return None if frame.empty else frame
+
+
+class _CalendarFeaturesOnObservedIndex:
+    """Present original timestamps to native features when the model clock changes."""
+
+    def __init__(
+        self,
+        features: Any,
+        model_index: pd.DatetimeIndex,
+        observed_index: pd.DatetimeIndex,
+    ) -> None:
+        self._features = features
+        self._model_index = model_index
+        self._observed_index = observed_index
+
+    def _timestamps(self, index: pd.DatetimeIndex) -> pd.DatetimeIndex:
+        positions = self._model_index.get_indexer(index)
+        if (positions < 0).any():
+            raise BadIndexException(
+                "Calendar feature dates must align to the forecast grid."
+            )
+        return self._observed_index.take(positions)
+
+    @property
+    def feature_names_out_(self) -> list[str]:
+        return self._features.feature_names_out_
+
+    def fit_transform(self, index: pd.DatetimeIndex) -> pd.DataFrame:
+        return self._features.fit_transform(self._timestamps(index))
+
+    def transform(self, index: pd.DatetimeIndex) -> pd.DataFrame:
+        return self._features.transform(self._timestamps(index))
 
 
 class _SkforecastAdapter(ModelAdapter):
@@ -200,9 +238,17 @@ class _SkforecastAdapter(ModelAdapter):
             )
         pre_index = y.get_index("obs_ind")
         full_index = (coords or {}).get("forecast_index", pre_index)
-        index = _regular_index(full_index, len(pre_index), window_size)[
-            : len(pre_index)
-        ]
+        grid = _regular_index(full_index, len(pre_index), window_size)
+        if (
+            isinstance(grid, pd.DatetimeIndex)
+            and isinstance(full_index, pd.DatetimeIndex)
+            and grid.tz != full_index.tz
+            and forecaster.calendar_features is not None
+        ):
+            forecaster.calendar_features = _CalendarFeaturesOnObservedIndex(
+                forecaster.calendar_features, grid, full_index
+            )
+        index = grid[: len(pre_index)]
         outcome = pd.Series(y.values[:, 0], index=index, name="y")
         if not np.isfinite(outcome).all():
             raise ValueError(
