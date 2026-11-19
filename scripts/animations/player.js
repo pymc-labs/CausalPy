@@ -20,7 +20,6 @@ const copy = [
     "Subtract the counterfactual from each observed outcome. Error bars show the resulting 94% credible intervals.",
   ],
 ];
-const average = D.impact.slice(S).reduce((a, b) => a + b, 0) / (N - S);
 let position = 0,
   playing =
     window.parent === window &&
@@ -226,7 +225,6 @@ function draw() {
     { id: "impact-intervals", "clip-path": "url(#impact-clip)" },
     impact,
   );
-  const cap = Math.min(3.5, ((w - L - R) / (N - 1)) * 0.28);
   for (let i = S; i < N; i++) {
     const barWidth = Math.max(2, ((w - L - R) / (N - 1)) * 0.6);
     el(
@@ -254,19 +252,6 @@ function draw() {
       },
       bars,
     );
-    for (const cy of [lower, upper])
-      el(
-        "line",
-        {
-          x1: x(i) - cap,
-          x2: x(i) + cap,
-          y1: cy,
-          y2: cy,
-          stroke: "#ffffff",
-          "stroke-width": 1.5,
-        },
-        bars,
-      );
   }
 
   label(
@@ -304,25 +289,39 @@ function render() {
     "width",
     (geometry.x(N - 1) - geometry.x(S - 1) + 3) * forecast,
   );
-  $("impact-reveal").setAttribute(
-    "width",
-    (geometry.x(N - 1) - geometry.x(S) + 10) * observed,
-  );
+  const impactWidth = (geometry.x(N - 1) - geometry.x(S) + 10) * observed;
+  $("impact-reveal").setAttribute("width", impactWidth);
   $("impact-placeholder").style.opacity = 1 - clamp((position - 16) * 2);
+  // Include a month as the wipe reaches its bar center and white interval.
+  const revealRight = geometry.x(S) - 5 + impactWidth;
+  const monthsShown = Math.max(
+    0,
+    Math.min(
+      N - S,
+      1 +
+        Math.floor(
+          (revealRight - geometry.x(S)) / (geometry.x(S + 1) - geometry.x(S)),
+        ),
+    ),
+  );
+  const average = monthsShown ? D.running_impact[monthsShown - 1] : null;
   $("metric").textContent =
     stage === 0
       ? "48"
       : stage === 1
         ? "24"
-        : observed < 1
-          ? "…"
-          : `+${average.toFixed(1)}`;
+        : average
+          ? `${average.mean >= 0 ? "+" : ""}${average.mean.toFixed(1)}`
+          : "—";
+  $("metric-interval").textContent = average
+    ? `94% HDI [${average.lower.toFixed(1)}, ${average.upper.toFixed(1)}]`
+    : "";
   $("metric-label").innerHTML =
     stage === 0
       ? "months used to fit<br>the untreated pattern"
       : stage === 1
         ? "months forecast<br>without intervention"
-        : "average monthly impact<br>outcome units · posterior mean";
+        : `average monthly impact<br>${monthsShown} ${monthsShown === 1 ? "month" : "months"} · outcome units`;
   $("scrub").value = position;
   $("time").textContent =
     `${String(Math.floor(position)).padStart(2, "0")} / 24 s`;

@@ -59,7 +59,7 @@ def main():
             "formula": formula,
             "backend": "causalpy.pymc_models.LinearRegression",
             "causalpy_version": cp.__version__,
-            "note": "Synthetic observations; prediction and impact HDIs from get_plot_data(). Predictive intervals await issue #295.",
+            "note": "Synthetic observations; Pointwise HDIs from get_plot_data(); running-average HDIs from effect_summary(). Predictive intervals await issue #295.",
         },
     }
     for key, column in {
@@ -73,6 +73,35 @@ def main():
         values = plot[column].to_numpy()
         assert np.isfinite(values).all(), column
         payload[key] = values.tolist()
+    # Each HDI summarizes the average of paired draws over the revealed window.
+    # Averaging the pointwise interval endpoints would lose their joint uncertainty.
+    payload["running_impact"] = []
+    for end in plot.index[split:]:
+        average = experiment.effect_summary(
+            window=(plot.index[split], end),
+            alpha=0.06,
+            cumulative=False,
+            relative=False,
+        ).table.loc["average"]
+        payload["running_impact"].append(
+            {
+                "mean": float(average["mean"]),
+                "lower": float(average["hdi_lower"]),
+                "upper": float(average["hdi_upper"]),
+            }
+        )
+    running = np.array(
+        [[row["mean"], row["lower"], row["upper"]] for row in payload["running_impact"]]
+    )
+    assert np.isfinite(running).all()
+    assert np.all(running[:, 1] < running[:, 2])
+    assert np.allclose(
+        running[:, 0],
+        np.cumsum(payload["impact"][split:]) / np.arange(1, len(t) - split + 1),
+    )
+    assert np.allclose(
+        running[0, 1:], [payload["impact_lower"][split], payload["impact_upper"][split]]
+    )
     for prefix in ("pred", "impact"):
         assert np.all(
             np.array(payload[prefix + "_lower"]) < np.array(payload[prefix + "_upper"])

@@ -175,11 +175,19 @@ h2 {
   letter-spacing: -1px;
   color: var(--accent);
   font-weight: 550;
+  font-variant-numeric: tabular-nums;
 }
 .metric span {
   font-size: 11px;
   line-height: 1.5;
   color: var(--muted);
+}
+#metric-interval {
+  display: block;
+  min-height: 1.5em;
+  color: var(--white);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .transport {
   display: flex;

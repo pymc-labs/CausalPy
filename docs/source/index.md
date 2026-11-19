@@ -24,7 +24,7 @@ CausalPy helps you estimate what changed because of an intervention when a rando
 
 The animation uses synthetic monthly outcomes with a trend, annual seasonality, independent noise, and a known +18-unit intervention from January 2024. CausalPy fits the first 48 months and forecasts the next 24 to estimate a {term}`counterfactual`. All fitted values and impacts are computed by CausalPy and saved for playback; the animation timing does not represent fitting time.
 
-White points show the observations. Green bands show pointwise 94% highest-density credible intervals for the expected untreated outcome. Green bars show observed outcomes minus the expected counterfactual; white error bars show their corresponding 94% credible intervals. These intervals include uncertainty in the fitted mean, but exclude new observation noise and uncertainty about the causal assumptions.
+White points show the observations. Green bands show pointwise 94% highest-density credible intervals for the expected untreated outcome. Green bars show observed outcomes minus the expected counterfactual; white error bars show their corresponding 94% credible intervals. The running average and its numeric 94% interval summarize the post-intervention months revealed so far, using the same pre-intervention fit. These intervals include uncertainty in the fitted mean, but exclude new observation noise and uncertainty about the causal assumptions.
 
 A causal interpretation requires that the untreated pattern would have continued and that no concurrent event explains the difference. A good fit before the intervention does not establish these assumptions.
 
@@ -35,6 +35,12 @@ experiment = cp.InterruptedTimeSeries(
     model=cp.pymc_models.LinearRegression(),
 ).fit()
 plot_data = experiment.get_plot_data(hdi_prob=0.94)
+for revealed_month in df.index[df.index >= pd.Timestamp("2024-01-01")]:
+    summary = experiment.effect_summary(
+        window=(pd.Timestamp("2024-01-01"), revealed_month),
+        alpha=0.06, cumulative=False, relative=False,
+    )
+    average = summary.table.loc["average", ["mean", "hdi_lower", "hdi_upper"]]
 ```
 
 See the {doc}`worked Python example <notebooks/interrupted-time-series-pymc>` for a complete interrupted time series analysis.

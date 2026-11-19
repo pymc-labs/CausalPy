@@ -22,7 +22,7 @@ uv run python scripts/animations/generate_data.py
 uv run python scripts/animations/build.py
 ```
 
-The generator simulates 72 monthly observations from the explicit `truth` parameters, including a +18-unit intervention after month 48, and fits through CausalPy's public API with default sampling settings. The NumPy seed fixes the observations; posterior summaries will vary slightly across refits. Inspect the printed R-hat, effective sample sizes and divergences before replacing the committed snapshot. Use `--output PATH` to inspect a new fit separately.
+The generator simulates 72 monthly observations from the explicit `truth` parameters, including a +18-unit intervention after month 48, and fits through CausalPy's public API with default sampling settings. The NumPy seed fixes the observations; posterior summaries will vary slightly across refits. For each revealed post-intervention month, `effect_summary(window=(start, end), alpha=0.06)` exports the running mean and its 94% HDI from the same fit. The interval is computed for the window average, preserving dependence across monthly draws. Inspect the printed R-hat, effective sample sizes and divergences before replacing the committed snapshot. Use `--output PATH` to inspect a new fit separately.
 
 Both prediction and impact intervals currently describe uncertainty in the expected outcome, not noisy posterior-predictive outcomes. The predictive option is tracked in [issue #295](https://github.com/pymc-labs/CausalPy/issues/295). Metadata in the JSON records the model, interval target and probability. When changing interval targets, update the homepage explanation and player labels together.
 
