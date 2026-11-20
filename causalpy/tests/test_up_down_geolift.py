@@ -173,6 +173,26 @@ def test_up_down_simulator_applies_geometric_adstock_before_saturation(
 
 
 @pytest.mark.parametrize(
+    ("n_pre", "n_post", "n_active"),
+    [
+        (120, 12, np.int8(8)),
+        (np.int64(40), 12, np.uint64(8)),
+        (np.int8(120), np.int64(12), 8),
+    ],
+)
+def test_up_down_simulator_accepts_numpy_integer_durations(n_pre, n_post, n_active):
+    expected = generate_up_down_geolift_data(
+        n_pre=int(n_pre), n_post=int(n_post), n_active=int(n_active)
+    )
+    result = generate_up_down_geolift_data(
+        n_pre=n_pre, n_post=n_post, n_active=n_active
+    )
+
+    assert result.treatment_end_time == expected.treatment_end_time
+    pd.testing.assert_frame_equal(result.spend_realized, expected.spend_realized)
+
+
+@pytest.mark.parametrize(
     ("settings", "message"),
     [
         ({"n_pre": 0}, "counts must be positive"),

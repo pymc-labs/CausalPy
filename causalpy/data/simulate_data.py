@@ -121,7 +121,7 @@ def generate_up_down_geolift_data(
         "2024-01-07", periods=n_pre + n_post, freq="W-SUN", name="time"
     )
     treatment_time = time[n_pre]
-    end_index = n_pre + active_weeks
+    end_index = int(n_pre) + int(active_weeks)
     treatment_end_time = time[end_index] if active_weeks < n_post else None
     arms = {
         "up": [f"up_{i + 1}" for i in range(n_up)],
