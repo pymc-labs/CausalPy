@@ -22,7 +22,6 @@ from causalpy.checks.operating_characteristics import (
     AssuranceResult,
     OperatingCharacteristics,
     operating_characteristics,
-    operating_characteristics_from_calibration,
 )
 from causalpy.checks.outcome_falsification import (
     FalsificationResult,
@@ -47,7 +46,6 @@ __all__ = [
     "OutcomeFalsification",
     "OperatingCharacteristics",
     "operating_characteristics",
-    "operating_characteristics_from_calibration",
     "PersistenceCheck",
     "PlaceboFoldResult",
     "PlaceboInSpace",
