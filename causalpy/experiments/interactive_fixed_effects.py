@@ -186,10 +186,10 @@ class InteractiveFixedEffectsSyntheticControl:
     def fit(
         self,
         *,
-        draws: int = 40,
-        tune: int = 80,
-        chains: int = 1,
-        cores: int = 1,
+        draws: int | None = None,
+        tune: int | None = None,
+        chains: int | None = None,
+        cores: int | None = None,
         random_seed: int | None = None,
         progressbar: bool = False,
         **sample_kwargs: Any,
@@ -197,7 +197,11 @@ class InteractiveFixedEffectsSyntheticControl:
         """Sample the joint posterior and populate :attr:`result`.
 
         Keyword arguments are forwarded to the control-panel :func:`pymc.sample`
-        call. The treated conditional sample is aligned to those draws: one
+        call. Unset ``draws``, ``tune``, ``chains``, and ``cores`` are not
+        passed, so PyMC resolves them. ``progressbar`` defaults to off and is
+        display only.
+
+        The treated conditional sample is aligned to those draws: one
         conditional draw per control-panel draw. Before that sample, the one
         shared residual scale's draws are updated from treated pre-period
         outcomes. The conditional sample uses those updated draws as the
@@ -211,14 +215,15 @@ class InteractiveFixedEffectsSyntheticControl:
 
         Parameters
         ----------
-        draws : int, default 40
-            Control-panel posterior draws per chain.
-        tune : int, default 80
-            Control-panel tuning steps.
-        chains : int, default 1
-            Control-panel chains.
-        cores : int, default 1
-            Cores for the control-panel sample.
+        draws : int, optional
+            Control-panel posterior draws per chain. Omitted values are not
+            passed, so :func:`pymc.sample` uses its own default.
+        tune : int, optional
+            Control-panel tuning steps. Omitted values are not passed.
+        chains : int, optional
+            Control-panel chains. Omitted values are not passed.
+        cores : int, optional
+            Cores for the control-panel sample. Omitted values are not passed.
         random_seed : int, optional
             Seed for the control-panel sample. The conditional sample uses the
             next integer when this is set.
@@ -234,15 +239,22 @@ class InteractiveFixedEffectsSyntheticControl:
         """
         self.build()
         assert self._control_model is not None
+        sampling = {
+            name: value
+            for name, value in {
+                "draws": draws,
+                "tune": tune,
+                "chains": chains,
+                "cores": cores,
+            }.items()
+            if value is not None
+        }
         control_idata = pm.sample(
-            draws=draws,
-            tune=tune,
-            chains=chains,
-            cores=cores,
             random_seed=random_seed,
             progressbar=progressbar,
             model=self._control_model,
             initvals=_control_initvals(self._control_model, self._control_outcomes()),
+            **sampling,
             **sample_kwargs,
         )
         conditional = _sample_treated_conditional(

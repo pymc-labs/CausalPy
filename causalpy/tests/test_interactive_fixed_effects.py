@@ -113,6 +113,52 @@ def _experiment(post_shift: float = 0.0) -> InteractiveFixedEffectsSyntheticCont
     )
 
 
+def test_argument_free_fit_does_not_override_pymc_sample(monkeypatch) -> None:
+    """An argument-free fit must not pass a short MCMC budget to PyMC."""
+    signature = inspect.signature(InteractiveFixedEffectsSyntheticControl.fit)
+    for name in ("draws", "tune", "chains", "cores"):
+        assert signature.parameters[name].default is None
+    seen: dict[str, object] = {}
+
+    def fake_sample(**kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("stop after control sample")
+
+    monkeypatch.setattr(
+        "causalpy.experiments.interactive_fixed_effects.pm.sample",
+        fake_sample,
+    )
+    with pytest.raises(RuntimeError, match="stop after control sample"):
+        _experiment().fit()
+    assert "draws" not in seen
+    assert "tune" not in seen
+    assert "chains" not in seen
+    assert "cores" not in seen
+    assert seen["progressbar"] is False
+
+
+def test_fit_forwards_explicit_sampling_arguments(monkeypatch) -> None:
+    """A caller-supplied short budget is still forwarded."""
+    seen: dict[str, object] = {}
+
+    def fake_sample(**kwargs):
+        seen.update(kwargs)
+        raise RuntimeError("stop after control sample")
+
+    monkeypatch.setattr(
+        "causalpy.experiments.interactive_fixed_effects.pm.sample",
+        fake_sample,
+    )
+    with pytest.raises(RuntimeError, match="stop after control sample"):
+        _experiment().fit(draws=7, tune=3, chains=2, cores=1, target_accept=0.9)
+    assert seen["draws"] == 7
+    assert seen["tune"] == 3
+    assert seen["chains"] == 2
+    assert seen["cores"] == 1
+    assert seen["target_accept"] == 0.9
+    assert seen["progressbar"] is False
+
+
 def test_counterfactual_keeps_both_intercepts() -> None:
     parts = _components()
     got = untreated_counterfactual(
