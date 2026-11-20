@@ -31,6 +31,7 @@ from causalpy.experiments._results import CoefficientResult, GroupComparisonScen
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
+from causalpy.plot_styles import active_colors
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
     has_posterior_draws,
@@ -94,22 +95,38 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
 
     Examples
     --------
-    >>> import causalpy as cp
-    >>> df = cp.load_data("did")
-    >>> seed = 42
-    >>> result = cp.DifferenceInDifferences(
-    ...     df,
-    ...     formula="y ~ 1 + group*post_treatment",
-    ...     time_variable_name="t",
-    ...     group_variable_name="group",
-    ...     model=cp.pymc_models.LinearRegression(
-    ...         sample_kwargs={
-    ...             "target_accept": 0.95,
-    ...             "random_seed": seed,
-    ...             "progressbar": False,
-    ...         }
-    ...     ),
-    ... ).fit()
+    The figure below is rendered with CausalPy's editorial plot theme
+    (``cp.plot_style("editorial")``); omit the ``with`` block to use the default
+    style. Sampling is kept small and seeded so the documentation build stays
+    fast and reproducible.
+
+    .. plot::
+        :context: close-figs
+        :include-source: True
+        :format: doctest
+
+        >>> import causalpy as cp
+        >>> import matplotlib.pyplot as plt
+        >>> df = cp.load_data("did")
+        >>> result = cp.DifferenceInDifferences(
+        ...     df,
+        ...     formula="y ~ 1 + group*post_treatment",
+        ...     time_variable_name="t",
+        ...     group_variable_name="group",
+        ...     model=cp.pymc_models.LinearRegression(
+        ...         sample_kwargs={
+        ...             "draws": 500,
+        ...             "tune": 500,
+        ...             "chains": 2,
+        ...             "cores": 1,
+        ...             "random_seed": 42,
+        ...             "progressbar": False,
+        ...         }
+        ...     ),
+        ... ).fit()
+        >>> with cp.plot_style("editorial"):
+        ...     fig, ax = result.plot()
+        >>> plt.show()
     """
 
     supports_ols = True
@@ -617,7 +634,8 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             ax.plot(
                 x_pred_counterfactual[self.time_variable_name],
                 np.squeeze(y_pred_counterfactual),
-                "go",
+                "o",
+                c=active_colors().counterfactual,
                 markersize=10,
                 label="counterfactual",
             )
@@ -640,13 +658,14 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         else:
             arrow_x = 1.05
             arrow_style = "<->"
+        impact_color = active_colors().impact
         ax.annotate(
             "",
             xy=(arrow_x, y_pred_counterfactual_scalar),
             xycoords="data",
             xytext=(arrow_x, y_pred_treatment_scalar),
             textcoords="data",
-            arrowprops={"arrowstyle": arrow_style, "color": "green", "lw": 3},
+            arrowprops={"arrowstyle": arrow_style, "color": impact_color, "lw": 3},
         )
         ax.annotate(
             "causal\nimpact",
@@ -657,7 +676,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             xycoords="data",
             xytext=(5, 0),
             textcoords="offset points",
-            color="green",
+            color=impact_color,
             va="center",
         )
 
