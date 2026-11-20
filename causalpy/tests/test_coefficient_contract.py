@@ -239,11 +239,11 @@ def test_shared_print_coefficients_dispatches_on_draw_count(capsys):
 
 
 def test_pymc_forecast_coefficients_are_unsupported():
-    pymc_forecast = pytest.importorskip("pymc_forecast", minversion="0.3")
-    if not SpecifierSet(">=0.3,<0.4").contains(
+    pymc_forecast = pytest.importorskip("pymc_forecast", minversion="0.4")
+    if not SpecifierSet(">=0.4,<0.5").contains(
         pymc_forecast.__version__, prereleases=False
     ):
-        pytest.skip("requires pymc-forecast>=0.3,<0.4")
+        pytest.skip("requires pymc-forecast>=0.4,<0.5")
 
     class TrivialModel(pymc_forecast.ForecastingModel):  # type: ignore[name-defined]
         def model(self, h, covariates):

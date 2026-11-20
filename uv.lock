@@ -647,8 +647,8 @@ requires-dist = [
     { name = "pymc", specifier = ">=6.0.1,<7" },
     { name = "pymc-bart", marker = "extra == 'docs'" },
     { name = "pymc-extras", specifier = ">=0.11" },
-    { name = "pymc-forecast", extras = ["extras"], marker = "extra == 'forecast'", specifier = ">=0.3,<0.4" },
-    { name = "pymc-forecast", extras = ["extras"], marker = "extra == 'test'", specifier = ">=0.3,<0.4" },
+    { name = "pymc-forecast", extras = ["extras"], marker = "extra == 'forecast'", specifier = ">=0.4,<0.5" },
+    { name = "pymc-forecast", extras = ["extras"], marker = "extra == 'test'", specifier = ">=0.4,<0.5" },
     { name = "pytensor", specifier = ">=3,<4" },
     { name = "pytest", marker = "extra == 'test'" },
     { name = "pytest-cov", marker = "extra == 'test'" },
@@ -4277,7 +4277,7 @@ wheels = [
 
 [[package]]
 name = "pymc-forecast"
-version = "0.3.0"
+version = "0.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "arviz" },
@@ -4286,9 +4286,9 @@ dependencies = [
     { name = "pymc" },
     { name = "xarray" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fe/80/7e8fe8357ca0fa3fe34a16de9a26f20fc7b8a7e47483e3bb618f16d961ec/pymc_forecast-0.3.0.tar.gz", hash = "sha256:0d29996855992255dadb899fce525d60f323a0f771b297b51328efca59f39d76", size = 115802, upload-time = "2026-10-05T10:00:22.118Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/7c/a7b82480f1d253a2724846f05b5af59f2aa58740b76b0427dd1ec38a8682/pymc_forecast-0.4.0.tar.gz", hash = "sha256:7646ce0846aa003190286ce6e5c7c5cd9af3b9e40021732bdea79e54abb2a471", size = 156793, upload-time = "2026-11-19T19:25:33.37Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/8c/a5/8fad53b5c047f2de6bcd35bc0e369e0f0b024b711d70d081dde72d3e7fd9/pymc_forecast-0.3.0-py3-none-any.whl", hash = "sha256:98642f1fc58b7776845db556a081916f313e0736ce77aea384a5afe7de7e1772", size = 85615, upload-time = "2026-10-05T10:00:20.244Z" },
+    { url = "https://files.pythonhosted.org/packages/30/2a/6155ddd198b25e165508fa7d9eef1df4b27ad2f88b6ae8258db25f36b7a5/pymc_forecast-0.4.0-py3-none-any.whl", hash = "sha256:42fbc3381324af62e53964f0a28e44d4f08a148e611821fd3d23ce746d5012ad", size = 112071, upload-time = "2026-11-19T19:25:32.118Z" },
 ]
 
 [package.optional-dependencies]
