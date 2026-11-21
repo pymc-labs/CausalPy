@@ -149,7 +149,7 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         self._t_design_info = t.design_info
         self._x_design_info = X.design_info
         self.labels = X.design_info.column_names
-        self.t, self.X = np.asarray(t), np.asarray(X)
+        self.t, self.X = self._treatment_column(t), np.asarray(X)
         kept_rows = np.asarray(X.index)
         self.y = np.asarray(self.data[self.outcome_variable])[kept_rows]
 
@@ -158,6 +158,52 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
         self.X_outcome = pd.DataFrame(self.X, columns=self.labels)
         self.X_outcome["trt"] = self.t
         self.coords["outcome_coeffs"] = self.X_outcome.columns
+
+    @staticmethod
+    def _treatment_column(t: pd.DataFrame) -> np.ndarray:
+        """Return the formula's treatment as a single 0/1 column.
+
+        Patsy codes a boolean treatment, such as a bool column or
+        ``I(trt == 1)``, as one column per level, and its contrast matrix
+        records how each level is coded. The treatment is the column coded 1
+        for ``True`` and 0 for ``False``, whatever that column is named. A
+        boolean treatment with no ``True`` level is all controls. A boolean
+        treatment whose contrast has no such column is rejected, and so is any
+        other treatment that spans several columns, such as a text or
+        categorical column.
+        """
+        info = t.design_info
+        names = info.column_names
+        values = np.asarray(t)
+        factors = list(info.factor_infos.values())
+        levels = (
+            factors[0].categories
+            if len(info.terms) == 1
+            and len(factors) == 1
+            and factors[0].type == "categorical"
+            else ()
+        )
+        if levels and all(isinstance(level, bool | np.bool_) for level in levels):
+            if True not in levels:
+                return np.zeros((len(values), 1))
+            # Read the coding from the contrast matrix (rows are levels), not
+            # from the column names: a custom contrast can name its columns freely.
+            contrast = info.term_codings[info.terms[0]][0].contrast_matrices
+            coding = np.asarray(contrast[factors[0].factor].matrix)
+            is_treated = np.array([[bool(level)] for level in levels])
+            treated_columns = np.flatnonzero((coding == is_treated).all(axis=0))
+            if treated_columns.size:
+                return values[:, treated_columns[:1]]
+        elif len(names) == 1:
+            return values
+        raise DataException(
+            "The treatment produced by the formula must be one 0/1 or boolean "
+            f"column, but it produced the columns {names}. A text or categorical "
+            "treatment gets one column per level, and a boolean treatment needs "
+            "a column coded 1 for True and 0 for False. Recode it as 0/1 or "
+            'boolean, for example with I(group == "treated") as the left-hand '
+            "side."
+        )
 
     def _fit_inputs(self) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
         """Return ``(X, y, coords)`` for the backend build step.
