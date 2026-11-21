@@ -62,10 +62,15 @@ def _posterior(n, propensity):
         pytest.param(
             TRT.astype(bool), "C(trt, levels=[True, False])", id="true-level-first"
         ),
+        pytest.param(
+            TRT.astype(bool),
+            "C(trt, ContrastMatrix([[0, 1], [1, 0]], ['[False]', '[True]']))",
+            id="swapped-contrast-with-boolean-names",
+        ),
     ],
 )
 def test_boolean_treatment_matches_the_integer_treatment(trt, lhs):
-    """Patsy codes a boolean treatment as two dummies; IPW keeps the True one."""
+    """IPW keeps the column that Patsy's contrast codes 1 for True, 0 for False."""
     expected = _ipw(_frame())
     experiment = _ipw(_frame(trt), lhs)
 
@@ -88,10 +93,38 @@ def test_boolean_treatment_matches_the_integer_treatment(trt, lhs):
         pytest.param(TRT.map({0: "False", 1: "True"}), "trt", id="text-true-false"),
         pytest.param(TRT.astype("category"), "trt", id="category"),
         pytest.param(TRT.astype(bool), "C(trt, Sum)", id="sum-contrast"),
+        pytest.param(
+            TRT.astype(bool),
+            "C(trt, ContrastMatrix([[1, 1], [0, 1]], ['[False]', '[True]']))",
+            id="non-indicator-contrast-with-boolean-names",
+        ),
+        pytest.param(
+            TRT.astype(bool),
+            "C(trt, ContrastMatrix([[1], [0]], ['[True]']))",
+            id="one-column-contrast-coding-false-as-one",
+        ),
         pytest.param(TRT, "trt + race", id="two-terms"),
     ],
 )
-def test_multi_column_treatment_is_rejected(trt, lhs):
+def test_treatment_without_a_zero_one_column_is_rejected(trt, lhs):
     """A treatment that is not one 0/1 column raises a DataException."""
     with pytest.raises(DataException, match="must be one 0/1 or boolean column"):
         _ipw(_frame(trt), lhs)
+
+
+@pytest.mark.parametrize(
+    ("level", "expected"),
+    [
+        pytest.param(False, 0, id="only-false"),
+        pytest.param(True, 1, id="only-true"),
+    ],
+)
+def test_single_level_boolean_treatment_keeps_its_meaning(level, expected):
+    """Patsy gives a one-level boolean a column of ones; False is still control."""
+    trt = pd.Categorical([level] * len(TRT), categories=[level])
+    experiment = _ipw(_frame(trt))
+
+    np.testing.assert_array_equal(experiment.t, np.full((len(TRT), 1), expected))
+    np.testing.assert_array_equal(
+        experiment.t, _ipw(_frame(pd.Series([expected] * len(TRT)))).t
+    )

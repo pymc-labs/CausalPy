@@ -154,33 +154,48 @@ class InversePropensityWeighting(BaseExperiment[ResultBundle]):
 
     @staticmethod
     def _treatment_column(t: pd.DataFrame) -> np.ndarray:
-        """Return the formula's treatment as a single column.
+        """Return the formula's treatment as a single 0/1 column.
 
         Patsy codes a boolean treatment, such as a bool column or
-        ``I(trt == 1)``, as two dummy columns named ``[False]`` and ``[True]``.
-        The ``[True]`` column is that treatment as 0/1. Any other treatment
-        that spans several columns, such as a text or categorical column, is
-        rejected.
+        ``I(trt == 1)``, as one column per level, and its contrast matrix
+        records how each level is coded. The treatment is the column coded 1
+        for ``True`` and 0 for ``False``, whatever that column is named. A
+        boolean treatment with no ``True`` level is all controls. A boolean
+        treatment whose contrast has no such column is rejected, and so is any
+        other treatment that spans several columns, such as a text or
+        categorical column.
         """
-        names = t.design_info.column_names
-        if len(names) == 1:
-            return np.asarray(t)
-        factors = list(t.design_info.factor_infos.values())
-        if len(t.design_info.terms) == 1 and len(factors) == 1:
-            term = t.design_info.terms[0].name()
-            factor = factors[0]
-            is_bool_factor = factor.type == "categorical" and all(
-                isinstance(level, bool | np.bool_) for level in factor.categories
-            )
-            # Exact names rule out other contrasts and text "True"/"False".
-            if is_bool_factor and sorted(names) == [f"{term}[False]", f"{term}[True]"]:
-                return np.asarray(t)[:, [names.index(f"{term}[True]")]]
+        info = t.design_info
+        names = info.column_names
+        values = np.asarray(t)
+        factors = list(info.factor_infos.values())
+        levels = (
+            factors[0].categories
+            if len(info.terms) == 1
+            and len(factors) == 1
+            and factors[0].type == "categorical"
+            else ()
+        )
+        if levels and all(isinstance(level, bool | np.bool_) for level in levels):
+            if True not in levels:
+                return np.zeros((len(values), 1))
+            # Read the coding from the contrast matrix (rows are levels), not
+            # from the column names: a custom contrast can name its columns freely.
+            contrast = info.term_codings[info.terms[0]][0].contrast_matrices
+            coding = np.asarray(contrast[factors[0].factor].matrix)
+            is_treated = np.array([[bool(level)] for level in levels])
+            treated_columns = np.flatnonzero((coding == is_treated).all(axis=0))
+            if treated_columns.size:
+                return values[:, treated_columns[:1]]
+        elif len(names) == 1:
+            return values
         raise DataException(
             "The treatment produced by the formula must be one 0/1 or boolean "
-            f"column, but it produced {len(names)} columns: {names}. A text or "
-            "categorical treatment gets one column per level. Recode it as 0/1 "
-            'or boolean, for example with I(group == "treated") as the '
-            "left-hand side."
+            f"column, but it produced the columns {names}. A text or categorical "
+            "treatment gets one column per level, and a boolean treatment needs "
+            "a column coded 1 for True and 0 for False. Recode it as 0/1 or "
+            'boolean, for example with I(group == "treated") as the left-hand '
+            "side."
         )
 
     def _fit_inputs(self) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
