@@ -511,9 +511,9 @@ class SyntheticControl(BaseExperiment[CausalResult]):
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : list[matplotlib.axes.Axes] or numpy.ndarray
+        ax : list of :class:`~matplotlib.axes.Axes` or :class:`~numpy.ndarray`
             Posterior axes are the ndarray from ``plt.subplots`` (top:
             predictions, middle: causal impact, bottom: cumulative impact).
             Prior axes are a one-element list.

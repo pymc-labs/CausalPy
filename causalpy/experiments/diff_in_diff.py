@@ -434,9 +434,9 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : matplotlib.axes.Axes
+        ax : :class:`~matplotlib.axes.Axes`
             The axes object containing the plot.
         """
         return self._render_plot(

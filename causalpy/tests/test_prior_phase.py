@@ -635,11 +635,11 @@ def test_pymc_adapter_coefficients_group_guard():
 
 
 def test_forecast_adapter_guards():
-    pymc_forecast = pytest.importorskip("pymc_forecast", minversion="0.3")
-    if not SpecifierSet(">=0.3,<0.4").contains(
+    pymc_forecast = pytest.importorskip("pymc_forecast", minversion="0.4")
+    if not SpecifierSet(">=0.4,<0.5").contains(
         pymc_forecast.__version__, prereleases=False
     ):
-        pytest.skip("requires pymc-forecast>=0.3,<0.4")
+        pytest.skip("requires pymc-forecast>=0.4,<0.5")
     from causalpy.pymc_forecast_models import PyMCForecastModel
 
     backend = model_adapter.PyMCForecastAdapter(

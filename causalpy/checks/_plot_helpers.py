@@ -41,7 +41,7 @@ def draw_figure(plot: Any, title: str, figsize: tuple[float, float]) -> Figure:
 
     Returns
     -------
-    matplotlib.figure.Figure
+    :class:`~matplotlib.figure.Figure`
         The drawn figure.
     """
     figure = plot.draw()

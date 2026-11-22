@@ -971,9 +971,9 @@ class StaggeredDifferenceInDifferences(
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : list[matplotlib.axes.Axes]
+        ax : list of :class:`~matplotlib.axes.Axes`
             A single-element list containing the event-study axes.
         """
         return self._render_plot(
@@ -1044,9 +1044,9 @@ class StaggeredDifferenceInDifferences(
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : list[matplotlib.axes.Axes]
+        ax : list of :class:`~matplotlib.axes.Axes`
             Axes containing the cohort trajectories. The list has one axes
             per cohort when ``layout="facet"`` and one axes when
             ``layout="overlay"``.
@@ -1111,7 +1111,7 @@ class StaggeredDifferenceInDifferences(
 
         Returns
         -------
-        tuple[plt.Figure, list[plt.Axes]]
+        tuple of :class:`~matplotlib.figure.Figure` and list of :class:`~matplotlib.axes.Axes`
             Figure and axes objects.
         """
         bundle = self._require_bundle(group)

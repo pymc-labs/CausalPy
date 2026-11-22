@@ -627,9 +627,9 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : list[matplotlib.axes.Axes]
+        ax : list of :class:`~matplotlib.axes.Axes`
             The three axes (top: predictions, middle: causal impact,
             bottom: cumulative impact).
         """

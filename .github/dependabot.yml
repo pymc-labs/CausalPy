@@ -33,3 +33,17 @@ updates:
       - dependency-name: "pandas"
         update-types:
           - "version-update:semver-major"
+      # PyTensor's Numba compiler can crash during synthetic-control fits (pymc-devs/pytensor#2591, CausalPy #1467). The PyMC, Extras, and Marketing versions below require that affected stack. Remove these entries together once a compatible PyTensor release passes both failing tests linked in #1467.
+      - dependency-name: "pytensor"
+        versions: [">=3.3.5,<=3.3.8"]
+      - dependency-name: "pymc"
+        versions: ["6.4.0"]
+      - dependency-name: "pymc-extras"
+        versions: [">=0.16.0,<=0.17.0"]
+      - dependency-name: "pymc-marketing"
+        versions: ["1.4.0"]
+    # Group all version updates, including majors, into one lockfile resolution (#1362). Security updates remain separate.
+    groups:
+      uv:
+        patterns:
+          - "*"

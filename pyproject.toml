@@ -79,7 +79,7 @@ dependencies = [
 # The [extras] marker pulls pymc-extras>=0.10, which upstream declares for
 # the Pathfinder integration the adapter advertises.
 forecast = [
-    "pymc-forecast[extras]>=0.3,<0.4",
+    "pymc-forecast[extras]>=0.4,<0.5",
 ]
 dev = [
     "prek",
@@ -133,7 +133,7 @@ test = [
     "papermill",
     "polars",
     "pyarrow",
-    "pymc-forecast[extras]>=0.3,<0.4",
+    "pymc-forecast[extras]>=0.4,<0.5",
 ]
 
 [tool.pyproject2conda]

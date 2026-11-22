@@ -347,7 +347,7 @@ class WidePanel:
 
         Returns
         -------
-        tuple[matplotlib.figure.Figure, list[matplotlib.axes.Axes]] or tuple[matplotlib.figure.Figure, numpy.ndarray]
+        tuple of :class:`~matplotlib.figure.Figure` and list of :class:`~matplotlib.axes.Axes` or tuple of :class:`~matplotlib.figure.Figure` and :class:`~numpy.ndarray`
             Posterior axes are the ndarray from ``plt.subplots``. Prior axes
             are a one-element list.
         """

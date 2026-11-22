@@ -344,7 +344,7 @@ def plot_correlations(
 
     Returns
     -------
-    tuple[pd.DataFrame, matplotlib.axes.Axes]
+    tuple of :class:`~pandas.DataFrame` and :class:`~matplotlib.axes.Axes`
         The correlation matrix and the axes containing the heatmap.
 
     Other Parameters

@@ -500,9 +500,9 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : list[matplotlib.axes.Axes]
+        ax : list of :class:`~matplotlib.axes.Axes`
             The three axes (top: observed, fitted and counterfactual;
             middle: causal effect; bottom: cumulative effect).
         """
@@ -557,9 +557,9 @@ class PiecewiseITS(BaseExperiment[CausalResult]):
 
         Returns
         -------
-        fig : plt.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The matplotlib figure.
-        ax : list[plt.Axes]
+        ax : list of :class:`~matplotlib.axes.Axes`
             List of axes objects.
         """
         bundle = self._require_bundle(group)

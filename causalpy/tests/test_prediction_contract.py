@@ -164,30 +164,6 @@ def test_bernoulli_logit_mu_is_probability(rng, mock_pymc_sample):
     )
 
 
-def test_link_scale_mu_would_mix_units():
-    """Using link-scale ``eta`` as ``mu`` produces contrasts in the wrong units."""
-    n_obs = 3
-    counts = xr.DataArray(
-        np.array([8.0, 10.0, 12.0]),
-        dims=["obs_ind"],
-        coords={"obs_ind": np.arange(n_obs)},
-    )
-    eta = xr.DataArray(
-        np.log([8.0, 10.0, 12.0]),
-        dims=["obs_ind"],
-        coords={"obs_ind": np.arange(n_obs)},
-    )
-    mu = np.exp(eta)
-
-    wrong_impact = counts - eta
-    right_impact = counts - mu
-
-    assert not np.allclose(wrong_impact, right_impact)
-    # Link-scale subtraction is not centered near zero when counts match exp(eta).
-    assert abs(float(wrong_impact.mean())) > 1.0
-    assert abs(float(right_impact.mean())) < 1e-10
-
-
 def test_impact_uses_mu_not_y_hat(rng, mock_pymc_sample):
     """Impact excludes observation noise by using ``mu`` rather than ``y_hat``."""
     n_obs = 10

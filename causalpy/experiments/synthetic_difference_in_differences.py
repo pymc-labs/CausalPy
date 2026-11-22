@@ -700,10 +700,10 @@ class SyntheticDifferenceInDifferences(
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure containing the three stacked panels.
-        ax : numpy.ndarray
-            Array of the three :class:`matplotlib.axes.Axes` instances.
+        ax : :class:`~numpy.ndarray`
+            Array of the three :class:`~matplotlib.axes.Axes` instances.
         """
         return self._render_plot(
             show=show,
@@ -763,9 +763,9 @@ class SyntheticDifferenceInDifferences(
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The matplotlib figure containing the plots.
-        ax : list of matplotlib.axes.Axes
+        ax : list of :class:`~matplotlib.axes.Axes`
             The three axes (counterfactual, impact, cumulative impact).
         """
         bundle = self._require_bundle(group)

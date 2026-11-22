@@ -23,12 +23,15 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass, field
 from numbers import Integral, Real
-from typing import Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.optimize import brentq
 from scipy.stats import norm
+
+if TYPE_CHECKING:
+    from causalpy.historical_validation import CalibrationRecord
 
 from causalpy.checks.base import CheckResult
 
@@ -456,7 +459,7 @@ class OperatingCharacteristics:
 
         Returns
         -------
-        matplotlib.figure.Figure
+        :class:`~matplotlib.figure.Figure`
             Figure containing the operating-characteristics display.
         """
         effects = self._validate_plot_grid()
@@ -587,6 +590,54 @@ def _extract_null_distribution(
     return theta, _finite_1d("fold_sds", raw_sds, positive=True)
 
 
+def _curves_from_inputs(
+    theta: np.ndarray,
+    sigmas: np.ndarray,
+    rope_half_width: float,
+    threshold: float,
+    effect_sizes: list[float] | np.ndarray | None,
+    n_points: int,
+    mde_target: float,
+) -> OperatingCharacteristics:
+    """Validate probability-engine inputs and return exact operating curves.
+
+    This is the only curve implementation. ``CheckResult`` and calibration
+    records are adapters around it, not separate engines.
+    """
+    theta, sigmas, rope, cutoff = _validate_inputs(
+        theta, sigmas, rope_half_width, threshold
+    )
+    target = _validate_probability("mde_target", mde_target)
+    if effect_sizes is None:
+        count = _validate_count("n_points", n_points)
+        effect_scale = max(float(np.std(theta)), float(np.max(sigmas)), rope)
+        effects = np.linspace(0.0, 4.0 * effect_scale, count)
+    else:
+        effects = _finite_1d("effect_sizes", effect_sizes)
+    probabilities = _decision_probs(theta, sigmas, rope, cutoff, effects)
+    result = OperatingCharacteristics(
+        effect_sizes=effects,
+        p_detect=probabilities["p_detect"],
+        p_null=probabilities["p_null"],
+        p_indeterminate=probabilities["p_indeterminate"],
+        p_wrong_sign=probabilities["p_wrong_sign"],
+        rope_half_width=rope,
+        threshold=cutoff,
+        mde=np.nan,
+        mde_target=target,
+        null_samples=theta,
+        fold_sds=sigmas,
+    )
+    result.mde = result.mde_at(target)
+    if result.mde > effects.max():
+        warnings.warn(
+            f"MDE ({result.mde:.4g}) is above the largest evaluated effect size "
+            f"({effects.max():.4g}). Consider widening the effect_sizes range.",
+            stacklevel=3,
+        )
+    return result
+
+
 def operating_characteristics(
     pit_result: CheckResult,
     *,
@@ -633,35 +684,94 @@ def operating_characteristics(
     )
     if threshold_value is None:
         threshold_value = 0.95
-    theta, sigmas, rope, cutoff = _validate_inputs(
-        theta, sigmas, rope_value, threshold_value
+    return _curves_from_inputs(
+        theta,
+        sigmas,
+        rope_value,
+        threshold_value,
+        effect_sizes,
+        n_points,
+        mde_target,
     )
-    target = _validate_probability("mde_target", mde_target)
-    if effect_sizes is None:
-        count = _validate_count("n_points", n_points)
-        effect_scale = max(float(np.std(theta)), float(np.max(sigmas)), rope)
-        effects = np.linspace(0.0, 4.0 * effect_scale, count)
-    else:
-        effects = _finite_1d("effect_sizes", effect_sizes)
-    probabilities = _decision_probs(theta, sigmas, rope, cutoff, effects)
-    result = OperatingCharacteristics(
-        effect_sizes=effects,
-        p_detect=probabilities["p_detect"],
-        p_null=probabilities["p_null"],
-        p_indeterminate=probabilities["p_indeterminate"],
-        p_wrong_sign=probabilities["p_wrong_sign"],
-        rope_half_width=rope,
-        threshold=cutoff,
-        mde=np.nan,
-        mde_target=target,
-        null_samples=theta,
-        fold_sds=sigmas,
+
+
+def operating_characteristics_from_calibration(
+    record: CalibrationRecord,
+    *,
+    effect_sizes: list[float] | np.ndarray | None = None,
+    rope_half_width: float | None = None,
+    threshold: float | None = None,
+    n_points: int = 201,
+    mde_target: float = 0.80,
+) -> OperatingCharacteristics:
+    """Compute exact operating curves from a historical calibration record.
+
+    This feeds the existing ROPE kernel. It is not a second probability engine
+    and it never labels the curve validated. The result is conditional on the
+    record's learned-null model.
+
+    Parameters
+    ----------
+    record : CalibrationRecord
+        Applicable calibration record whose ``curve_validated`` flag is false.
+    effect_sizes : list of float or np.ndarray, optional
+        Finite one-dimensional effect grid. The default is a nonnegative
+        regular grid based on the learned-null spread and ROPE.
+    rope_half_width : float, optional
+        Nonnegative ROPE half-width. The record value is used when omitted.
+    threshold : float, optional
+        Decision probability in ``(0, 1)``. The record value is used when
+        omitted. This is the curve's probability threshold, not an effect size.
+    n_points : int
+        Positive number of grid points when ``effect_sizes`` is omitted.
+    mde_target : float
+        Detection probability in ``(0, 1)`` at which to report MDE.
+
+    Returns
+    -------
+    OperatingCharacteristics
+        Exact curve conditional on the learned-null model.
+
+    Raises
+    ------
+    TypeError
+        If ``record`` is not a ``CalibrationRecord``.
+    ValueError
+        If the record is inapplicable, already marked validated, or lacks the
+        learned-null samples and fold standard deviations the kernel requires.
+    """
+    from causalpy.historical_validation import (
+        CalibrationRecord as CalibrationRecordRuntime,
     )
-    result.mde = result.mde_at(target)
-    if result.mde > effects.max():
-        warnings.warn(
-            f"MDE ({result.mde:.4g}) is above the largest evaluated effect size ({effects.max():.4g}). "
-            "Consider widening the effect_sizes range.",
-            stacklevel=2,
+
+    if not isinstance(record, CalibrationRecordRuntime):
+        raise TypeError("record must be a CalibrationRecord.")
+    if record.curve_validated:
+        raise ValueError(
+            "Refusing a calibration record already marked curve_validated. "
+            "The operating-characteristics engine does not validate a curve."
         )
-    return result
+    if not record.applicable or record.null_samples is None or record.fold_sds is None:
+        detail = (
+            "; ".join(record.reasons) if record.reasons else "record is not applicable"
+        )
+        raise ValueError(
+            "Calibration record cannot feed the operating-characteristics "
+            f"engine: {detail}"
+        )
+    rope_value = record.rope_half_width if rope_half_width is None else rope_half_width
+    threshold_value = record.threshold if threshold is None else threshold
+    if rope_value is None or threshold_value is None:
+        raise ValueError(
+            "Calibration record has no rope_half_width or threshold, and no "
+            "override was passed. The kernel will not invent those inputs."
+        )
+    return _curves_from_inputs(
+        np.asarray(record.null_samples, dtype=float),
+        np.asarray(record.fold_sds, dtype=float),
+        rope_value,
+        threshold_value,
+        effect_sizes,
+        n_points,
+        mde_target,
+    )

@@ -362,7 +362,7 @@ class PlaceboInSpace:
 
         Returns
         -------
-        matplotlib.figure.Figure
+        :class:`~matplotlib.figure.Figure`
             The drawn figure.
 
         Raises

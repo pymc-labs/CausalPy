@@ -85,8 +85,9 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         The name of the predictor variable that the treatment threshold is
         based upon.
     epsilon : float, default 0.001
-        A small scalar value which determines how far above and below the
-        treatment threshold to evaluate the causal impact.
+        A small positive scalar which determines how far above and below the
+        treatment threshold to evaluate the causal impact. Must be greater
+        than zero.
     donut_hole : float, default 0.0
         Observations within this distance from the treatment threshold are
         excluded from model fitting. Used as a robustness check when
@@ -323,6 +324,9 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
                 f"({self.bandwidth}) when bandwidth is finite."
             )
 
+        if self.epsilon <= 0:
+            raise ValueError("Epsilon must be greater than zero.")
+
         # Numeric 0/1 indicators, including pandas nullable integers and floats,
         # become bool before the design is built. A numeric factor disagrees
         # with the boolean prediction grid and fit raises AttributeError.
@@ -432,9 +436,9 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
 
         Returns
         -------
-        fig : matplotlib.figure.Figure
+        fig : :class:`~matplotlib.figure.Figure`
             The figure that was created.
-        ax : matplotlib.axes.Axes
+        ax : :class:`~matplotlib.axes.Axes`
             The axes object containing the plot.
         """
         return self._render_plot(

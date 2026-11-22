@@ -35,11 +35,15 @@ from causalpy.experiments.model_adapter import (
 )
 from causalpy.pymc_forecast_models import PyMCForecastModel
 
-pymc_forecast = pytest.importorskip("pymc_forecast", minversion="0.3")
-if not SpecifierSet(">=0.3,<0.4").contains(
+pymc_forecast = pytest.importorskip("pymc_forecast", minversion="0.4")
+if not SpecifierSet(">=0.4,<0.5").contains(
     pymc_forecast.__version__, prereleases=False
 ):
-    pytest.skip("requires pymc-forecast>=0.3,<0.4", allow_module_level=True)
+    pytest.skip("requires pymc-forecast>=0.4,<0.5", allow_module_level=True)
+
+# Genuine pm.sample is autouse for this module, including the fast path.
+# Marking one recovery would leave the other fits on the PR job.
+pytestmark = pytest.mark.correctness
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -775,7 +779,7 @@ class TestPlaceboInTime:
 
 def test_pymc_forecast_03_prediction_schema_contract():
     """The optional extra's pinned 0.3 schema matches adapter consumption."""
-    assert version("pymc-forecast").startswith("0.3.")
+    assert version("pymc-forecast").startswith("0.4.")
     assert {
         "OBS_VAR": pymc_forecast.OBS_VAR,
         "MU_VAR": pymc_forecast.MU_VAR,
