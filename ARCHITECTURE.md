@@ -109,6 +109,8 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 | `InstrumentalVariable` | IV/2SLS | Bayes only | Non-standard `fit()` signature; no unified `plot()` |
 | `PanelRegression` | Panel FE | OLS + Bayes | No `_default_model_class`; model required |
 
+`StaggeredDifferenceInDifferencesInDifferences` is not a `BaseExperiment`. It fits one `StaggeredDifferenceInDifferences` per predefined third-dimension level and contrasts the public `att_event_time_draws` and `att_overall_draws` of those fits. It does not impute a second untreated outcome.
+
 ## PyMC Models
 
 - `LinearRegression` — ITS, DiD, RD, RKD, PrePostNEGD, PiecewiseITS, StaggeredDiD, PanelRegression

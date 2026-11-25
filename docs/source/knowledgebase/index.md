@@ -6,6 +6,7 @@
 glossary
 estimands
 prediction-contract
+staggered-difference-in-differences-in-differences
 reporting_statistics
 design_notation
 quasi_dags.ipynb

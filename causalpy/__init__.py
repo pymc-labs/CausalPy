@@ -39,6 +39,7 @@ from .experiments.piecewise_its import PiecewiseITS
 from .experiments.prepostnegd import PrePostNEGD
 from .experiments.regression_discontinuity import RegressionDiscontinuity
 from .experiments.regression_kink import RegressionKink
+from .experiments.staggered_ddd import StaggeredDifferenceInDifferencesInDifferences
 from .experiments.staggered_did import StaggeredDifferenceInDifferences
 from .experiments.synthetic_control import SyntheticControl
 from .experiments.synthetic_difference_in_differences import (
@@ -89,6 +90,7 @@ __all__ = [
     "SensitivitySummary",
     "skl_models",
     "StaggeredDifferenceInDifferences",
+    "StaggeredDifferenceInDifferencesInDifferences",
     "step",
     "Step",
     "SyntheticControl",
