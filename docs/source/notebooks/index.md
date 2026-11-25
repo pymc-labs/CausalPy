@@ -144,6 +144,13 @@ Geolift (geographical lift testing) is a method for measuring the causal impact 
 :link: up-down-control-geolift-pymc
 :link-type: doc
 :::
+
+:::{grid-item-card} Geo spend bundles with randomized markets
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/synthetic-control-geo-spend-bundles-pymc.png
+:link: synthetic-control-geo-spend-bundles-pymc
+:link-type: doc
+:::
 ::::
 
 ## Difference in Differences
@@ -207,6 +214,13 @@ A quasi-experimental design that uses time series methods to generate counterfac
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/interrupted-time-series-lift-test.png
 :link: interrupted-time-series-lift-test
+:link-type: doc
+:::
+
+:::{grid-item-card} National spend bundles with interrupted time series
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/interrupted-time-series-national-spend-bundles-pymc.png
+:link: interrupted-time-series-national-spend-bundles-pymc
 :link-type: doc
 :::
 
@@ -482,6 +496,7 @@ interrupted-time-series-causalpy-vs-causalimpact.ipynb
 geolift-single-cell.ipynb
 multi-cell-geolift.ipynb
 up-down-control-geolift-pymc.ipynb
+synthetic-control-geo-spend-bundles-pymc.ipynb
 :::
 
 :::{toctree}
@@ -503,6 +518,7 @@ interrupted-time-series-pymc.ipynb
 interrupted-time-series-post-intervention-analysis.ipynb
 interrupted-time-series-covid.ipynb
 interrupted-time-series-lift-test.ipynb
+interrupted-time-series-national-spend-bundles-pymc.ipynb
 interrupted-time-series-placebo-in-time-analysis.ipynb
 :::
 
