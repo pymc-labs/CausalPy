@@ -350,3 +350,56 @@ def test_labeled_draw_arrays_produce_intervals():
     assert axes[0].containers
     assert axes[2].containers
     plt.close(fig)
+
+
+def test_one_level_and_default_model_are_rejected_or_accepted():
+    data = _stacked()
+    one_level = data.loc[data["sugar"] == "high"]
+    with pytest.raises(cp.DataException, match="at least two"):
+        cp.StaggeredDifferenceInDifferencesInDifferences(
+            one_level,
+            formula="y ~ 1 + C(unit) + C(time)",
+            unit_variable_name="unit",
+            time_variable_name="time",
+            level_variable_name="sugar",
+            treatment_time_variable_name="treatment_time",
+            reference_level="high",
+        )
+    built = cp.StaggeredDifferenceInDifferencesInDifferences(
+        data,
+        formula="y ~ 1 + C(unit) + C(time)",
+        unit_variable_name="unit",
+        time_variable_name="time",
+        level_variable_name="sugar",
+        treatment_time_variable_name="treatment_time",
+        reference_level="low",
+    )
+    assert set(built.experiments) == {"high", "low"}
+
+
+def test_overall_contrast_skips_a_side_without_post_treatment():
+    result = _fit_ols(_stacked(), reference_level="low")
+    high = result.experiments["high"]
+    table = high.result.att_event_time.copy()
+    table.loc[table["event_time"] >= 0, "identified"] = False
+    object.__setattr__(high.result, "att_event_time", table)
+    with pytest.raises(cp.DataException, match="No identified post-treatment"):
+        high.att_overall_draws()
+    high.att_overall_draws = lambda: (_ for _ in ()).throw(
+        cp.DataException("No identified post-treatment event time to average.")
+    )
+    assert result.contrast_att_overall().empty
+    high.att_overall_draws = lambda: pd.Series([1.0], name="att")
+    with pytest.raises(cp.DataException, match="Cannot subtract"):
+        result.contrast_att_overall()
+    high.att_overall_draws = lambda: 1.0
+    result.experiments["low"].att_overall_draws = lambda: 1.0
+    high.att_event_time_draws = lambda: object()
+    result.experiments["low"].att_event_time_draws = lambda: object()
+    assert result.contrast_att_event_time().empty
+    level_table = result.level_att_event_time()
+    level_table["identified"] = True
+    result.level_att_event_time = lambda: level_table
+    fig, axes = result.plot()
+    assert axes[0].get_title() == "Event-time ATT by level"
+    plt.close(fig)
