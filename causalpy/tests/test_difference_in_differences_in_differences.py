@@ -17,12 +17,14 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from types import SimpleNamespace
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+from patsy import PatsyError
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
@@ -600,6 +602,145 @@ def test_class_is_a_tier_one_export_without_reordering_neighbors() -> None:
         "diff_in_diff import DifferenceInDifferences"
     )
     assert not issubclass(DifferenceInDifferencesInDifferences, BaseExperiment)
+
+
+def test_each_level_receives_a_fresh_pymc_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A posterior model is cloned per level, not deep-copied or shared."""
+    seen: list[object] = []
+
+    def _fit(self):
+        seen.append(self.model)
+        tier = self.data["tier"].iloc[0]
+        impact = {"none": 2.0, "lite": 5.0, "full": 9.0}[tier]
+        self._result = SimpleNamespace(causal_impact=np.array([impact]))
+        return self
+
+    monkeypatch.setattr(ddd_module.DifferenceInDifferences, "fit", _fit)
+    original = BayesianLinearRegression()
+    experiment = DifferenceInDifferencesInDifferences(
+        sales_frame(),
+        FORMULA,
+        time_variable_name="t",
+        group_variable_name="group",
+        level_variable_name="tier",
+        model=original,
+        reference_level="none",
+    ).fit()
+
+    assert len(seen) == 3
+    assert all(isinstance(model, BayesianLinearRegression) for model in seen)
+    assert all(model is not original for model in seen)
+    assert len({id(model) for model in seen}) == 3
+    assert contrast_table(experiment)["estimate"].tolist() == pytest.approx([3.0, 7.0])
+
+
+def test_bootstrap_names_a_level_whose_units_are_all_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A replicate that drops a whole level names that level instead of crashing."""
+
+    class _DropLite:
+        def choice(self, units, size, replace):
+            del size, replace
+            return np.asarray(
+                [unit for unit in units if not str(unit).startswith("lite")]
+            )
+
+    monkeypatch.setattr(ddd_module, "default_rng", lambda seed: _DropLite())
+    with pytest.raises(DataException, match="bootstrap replicate 0") as exc_info:
+        fit_sales(contrasts=[("full", "lite")]).fit(n_bootstrap=1)
+    message = str(exc_info.value)
+    assert "lite" in message
+    assert "treated post" in message
+
+
+def test_invalid_formula_is_a_formula_error_not_a_missing_cell() -> None:
+    """A name Patsy cannot evaluate is not reported as a missing comparison cell."""
+    experiment = DifferenceInDifferencesInDifferences(
+        sales_frame(),
+        "y ~ 1 + group * post_treatment + missing",
+        time_variable_name="t",
+        group_variable_name="group",
+        level_variable_name="tier",
+        model=LinearRegression(fit_intercept=False),
+        reference_level="none",
+    )
+    with pytest.raises(PatsyError, match="missing"):
+        experiment.fit()
+
+
+def test_duplicate_contrast_text_keeps_both_requested_rows() -> None:
+    """Repeated pair text stays two contrasts, with a suffix so the labels differ."""
+    experiment = fit_sales(contrasts=[("full", "lite"), ("full", "lite")])
+    table = contrast_table(experiment)
+
+    assert table["label"].tolist() == ["full - lite", "full - lite (2)"]
+    assert table["estimate"].tolist() == pytest.approx([4.0, 4.0])
+    assert experiment.contrast_draws().columns.tolist() == table["label"].tolist()
+
+
+def test_missing_level_column_is_not_reported_as_an_unknown_level() -> None:
+    """A missing third-dimension column is a missing column in both contrast modes."""
+    data = sales_frame().drop(columns=["tier"])
+    with pytest.raises(DataException, match="Missing required columns") as reference:
+        DifferenceInDifferencesInDifferences(
+            data,
+            FORMULA,
+            time_variable_name="t",
+            group_variable_name="group",
+            level_variable_name="tier",
+            model=LinearRegression(fit_intercept=False),
+            reference_level="none",
+        )
+    with pytest.raises(DataException, match="Missing required columns") as explicit:
+        DifferenceInDifferencesInDifferences(
+            data,
+            FORMULA,
+            time_variable_name="t",
+            group_variable_name="group",
+            level_variable_name="tier",
+            model=LinearRegression(fit_intercept=False),
+            contrasts=[("full", "lite")],
+        )
+    assert "tier" in str(reference.value)
+    assert "tier" in str(explicit.value)
+    assert "not in column" not in str(reference.value)
+    assert "not in column" not in str(explicit.value)
+
+
+def test_summarize_rejects_empty_draws_unknown_levels_and_bad_labels() -> None:
+    """The summarizer names a level with no draws and refuses an unknown uncertainty label."""
+    draws = {"full": [11.0, 1.0], "lite": [9.0, 3.0]}
+    with pytest.raises(DataException, match="lite"):
+        DifferenceInDifferencesInDifferences.summarize_paired_effects(
+            {"full": [11.0, 1.0], "lite": []},
+            contrasts=[("full", "lite")],
+        )
+    with pytest.raises(DataException, match="gold"):
+        DifferenceInDifferencesInDifferences.summarize_paired_effects(
+            draws,
+            contrasts=[("full", "gold")],
+        )
+    with pytest.raises(ValueError, match="unit_bootstrap"):
+        DifferenceInDifferencesInDifferences.summarize_paired_effects(
+            draws,
+            contrasts=[("full", "lite")],
+            uncertainty="stderr",
+        )
+    with pytest.raises(DataException, match="lite"):
+        DifferenceInDifferencesInDifferences.summarize_paired_effects(
+            draws,
+            contrasts=[("full", "lite")],
+            point_estimates={"full": 9.0},
+        )
+
+
+def test_plot_uses_a_caller_supplied_figure_size() -> None:
+    """An explicit figure size is used instead of the default that grows with the table."""
+    ax = fit_sales(contrasts=[("full", "lite")]).plot(show=False, figsize=(8.0, 3.0))
+    assert tuple(ax.figure.get_size_inches()) == pytest.approx((8.0, 3.0))
 
 
 def _shared_unit_frame() -> pd.DataFrame:
