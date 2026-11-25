@@ -263,3 +263,90 @@ def test_bayesian_draw_means_match_base_estimates():
     low_row = low_table.set_index("event_time").loc[shared]
     endpoint_gap = high_row["att_upper"].to_numpy() - low_row["att_upper"].to_numpy()
     assert not np.allclose(table["att_upper"].to_numpy(), endpoint_gap)
+
+
+def test_constructor_rejects_invalid_contrast_requests():
+    data = _stacked()
+    with pytest.raises(cp.DataException, match="not both and not neither"):
+        _fit_ols(data)
+    with pytest.raises(cp.DataException, match="not in sugar"):
+        _fit_ols(data, reference_level="missing")
+    with pytest.raises(cp.DataException, match="at least one"):
+        _fit_ols(data, contrasts=[])
+    with pytest.raises(cp.DataException, match="ordered pair"):
+        _fit_ols(data, contrasts=[("high",)])
+    with pytest.raises(cp.DataException, match="not in sugar"):
+        _fit_ols(data, contrasts=[("high", "missing")])
+
+
+def test_constructor_rejects_bad_panels():
+    data = _stacked()
+    missing = data.drop(columns=["sugar"])
+    with pytest.raises(cp.DataException, match="Missing required columns"):
+        _fit_ols(missing, reference_level="low")
+    blank = data.copy()
+    blank.loc[0, "sugar"] = np.nan
+    with pytest.raises(cp.DataException, match="missing levels"):
+        _fit_ols(blank, reference_level="low")
+    shared = data.copy()
+    shared.loc[shared["sugar"] == "low", "unit"] = shared.loc[
+        shared["sugar"] == "high", "unit"
+    ].to_numpy()
+    with pytest.raises(cp.DataException, match="more than one"):
+        _fit_ols(shared, reference_level="low")
+
+
+def test_shape_mismatch_and_empty_plots():
+    with pytest.raises(cp.DataException, match="share a shape"):
+        cp.StaggeredDifferenceInDifferencesInDifferences.contrast_draws(
+            np.array([1.0, 2.0]),
+            np.array([1.0]),
+        )
+    result = _fit_ols(_stacked(), reference_level="low")
+    result.contrast_att_event_time = lambda **kwargs: pd.DataFrame(
+        columns=["level_a", "level_b", "event_time", "att"]
+    )
+    result.contrast_att_overall = lambda **kwargs: pd.DataFrame(
+        columns=["level_a", "level_b", "att"]
+    )
+    fig, axes = result.plot()
+    assert axes[1].texts[0].get_text() == "No shared identified event time"
+    assert axes[2].texts[0].get_text() == "No overall contrast"
+    plt.close(fig)
+
+
+def test_labeled_draw_arrays_produce_intervals():
+    result = _fit_ols(_stacked(), reference_level="low")
+    draws = {
+        "high": xr.DataArray(
+            np.array([[[7.0, 9.0, 11.0], [8.0, 10.0, 12.0]]]),
+            dims=("chain", "draw", "event_time"),
+            coords={"event_time": [0, 1, 2]},
+        ),
+        "low": xr.DataArray(
+            np.array([[[5.0, 3.0, 1.0], [4.0, 2.0, 0.0]]]),
+            dims=("chain", "draw", "event_time"),
+            coords={"event_time": [0, 1, 2]},
+        ),
+    }
+    overall = {
+        "high": xr.DataArray(np.array([[7.0, 9.0, 11.0]]), dims=("chain", "draw")),
+        "low": xr.DataArray(np.array([[5.0, 3.0, 1.0]]), dims=("chain", "draw")),
+    }
+    for level, experiment in result.experiments.items():
+        experiment.att_event_time_draws = lambda level=level: draws[level]
+        experiment.att_overall_draws = lambda level=level: overall[level]
+    table = result.contrast_att_event_time()
+    np.testing.assert_allclose(table["att"].to_numpy(), [3.0, 7.0, 11.0])
+    assert {"att_lower", "att_upper"} <= set(table.columns)
+    overall_table = result.contrast_att_overall()
+    np.testing.assert_allclose(overall_table["att"].to_numpy(), [6.0])
+    level_table = result.level_att_event_time()
+    level_table["att_lower"] = level_table["att"] - 0.1
+    level_table["att_upper"] = level_table["att"] + 0.1
+    result.level_att_event_time = lambda: level_table
+    result.contrast_att_event_time = lambda **kwargs: table
+    fig, axes = result.plot()
+    assert axes[0].containers
+    assert axes[2].containers
+    plt.close(fig)
