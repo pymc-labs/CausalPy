@@ -253,7 +253,7 @@ def test_prior_effect_tail_probability_near_neutral(its_data):
     """Under a symmetric zero-mean prior, P(effect > 0) should sit near 0.5."""
     exp = _make_its(its_data, prior_sample_kwargs={"draws": 200, "random_seed": 3})
     exp.sample_prior_predictive()
-    summary = exp.effect_summary(group="prior")
+    summary = exp.effect_summary(group="prior", effect="observed_gap")
     table = summary.table
     prob_col = "p_gt_0" if "p_gt_0" in table.columns else table.columns[-1]
     prob = float(table[prob_col].iloc[0])

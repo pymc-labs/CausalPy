@@ -361,9 +361,12 @@ class WidePanel:
         shade_gap : bool, default True
             Whether to shade the realized-minus-counterfactual region.
         post_effect : xarray.DataArray, optional
-            Headline post-period series. Defaults to the stored impact.
+            Headline post-period series. When omitted, the stored impact is
+            drawn unless ``unavailable_reason`` is set. A missing expected
+            effect is annotated; it is not replaced by the realized gap.
         post_effect_cumulative : xarray.DataArray, optional
-            Bottom-panel series. Defaults to the stored cumulative impact.
+            Bottom-panel series. Defaults to the stored cumulative impact
+            unless the expected effect is missing.
         unavailable_reason : str, optional
             Annotation used when the headline expected effect is missing.
 
@@ -762,77 +765,83 @@ def _plot_counterfactual(
 
     ax[0].set(title=title)
 
-    if with_uncertainty:
-        plot_posterior_over_x(
-            pre_index,
-            pre_impact,
-            ax=ax[1],
-            **style,
-            plot_hdi_kwargs={"color": "C0"},
-        )
-        plot_posterior_over_x(
-            post_index,
-            post_effect if post_effect is not None else post_impact,
-            ax=ax[1],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
-        )
+    expected_missing = unavailable_reason is not None and post_effect is None
+    if expected_missing:
+        for axis, panel_title in (
+            (ax[1], impact_title),
+            (ax[2], cumulative_title),
+        ):
+            axis.axhline(y=0, c="k")
+            axis.text(
+                0.5,
+                0.5,
+                unavailable_reason,
+                transform=axis.transAxes,
+                ha="center",
+                va="center",
+                fontsize=8,
+                wrap=True,
+            )
+            axis.set(title=panel_title)
     else:
-        ax[1].plot(pre_index, pre_impact.mean(dim=["chain", "draw"]), "k.")
-        ax[1].plot(
-            post_index,
-            (post_effect if post_effect is not None else post_impact).mean(
-                dim=["chain", "draw"]
-            ),
-            "k.",
-            label=counterfactual_label,
-        )
-    ax[1].axhline(y=0, c="k")
-    if shade_gap or post_effect is not None:
-        ax[1].fill_between(
-            post_index,
-            y1=(post_effect if post_effect is not None else post_impact).mean(
-                dim=["chain", "draw"]
-            ),
-            color="C0",
-            alpha=0.25,
-            label=impact_label,
-        )
-    elif unavailable_reason is not None:
-        ax[1].text(
-            0.5,
-            0.5,
-            unavailable_reason,
-            transform=ax[1].transAxes,
-            ha="center",
-            va="center",
-            fontsize=8,
-            wrap=True,
-        )
-    ax[1].set(title=impact_title)
-
-    if with_uncertainty:
-        plot_posterior_over_x(
-            post_index,
+        drawn_post = post_effect if post_effect is not None else post_impact
+        drawn_cumulative = (
             post_effect_cumulative
             if post_effect_cumulative is not None
-            else post_impact_cumulative,
-            ax=ax[2],
-            **style,
-            plot_hdi_kwargs={"color": "C1"},
+            else post_impact_cumulative
         )
-    else:
-        ax[2].plot(
-            post_index,
-            (
-                post_effect_cumulative
-                if post_effect_cumulative is not None
-                else post_impact_cumulative
-            ).mean(dim=["chain", "draw"]),
-            c="k",
-        )
-    ax[2].axhline(y=0, c="k")
-    ax[2].set(title=cumulative_title)
+        if with_uncertainty:
+            if post_effect is None:
+                plot_posterior_over_x(
+                    pre_index,
+                    pre_impact,
+                    ax=ax[1],
+                    **style,
+                    plot_hdi_kwargs={"color": "C0"},
+                )
+            plot_posterior_over_x(
+                post_index,
+                drawn_post,
+                ax=ax[1],
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+            )
+        else:
+            if post_effect is None:
+                ax[1].plot(pre_index, pre_impact.mean(dim=["chain", "draw"]), "k.")
+            ax[1].plot(
+                post_index,
+                drawn_post.mean(dim=["chain", "draw"]),
+                "k.",
+                label=counterfactual_label,
+            )
+        ax[1].axhline(y=0, c="k")
+        if shade_gap or post_effect is not None:
+            ax[1].fill_between(
+                post_index,
+                y1=drawn_post.mean(dim=["chain", "draw"]),
+                color="C0",
+                alpha=0.25,
+                label=impact_label,
+            )
+        ax[1].set(title=impact_title)
+
+        if with_uncertainty:
+            plot_posterior_over_x(
+                post_index,
+                drawn_cumulative,
+                ax=ax[2],
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+            )
+        else:
+            ax[2].plot(
+                post_index,
+                drawn_cumulative.mean(dim=["chain", "draw"]),
+                c="k",
+            )
+        ax[2].axhline(y=0, c="k")
+        ax[2].set(title=cumulative_title)
 
     for i in [0, 1, 2]:
         converted = _convert_treatment_time_for_axis(ax[i], treatment_time)

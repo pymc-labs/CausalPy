@@ -210,6 +210,17 @@ def test_its_and_sc_labels_bump_and_unavailable_path():
     synthetic = _fit_sc()
     assert synthetic.result.expected_effect is None
     assert "unavailable" in synthetic.effect_summary().text
+    figure, axes = synthetic.plot(show=False)
+    assert "unavailable" in axes[1].get_title().lower()
+    assert "unavailable" in axes[2].get_title().lower()
+    gap = np.asarray(synthetic.result.impact_post.sel(treated_units="actual")).reshape(
+        -1
+    )
+    for line in axes[1].lines:
+        ydata = np.asarray(line.get_ydata(), dtype=float).reshape(-1)
+        if ydata.size == gap.size:
+            assert not np.allclose(ydata, gap)
+    figure.clf()
     synthetic._assign_bundle(
         "posterior",
         replace(synthetic.result, expected_effect=plotted, expected_effect_reason=None),

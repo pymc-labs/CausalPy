@@ -323,6 +323,8 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
     def _causal_impact_summary_stat(self, round_to: int | None = 2) -> str:
         """Computes the mean and credible interval bounds for the causal impact."""
         causal_impact = self.result.causal_impact
+        if not isinstance(causal_impact, xr.DataArray):
+            return f"Expected effect = {round_num(float(causal_impact), round_to)}"
         percentiles = causal_impact.quantile(
             [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
         ).values
@@ -555,13 +557,25 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
         )
 
         # Plot estimated causal impact / treatment effect
-        plot_scalar_posterior(
-            bundle.causal_impact,
-            ax=ax[1],
-            ci_prob=ci_prob,
-            ref_val=0,
-            round_to=round_to,
-        )
+        impact = bundle.causal_impact
+        if isinstance(impact, xr.DataArray):
+            plot_scalar_posterior(
+                impact,
+                ax=ax[1],
+                ci_prob=ci_prob,
+                ref_val=0,
+                round_to=round_to,
+            )
+        else:
+            ax[1].axvline(float(impact), c="C1", ls="--")
+            ax[1].text(
+                0.5,
+                0.5,
+                f"Expected effect = {round_num(float(impact), round_to)}",
+                transform=ax[1].transAxes,
+                ha="center",
+                va="center",
+            )
         ax[1].set(title="Estimated treatment effect")
         return fig, ax
 

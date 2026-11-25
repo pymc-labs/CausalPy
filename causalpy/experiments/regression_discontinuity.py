@@ -539,7 +539,12 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         # create strings to compose title
         r2 = format_r2_score(bundle.score, round_to=round_to, context="on fit data")
         if with_uncertainty:
-            percentiles = bundle.discontinuity_at_threshold.quantile(
+            discontinuity = bundle.discontinuity_at_threshold
+            if not isinstance(discontinuity, xr.DataArray):
+                raise TypeError(
+                    "Posterior discontinuity_at_threshold must be an xarray.DataArray."
+                )
+            percentiles = discontinuity.quantile(
                 [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
             ).values
             ci = (
@@ -547,7 +552,7 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
                 + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
             )
             discon = f"""
-            Discontinuity at threshold = {round_num(bundle.discontinuity_at_threshold.mean(), round_to)},
+            Discontinuity at threshold = {round_num(discontinuity.mean(), round_to)},
             """
             title = r2 + "\n" + discon + ci
         else:

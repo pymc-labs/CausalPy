@@ -114,11 +114,11 @@ See the [Interrupted Time Series section of quasi_dags](quasi_dags.ipynb#interru
 
 **Typical research questions**: What would have happened to a treated unit (e.g., a country, region, or firm) if it had not been treated? What is the causal effect of a unique intervention?
 
-**Empirical estimand**: Time-varying causal impact for a treated unit---the difference between the observed outcome and a synthetic counterfactual constructed from weighted control units:
+**Empirical estimand**: Two quantities are easy to confuse. ``observed_gap`` is the realized outcome minus the synthetic counterfactual. ``expected_effect`` is the response-scale contrast between a treated mean and that counterfactual. A counterfactual-only synthetic control models only the untreated path, so CausalPy reports ``expected_effect`` as unavailable and keeps ``observed_gap``:
 
-$$\text{impact}(t) = Y_{\text{treated}}(t) - \sum_i w_i \cdot Y_{\text{control}_i}(t)$$
+$$\text{observed gap}(t) = Y_{\text{treated}}(t) - \sum_i w_i \cdot Y_{\text{control}_i}(t)$$
 
-Like ITS, this is **not** a population-level effect.
+Like ITS, the realized gap is **not** a population-level effect, and it is not the default headline.
 
 **Identification assumptions**:
 

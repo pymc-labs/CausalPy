@@ -213,7 +213,7 @@ def test_its_single_post_observation_plot(mock_pymc_sample, its_data):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
     assert len(result.datapost) == 1
-    fig, ax = result.plot(show=False)
+    fig, ax = result.plot(show=False, effect="observed_gap")
 
     treatment_axvlines = [
         ln for a in ax for ln in a.get_lines() if ln.get_label() == "Treatment start"

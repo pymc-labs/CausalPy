@@ -218,7 +218,15 @@ class OutcomeFalsification:
         """
         if isinstance(experiment, DifferenceInDifferences):
             summary = experiment.effect_summary(alpha=alpha, direction="two-sided")
-        elif isinstance(experiment, (InterruptedTimeSeries, PiecewiseITS)):
+        elif isinstance(experiment, InterruptedTimeSeries):
+            summary = experiment.effect_summary(
+                alpha=alpha,
+                direction="two-sided",
+                cumulative=False,
+                relative=False,
+                effect="observed_gap",
+            )
+        elif isinstance(experiment, PiecewiseITS):
             summary = experiment.effect_summary(
                 alpha=alpha,
                 direction="two-sided",
