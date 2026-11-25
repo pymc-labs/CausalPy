@@ -34,7 +34,7 @@ from causalpy.experiments.staggered_did import StaggeredDifferenceInDifferences
 from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.pymc_models import PyMCModel
 
-Draws = xr.DataArray | pd.Series | float
+type Draws = xr.DataArray | pd.Series | float
 
 
 class StaggeredDifferenceInDifferencesInDifferences:
