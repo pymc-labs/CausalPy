@@ -415,9 +415,7 @@ def _fresh_model(
 
 
 def _adoption_times(experiment: StaggeredDifferenceInDifferences) -> tuple[Any, ...]:
-    treatment_time = experiment.data["G"]
-    adopted = treatment_time[treatment_time != experiment.never_treated_value]
-    return tuple(sorted(set(adopted.tolist())))
+    return tuple(experiment.cohorts)
 
 
 def _event_times(draws: Draws) -> list[int]:
@@ -478,7 +476,14 @@ def _hdi(difference: np.ndarray, hdi_prob: float) -> tuple[float, float]:
     return hdi_bounds(difference, prob=hdi_prob, flatten_chains_draws=True)
 
 
-def _errorbar(ax: plt.Axes, x: np.ndarray, frame: pd.DataFrame, label: str) -> None:
+def _errorbar(
+    ax: plt.Axes,
+    x: np.ndarray,
+    frame: pd.DataFrame,
+    label: str,
+    *,
+    connect: bool = True,
+) -> None:
     if {"att_lower", "att_upper"}.issubset(frame.columns):
         yerr = np.vstack(
             [
@@ -488,7 +493,13 @@ def _errorbar(ax: plt.Axes, x: np.ndarray, frame: pd.DataFrame, label: str) -> N
         )
         ax.errorbar(x, frame["att"], yerr=yerr, fmt="o", capsize=3, label=label)
         return
-    ax.plot(x, frame["att"], marker="o", linestyle="-", label=label)
+    ax.plot(
+        x,
+        frame["att"],
+        marker="o",
+        linestyle="-" if connect else "none",
+        label=label,
+    )
 
 
 def _plot_level_curves(ax: plt.Axes, table: pd.DataFrame) -> None:
@@ -532,7 +543,7 @@ def _plot_overall(ax: plt.Axes, table: pd.DataFrame) -> None:
         return
     labels = [f"{row.level_a} - {row.level_b}" for row in table.itertuples()]
     x = np.arange(len(table))
-    _errorbar(ax, x, table, "Overall contrast")
+    _errorbar(ax, x, table, "Overall contrast", connect=False)
     ax.set_xticks(x, labels)
     ax.set_xlabel("Contrast")
     ax.axhline(0, color="0.5", linewidth=0.8)

@@ -162,6 +162,30 @@ def test_reference_level_returns_other_minus_reference_only():
     assert only_pairs == {("mid", "high")}
 
 
+def test_mismatched_adoption_times_raise():
+    data = _stacked()
+    shifted = data.loc[data["sugar"] == "low", "treatment_time"]
+    data.loc[data["sugar"] == "low", "treatment_time"] = shifted.replace({4: 5})
+    with pytest.raises(cp.DataException, match="same adoption timing"):
+        _fit_ols(data, reference_level="low")
+
+
+def test_overall_ols_points_are_not_connected():
+    data = pd.concat(
+        [_stacked(), _panel(effect=2.0, sugar="mid", unit_offset=200, seed=5)],
+        ignore_index=True,
+    )
+    result = _fit_ols(data, reference_level="low")
+    fig, axes = result.plot()
+    overall_lines = [
+        line for line in axes[2].get_lines() if not line.get_label().startswith("_")
+    ]
+    assert len(overall_lines) == 1
+    assert overall_lines[0].get_linestyle() == "None"
+    assert len(overall_lines[0].get_ydata()) == 2
+    plt.close(fig)
+
+
 def test_plot_values_match_tables():
     result = _fit_ols(_stacked(), reference_level="low")
     fig, axes = result.plot()

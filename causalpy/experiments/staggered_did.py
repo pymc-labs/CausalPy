@@ -103,7 +103,9 @@ class StaggeredDifferenceInDifferences(
         ``ATT(g, t)``. A cohort is included when one of its post-treatment
         calendar periods lacks untreated support, or when none of its own units
         has an untreated observation.
-
+    cohorts : list
+        Sorted unique treatment times, excluding the never-treated value.
+        Available after construction, before :meth:`fit`.
     Notes
     -----
     **Estimate extraction**
