@@ -47,12 +47,12 @@ result = cp.SyntheticControl(
 ).fit()
 
 result.summary()
-summary = result.effect_summary(direction="increase")
-result.plot()
+summary = result.effect_summary(direction="increase", effect="observed_gap")
+result.plot(effect="observed_gap")
 ```
 
 ## Interpretation Checks
 
-- Inspect pre-period fit and donor weights before interpreting the effect.
+- This example only models the untreated trajectory, so the default `expected_effect` is unavailable. The calls above request `observed_gap`. Inspect pre-period fit and donor weights before interpreting that gap.
 - Check support with `cp.checks.ConvexHullCheck`, donor dependence with `cp.checks.LeaveOneOut`, and placebo effects with `cp.checks.PlaceboInSpace` or `cp.checks.PlaceboInTime`, typically through `cp.SensitivityAnalysis`.
 - Use `SyntheticDifferenceInDifferences` when time weighting is a core part of the design.

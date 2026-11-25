@@ -45,12 +45,12 @@ result = cp.InterruptedTimeSeries(
 ).fit()
 
 result.summary()
-summary = result.effect_summary(direction="increase")
-result.plot()
+summary = result.effect_summary(direction="increase", effect="observed_gap")
+result.plot(effect="observed_gap")
 ```
 
 ## Interpretation Checks
 
-- Verify pre-period fit before interpreting post-period impacts.
+- This example only models the untreated trajectory, so the default `expected_effect` is unavailable. The calls above request `observed_gap`, the realized outcome minus that counterfactual. Verify the pre-period fit before interpreting that gap.
 - If the intervention is temporary, pass `treatment_end_time` and consider `cp.checks.PersistenceCheck()`.
 - For explicit level and slope changes fitted over the whole series, use `PiecewiseITS`.
