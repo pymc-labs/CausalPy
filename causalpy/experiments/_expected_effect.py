@@ -34,6 +34,52 @@ UNTREATED_ONLY_REASON = (
 EffectChoice = Literal["expected_effect", "observed_gap"]
 
 
+def align_expected_window(
+    series: xr.DataArray | None,
+    post_index: pd.Index,
+    window_coords: pd.Index,
+) -> xr.DataArray | None:
+    """Select ``window_coords`` from a post-period expected-effect series.
+
+    Label selection is used when the series shares ``obs_ind`` with the
+    post-period index. A full-post request keeps a stored series whose labels
+    differ. A shorter series of the same length as the post index is selected
+    by position.
+
+    Parameters
+    ----------
+    series : xarray.DataArray or None
+        Stored post-period expected effect. ``None`` is returned unchanged.
+    post_index : pandas.Index
+        Index of the experiment post-period.
+    window_coords : pandas.Index
+        Coordinates selected by the requested window.
+
+    Returns
+    -------
+    xarray.DataArray or None
+        The windowed series, or ``None`` when ``series`` is missing.
+
+    Raises
+    ------
+    ValueError
+        If a partial window cannot be aligned to ``series``.
+    """
+    if series is None:
+        return None
+    wanted = pd.Index(window_coords)
+    labels = series.coords["obs_ind"].to_index()
+    if wanted.isin(labels).all():
+        return series.sel(obs_ind=wanted)
+    if len(wanted) == len(post_index):
+        return series
+    if labels.size == len(post_index):
+        positions = post_index.get_indexer(wanted)
+        if (positions >= 0).all():
+            return series.isel(obs_ind=positions)
+    raise ValueError("expected_effect is not aligned to the post-period index")
+
+
 def response_contrast(
     mu_treated: xr.DataArray,
     mu_untreated: xr.DataArray,
@@ -197,26 +243,21 @@ def summarize_expected_effect(
     series: xr.DataArray | float | None,
     *,
     reason: str | None = None,
-    datapost_index: pd.Index | None = None,
     cumulative: bool = True,
     group: Literal["prior", "posterior"] = "posterior",
 ) -> Any:
     """Headline the mean expected effect, or explain why it is unavailable.
 
-    Bayesian series keep their sampling dimensions. The headline is the mean
-    of the within-draw window averages. A point series is summarized by its
-    window mean alone: no credible interval and no posterior probability.
-    ``datapost_index`` is accepted so callers can name the window; the series
-    is already the post-intervention contrast.
+    Callers slice ``series`` to the requested window before calling.
+    Bayesian series keep their sampling dimensions. A point series is
+    summarized by its window mean alone.
 
     Parameters
     ----------
     series : xarray.DataArray, float, or None
-        Stored expected effect. ``None`` reports ``reason``.
+        Windowed expected effect. ``None`` reports ``reason``.
     reason : str, optional
         Explanation used when ``series`` is missing.
-    datapost_index : pandas.Index, optional
-        Accepted so callers can name the window. Not used for the headline.
     cumulative : bool, default True
         Whether to append the cumulative sum.
     group : {"prior", "posterior"}, default "posterior"
@@ -227,7 +268,6 @@ def summarize_expected_effect(
     EffectSummary
         Headline table and prose, or an unavailable summary.
     """
-    del datapost_index
     if series is None:
         return unavailable_summary(reason, group=group)
     from causalpy.reporting import EffectSummary, _apply_prior_grouping

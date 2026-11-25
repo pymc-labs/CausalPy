@@ -1422,15 +1422,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             Object with .table (DataFrame) and .text (str) attributes.
             The .text attribute contains a detailed multi-paragraph narrative report.
         """
-        if effect == "expected_effect":
-            bundle = self._require_bundle(group)
-            return summarize_expected_effect(
-                bundle.expected_effect,
-                reason=bundle.expected_effect_reason,
-                datapost_index=self.datapost.index,
-                group=group,
-            )
-        if effect != "observed_gap":
+        if effect not in ("expected_effect", "observed_gap"):
             raise ValueError(
                 f"effect must be 'expected_effect' or 'observed_gap', got {effect!r}."
             )
@@ -1461,7 +1453,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 )
 
             if period == "comparison":
-                # Comparison period: delegate to subclass method
+                if effect == "expected_effect":
+                    raise ValueError(
+                        "period='comparison' summarizes observed-gap persistence. "
+                        "Pass effect='observed_gap'."
+                    )
                 return self._comparison_period_summary(
                     bundle=self._require_bundle(group),
                     direction=direction,
@@ -1506,7 +1502,18 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
                 treated_unit=treated_unit,
             )
 
-        # Extract counterfactual for relative effects
+        if effect == "expected_effect":
+            from causalpy.experiments._expected_effect import align_expected_window
+
+            return summarize_expected_effect(
+                align_expected_window(
+                    bundle.expected_effect, self.datapost.index, window_coords
+                ),
+                reason=bundle.expected_effect_reason,
+                cumulative=cumulative,
+                group=group,
+            )
+
         counterfactual = _extract_counterfactual(
             bundle.predictions_post, window_coords, treated_unit=treated_unit
         )

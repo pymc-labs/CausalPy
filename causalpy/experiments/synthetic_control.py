@@ -782,15 +782,37 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             The .text attribute contains a detailed multi-paragraph narrative report.
         """
         if effect == "expected_effect":
+            if period is not None:
+                warnings.warn(
+                    f"period='{period}' is ignored for SyntheticControl "
+                    "(two-period design only). Use the 'window' parameter.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            from causalpy.reporting import _extract_window
+
             bundle = self._require_bundle(group)
             series = bundle.expected_effect
             unit = resolve_treated_unit(self.treated_units, treated_unit)
             if series is not None and "treated_units" in series.dims:
                 series = series.sel(treated_units=unit)
+            if series is not None:
+                from causalpy.experiments._expected_effect import (
+                    align_expected_window,
+                )
+
+                _impact, coords = _extract_window(
+                    bundle.impact_post,
+                    self.datapost.index,
+                    window,
+                    treated_unit=unit,
+                )
+                del _impact
+                series = align_expected_window(series, self.datapost.index, coords)
             return summarize_expected_effect(
                 series,
                 reason=bundle.expected_effect_reason,
-                datapost_index=self.datapost.index,
+                cumulative=cumulative,
                 group=group,
             )
         if effect != "observed_gap":
