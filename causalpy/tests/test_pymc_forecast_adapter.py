@@ -584,7 +584,7 @@ def test_three_period_design(its_data):
     slices = result._period_slices(result.result)
     assert slices["intervention_pred"].sizes["obs_ind"] == 15
     assert slices["post_intervention_pred"].sizes["obs_ind"] == 15
-    summary = result.effect_summary(period="comparison")
+    summary = result.effect_summary(effect="observed_gap", period="comparison")
     assert "persistence" in summary.text
 
 

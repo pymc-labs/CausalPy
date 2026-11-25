@@ -295,7 +295,16 @@ def test_did_bayesian_matches_only_exact_interaction(did_data):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    assert result.result.causal_impact.coords["coeffs"].item() == "post[T.True]:g"
+    label = next(
+        name for name in result.labels if result._is_treatment_interaction(name)
+    )
+    assert label == "post[T.True]:g"
+    coefficient = result.idata["posterior"]["beta"].sel(
+        coeffs=label, treated_units="unit_0"
+    )
+    np.testing.assert_allclose(
+        np.asarray(result.result.causal_impact), np.asarray(coefficient)
+    )
 
 
 def test_did_validation_post_treatment_data():
@@ -928,9 +937,7 @@ def test_regression_discontinuity_float_treatment(treated_dtype):
     pd.testing.assert_frame_equal(df, original)
     fitted = result.fit()
     # The epsilon window adds 2 * slope * epsilon to the planted jump of 5.
-    assert float(fitted.result.discontinuity_at_threshold.mean()) == pytest.approx(
-        5.004
-    )
+    assert float(fitted.result.discontinuity_at_threshold) == pytest.approx(5.004)
 
 
 def test_regression_discontinuity_rejects_non_indicator_float():

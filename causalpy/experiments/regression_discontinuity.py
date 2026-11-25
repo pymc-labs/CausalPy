@@ -19,6 +19,7 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
+import xarray as xr
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 from plotnine import (
@@ -36,6 +37,7 @@ from sklearn.base import RegressorMixin
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.experiments._results import DiscontinuityResult
+from causalpy.experiments._expected_effect import response_contrast
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.custom_exceptions import (
     DataException,
@@ -108,7 +110,7 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
 
     **Estimate extraction**
 
-    After fitting the regression on the selected bandwidth, the class predicts the conditional expectation immediately below the threshold with ``treated=0`` and immediately above it with ``treated=1``. ``discontinuity_at_threshold`` is the upper prediction minus the lower prediction, evaluated at ``threshold ± epsilon``. This is a local prediction contrast, not a population-standardized effect.
+    After fitting the regression on the selected bandwidth, the class predicts the conditional expectation immediately below the threshold with ``treated=0`` and immediately above it with ``treated=1``. ``discontinuity_at_threshold`` is that upper-minus-lower response contrast, evaluated at ``threshold ± epsilon``. ``expected_effect`` is the same value. An OLS result is a point contrast with no sampling dimensions. This is a local prediction contrast, not a population-standardized effect.
 
     Examples
     --------
@@ -278,9 +280,14 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         # discontinuity = difference in model expectation across the threshold,
         # evaluated on the two threshold rows built at configure time
         pred_discon = self._model_backend.predict(X=self.x_discon_design, group=group)
-        discontinuity_at_threshold = pred_discon.isel(
-            obs_ind=1, treated_units=0
-        ) - pred_discon.isel(obs_ind=0, treated_units=0)
+        upper = pred_discon.isel(obs_ind=1, treated_units=0)
+        lower = pred_discon.isel(obs_ind=0, treated_units=0)
+        discontinuity_at_threshold = response_contrast(
+            upper,
+            lower,
+            reduce_dims=(),
+            point=self._model_backend.is_ols,
+        )
 
         score = None
         if group == "posterior":
@@ -365,11 +372,9 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         print(f"Observations used for fit: {len(self.fit_data)}")
         print("\nResults:")
         bundle = self.result
-        discontinuity = (
-            bundle.discontinuity_at_threshold
-            if has_posterior_draws(bundle.discontinuity_at_threshold)
-            else _as_scalar(bundle.discontinuity_at_threshold)
-        )
+        discontinuity = bundle.discontinuity_at_threshold
+        if not isinstance(discontinuity, xr.DataArray):
+            discontinuity = _as_scalar(discontinuity)
         print(f"Discontinuity at threshold = {convert_to_string(discontinuity)}")
         print("\n")
         self.print_coefficients(round_to)

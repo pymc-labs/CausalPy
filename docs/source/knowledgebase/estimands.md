@@ -86,7 +86,7 @@ Each quasi-experimental design connects a research question to an empirical esti
 
 See the [Difference in Differences section of quasi_dags](quasi_dags.ipynb#difference-in-differences) for the DAG representation.
 
-**Interpretation note**: A single ATT summarizes the treatment effect across treated post-treatment observations and can conceal variation across units or time.
+**Interpretation note**: A single ATT summarizes the treatment effect across treated post-treatment observations and can conceal variation across units or time. CausalPy reports this ATT as ``expected_effect``: the mean response-scale contrast over treated post-period rows with the treatment interaction switched off. On an additive identity link that contrast equals the interaction coefficient.
 
 ---
 
@@ -94,9 +94,9 @@ See the [Difference in Differences section of quasi_dags](quasi_dags.ipynb#diffe
 
 **Typical research questions**: Did an intervention (policy change, marketing campaign, etc.) affect a time series? What is the causal impact over time?
 
-**Empirical estimand**: Time-varying causal impact for a single treated unit (or aggregate). This is **not** a population-level {term}`ATE` or {term}`ATT`---it is unit-specific and time-indexed:
+**Empirical estimand**: Two quantities are easy to confuse. ``observed_gap`` is the realized outcome minus the untreated counterfactual. ``expected_effect`` is the response-scale contrast between a treated mean and an untreated mean. A counterfactual-only interrupted time series models only the untreated trajectory, so CausalPy reports ``expected_effect`` as unavailable and keeps ``observed_gap``:
 
-$$\text{impact}(t) = Y_{\text{observed}}(t) - \mathbb{E}[Y_{\text{counterfactual}}(t)]$$
+$$\text{observed gap}(t) = Y_{\text{observed}}(t) - \mathbb{E}[Y_{\text{untreated}}(t)]$$
 
 **Identification assumptions**:
 

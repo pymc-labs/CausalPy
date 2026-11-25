@@ -95,16 +95,16 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 
 | Class | Method | Backends | Notable quirk |
 | --- | --- | --- | --- |
-| `InterruptedTimeSeries` | ITS | OLS + Bayes | 3-period design via `treatment_end_time` |
+| `InterruptedTimeSeries` | ITS | OLS + Bayes | Counterfactual-only fit; `expected_effect` unavailable unless a treated mean is supplied. `observed_gap` is y minus mu |
 | `PiecewiseITS` | Segmented ITS | OLS + Bayes | Fits full series; `step()`/`ramp()` transforms |
-| `DifferenceInDifferences` | DiD | OLS + Bayes | Effect from interaction coefficient |
+| `DifferenceInDifferences` | DiD | OLS + Bayes | `expected_effect` is the post-treatment ATT; equals the interaction on an identity link |
 | `StaggeredDifferenceInDifferences` | Staggered DiD | OLS + Bayes | Fits untreated obs only |
-| `SyntheticControl` | SC | OLS + Bayes | Multi-unit; control/treated unit lists, no formula |
+| `SyntheticControl` | SC | OLS + Bayes | Multi-unit; counterfactual-only fit leaves `expected_effect` unavailable. `observed_gap` is y minus mu |
 | `UpDownGeoLift` | Three-arm geo lift | Bayes only | Extends synthetic control with up/down/control assignment and joint draw summaries |
 | `SyntheticDifferenceInDifferences` | SDiD | OLS + Bayes | Tau computed analytically from weight posteriors |
-| `RegressionDiscontinuity` | RD | OLS + Bayes | `epsilon` at threshold; optional `bandwidth` |
+| `RegressionDiscontinuity` | RD | OLS + Bayes | `expected_effect` aliases the cutoff contrast; optional `bandwidth` |
 | `RegressionKink` | RKD | Bayes only | Slope change at `kink_point` |
-| `PrePostNEGD` | Pretest/posttest | Bayes only | `group_variable_name` + `pretreatment_variable_name` |
+| `PrePostNEGD` | Pretest/posttest | Bayes only | `expected_effect` is the study-sample posttest ATE |
 | `InversePropensityWeighting` | IPW | Bayes only | Two-stage; no unified `plot()` |
 | `InstrumentalVariable` | IV/2SLS | Bayes only | Non-standard `fit()` signature; no unified `plot()` |
 | `PanelRegression` | Panel FE | OLS + Bayes | No `_default_model_class`; model required |
@@ -127,7 +127,7 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 | **Formulas** | Patsy `dmatrices()` for design matrices; `build_design_matrices()` for counterfactual prediction. Bare datetime predictors are encoded as continuous elapsed days from the fitted origin; use `C(date)` for date fixed effects. `PiecewiseITS` uses `step()`/`ramp()` stateful transforms. |
 | **obs_ind** | All experiments set `data.index.name = "obs_ind"`. Canonical xarray/PyMC dimension name. |
 | **treated_units always 2D** | Even single-unit experiments use `treated_units=["unit_0"]`. Never pass 1D y to PyMC. |
-| **Impact uses mu, not y_hat** | The adapter's `predict()` extracts posterior `mu` (conditional expected outcome in observed units), not `y_hat` (with observation noise); impact is `y - predict(X)`. For GLMs, `mu` must be inverse-linked before impact; see `docs/source/knowledgebase/prediction-contract.md`. |
+| **Impact uses mu, not y_hat** | The adapter's `predict()` extracts posterior `mu` (conditional expected outcome in observed units), not `y_hat` (with observation noise). For DifferenceInDifferences, PrePostNEGD, RegressionDiscontinuity, InterruptedTimeSeries, and SyntheticControl, `expected_effect` is mu under intervention minus mu under no intervention. `observed_gap` remains y minus the untreated mu. For GLMs, `mu` must be inverse-linked before either contrast; see `docs/source/knowledgebase/prediction-contract.md`. |
 | **Intercept handling** | Patsy includes intercept by default. sklearn models must use `fit_intercept=False`. |
 | **create_causalpy_compatible_class** | Applied during `make_model_adapter()` for sklearn backends; clones the user instance before patching. |
 | **Wide-panel counterfactuals** | New wide-panel experiments hold a `WidePanel` (`causalpy/experiments/_panel_counterfactual.py`) instead of subclassing `SyntheticControl`. The `coeffs` rename stays inside `SyntheticControl`. Post-period treated outcomes are impact and display only, not a fit or tuning input. #1243 and #1244 edit only their own new modules and do not edit `_panel_counterfactual.py` or `reporting.py` while the other is in progress. Non-goals live in the module docstring. If `WidePanel` is not enough for a caller, stop and extend it in a serial PR. |

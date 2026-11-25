@@ -319,6 +319,13 @@ class WidePanel:
         style: _PosteriorPlotStyle,
         figsize: tuple[float, float],
         plot_predictors: bool,
+        impact_label: str = "Causal impact",
+        impact_title: str = "Causal Impact",
+        cumulative_title: str = "Cumulative Causal Impact",
+        shade_gap: bool = True,
+        post_effect: xr.DataArray | None = None,
+        post_effect_cumulative: xr.DataArray | None = None,
+        unavailable_reason: str | None = None,
     ) -> tuple[plt.Figure, list[plt.Axes]] | tuple[plt.Figure, np.ndarray]:
         """Draw the prior-check figure or the three-panel posterior figure.
 
@@ -344,6 +351,21 @@ class WidePanel:
             Figure size in inches.
         plot_predictors : bool
             Whether to overlay donor trajectories.
+
+        impact_label : str, default "Causal impact"
+            Legend label for the middle-panel series.
+        impact_title : str, default "Causal Impact"
+            Title of the middle panel when the expected effect is present.
+        cumulative_title : str, default "Cumulative Causal Impact"
+            Title of the bottom panel when the expected effect is present.
+        shade_gap : bool, default True
+            Whether to shade the realized-minus-counterfactual region.
+        post_effect : xarray.DataArray, optional
+            Headline post-period series. Defaults to the stored impact.
+        post_effect_cumulative : xarray.DataArray, optional
+            Bottom-panel series. Defaults to the stored cumulative impact.
+        unavailable_reason : str, optional
+            Annotation used when the headline expected effect is missing.
 
         Returns
         -------
@@ -395,6 +417,13 @@ class WidePanel:
             style=style,
             figsize=figsize,
             plot_predictors=plot_predictors,
+            impact_label=impact_label,
+            impact_title=impact_title,
+            cumulative_title=cumulative_title,
+            shade_gap=shade_gap,
+            post_effect=post_effect,
+            post_effect_cumulative=post_effect_cumulative,
+            unavailable_reason=unavailable_reason,
         )
 
     def plot_data(
@@ -649,6 +678,13 @@ def _plot_counterfactual(
     style: _PosteriorPlotStyle,
     figsize: tuple[float, float],
     plot_predictors: bool,
+    impact_label: str = "Causal impact",
+    impact_title: str = "Causal Impact",
+    cumulative_title: str = "Cumulative Causal Impact",
+    shade_gap: bool = True,
+    post_effect: xr.DataArray | None = None,
+    post_effect_cumulative: xr.DataArray | None = None,
+    unavailable_reason: str | None = None,
 ) -> tuple[plt.Figure, np.ndarray]:
     """Render the three-panel counterfactual, impact, and cumulative figure.
 
@@ -702,17 +738,27 @@ def _plot_counterfactual(
             c="k",
         )
 
-    h = ax[0].fill_between(
-        post_index,
-        y1=post_pred.mean(dim=["chain", "draw"]).values,
-        y2=post_treated.values,
-        color="C0",
-        alpha=0.25,
-        label="Causal impact",
-    )
-    if with_uncertainty:
-        handles.append(h)
-        labels.append("Causal impact")
+    if shade_gap:
+        h = ax[0].fill_between(
+            post_index,
+            y1=post_pred.mean(dim=["chain", "draw"]).values,
+            y2=post_treated.values,
+            color="C0",
+            alpha=0.25,
+            label=impact_label,
+        )
+        if with_uncertainty:
+            handles.append(h)
+            labels.append(impact_label)
+    elif unavailable_reason is not None:
+        ax[0].annotate(
+            unavailable_reason,
+            xy=(0.5, 0.08),
+            xycoords="axes fraction",
+            ha="center",
+            fontsize=8,
+            color="0.3",
+        )
 
     ax[0].set(title=title)
 
@@ -726,7 +772,7 @@ def _plot_counterfactual(
         )
         plot_posterior_over_x(
             post_index,
-            post_impact,
+            post_effect if post_effect is not None else post_impact,
             ax=ax[1],
             **style,
             plot_hdi_kwargs={"color": "C1"},
@@ -735,24 +781,42 @@ def _plot_counterfactual(
         ax[1].plot(pre_index, pre_impact.mean(dim=["chain", "draw"]), "k.")
         ax[1].plot(
             post_index,
-            post_impact.mean(dim=["chain", "draw"]),
+            (post_effect if post_effect is not None else post_impact).mean(
+                dim=["chain", "draw"]
+            ),
             "k.",
             label=counterfactual_label,
         )
     ax[1].axhline(y=0, c="k")
-    ax[1].fill_between(
-        post_index,
-        y1=post_impact.mean(dim=["chain", "draw"]),
-        color="C0",
-        alpha=0.25,
-        label="Causal impact",
-    )
-    ax[1].set(title="Causal Impact")
+    if shade_gap or post_effect is not None:
+        ax[1].fill_between(
+            post_index,
+            y1=(post_effect if post_effect is not None else post_impact).mean(
+                dim=["chain", "draw"]
+            ),
+            color="C0",
+            alpha=0.25,
+            label=impact_label,
+        )
+    elif unavailable_reason is not None:
+        ax[1].text(
+            0.5,
+            0.5,
+            unavailable_reason,
+            transform=ax[1].transAxes,
+            ha="center",
+            va="center",
+            fontsize=8,
+            wrap=True,
+        )
+    ax[1].set(title=impact_title)
 
     if with_uncertainty:
         plot_posterior_over_x(
             post_index,
-            post_impact_cumulative,
+            post_effect_cumulative
+            if post_effect_cumulative is not None
+            else post_impact_cumulative,
             ax=ax[2],
             **style,
             plot_hdi_kwargs={"color": "C1"},
@@ -760,11 +824,15 @@ def _plot_counterfactual(
     else:
         ax[2].plot(
             post_index,
-            post_impact_cumulative.mean(dim=["chain", "draw"]),
+            (
+                post_effect_cumulative
+                if post_effect_cumulative is not None
+                else post_impact_cumulative
+            ).mean(dim=["chain", "draw"]),
             c="k",
         )
     ax[2].axhline(y=0, c="k")
-    ax[2].set(title="Cumulative Causal Impact")
+    ax[2].set(title=cumulative_title)
 
     for i in [0, 1, 2]:
         converted = _convert_treatment_time_for_axis(ax[i], treatment_time)

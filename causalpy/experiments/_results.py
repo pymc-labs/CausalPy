@@ -20,9 +20,12 @@ two public slots ``experiment.result`` (posterior group) and
 ``experiment.prior_result`` (prior group) hold these bundles and back the
 ``is_fitted`` / ``has_prior_predictive`` state predicates.
 
-All prediction/impact fields are typed :class:`xarray.DataArray` on the
+Prediction and impact series are typed :class:`xarray.DataArray` on the
 canonical ``("chain", "draw", "obs_ind"[, ...])`` dimensions produced by
 :class:`~causalpy.experiments.model_adapter.ModelAdapter.predict`.
+OLS point contrasts are Python floats with no sampling dimensions.
+``expected_effect`` is ``None`` when a fit supplies only the untreated
+trajectory.
 """
 
 from __future__ import annotations
@@ -64,6 +67,13 @@ class CausalResult:
     impact_post: xr.DataArray
     impact_post_cumulative: xr.DataArray
     score: pd.Series | None = None
+    expected_effect: xr.DataArray | None = None
+    expected_effect_reason: str | None = None
+
+    @property
+    def observed_gap(self) -> xr.DataArray:
+        """Realized outcome minus the untreated counterfactual, in outcome units."""
+        return self.impact_post
 
 
 @dataclass(frozen=True)
@@ -89,27 +99,41 @@ class GroupComparisonScenario:
 
 @dataclass(frozen=True)
 class CoefficientResult:
-    """Result bundle for coefficient-contrast experiments (DiD, PrePostNEGD).
+    """Result bundle for response-contrast experiments (DiD, PrePostNEGD).
 
-    ``causal_impact`` holds draws of the treatment-effect coefficient (or its
-    algebraically-equivalent prediction contrast) with canonical coefficient
-    dimensions.
+    ``causal_impact`` is the response-scale expected effect. On an additive
+    identity link it equals the treatment coefficient. Bayesian results keep
+    sampling dimensions; an OLS result is a Python float.
     """
 
-    causal_impact: xr.DataArray
+    causal_impact: xr.DataArray | float
     scenario_control: GroupComparisonScenario
     scenario_treated: GroupComparisonScenario
     scenario_counterfactual: GroupComparisonScenario
     score: pd.Series | None = None
 
+    @property
+    def expected_effect(self) -> xr.DataArray | float:
+        """Headline response-scale contrast. Alias of ``causal_impact``."""
+        return self.causal_impact
+
 
 @dataclass(frozen=True)
 class DiscontinuityResult:
-    """Result bundle for :class:`~causalpy.experiments.regression_discontinuity.RegressionDiscontinuity`."""
+    """Result bundle for :class:`~causalpy.experiments.regression_discontinuity.RegressionDiscontinuity`.
+
+    ``discontinuity_at_threshold`` is the local response-scale contrast at the
+    cutoff. ``expected_effect`` is that same value.
+    """
 
     predictions: xr.DataArray
-    discontinuity_at_threshold: xr.DataArray
+    discontinuity_at_threshold: xr.DataArray | float
     score: pd.Series | None = None
+
+    @property
+    def expected_effect(self) -> xr.DataArray | float:
+        """Headline response-scale contrast. Alias of ``discontinuity_at_threshold``."""
+        return self.discontinuity_at_threshold
 
 
 @dataclass(frozen=True)

@@ -360,7 +360,7 @@ def test_effect_summary_does_not_default_to_synthetic_control_assumptions(sc_dat
         treated_units=["actual"],
         model=cp.skl_models.WeightedProportion(),
     ).fit()
-    summary = experiment.effect_summary()
+    summary = experiment.effect_summary(effect="observed_gap")
     assert (
         "control units used to construct the synthetic counterfactual" in summary.text
     )

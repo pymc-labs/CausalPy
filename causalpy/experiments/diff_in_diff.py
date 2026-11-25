@@ -27,6 +27,7 @@ from causalpy.custom_exceptions import (
     DataException,
     FormulaException,
 )
+from causalpy.experiments._expected_effect import response_contrast
 from causalpy.experiments._results import CoefficientResult, GroupComparisonScenario
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
@@ -84,7 +85,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
     -----
     **Estimate extraction**
 
-    Both Bayesian and OLS backends store the fitted group-by-post interaction coefficient as ``causal_impact``. The class also constructs treated-post counterfactual predictions for visualization by setting that interaction term to zero, but those predictions do not determine the reported scalar effect. In an additive identity-link model, the coefficient and the corresponding predicted contrast are algebraically identical.
+    ``causal_impact`` is the post-treatment average treatment effect on the treated: every treated-group post-period row, equally weighted, compared with that same row after the treatment interaction is switched off. On an additive identity link this equals the group-by-post coefficient. Bayesian results keep sampling dimensions; an OLS result is a point contrast with no sampling dimensions. ``expected_effect`` is an alias of ``causal_impact``.
 
     Lazy lifecycle: construction only validates inputs and builds design
     matrices — nothing is sampled. Call :meth:`fit` to draw posterior
@@ -242,13 +243,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             np.asarray(new_x), group=group
         )
 
-        # calculate causal impact
-        treatment_coefficient = next(
-            label for label in self.labels if self._is_treatment_interaction(label)
-        )
-        causal_impact = self._model_backend.coefficients(group=group).sel(
-            coeffs=treatment_coefficient
-        )
+        causal_impact = self._expected_effect(group)
 
         bundle = CoefficientResult(
             causal_impact=causal_impact,
@@ -264,6 +259,38 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             score=None,
         )
         self._assign_bundle(group, bundle)
+
+    def _expected_effect(
+        self, group: Literal["prior", "posterior"]
+    ) -> xr.DataArray | float:
+        """Post-treatment ATT from paired response-scale predictions.
+
+        Every treated-group post-period row is weighted equally. Group, period,
+        and covariates stay fixed; only the treatment interaction is switched
+        off. The outcome column is dropped before either prediction.
+        """
+        rows = (
+            self.data.query(f"{self.group_variable_name} == 1")
+            .query(f"{self.post_treatment_variable_name} == True")
+            .drop(columns=[self.outcome_variable_name])
+        )
+        if rows.empty:
+            raise ValueError("No treated post-period rows to contrast.")
+        (design,) = build_design_matrices(
+            [self._x_design_info], rows, return_type="dataframe"
+        )
+        untreated = design.copy()
+        for index, label in enumerate(self.labels):
+            if self._is_treatment_interaction(label):
+                untreated.iloc[:, index] = 0
+        mu_treated = self._model_backend.predict(np.asarray(design), group=group)
+        mu_untreated = self._model_backend.predict(np.asarray(untreated), group=group)
+        return response_contrast(
+            mu_treated,
+            mu_untreated,
+            reduce_dims=("obs_ind", "treated_units"),
+            point=self._model_backend.is_ols,
+        )
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -367,7 +394,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
 
     def _causal_impact_summary_stat(self, round_to: int | None = None) -> str:
         """Computes the mean and credible interval bounds for the causal impact."""
-        return f"Causal impact = {convert_to_string(self.result.causal_impact, round_to=round_to)}"
+        return f"Expected effect = {convert_to_string(self.result.causal_impact, round_to=round_to)}"
 
     def plot(
         self,
@@ -678,7 +705,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
                 xlim=[-0.05, 1.1],
                 xticks=[0, 1],
                 xticklabels=["pre", "post"],
-                title=f"Causal impact = {round_num(causal_impact_value, round_to)}",
+                title=f"Expected effect = {round_num(causal_impact_value, round_to)}",
             )
             ax.legend(fontsize=LEGEND_FONT_SIZE)
         return fig, ax

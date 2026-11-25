@@ -167,7 +167,9 @@ def test_effect_summary_2period_pymc_datetime(datetime_data_2period, mock_pymc_s
     ).fit()
 
     # Default summary (all post-treatment period)
-    summary = result.effect_summary()
+    summary = result.effect_summary(
+        effect="observed_gap",
+    )
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -194,7 +196,9 @@ def test_effect_summary_2period_ols_datetime(datetime_data_2period):
     ).fit()
 
     # Default summary
-    summary = result.effect_summary()
+    summary = result.effect_summary(
+        effect="observed_gap",
+    )
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -218,7 +222,9 @@ def test_effect_summary_2period_pymc_integer(integer_data_2period, mock_pymc_sam
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    summary = result.effect_summary()
+    summary = result.effect_summary(
+        effect="observed_gap",
+    )
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -236,7 +242,9 @@ def test_effect_summary_2period_ols_integer(integer_data_2period):
         model=LinearRegression(),
     ).fit()
 
-    summary = result.effect_summary()
+    summary = result.effect_summary(
+        effect="observed_gap",
+    )
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -257,7 +265,9 @@ def test_effect_summary_2period_with_window(datetime_data_2period, mock_pymc_sam
     # Use a window that's a subset of post-treatment period
     window_start = df.index[df.index >= treatment_time][5]
     window_end = df.index[df.index >= treatment_time][15]
-    summary = result.effect_summary(window=(window_start, window_end))
+    summary = result.effect_summary(
+        effect="observed_gap", window=(window_start, window_end)
+    )
 
     assert summary is not None
     assert hasattr(summary, "table")
@@ -279,10 +289,16 @@ def test_effect_summary_2period_with_parameters(
     ).fit()
 
     # Test with different parameters
-    summary1 = result.effect_summary(cumulative=True, relative=True)
-    summary2 = result.effect_summary(cumulative=False, relative=False)
-    summary3 = result.effect_summary(alpha=0.1, direction="increase")
-    summary4 = result.effect_summary(min_effect=1.0)
+    summary1 = result.effect_summary(
+        effect="observed_gap", cumulative=True, relative=True
+    )
+    summary2 = result.effect_summary(
+        effect="observed_gap", cumulative=False, relative=False
+    )
+    summary3 = result.effect_summary(
+        effect="observed_gap", alpha=0.1, direction="increase"
+    )
+    summary4 = result.effect_summary(effect="observed_gap", min_effect=1.0)
 
     for summary in [summary1, summary2, summary3, summary4]:
         assert summary is not None
@@ -310,7 +326,7 @@ def test_effect_summary_3period_intervention_pymc_datetime(
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    summary = result.effect_summary(period="intervention")
+    summary = result.effect_summary(effect="observed_gap", period="intervention")
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -340,7 +356,7 @@ def test_effect_summary_3period_intervention_ols_datetime(datetime_data_3period)
         model=LinearRegression(),
     ).fit()
 
-    summary = result.effect_summary(period="intervention")
+    summary = result.effect_summary(effect="observed_gap", period="intervention")
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -366,7 +382,7 @@ def test_effect_summary_3period_intervention_pymc_integer(
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    summary = result.effect_summary(period="intervention")
+    summary = result.effect_summary(effect="observed_gap", period="intervention")
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -385,7 +401,7 @@ def test_effect_summary_3period_intervention_ols_integer(integer_data_3period):
         model=LinearRegression(),
     ).fit()
 
-    summary = result.effect_summary(period="intervention")
+    summary = result.effect_summary(effect="observed_gap", period="intervention")
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -411,7 +427,7 @@ def test_effect_summary_3period_post_pymc_datetime(
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    summary = result.effect_summary(period="post")
+    summary = result.effect_summary(effect="observed_gap", period="post")
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -439,7 +455,7 @@ def test_effect_summary_3period_post_ols_datetime(datetime_data_3period):
         model=LinearRegression(),
     ).fit()
 
-    summary = result.effect_summary(period="post")
+    summary = result.effect_summary(effect="observed_gap", period="post")
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -465,7 +481,7 @@ def test_effect_summary_3period_post_pymc_integer(
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    summary = result.effect_summary(period="post")
+    summary = result.effect_summary(effect="observed_gap", period="post")
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -484,7 +500,7 @@ def test_effect_summary_3period_post_ols_integer(integer_data_3period):
         model=LinearRegression(),
     ).fit()
 
-    summary = result.effect_summary(period="post")
+    summary = result.effect_summary(effect="observed_gap", period="post")
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -519,7 +535,9 @@ def test_effect_summary_post_keeps_float_treatment_end_bound(
         model=LinearRegression(),
     ).fit()
 
-    post = result.effect_summary(period="post", cumulative=True, relative=False)
+    post = result.effect_summary(
+        effect="observed_gap", period="post", cumulative=True, relative=False
+    )
     expected_n = int((index >= treatment_end_time).sum())
     assert float(post.table.loc["average", "mean"]) == pytest.approx(post_value)
     assert float(post.table.loc["cumulative", "mean"]) == pytest.approx(
@@ -527,6 +545,7 @@ def test_effect_summary_post_keeps_float_treatment_end_bound(
     )
 
     windowed = result.effect_summary(
+        effect="observed_gap",
         window=(treatment_end_time, index.max()),
         cumulative=True,
         relative=False,
@@ -553,7 +572,9 @@ def test_effect_summary_post_float_end_on_range_index_keeps_only_last_label():
         model=LinearRegression(),
     ).fit()
 
-    post = result.effect_summary(period="post", cumulative=True, relative=False)
+    post = result.effect_summary(
+        effect="observed_gap", period="post", cumulative=True, relative=False
+    )
     assert "11 to 11" in post.text
     assert float(post.table.loc["average", "mean"]) == pytest.approx(0.0)
     assert float(post.table.loc["cumulative", "mean"]) == pytest.approx(0.0)
@@ -572,7 +593,9 @@ def test_effect_summary_post_integer_end_excludes_prior_label():
         model=LinearRegression(),
     ).fit()
 
-    post = result.effect_summary(period="post", cumulative=True, relative=False)
+    post = result.effect_summary(
+        effect="observed_gap", period="post", cumulative=True, relative=False
+    )
     assert "6 to 11" in post.text
     assert "5 to" not in post.text
     assert float(post.table.loc["average", "mean"]) == pytest.approx(0.0)
@@ -590,7 +613,9 @@ def test_effect_summary_post_negative_end_keeps_following_label():
         model=LinearRegression(),
     ).fit()
 
-    post = result.effect_summary(period="post", cumulative=True, relative=False)
+    post = result.effect_summary(
+        effect="observed_gap", period="post", cumulative=True, relative=False
+    )
     assert "-0.25 to 1.0" in post.text
     assert float(post.table.loc["average", "mean"]) == pytest.approx(0.0)
     assert float(post.table.loc["cumulative", "mean"]) == pytest.approx(0.0)
@@ -609,7 +634,7 @@ def test_effect_summary_post_rejects_empty_window_after_the_last_label():
     result.treatment_end_time = float(index.max()) + 0.5
 
     with pytest.raises(ValueError, match="Window contains no time points"):
-        result.effect_summary(period="post")
+        result.effect_summary(effect="observed_gap", period="post")
 
 
 # ==============================================================================
@@ -632,7 +657,7 @@ def test_effect_summary_3period_comparison_pymc_datetime(
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    summary = result.effect_summary(period="comparison")
+    summary = result.effect_summary(effect="observed_gap", period="comparison")
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -668,7 +693,7 @@ def test_effect_summary_3period_comparison_ols_datetime(datetime_data_3period):
         model=LinearRegression(),
     ).fit()
 
-    summary = result.effect_summary(period="comparison")
+    summary = result.effect_summary(effect="observed_gap", period="comparison")
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -700,7 +725,7 @@ def test_effect_summary_3period_comparison_pymc_integer(
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    summary = result.effect_summary(period="comparison")
+    summary = result.effect_summary(effect="observed_gap", period="comparison")
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -724,7 +749,7 @@ def test_effect_summary_3period_comparison_ols_integer(integer_data_3period):
         model=LinearRegression(),
     ).fit()
 
-    summary = result.effect_summary(period="comparison")
+    summary = result.effect_summary(effect="observed_gap", period="comparison")
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -749,7 +774,9 @@ def test_ols_persistence_prose_names_requested_coverage(alpha, coverage):
         model=LinearRegression(),
     ).fit()
 
-    text = result.effect_summary(period="comparison", alpha=alpha).text
+    text = result.effect_summary(
+        effect="observed_gap", period="comparison", alpha=alpha
+    ).text
     truncated = f"{int((1 - alpha) * 100)}%"
 
     assert f"{coverage} CI" in text
@@ -775,8 +802,10 @@ def test_effect_summary_3period_default_pymc(datetime_data_3period, mock_pymc_sa
     ).fit()
 
     # Default should summarize all post-treatment data (backward compatible)
-    summary1 = result.effect_summary(period=None)
-    summary2 = result.effect_summary()  # Without period parameter
+    summary1 = result.effect_summary(effect="observed_gap", period=None)
+    summary2 = result.effect_summary(
+        effect="observed_gap",
+    )  # Without period parameter
 
     for summary in [summary1, summary2]:
         assert summary is not None
@@ -798,7 +827,9 @@ def test_effect_summary_3period_default_ols(datetime_data_3period):
     ).fit()
 
     # Default should summarize all post-treatment data
-    summary = result.effect_summary()
+    summary = result.effect_summary(
+        effect="observed_gap",
+    )
     assert summary is not None
     assert hasattr(summary, "table")
     assert hasattr(summary, "text")
@@ -826,15 +857,17 @@ def test_effect_summary_3period_intervention_with_parameters(
 
     # Test with different parameters
     summary1 = result.effect_summary(
-        period="intervention", cumulative=True, relative=True
+        effect="observed_gap", period="intervention", cumulative=True, relative=True
     )
     summary2 = result.effect_summary(
-        period="intervention", cumulative=False, relative=False
+        effect="observed_gap", period="intervention", cumulative=False, relative=False
     )
     summary3 = result.effect_summary(
-        period="intervention", alpha=0.1, direction="increase"
+        effect="observed_gap", period="intervention", alpha=0.1, direction="increase"
     )
-    summary4 = result.effect_summary(period="intervention", min_effect=1.0)
+    summary4 = result.effect_summary(
+        effect="observed_gap", period="intervention", min_effect=1.0
+    )
 
     for summary in [summary1, summary2, summary3, summary4]:
         assert summary is not None
@@ -858,9 +891,15 @@ def test_effect_summary_3period_post_with_parameters(
     ).fit()
 
     # Test with different parameters
-    summary1 = result.effect_summary(period="post", cumulative=True, relative=True)
-    summary2 = result.effect_summary(period="post", cumulative=False, relative=False)
-    summary3 = result.effect_summary(period="post", alpha=0.1, direction="increase")
+    summary1 = result.effect_summary(
+        effect="observed_gap", period="post", cumulative=True, relative=True
+    )
+    summary2 = result.effect_summary(
+        effect="observed_gap", period="post", cumulative=False, relative=False
+    )
+    summary3 = result.effect_summary(
+        effect="observed_gap", period="post", alpha=0.1, direction="increase"
+    )
 
     for summary in [summary1, summary2, summary3]:
         assert summary is not None
@@ -888,13 +927,13 @@ def test_effect_summary_period_without_treatment_end_time_raises_error(
 
     # Should raise error for any period-specific parameter
     with pytest.raises(ValueError, match="treatment_end_time"):
-        result.effect_summary(period="intervention")
+        result.effect_summary(effect="observed_gap", period="intervention")
 
     with pytest.raises(ValueError, match="treatment_end_time"):
-        result.effect_summary(period="post")
+        result.effect_summary(effect="observed_gap", period="post")
 
     with pytest.raises(ValueError, match="treatment_end_time"):
-        result.effect_summary(period="comparison")
+        result.effect_summary(effect="observed_gap", period="comparison")
 
 
 def test_effect_summary_invalid_period_raises_error(
@@ -912,7 +951,7 @@ def test_effect_summary_invalid_period_raises_error(
     )
 
     with pytest.raises(ValueError, match="period must be one of"):
-        result.effect_summary(period="invalid")
+        result.effect_summary(effect="observed_gap", period="invalid")
 
 
 # ==============================================================================
@@ -936,9 +975,13 @@ def test_effect_summary_3period_consistency_pymc(
     ).fit()
 
     # Get summaries for each period
-    intervention_summary = result.effect_summary(period="intervention")
-    post_summary = result.effect_summary(period="post")
-    comparison_summary = result.effect_summary(period="comparison")
+    intervention_summary = result.effect_summary(
+        effect="observed_gap", period="intervention"
+    )
+    post_summary = result.effect_summary(effect="observed_gap", period="post")
+    comparison_summary = result.effect_summary(
+        effect="observed_gap", period="comparison"
+    )
 
     # Check that comparison summary means match individual period summaries
     intervention_mean_from_comparison = comparison_summary.table.loc[
@@ -970,9 +1013,13 @@ def test_effect_summary_3period_consistency_ols(datetime_data_3period):
     ).fit()
 
     # Get summaries for each period
-    intervention_summary = result.effect_summary(period="intervention")
-    post_summary = result.effect_summary(period="post")
-    comparison_summary = result.effect_summary(period="comparison")
+    intervention_summary = result.effect_summary(
+        effect="observed_gap", period="intervention"
+    )
+    post_summary = result.effect_summary(effect="observed_gap", period="post")
+    comparison_summary = result.effect_summary(
+        effect="observed_gap", period="comparison"
+    )
 
     # Check that comparison summary means match individual period summaries
     intervention_mean_from_comparison = comparison_summary.table.loc[
@@ -1011,7 +1058,7 @@ def test_ols_comparison_prob_persisted_is_positive_post_effect_probability():
     y[20:30] = -6
     result = _fit_constant_baseline_its(y, treatment_time=10, treatment_end_time=20)
     summary = result.effect_summary(
-        period="comparison", cumulative=False, relative=False
+        effect="observed_gap", period="comparison", cumulative=False, relative=False
     )
 
     post = summary.table.loc["post_intervention"]
@@ -1028,7 +1075,9 @@ def test_ols_comparison_prob_persisted_is_positive_post_effect_probability():
     positive = _fit_constant_baseline_its(
         y_positive, treatment_time=10, treatment_end_time=20
     )
-    positive_summary = positive.effect_summary(period="comparison")
+    positive_summary = positive.effect_summary(
+        effect="observed_gap", period="comparison"
+    )
     assert positive_summary.table.loc["post_intervention", "prob_persisted"] == 1
     assert "probability of 1.00" in positive_summary.text
 
@@ -1041,7 +1090,7 @@ def test_ols_comparison_prob_persisted_is_positive_post_effect_probability():
     noisy = _fit_constant_baseline_its(
         y_noisy, treatment_time=10, treatment_end_time=20
     )
-    noisy_summary = noisy.effect_summary(period="comparison")
+    noisy_summary = noisy.effect_summary(effect="observed_gap", period="comparison")
     noisy_prob = float(noisy_summary.table.loc["post_intervention", "prob_persisted"])
     assert 0 < noisy_prob < 0.5
     assert f"{noisy_prob:.2f}" in noisy_summary.text
@@ -1055,6 +1104,6 @@ def test_ols_comparison_prob_persisted_is_positive_post_effect_probability():
     single = _fit_constant_baseline_its(
         y_single, treatment_time=10, treatment_end_time=20
     )
-    single_summary = single.effect_summary(period="comparison")
+    single_summary = single.effect_summary(effect="observed_gap", period="comparison")
     assert single_summary.table.loc["post_intervention", "prob_persisted"] == 0
     assert "probability of 0.00" in single_summary.text

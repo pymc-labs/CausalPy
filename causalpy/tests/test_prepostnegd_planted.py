@@ -25,8 +25,8 @@ from causalpy.pymc_models import PyMCModel
 class _ClosedFormCoefficientModel(PyMCModel):
     """Solve the experiment's design with least squares and skip NUTS.
 
-    ``predict`` is unused by the coefficient assertion. It returns a zero
-    predictive tree so scenario bookkeeping in ``fit`` can finish.
+    ``predict`` applies the solved coefficients. The response-scale contrast
+    then equals the planted group shift. It does not sample.
     """
 
     def __init__(self) -> None:
@@ -56,9 +56,12 @@ class _ClosedFormCoefficientModel(PyMCModel):
         return self.idata
 
     def predict(self, X, coords=None, out_of_sample=False, group="posterior"):  # noqa: ARG002
-        n_obs = np.asarray(X).shape[0]
+        design = np.asarray(X, dtype=float)
+        beta = np.asarray(self.idata["posterior"]["beta"].values).reshape(-1)
+        mu_point = design @ beta
+        n_obs = mu_point.shape[0]
         mu = xr.DataArray(
-            np.zeros((1, 1, n_obs, 1)),
+            mu_point.reshape(1, 1, n_obs, 1),
             dims=["chain", "draw", "obs_ind", "treated_units"],
             coords={
                 "obs_ind": np.arange(n_obs),

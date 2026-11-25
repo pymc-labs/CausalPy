@@ -169,7 +169,9 @@ def test_effect_summary_window_datetime(mock_pymc_sample, its_data):
     window_end = post_dates[min(4, len(post_dates) - 2)]
     selected = post_dates[(post_dates >= window_start) & (post_dates <= window_end)]
 
-    stats = result.effect_summary(window=(window_start, window_end))
+    stats = result.effect_summary(
+        effect="observed_gap", window=(window_start, window_end)
+    )
     _assert_windowed_average_matches_selected_impact(result, stats, selected)
 
 
@@ -205,12 +207,12 @@ def test_effect_summary_window_integer(mock_pymc_sample):
     slice_selected = post_index[(post_index >= 55) & (post_index < 65)]
     assert not tuple_selected.equals(slice_selected)
 
-    stats_tuple = result.effect_summary(window=(55, 65))
+    stats_tuple = result.effect_summary(effect="observed_gap", window=(55, 65))
     _assert_windowed_average_matches_selected_impact(
         result, stats_tuple, tuple_selected
     )
 
-    stats_slice = result.effect_summary(window=slice(55, 65))
+    stats_slice = result.effect_summary(effect="observed_gap", window=slice(55, 65))
     _assert_windowed_average_matches_selected_impact(
         result, stats_slice, slice_selected
     )
@@ -228,7 +230,7 @@ def test_effect_summary_alpha(mock_pymc_sample, its_data):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    stats = result.effect_summary(alpha=0.1)  # 90% HDI
+    stats = result.effect_summary(effect="observed_gap", alpha=0.1)  # 90% HDI
 
     # Check that HDI is in text (should mention 90%)
     assert "90%" in stats.text
@@ -246,7 +248,7 @@ def test_effect_summary_rope(mock_pymc_sample, its_data):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    stats = result.effect_summary(min_effect=1.0)
+    stats = result.effect_summary(effect="observed_gap", min_effect=1.0)
 
     assert "p_rope" in stats.table.columns
     assert 0 <= stats.table.loc["average", "p_rope"] <= 1
@@ -526,7 +528,10 @@ def test_effect_summary_empty_window_error(mock_pymc_sample, its_data):
     # Create window that doesn't overlap with post-period
     future_date = pd.to_datetime("2100-01-01")
     with pytest.raises(ValueError, match="no time points"):
-        result.effect_summary(window=(future_date, future_date + pd.Timedelta(days=1)))
+        result.effect_summary(
+            effect="observed_gap",
+            window=(future_date, future_date + pd.Timedelta(days=1)),
+        )
 
 
 # ==============================================================================
@@ -1941,7 +1946,9 @@ def test_effect_summary_ols_zero_se_cumulative_p_value(mock_pymc_sample, n_post)
         model=LinearRegression(),
     ).fit()
 
-    summary = result.effect_summary(cumulative=True, relative=False)
+    summary = result.effect_summary(
+        effect="observed_gap", cumulative=True, relative=False
+    )
     row = summary.table.loc["cumulative"]
 
     assert row["mean"] == pytest.approx(impact * n_post)
@@ -2008,7 +2015,9 @@ def test_ols_cumulative_relative_effect_is_ratio_of_cumulative_totals(
         formula="y ~ 1",
         model=LinearRegression(),
     ).fit()
-    cited_table = cited.effect_summary(relative=True, cumulative=True).table
+    cited_table = cited.effect_summary(
+        effect="observed_gap", relative=True, cumulative=True
+    ).table
     assert cited_table.loc["cumulative", "relative_mean"] == pytest.approx(20.0)
     assert cited_table.loc["cumulative", "relative_mean"] != pytest.approx(200.0)
 
@@ -2028,7 +2037,9 @@ def test_ols_cumulative_relative_effect_is_ratio_of_cumulative_totals(
         formula="y ~ 1 + t",
         model=LinearRegression(),
     ).fit()
-    varied_table = varied.effect_summary(relative=True, cumulative=True).table
+    varied_table = varied.effect_summary(
+        effect="observed_gap", relative=True, cumulative=True
+    ).table
     expected_varied = float(np.sum(impact) / np.sum(counterfactual) * 100)
     period_sum_varied = float(np.sum(impact / counterfactual * 100))
     assert varied_table.loc["cumulative", "relative_mean"] == pytest.approx(

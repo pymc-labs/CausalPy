@@ -26,6 +26,7 @@ from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
 )
+from causalpy.experiments._expected_effect import response_contrast
 from causalpy.experiments._results import CoefficientResult, GroupComparisonScenario
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
@@ -65,7 +66,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
     -----
     **Estimate extraction**
 
-    The reported ``causal_impact`` is the posterior coefficient on the treatment-group term, conditional on the pretreatment outcome and any other formula covariates. Treated and untreated prediction curves are also computed for visualization, but they do not determine the reported scalar effect. With the current additive identity-link model, the treatment coefficient equals the corresponding conditional prediction contrast.
+    The reported ``causal_impact`` is the study-sample average treatment effect on the posttest. Each enrolled unit is predicted twice, once treated and once untreated, with its pretest and other covariates held fixed. Units are weighted equally. On an additive identity link this equals the group coefficient. ``expected_effect`` is an alias of ``causal_impact``.
 
     Lazy lifecycle: construction only validates inputs and builds design
     matrices — nothing is sampled. Call :meth:`fit` to draw posterior
@@ -101,7 +102,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
          1 104       12        14
     <BLANKLINE>
     Results:
-    Causal impact = 2, $CI_{94%}$[2, 2]
+    Expected effect = 2, $CI_{94%}$[2, 2]
     Model coefficients:
         Intercept      -0.5, 94% HDI [-1, 0.2]
         C(group)[T.1]  2, 94% HDI [2, 2]
@@ -221,10 +222,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
         # coincides with the control scenario above and reuses its prediction
         # instead of paying for an identical second predict pass.
 
-        # Evaluate causal impact as equal to the treatment effect
-        causal_impact = self._model_backend.coefficients(group=group).sel(
-            coeffs=self._get_treatment_effect_coeff()
-        )
+        causal_impact = self._expected_effect(group)
 
         bundle = CoefficientResult(
             causal_impact=causal_impact,
@@ -240,6 +238,38 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             score=None,
         )
         self._assign_bundle(group, bundle)
+
+    def _expected_effect(
+        self, group: Literal["prior", "posterior"]
+    ) -> xr.DataArray | float:
+        """Study-sample ATE from paired treated and untreated predictions.
+
+        Each enrolled row is predicted with its own pretest and covariates,
+        once with the group indicator set to treated and once to untreated.
+        The outcome column is not passed to ``predict``.
+        """
+        group_name = self.group_variable_name
+        rows = self.data.drop(columns=[self.outcome_variable_name])
+        levels = sorted(self.data[group_name].unique(), key=lambda value: int(value))
+        untreated_level, treated_level = levels[0], levels[1]
+        treated = rows.copy()
+        untreated = rows.copy()
+        treated[group_name] = treated_level
+        untreated[group_name] = untreated_level
+        (design_treated,) = build_design_matrices([self._x_design_info], treated)
+        (design_untreated,) = build_design_matrices([self._x_design_info], untreated)
+        mu_treated = self._model_backend.predict(
+            np.asarray(design_treated), group=group
+        )
+        mu_untreated = self._model_backend.predict(
+            np.asarray(design_untreated), group=group
+        )
+        return response_contrast(
+            mu_treated,
+            mu_untreated,
+            reduce_dims=("obs_ind", "treated_units"),
+            point=self._model_backend.is_ols,
+        )
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -301,7 +331,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
         )
         causal_impact_mean = f"{round_num(causal_impact.mean(), round_to)}, "
-        return f"Causal impact = {causal_impact_mean + ci}"
+        return f"Expected effect = {causal_impact_mean + ci}"
 
     def _group_level_summary_stats(self, round_to: int | None = None) -> pd.DataFrame:
         """Compute group-level sample sizes and pre/post means.

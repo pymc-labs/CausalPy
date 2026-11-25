@@ -13,6 +13,7 @@
 #   limitations under the License.
 """Interrupted Time Series Analysis."""
 
+from types import SimpleNamespace
 from typing import Any, Literal
 
 import numpy as np
@@ -28,6 +29,10 @@ from causalpy.date_utils import (
     _combine_datetime_indices,
     format_date_axes,
     validate_treatment_time_against_index,
+)
+from causalpy.experiments._expected_effect import (
+    UNTREATED_ONLY_REASON,
+    summarize_expected_effect,
 )
 from causalpy.experiments._results import CausalResult
 from causalpy.experiments.model_adapter import build_coords
@@ -126,7 +131,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
 
     **Estimate extraction**
 
-    The model is fitted to pre-intervention observations and predicts the untreated trajectory after the intervention. Pointwise impact is the observed post-intervention outcome minus that one-sided counterfactual prediction, and cumulative impact is its running sum. Bayesian backends subtract the posterior conditional expectation ``mu`` rather than noisy posterior-predictive draws ``y_hat``; OLS subtracts its point prediction.
+    The model is fitted to pre-intervention observations and predicts the untreated trajectory after the intervention. ``observed_gap`` is the realized post-intervention outcome minus that counterfactual. A counterfactual-only fit does not model the treated mean, so ``expected_effect`` is unavailable and the reason is stored on the result. When a treated mean is supplied on the result, ``expected_effect`` is that response-scale contrast and the default headline in summaries and plots. Bayesian backends use posterior ``mu``, not posterior-predictive ``y_hat``.
 
     This fit-predict-subtract procedure is a reduced-form estimator. From a Bayesian structural perspective, the same impact can be viewed as the response to an intervention shock in a state-space model of the outcome series; see the knowledgebase page on structural causal models for the reduced-form versus structural distinction.
 
@@ -263,8 +268,123 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             impact_post=impact_post,
             impact_post_cumulative=impact_post_cumulative,
             score=score,
+            expected_effect=None,
+            expected_effect_reason=UNTREATED_ONLY_REASON,
         )
         self._assign_bundle(group, bundle)
+
+    def _selected_effect(self, bundle: CausalResult, effect: str) -> Any:
+        """Choose the headline series for summaries and plots.
+
+        ``observed_gap`` keeps the realized-minus-counterfactual series.
+        ``expected_effect`` uses the stored response-scale contrast when a
+        treated mean was supplied, and otherwise reports why it is missing.
+        """
+        if effect == "observed_gap":
+            return SimpleNamespace(
+                pointwise=bundle.impact_post,
+                cumulative=bundle.impact_post_cumulative,
+                point_title="Observed gap",
+                cumulative_title="Cumulative observed gap",
+                reason=None,
+                shade_gap=True,
+            )
+        if effect != "expected_effect":
+            raise ValueError(
+                f"effect must be 'expected_effect' or 'observed_gap', got {effect!r}."
+            )
+        series = bundle.expected_effect
+        if series is None:
+            return SimpleNamespace(
+                pointwise=None,
+                cumulative=None,
+                point_title="Expected effect unavailable",
+                cumulative_title="Cumulative expected effect unavailable",
+                reason=bundle.expected_effect_reason,
+                shade_gap=False,
+            )
+        return SimpleNamespace(
+            pointwise=series,
+            cumulative=series.cumsum(dim="obs_ind"),
+            point_title="Expected effect",
+            cumulative_title="Cumulative expected effect",
+            reason=None,
+            shade_gap=False,
+        )
+
+    def _draw_effect_panel(
+        self,
+        axis: plt.Axes,
+        pre_series: xr.DataArray | None,
+        post_series: xr.DataArray | None,
+        pre_index: pd.Index,
+        post_index: pd.Index,
+        style: _PosteriorPlotStyle,
+        with_uncertainty: bool,
+        single_post_obs: bool,
+        ci_prob: float,
+        counterfactual_label: str,
+        title: str,
+        reason: str | None,
+    ) -> None:
+        """Draw one effect panel, or annotate why the series is missing."""
+        if post_series is None:
+            axis.axhline(y=0, c="k")
+            axis.set(title=title)
+            if reason is not None:
+                axis.text(
+                    0.5,
+                    0.5,
+                    reason,
+                    transform=axis.transAxes,
+                    ha="center",
+                    va="center",
+                    fontsize=8,
+                    wrap=True,
+                )
+            return
+        if with_uncertainty:
+            if pre_series is not None:
+                plot_posterior_over_x(
+                    pre_index,
+                    pre_series,
+                    ax=axis,
+                    **style,
+                    plot_hdi_kwargs={"color": "C0"},
+                )
+            plot_posterior_over_x(
+                post_index,
+                post_series,
+                ax=axis,
+                **style,
+                plot_hdi_kwargs={"color": "C1"},
+            )
+            if single_post_obs:
+                self._draw_singleton_hdi_marker(
+                    axis,
+                    post_index,
+                    post_series,
+                    color="C1",
+                    hdi_prob=ci_prob,
+                )
+        else:
+            if pre_series is not None:
+                axis.plot(pre_index, pre_series.mean(("chain", "draw")), "k.")
+            axis.plot(
+                post_index,
+                post_series.mean(("chain", "draw")),
+                "k.",
+                label=counterfactual_label,
+            )
+        axis.axhline(y=0, c="k")
+        axis.fill_between(
+            post_index,
+            y1=post_series.mean(("chain", "draw")),
+            color="C0",
+            alpha=0.25,
+            label=title,
+        )
+        axis.set(title=title)
 
     def _period_slices(self, bundle: CausalResult) -> dict[str, Any]:
         """Split a bundle's post-period draws at ``treatment_end_time``.
@@ -576,6 +696,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         figsize: tuple[float, float] = (7, 8),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
+        effect: Literal["expected_effect", "observed_gap"] = "expected_effect",
     ) -> tuple[plt.Figure, list[plt.Axes]]:
         """Plot the interrupted time-series results.
 
@@ -625,6 +746,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             ``bbox_to_anchor``). The existing legend is modified **in
             place** so that custom handles are preserved.
 
+        effect : {"expected_effect", "observed_gap"}, default "expected_effect"
+            Headline series. ``expected_effect`` is the response-scale contrast
+            and is annotated unavailable when the fit has no treated mean.
+            ``observed_gap`` keeps the realized-minus-counterfactual series.
+
         Returns
         -------
         fig : :class:`~matplotlib.figure.Figure`
@@ -643,6 +769,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             ci_kind=ci_kind,
             num_samples=num_samples,
             figsize=figsize,
+            effect=effect,
         )
 
     @staticmethod
@@ -724,6 +851,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             Width and height of the figure in inches. Defaults to ``(7, 8)``.
         """
         bundle = self._require_bundle(group)
+        effect = kwargs.pop("effect", "expected_effect")
         style: _PosteriorPlotStyle = {
             "ci_prob": ci_prob,
             "kind": kind,
@@ -812,17 +940,28 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         # Shaded causal effect (only meaningful when there are >=2 post-period
         # points; with a single datum the fill_between collapses to nothing,
         # so we omit the legend entry to avoid misleading the reader).
-        h = ax[0].fill_between(
-            self.datapost.index,
-            y1=post_pred.mean(("chain", "draw")),
-            y2=post_y,
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
-        )
-        if with_uncertainty and not single_post_obs:
-            handles.append(h)
-            labels.append("Causal impact")
+        effect_series = self._selected_effect(bundle, effect)
+        if effect_series.shade_gap:
+            h = ax[0].fill_between(
+                self.datapost.index,
+                y1=post_pred.mean(("chain", "draw")),
+                y2=post_y,
+                color="C0",
+                alpha=0.25,
+                label=effect_series.point_title,
+            )
+            if with_uncertainty and not single_post_obs:
+                handles.append(h)
+                labels.append(effect_series.point_title)
+        elif effect_series.reason is not None:
+            ax[0].annotate(
+                effect_series.reason,
+                xy=(0.5, 0.08),
+                xycoords="axes fraction",
+                ha="center",
+                fontsize=8,
+                color="0.3",
+            )
 
         ax[0].set(
             title=format_r2_score(
@@ -833,74 +972,36 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         )
 
         # MIDDLE PLOT -----------------------------------------------
-        if with_uncertainty:
-            plot_posterior_over_x(
-                self.datapre.index,
-                bundle.impact_pre,
-                ax=ax[1],
-                **style,
-                plot_hdi_kwargs={"color": "C0"},
-            )
-            plot_posterior_over_x(
-                self.datapost.index,
-                bundle.impact_post,
-                ax=ax[1],
-                **style,
-                plot_hdi_kwargs={"color": "C1"},
-            )
-            if single_post_obs:
-                self._draw_singleton_hdi_marker(
-                    ax[1],
-                    self.datapost.index,
-                    bundle.impact_post,
-                    color="C1",
-                    hdi_prob=ci_prob,
-                )
-        else:
-            ax[1].plot(
-                self.datapre.index, bundle.impact_pre.mean(("chain", "draw")), "k."
-            )
-            ax[1].plot(
-                self.datapost.index,
-                bundle.impact_post.mean(("chain", "draw")),
-                "k.",
-                label=counterfactual_label,
-            )
-        ax[1].axhline(y=0, c="k")
-        ax[1].fill_between(
+        self._draw_effect_panel(
+            ax[1],
+            bundle.impact_pre if effect == "observed_gap" else None,
+            effect_series.pointwise,
+            self.datapre.index,
             self.datapost.index,
-            y1=bundle.impact_post.mean(("chain", "draw")),
-            color="C0",
-            alpha=0.25,
-            label="Causal impact",
+            style,
+            with_uncertainty,
+            single_post_obs,
+            ci_prob,
+            counterfactual_label,
+            effect_series.point_title,
+            effect_series.reason,
         )
-        ax[1].set(title="Causal Impact")
 
         # BOTTOM PLOT -----------------------------------------------
-        if with_uncertainty:
-            plot_posterior_over_x(
-                self.datapost.index,
-                bundle.impact_post_cumulative,
-                ax=ax[2],
-                **style,
-                plot_hdi_kwargs={"color": "C1"},
-            )
-            if single_post_obs:
-                self._draw_singleton_hdi_marker(
-                    ax[2],
-                    self.datapost.index,
-                    bundle.impact_post_cumulative,
-                    color="C1",
-                    hdi_prob=ci_prob,
-                )
-        else:
-            ax[2].plot(
-                self.datapost.index,
-                bundle.impact_post_cumulative.mean(("chain", "draw")),
-                c="k",
-            )
-        ax[2].axhline(y=0, c="k")
-        ax[2].set(title="Cumulative Causal Impact")
+        self._draw_effect_panel(
+            ax[2],
+            None,
+            effect_series.cumulative,
+            self.datapre.index,
+            self.datapost.index,
+            style,
+            with_uncertainty,
+            single_post_obs,
+            ci_prob,
+            counterfactual_label,
+            effect_series.cumulative_title,
+            effect_series.reason,
+        )
 
         # Intervention lines. Use a thin dashed black style and a zorder just
         # below the data so the treatment marker reads as a neutral
@@ -1271,6 +1372,7 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         treated_unit: str | None = None,
         period: Literal["intervention", "post", "comparison"] | None = None,
         prefix: str = "Post-period",
+        effect: Literal["expected_effect", "observed_gap"] = "expected_effect",
     ) -> EffectSummary:
         """
         Generate a decision-ready summary of causal effects for Interrupted Time Series.
@@ -1309,12 +1411,29 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             Prefix for prose generation (e.g., "During intervention", "Post-intervention").
             Defaults to "Post-period".
 
+        effect : {"expected_effect", "observed_gap"}, default "expected_effect"
+            Quantity to summarize. ``expected_effect`` is the response-scale
+            contrast and is unavailable when the fit has no treated mean.
+            ``observed_gap`` keeps the realized-minus-counterfactual summary.
+
         Returns
         -------
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes.
             The .text attribute contains a detailed multi-paragraph narrative report.
         """
+        if effect == "expected_effect":
+            bundle = self._require_bundle(group)
+            return summarize_expected_effect(
+                bundle.expected_effect,
+                reason=bundle.expected_effect_reason,
+                datapost_index=self.datapost.index,
+                group=group,
+            )
+        if effect != "observed_gap":
+            raise ValueError(
+                f"effect must be 'expected_effect' or 'observed_gap', got {effect!r}."
+            )
         from causalpy.reporting import (
             _effect_summary_timeseries,
             _extract_counterfactual,

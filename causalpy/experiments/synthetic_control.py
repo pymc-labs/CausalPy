@@ -24,6 +24,10 @@ from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB
 from causalpy.date_utils import validate_treatment_time_against_index
+from causalpy.experiments._expected_effect import (
+    UNTREATED_ONLY_REASON,
+    summarize_expected_effect,
+)
 from causalpy.experiments._panel_counterfactual import WidePanel, resolve_treated_unit
 from causalpy.experiments._results import CausalResult
 from causalpy.experiments.model_adapter import PyMCModelAdapter, build_coords
@@ -94,7 +98,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
 
     **Estimate extraction**
 
-    The model learns control-unit weights from pre-intervention outcomes and applies them to post-intervention controls to construct a synthetic untreated trajectory. Pointwise impact is the observed treated outcome minus this synthetic counterfactual, and cumulative impact is its running sum. Bayesian backends subtract the posterior conditional expectation ``mu`` rather than noisy posterior-predictive draws ``y_hat``; OLS subtracts its weighted point prediction.
+    The model learns control-unit weights from pre-intervention outcomes and applies them to post-intervention controls to construct a synthetic untreated trajectory. ``observed_gap`` is the realized treated outcome minus that counterfactual. A counterfactual-only fit does not model the treated mean, so ``expected_effect`` is unavailable and the reason is stored on the result. When a treated mean is supplied, ``expected_effect`` is the response-scale contrast and the default headline.
 
     Examples
     --------
@@ -378,6 +382,8 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             impact_post=impact_post,
             impact_post_cumulative=impact_post_cumulative,
             score=score,
+            expected_effect=None,
+            expected_effect_reason=UNTREATED_ONLY_REASON,
         )
         self._assign_bundle(group, bundle)
 
@@ -453,6 +459,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         figsize: tuple[float, float] = (7, 8),
         show: bool = True,
         legend_kwargs: dict[str, Any] | None = None,
+        effect: Literal["expected_effect", "observed_gap"] = "expected_effect",
     ) -> tuple[plt.Figure, list[plt.Axes]] | tuple[plt.Figure, np.ndarray]:
         """Plot the synthetic control results for a specific treated unit.
 
@@ -509,6 +516,11 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             ``bbox_to_anchor``). The existing legend is modified **in
             place** so that custom handles are preserved.
 
+        effect : {"expected_effect", "observed_gap"}, default "expected_effect"
+            Headline series. ``expected_effect`` is the response-scale contrast
+            and is annotated unavailable when the fit has no treated mean.
+            ``observed_gap`` keeps the realized-minus-counterfactual series.
+
         Returns
         -------
         fig : :class:`~matplotlib.figure.Figure`
@@ -530,6 +542,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             num_samples=num_samples,
             plot_predictors=plot_predictors,
             figsize=figsize,
+            effect=effect,
         )
 
     def _plot(
@@ -588,6 +601,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             if group == "posterior"
             else ""
         )
+        effect = kwargs.pop("effect", "expected_effect")
         return self._panel.plot(
             bundle,
             group=group,
@@ -596,7 +610,43 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             style=style,
             figsize=figsize,
             plot_predictors=plot_predictors,
+            **self._effect_plot_kwargs(bundle, treated_unit, effect),
         )
+
+    def _effect_plot_kwargs(
+        self, bundle: CausalResult, treated_unit: str, effect: str
+    ) -> dict[str, Any]:
+        """Labels and series for the shared panel plotter."""
+        if effect == "observed_gap":
+            return {
+                "impact_label": "Observed gap",
+                "impact_title": "Observed gap",
+                "cumulative_title": "Cumulative observed gap",
+                "shade_gap": True,
+            }
+        if effect != "expected_effect":
+            raise ValueError(
+                f"effect must be 'expected_effect' or 'observed_gap', got {effect!r}."
+            )
+        series = bundle.expected_effect
+        if series is None:
+            return {
+                "impact_label": "Expected effect",
+                "impact_title": "Expected effect unavailable",
+                "cumulative_title": "Cumulative expected effect unavailable",
+                "shade_gap": False,
+                "unavailable_reason": bundle.expected_effect_reason,
+            }
+        if "treated_units" in series.dims:
+            series = series.sel(treated_units=treated_unit)
+        return {
+            "impact_label": "Expected effect",
+            "impact_title": "Expected effect",
+            "cumulative_title": "Cumulative expected effect",
+            "shade_gap": False,
+            "post_effect": series,
+            "post_effect_cumulative": series.cumsum(dim="obs_ind"),
+        }
 
     def get_plot_data(
         self,
@@ -682,6 +732,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         treated_unit: str | None = None,
         period: Literal["intervention", "post", "comparison"] | None = None,
         prefix: str = "Post-period",
+        effect: Literal["expected_effect", "observed_gap"] = "expected_effect",
     ) -> EffectSummary:
         """
         Generate a decision-ready summary of causal effects for Synthetic Control.
@@ -719,12 +770,33 @@ class SyntheticControl(BaseExperiment[CausalResult]):
         prefix : str, optional
             Prefix for prose generation. Defaults to "Post-period".
 
+        effect : {"expected_effect", "observed_gap"}, default "expected_effect"
+            Quantity to summarize. ``expected_effect`` is the response-scale
+            contrast and is unavailable when the fit has no treated mean.
+            ``observed_gap`` keeps the realized-minus-counterfactual summary.
+
         Returns
         -------
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes.
             The .text attribute contains a detailed multi-paragraph narrative report.
         """
+        if effect == "expected_effect":
+            bundle = self._require_bundle(group)
+            series = bundle.expected_effect
+            unit = resolve_treated_unit(self.treated_units, treated_unit)
+            if series is not None and "treated_units" in series.dims:
+                series = series.sel(treated_units=unit)
+            return summarize_expected_effect(
+                series,
+                reason=bundle.expected_effect_reason,
+                datapost_index=self.datapost.index,
+                group=group,
+            )
+        if effect != "observed_gap":
+            raise ValueError(
+                f"effect must be 'expected_effect' or 'observed_gap', got {effect!r}."
+            )
         if period is not None:
             warnings.warn(
                 f"period='{period}' is ignored for SyntheticControl (two-period design only). "
