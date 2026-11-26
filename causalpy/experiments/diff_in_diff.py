@@ -85,7 +85,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
     -----
     **Estimate extraction**
 
-    ``causal_impact`` is the post-treatment average treatment effect on the treated: every treated-group post-period row, equally weighted, compared with that same row after the treatment interaction is switched off. On an additive identity link this equals the group-by-post coefficient. Bayesian results keep sampling dimensions; an OLS result is a point contrast with no sampling dimensions. ``expected_effect`` is an alias of ``causal_impact``.
+    ``causal_impact`` is the post-treatment average treatment effect on the treated: every treated-group post-period row, equally weighted, compared with that same row after the treatment interaction is switched off. On an additive identity link this equals the group-by-post coefficient. Bayesian results keep sampling dimensions; an OLS result keeps the adapter's singleton ``chain`` and ``draw`` dimensions and is not a posterior interval. ``expected_effect`` is an alias of ``causal_impact``.
 
     Lazy lifecycle: construction only validates inputs and builds design
     matrices — nothing is sampled. Call :meth:`fit` to draw posterior
@@ -390,8 +390,13 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         self.print_coefficients(round_to)
 
     def _causal_impact_summary_stat(self, round_to: int | None = None) -> str:
-        """Computes the mean and credible interval bounds for the causal impact."""
-        return f"Expected effect = {convert_to_string(self.result.causal_impact, round_to=round_to)}"
+        """Format the response-scale contrast, without a credible interval on a point."""
+        impact = self.result.causal_impact
+        if has_posterior_draws(impact):
+            printed = convert_to_string(impact, round_to=round_to)
+        else:
+            printed = f"{_as_scalar(impact):.2f}"
+        return f"Expected effect = {printed}"
 
     def plot(
         self,

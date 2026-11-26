@@ -23,7 +23,7 @@ two public slots ``experiment.result`` (posterior group) and
 Prediction and impact series are typed :class:`xarray.DataArray` on the
 canonical ``("chain", "draw", "obs_ind"[, ...])`` dimensions produced by
 :class:`~causalpy.experiments.model_adapter.ModelAdapter.predict`.
-OLS point contrasts are Python floats with no sampling dimensions.
+OLS point contrasts keep the adapter's singleton ``chain`` and ``draw`` dimensions. They are not squeezed to a Python float.
 ``expected_effect`` is ``None`` when a fit supplies only the untreated
 trajectory.
 """

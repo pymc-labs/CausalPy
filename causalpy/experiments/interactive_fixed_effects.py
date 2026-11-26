@@ -392,6 +392,7 @@ class InteractiveFixedEffectsSyntheticControl:
             style=style,
             figsize=figsize,
             plot_predictors=plot_predictors,
+            effect="observed_gap",
         )
         if show:
             plt.show()

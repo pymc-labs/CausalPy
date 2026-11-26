@@ -33,12 +33,13 @@ from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
+    has_posterior_draws,
     plot_posterior_over_x,
     plot_scalar_posterior,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
-from causalpy.utils import _is_variable_dummy_coded, round_num
+from causalpy.utils import _as_scalar, _is_variable_dummy_coded, round_num
 
 from .base import BaseExperiment
 
@@ -318,8 +319,10 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
         return matches[0]
 
     def _causal_impact_summary_stat(self, round_to: int | None = 2) -> str:
-        """Computes the mean and credible interval bounds for the causal impact."""
+        """Format the response-scale contrast, without a credible interval on a point."""
         causal_impact = self.result.causal_impact
+        if not has_posterior_draws(causal_impact):
+            return f"Expected effect = {_as_scalar(causal_impact):.2f}"
         percentiles = causal_impact.quantile(
             [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
         ).values

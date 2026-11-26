@@ -142,8 +142,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
     - Clinical treatments with limited duration
     - Seasonal interventions
 
-    Use ``effect_summary(period="intervention")`` to analyze effects during the
-    intervention, and ``effect_summary(period="post")`` to analyze effect persistence
+    Use ``effect_summary(period="intervention", effect="observed_gap")`` to analyze the realized gap during the
+    intervention, and ``effect_summary(period="post", effect="observed_gap")`` to analyze gap persistence
     after the intervention ends.
 
     Examples
@@ -180,8 +180,10 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
     ...     treatment_end_time=treatment_end_time,
     ... ).fit()
     >>> # Get period-specific effect summaries
-    >>> intervention_summary = result.effect_summary(period="intervention")
-    >>> post_summary = result.effect_summary(period="post")
+    >>> intervention_summary = result.effect_summary(
+    ...     period="intervention", effect="observed_gap"
+    ... )
+    >>> post_summary = result.effect_summary(period="post", effect="observed_gap")
     """
 
     supports_ols = True

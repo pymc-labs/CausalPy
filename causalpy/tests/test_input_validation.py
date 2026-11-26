@@ -937,7 +937,9 @@ def test_regression_discontinuity_float_treatment(treated_dtype):
     pd.testing.assert_frame_equal(df, original)
     fitted = result.fit()
     # The epsilon window adds 2 * slope * epsilon to the planted jump of 5.
-    assert float(fitted.result.discontinuity_at_threshold) == pytest.approx(5.004)
+    assert float(
+        np.asarray(fitted.result.discontinuity_at_threshold).reshape(())
+    ) == pytest.approx(5.004)
 
 
 def test_regression_discontinuity_rejects_non_indicator_float():

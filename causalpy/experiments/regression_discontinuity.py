@@ -109,7 +109,7 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
 
     **Estimate extraction**
 
-    After fitting the regression on the selected bandwidth, the class predicts the conditional expectation immediately below the threshold with ``treated=0`` and immediately above it with ``treated=1``. ``discontinuity_at_threshold`` is that upper-minus-lower response contrast, evaluated at ``threshold ± epsilon``. ``expected_effect`` is the same value. An OLS result is a point contrast with no sampling dimensions. This is a local prediction contrast, not a population-standardized effect.
+    After fitting the regression on the selected bandwidth, the class predicts the conditional expectation immediately below the threshold with ``treated=0`` and immediately above it with ``treated=1``. ``discontinuity_at_threshold`` is that upper-minus-lower response contrast, evaluated at ``threshold ± epsilon``. ``expected_effect`` is the same value. An OLS result keeps the adapter's singleton ``chain`` and ``draw`` dimensions and is not a posterior interval. This is a local prediction contrast, not a population-standardized effect.
 
     Examples
     --------
@@ -367,7 +367,11 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         print("\nResults:")
         bundle = self.result
         discontinuity = bundle.discontinuity_at_threshold
-        print(f"Discontinuity at threshold = {convert_to_string(discontinuity)}")
+        if has_posterior_draws(discontinuity):
+            printed = convert_to_string(discontinuity)
+        else:
+            printed = f"{_as_scalar(discontinuity):.2f}"
+        print(f"Discontinuity at threshold = {printed}")
         print("\n")
         self.print_coefficients(round_to)
 

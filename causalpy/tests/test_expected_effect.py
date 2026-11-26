@@ -53,7 +53,7 @@ def test_logit_contrast_helper_uses_known_response_means():
     assert float(np.asarray(pooled)) == pytest.approx(17 / 120)
 
 
-def test_identity_link_ols_did_equals_interaction():
+def test_identity_link_ols_did_equals_interaction(capsys):
     """Every treated post row, interaction off, equals the fitted coefficient."""
     rows = []
     unit = 0
@@ -96,6 +96,10 @@ def test_identity_link_ols_did_equals_interaction():
     assert float(
         np.asarray(result.result.expected_effect).reshape(())
     ) == pytest.approx(float(np.asarray(impact).reshape(())))
+    result.summary()
+    printed = capsys.readouterr().out
+    assert "CI_" not in printed
+    assert f"Expected effect = {float(np.asarray(impact).reshape(())):.2f}" in printed
 
     bumped = frame.copy()
     bumped.loc[bumped.index[-1], "y"] += 1
@@ -105,7 +109,7 @@ def test_identity_link_ols_did_equals_interaction():
     ) == pytest.approx(float(np.asarray(impact).reshape(())))
 
 
-def test_identity_link_ols_prepost_equals_group_coefficient():
+def test_identity_link_ols_prepost_equals_group_coefficient(capsys):
     """Each enrolled unit twice, pretest fixed, equals the group coefficient."""
     frame = pd.DataFrame(
         {
@@ -132,9 +136,13 @@ def test_identity_link_ols_prepost_equals_group_coefficient():
     assert float(
         np.asarray(result.result.expected_effect).reshape(-1)[0]
     ) == pytest.approx(impact)
+    result.summary()
+    printed = capsys.readouterr().out
+    assert "CI_" not in printed
+    assert f"Expected effect = {impact:.2f}" in printed
 
 
-def test_rd_epsilon_contrast_uses_the_configured_rows():
+def test_rd_epsilon_contrast_uses_the_configured_rows(capsys):
     """A slope makes the wrong threshold positions fail."""
     rng = np.random.default_rng(0)
     running = np.linspace(-1, 1, 41)
@@ -160,6 +168,11 @@ def test_rd_epsilon_contrast_uses_the_configured_rows():
     upper = np.asarray(predicted.isel(obs_ind=1, treated_units=0)).reshape(-1)[0]
     lower = np.asarray(predicted.isel(obs_ind=0, treated_units=0)).reshape(-1)[0]
     assert float(np.asarray(effect).reshape(())) == pytest.approx(float(upper - lower))
+    result.summary()
+    printed = capsys.readouterr().out
+    assert "CI_" not in printed
+    point = f"{float(np.asarray(effect).reshape(())):.2f}"
+    assert f"Discontinuity at threshold = {point}" in printed
 
 
 def test_its_and_sc_labels_bump_and_unavailable_path():
