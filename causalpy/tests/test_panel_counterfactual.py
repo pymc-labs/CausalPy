@@ -360,7 +360,7 @@ def test_effect_summary_does_not_default_to_synthetic_control_assumptions(sc_dat
         treated_units=["actual"],
         model=cp.skl_models.WeightedProportion(),
     ).fit()
-    summary = experiment.effect_summary()
+    summary = experiment.effect_summary(effect="observed_gap")
     assert (
         "control units used to construct the synthetic counterfactual" in summary.text
     )
@@ -539,4 +539,40 @@ def test_prior_check_figure_is_one_panel():
     assert axes[0].get_title() == "Prior predictive check"
     assert len(axes) == 1
     assert not isinstance(axes, np.ndarray)
+    plt.close(figure)
+
+
+@pytest.mark.parametrize("reason", [None, "counterfactual-only fit"])
+def test_missing_expected_effect_is_not_drawn_as_the_gap(reason):
+    """A missing selected series is annotated, not replaced by the gap."""
+    pre_index = pd.Index([0, 1])
+    post_index = pd.Index([2, 3, 4])
+    gap = np.array([4.222, 4.111, 4.000])
+    panel = _panel(
+        pd.DataFrame({"donor": 0.0, "actual": 1.0}, index=pre_index),
+        pd.DataFrame({"donor": 0.0, "actual": 1.0}, index=post_index),
+        2,
+    )
+    bundle = CausalResult(
+        predictions_pre=_draws(np.zeros((1, 1, 2, 1)), pre_index),
+        predictions_post=_draws(np.zeros((1, 1, 3, 1)), post_index),
+        impact_pre=_draws(np.zeros((1, 1, 2, 1)), pre_index),
+        impact_post=_draws(gap.reshape(1, 1, 3, 1), post_index),
+        impact_post_cumulative=_draws(np.cumsum(gap).reshape(1, 1, 3, 1), post_index),
+        expected_effect=None,
+        expected_effect_reason=reason,
+    )
+    figure, axes = panel.plot(bundle, **_plot_kwargs())
+    drawn = np.concatenate(
+        [
+            np.asarray(line.get_ydata(), dtype=float).ravel()
+            for axis in axes[1:]
+            for line in axis.get_lines()
+        ]
+    )
+    assert not np.any(np.isclose(drawn, 4.222))
+    assert axes[1].get_title() == "Expected effect unavailable"
+    assert (reason or "Expected effect unavailable") in [
+        text.get_text() for text in axes[1].texts
+    ]
     plt.close(figure)

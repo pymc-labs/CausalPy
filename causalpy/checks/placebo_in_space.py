@@ -239,7 +239,7 @@ class PlaceboInSpace:
 
             try:
                 alt_experiment = method(context.data, **kw).fit()
-                summary = alt_experiment.effect_summary()
+                summary = alt_experiment.effect_summary(effect="observed_gap")
             except Exception as exc:
                 logger.warning(
                     "PlaceboInSpace: failed for '%s': %s",

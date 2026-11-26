@@ -105,7 +105,7 @@ class LeaveOneOut:
 
             try:
                 alt_experiment = method(context.data, **kw).fit()
-                summary = alt_experiment.effect_summary()
+                summary = alt_experiment.effect_summary(effect="observed_gap")
                 row: dict[str, Any] = {"dropped_unit": dropped}
                 if summary.table is not None and not summary.table.empty:
                     for col in summary.table.columns:

@@ -142,7 +142,12 @@ class PriorSensitivity:
             alt_experiment = method(context.data, model=model, **base_kwargs).fit()
 
             try:
-                summary = alt_experiment.effect_summary()
+                summary_kwargs: dict[str, Any] = {}
+                if isinstance(
+                    alt_experiment, (InterruptedTimeSeries, SyntheticControl)
+                ):
+                    summary_kwargs["effect"] = "observed_gap"
+                summary = alt_experiment.effect_summary(**summary_kwargs)
                 row: dict[str, Any] = {"prior_spec": name}
                 if summary.table is not None and not summary.table.empty:
                     for col in summary.table.columns:

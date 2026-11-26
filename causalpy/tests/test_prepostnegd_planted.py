@@ -25,8 +25,8 @@ from causalpy.pymc_models import PyMCModel
 class _ClosedFormCoefficientModel(PyMCModel):
     """Solve the experiment's design with least squares and skip NUTS.
 
-    ``predict`` is unused by the coefficient assertion. It returns a zero
-    predictive tree so scenario bookkeeping in ``fit`` can finish.
+    ``predict`` applies the solved coefficients. The response-scale contrast
+    then equals the planted group shift. It does not sample.
     """
 
     def __init__(self) -> None:
@@ -56,9 +56,12 @@ class _ClosedFormCoefficientModel(PyMCModel):
         return self.idata
 
     def predict(self, X, coords=None, out_of_sample=False, group="posterior"):  # noqa: ARG002
-        n_obs = np.asarray(X).shape[0]
+        design = np.asarray(X, dtype=float)
+        beta = np.asarray(self.idata["posterior"]["beta"].values).reshape(-1)
+        mu_point = design @ beta
+        n_obs = mu_point.shape[0]
         mu = xr.DataArray(
-            np.zeros((1, 1, n_obs, 1)),
+            mu_point.reshape(1, 1, n_obs, 1),
             dims=["chain", "draw", "obs_ind", "treated_units"],
             coords={
                 "obs_ind": np.arange(n_obs),
@@ -110,3 +113,34 @@ def test_prepostnegd_recovers_planted_group_shift(mock_pymc_sample):
     assert impact == pytest.approx(4.0)
     assert impact != pytest.approx(raw_contrast)
     assert impact != pytest.approx(0.0)
+
+
+def test_prepostnegd_transformed_outcome_returns_the_paired_contrast(
+    mock_pymc_sample,
+):
+    """A formula outcome that is not a column must not stop the contrast.
+
+    ``np.log(post) = 1 + 0.3 * group + 0.1 * pre``. The stored contrast is
+    that group shift on the modeled scale, not a missing-column error and
+    not the raw post difference.
+    """
+    del mock_pymc_sample
+    group = np.array([0, 0, 0, 1, 1, 1])
+    pre = np.array([0.0, 1.0, 2.0, 0.5, 1.5, 2.5])
+    log_post = 1.0 + 0.3 * group + 0.1 * pre
+    frame = pd.DataFrame({"group": group, "pre": pre, "post": np.exp(log_post)})
+    raw_contrast = float(
+        frame.loc[frame["group"] == 1, "post"].mean()
+        - frame.loc[frame["group"] == 0, "post"].mean()
+    )
+    experiment = cp.PrePostNEGD(
+        frame,
+        formula="np.log(post) ~ 1 + C(group) + pre",
+        group_variable_name="group",
+        pretreatment_variable_name="pre",
+        model=_ClosedFormCoefficientModel(),
+    )
+    experiment.fit()
+    impact = float(np.asarray(experiment.result.causal_impact).reshape(-1)[0])
+    assert impact == pytest.approx(0.3)
+    assert impact != pytest.approx(raw_contrast)

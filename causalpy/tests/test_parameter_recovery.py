@@ -761,6 +761,7 @@ def test_synthetic_control_parameter_recovery(
         alpha=1 - harness.HDI_PROB,
         cumulative=True,
         relative=False,
+        effect="observed_gap",
     )
     table_semantics = harness._table_semantics(effect_summary.table)
     assert table_semantics["hdi"]["probability"] == harness.HDI_PROB

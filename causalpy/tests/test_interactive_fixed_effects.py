@@ -500,6 +500,9 @@ def test_plot_requires_a_result_and_honours_show() -> None:
         show.assert_not_called()
         assert isinstance(figure, plt.Figure)
         assert len(axes) == 3
+        titles = [axis.get_title() for axis in axes]
+        assert "Observed gap" in titles
+        assert "Expected effect unavailable" not in titles
         plt.close(figure)
         figure, _ = experiment.plot(show=True)
         show.assert_called_once()

@@ -353,7 +353,7 @@ def test_effect_summary_intervention_period(datetime_data, mock_pymc_sample):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    stats = result.effect_summary(period="intervention")
+    stats = result.effect_summary(effect="observed_gap", period="intervention")
     assert stats is not None
     assert hasattr(stats, "table")
     assert hasattr(stats, "text")
@@ -373,7 +373,7 @@ def test_effect_summary_post_period(datetime_data, mock_pymc_sample):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    stats = result.effect_summary(period="post")
+    stats = result.effect_summary(effect="observed_gap", period="post")
     assert stats is not None
     assert hasattr(stats, "table")
     assert hasattr(stats, "text")
@@ -394,11 +394,13 @@ def test_effect_summary_default_behavior(datetime_data, mock_pymc_sample):
     ).fit()
 
     # Default should summarize all post-treatment data (backward compatible)
-    stats = result.effect_summary(period=None)
+    stats = result.effect_summary(effect="observed_gap", period=None)
     assert stats is not None
 
     # Without period parameter should also work
-    stats2 = result.effect_summary()
+    stats2 = result.effect_summary(
+        effect="observed_gap",
+    )
     assert stats2 is not None
 
 
@@ -415,7 +417,9 @@ def test_effect_summary_comparison_pymc(datetime_data, mock_pymc_sample):
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    comparison_summary = result.effect_summary(period="comparison")
+    comparison_summary = result.effect_summary(
+        effect="observed_gap", period="comparison"
+    )
 
     # Check that summary is returned (not NotImplementedError)
     assert comparison_summary is not None
@@ -456,7 +460,9 @@ def test_effect_summary_comparison_sklearn(datetime_data):
         model=LinearRegression(),
     ).fit()
 
-    comparison_summary = result.effect_summary(period="comparison")
+    comparison_summary = result.effect_summary(
+        effect="observed_gap", period="comparison"
+    )
 
     # Check that summary is returned
     assert comparison_summary is not None
@@ -488,7 +494,9 @@ def test_effect_summary_comparison_persistence_ratio(datetime_data, mock_pymc_sa
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    comparison_summary = result.effect_summary(period="comparison")
+    comparison_summary = result.effect_summary(
+        effect="observed_gap", period="comparison"
+    )
 
     # Get persistence ratio from table (in post_intervention row)
     persistence_ratio_pct = comparison_summary.table.loc[
@@ -518,7 +526,9 @@ def test_effect_summary_comparison_prob_persisted(datetime_data, mock_pymc_sampl
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    comparison_summary = result.effect_summary(period="comparison")
+    comparison_summary = result.effect_summary(
+        effect="observed_gap", period="comparison"
+    )
 
     # Check that prob_persisted is in the table (in post_intervention row)
     assert "prob_persisted" in comparison_summary.table.columns
@@ -541,7 +551,9 @@ def test_effect_summary_comparison_hdi_intervals(datetime_data, mock_pymc_sample
         model=cp.pymc_models.LinearRegression(sample_kwargs=sample_kwargs),
     ).fit()
 
-    comparison_summary = result.effect_summary(period="comparison")
+    comparison_summary = result.effect_summary(
+        effect="observed_gap", period="comparison"
+    )
 
     # Check that HDI intervals are in the table
     intervention_lower = comparison_summary.table.loc["intervention", "hdi_lower"]
@@ -572,7 +584,7 @@ def test_effect_summary_invalid_period_raises_error(datetime_data, mock_pymc_sam
     )
 
     with pytest.raises(ValueError, match="period"):
-        result.effect_summary(period="invalid")
+        result.effect_summary(effect="observed_gap", period="invalid")
 
 
 # ==============================================================================
@@ -1197,7 +1209,9 @@ def test_prior_comparison_summary_is_a_plausibility_check(integer_data, draws):
     )
     experiment.sample_prior_predictive(draws=draws, random_seed=42)
 
-    summary = experiment.effect_summary(group="prior", period="comparison")
+    summary = experiment.effect_summary(
+        effect="observed_gap", group="prior", period="comparison"
+    )
     impact = experiment.prior_result.impact_post
     expected = [
         impact.sel(obs_ind=slice(treatment_time, treatment_end_time - 1)).mean().item(),
@@ -1277,11 +1291,13 @@ def test_plot_forwards_ci_prob_to_all_singleton_hdi_markers(monkeypatch):
         return ax.plot([], [])[0]
 
     stub._require_bundle = lambda group: bundle
+    stub._selected_effect = InterruptedTimeSeries._selected_effect.__get__(stub)
+    stub._draw_effect_panel = InterruptedTimeSeries._draw_effect_panel.__get__(stub)
     stub._draw_singleton_hdi_marker = fake_singleton_marker
 
     monkeypatch.setattr(its_module, "plot_posterior_over_x", fake_plot_posterior)
 
-    fig, _ = InterruptedTimeSeries._plot(stub, ci_prob=0.8)
+    fig, _ = InterruptedTimeSeries._plot(stub, ci_prob=0.8, effect="observed_gap")
     assert probabilities == [0.8, 0.8, 0.8]
     plt.close(fig)
 

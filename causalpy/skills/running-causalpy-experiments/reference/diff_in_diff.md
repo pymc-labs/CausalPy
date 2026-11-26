@@ -48,6 +48,6 @@ result.plot()
 
 ## Interpretation Checks
 
-- Inspect whether pre-treatment trends look plausibly parallel before relying on the interaction effect.
-- Treat the interaction coefficient and `effect_summary()` as causal only if the control group is a credible counterfactual.
+- Inspect whether pre-treatment trends look plausibly parallel before relying on the reported effect.
+- `effect_summary()` reports the response-scale post-treatment contrast on the treated rows. On an additive identity link that contrast equals the interaction coefficient; on another link it does not. Treat it as causal only if the control group is a credible counterfactual.
 - For staggered adoption, use `StaggeredDifferenceInDifferences` rather than forcing all units into a single post indicator.

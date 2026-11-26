@@ -26,18 +26,20 @@ from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.custom_exceptions import (
     DataException,
 )
+from causalpy.experiments._expected_effect import response_contrast
 from causalpy.experiments._results import CoefficientResult, GroupComparisonScenario
 from causalpy.experiments.model_adapter import build_coords
 from causalpy.formula_utils import build_design_matrices, build_formula_matrices
 from causalpy.input_data import DataFrameLike, to_pandas
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
+    has_posterior_draws,
     plot_posterior_over_x,
     plot_scalar_posterior,
 )
 from causalpy.pymc_models import LinearRegression, PyMCModel
 from causalpy.reporting import EffectSummary, _effect_summary_did
-from causalpy.utils import _is_variable_dummy_coded, round_num
+from causalpy.utils import _as_scalar, _is_variable_dummy_coded, round_num
 
 from .base import BaseExperiment
 
@@ -65,7 +67,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
     -----
     **Estimate extraction**
 
-    The reported ``causal_impact`` is the posterior coefficient on the treatment-group term, conditional on the pretreatment outcome and any other formula covariates. Treated and untreated prediction curves are also computed for visualization, but they do not determine the reported scalar effect. With the current additive identity-link model, the treatment coefficient equals the corresponding conditional prediction contrast.
+    The reported ``causal_impact`` is the study-sample average treatment effect on the posttest. Each enrolled unit is predicted twice, once treated and once untreated, with its pretest and other covariates held at that row's own values. Units are weighted equally. On an additive identity link this equals the group coefficient. ``expected_effect`` is an alias of ``causal_impact``. Plotted treated and untreated curves hold any other covariate at the sample mean when the column is numeric, and at its modal value otherwise. Those curves are not the stored contrast.
 
     Lazy lifecycle: construction only validates inputs and builds design
     matrices — nothing is sampled. Call :meth:`fit` to draw posterior
@@ -101,7 +103,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
          1 104       12        14
     <BLANKLINE>
     Results:
-    Causal impact = 2, $CI_{94%}$[2, 2]
+    Expected effect = 2, $CI_{94%}$[2, 2]
     Model coefficients:
         Intercept      -0.5, 94% HDI [-1, 0.2]
         C(group)[T.1]  2, 94% HDI [2, 2]
@@ -176,6 +178,44 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             build_coords(self.labels, X.shape[0]),
         )
 
+    def _scenario_references(self) -> dict[str, Any]:
+        """Stated plot reference for columns other than pretest and group.
+
+        Numeric columns use the sample mean. Every other column uses its modal
+        value. The stored contrast does not use this frame: it predicts each
+        enrolled row with that row's own covariates.
+        """
+        reserved = {
+            self.pretreatment_variable_name,
+            self.group_variable_name,
+            self.outcome_variable_name,
+        }
+        columns: set[str] = set()
+        for factor in self._x_design_info.factor_infos:
+            code = getattr(factor, "code", None) or factor.name()
+            for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", code):
+                if token in self.data.columns and token not in reserved:
+                    columns.add(token)
+        return {column: self._stated_reference(column) for column in sorted(columns)}
+
+    def _stated_reference(self, column: str) -> Any:
+        series = self.data[column]
+        if pd.api.types.is_bool_dtype(series) or not pd.api.types.is_numeric_dtype(
+            series
+        ):
+            modes = series.mode(dropna=True)
+            if modes.empty:
+                raise ValueError(
+                    f"Cannot plot a reference for {column!r}: the column has no values."
+                )
+            return modes.iloc[0]
+        value = float(series.mean())
+        if not np.isfinite(value):
+            raise ValueError(
+                f"Cannot plot a reference for {column!r}: the column has no finite values."
+            )
+        return value
+
     def _finalize(self, group: Literal["prior", "posterior"]) -> None:
         """Compute the group's result bundle from its draws and assign it.
 
@@ -198,19 +238,16 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
                 self.group_variable_name: np.zeros(self.pred_xi.shape),
             }
         )
+        for column, value in self._scenario_references().items():
+            x_pred_untreated[column] = value
         (new_x_untreated,) = build_design_matrices(
             [self._x_design_info], x_pred_untreated
         )
         pred_untreated = self._model_backend.predict(
             X=np.asarray(new_x_untreated), group=group
         )
-        # treated
-        x_pred_treated = pd.DataFrame(
-            {
-                self.pretreatment_variable_name: self.pred_xi,
-                self.group_variable_name: np.ones(self.pred_xi.shape),
-            }
-        )
+        x_pred_treated = x_pred_untreated.copy()
+        x_pred_treated[self.group_variable_name] = np.ones(self.pred_xi.shape)
         (new_x_treated,) = build_design_matrices([self._x_design_info], x_pred_treated)
         pred_treated = self._model_backend.predict(
             X=np.asarray(new_x_treated), group=group
@@ -221,10 +258,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
         # coincides with the control scenario above and reuses its prediction
         # instead of paying for an identical second predict pass.
 
-        # Evaluate causal impact as equal to the treatment effect
-        causal_impact = self._model_backend.coefficients(group=group).sel(
-            coeffs=self._get_treatment_effect_coeff()
-        )
+        causal_impact = self._expected_effect(group)
 
         bundle = CoefficientResult(
             causal_impact=causal_impact,
@@ -240,6 +274,39 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             score=None,
         )
         self._assign_bundle(group, bundle)
+
+    def _expected_effect(self, group: Literal["prior", "posterior"]) -> xr.DataArray:
+        """Study-sample ATE from paired treated and untreated predictions.
+
+        Each enrolled row is predicted with its own pretest and covariates,
+        once with the group indicator set to treated and once to untreated.
+        A plain outcome column is omitted. A transformed outcome such as
+        ``np.log(post)`` is not a column, so the raw column stays for the
+        formula.
+        """
+        group_name = self.group_variable_name
+        rows = self.data
+        if self.outcome_variable_name in rows.columns:
+            rows = rows.drop(columns=[self.outcome_variable_name])
+        levels = sorted(self.data[group_name].unique(), key=lambda value: int(value))
+        untreated_level, treated_level = levels[0], levels[1]
+        treated = rows.copy()
+        untreated = rows.copy()
+        treated[group_name] = treated_level
+        untreated[group_name] = untreated_level
+        (design_treated,) = build_design_matrices([self._x_design_info], treated)
+        (design_untreated,) = build_design_matrices([self._x_design_info], untreated)
+        mu_treated = self._model_backend.predict(
+            np.asarray(design_treated), group=group
+        )
+        mu_untreated = self._model_backend.predict(
+            np.asarray(design_untreated), group=group
+        )
+        return response_contrast(
+            mu_treated,
+            mu_untreated,
+            reduce_dims=("obs_ind", "treated_units"),
+        )
 
     def input_validation(self) -> None:
         """Validate the input data and model formula for correctness."""
@@ -291,8 +358,10 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
         return matches[0]
 
     def _causal_impact_summary_stat(self, round_to: int | None = 2) -> str:
-        """Computes the mean and credible interval bounds for the causal impact."""
+        """Format the response-scale contrast, without a credible interval on a point."""
         causal_impact = self.result.causal_impact
+        if not has_posterior_draws(causal_impact):
+            return f"Expected effect = {_as_scalar(causal_impact):.2f}"
         percentiles = causal_impact.quantile(
             [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
         ).values
@@ -301,7 +370,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             + f"[{round_num(percentiles[0], round_to)}, {round_num(percentiles[1], round_to)}]"
         )
         causal_impact_mean = f"{round_num(causal_impact.mean(), round_to)}, "
-        return f"Causal impact = {causal_impact_mean + ci}"
+        return f"Expected effect = {causal_impact_mean + ci}"
 
     def _group_level_summary_stats(self, round_to: int | None = None) -> pd.DataFrame:
         """Compute group-level sample sizes and pre/post means.
@@ -525,13 +594,26 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
         )
 
         # Plot estimated causal impact / treatment effect
-        plot_scalar_posterior(
-            bundle.causal_impact,
-            ax=ax[1],
-            ci_prob=ci_prob,
-            ref_val=0,
-            round_to=round_to,
-        )
+        impact = bundle.causal_impact
+        if {"chain", "draw"} <= set(impact.dims):
+            plot_scalar_posterior(
+                impact,
+                ax=ax[1],
+                ci_prob=ci_prob,
+                ref_val=0,
+                round_to=round_to,
+            )
+        else:
+            value = float(np.asarray(impact).reshape(()))
+            ax[1].axvline(value, c="C1", ls="--")
+            ax[1].text(
+                0.5,
+                0.5,
+                f"Expected effect = {round_num(value, round_to)}",
+                transform=ax[1].transAxes,
+                ha="center",
+                va="center",
+            )
         ax[1].set(title="Estimated treatment effect")
         return fig, ax
 

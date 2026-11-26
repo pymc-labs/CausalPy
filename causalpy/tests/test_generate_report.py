@@ -236,7 +236,7 @@ def test_ols_html_report_contains_known_relative_effect(mock_pymc_sample):
         formula="y ~ 1",
         model=LinearRegression(),
     ).fit()
-    stats = cited.effect_summary(relative=True, cumulative=True)
+    stats = cited.effect_summary(effect="observed_gap", relative=True, cumulative=True)
     assert stats.table.loc["cumulative", "relative_mean"] == pytest.approx(20.0)
     assert stats.table.loc["cumulative", "relative_mean"] != pytest.approx(200.0)
 

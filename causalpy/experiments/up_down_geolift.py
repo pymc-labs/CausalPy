@@ -59,9 +59,12 @@ class UpDownGeoLift(SyntheticControl):
 
     Notes
     -----
-    The inherited three-panel :meth:`plot` labels revenue and impact axes from
-    ``data.attrs["unit"]`` when present. A per-period unit such as ``USD/week``
-    becomes ``USD`` on the cumulative-impact axis.
+    Inherited :meth:`plot` and :meth:`effect_summary` default to
+    ``expected_effect``. This counterfactual-only fit has no treated mean, so
+    that contrast is unavailable. Pass ``effect="observed_gap"`` for the
+    realized gap. Axis labels come from ``data.attrs["unit"]`` when present. A
+    per-period unit such as ``USD/week`` becomes ``USD`` on the cumulative
+    impact axis.
     """
 
     supports_ols = False
