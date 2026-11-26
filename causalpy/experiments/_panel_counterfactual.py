@@ -755,6 +755,11 @@ def _plot_counterfactual(
             )
             axis.set(title=panel_title)
     else:
+        cumulative = (
+            post_effect_cumulative
+            if post_effect_cumulative is not None
+            else post_effect.cumsum(dim="obs_ind")
+        )
         if with_uncertainty:
             plot_posterior_over_x(
                 post_index,
@@ -783,7 +788,7 @@ def _plot_counterfactual(
         if with_uncertainty:
             plot_posterior_over_x(
                 post_index,
-                post_effect_cumulative,
+                cumulative,
                 ax=ax[2],
                 **style,
                 plot_hdi_kwargs={"color": "C1"},
@@ -791,7 +796,7 @@ def _plot_counterfactual(
         else:
             ax[2].plot(
                 post_index,
-                post_effect_cumulative.mean(dim=["chain", "draw"]),
+                cumulative.mean(dim=["chain", "draw"]),
                 c="k",
             )
         ax[2].axhline(y=0, c="k")
