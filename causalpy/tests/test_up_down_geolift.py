@@ -244,11 +244,16 @@ def test_up_down_plot_labels_geo_and_revenue_units(fitted_up_down_mock):
 
 
 @pytest.mark.integration
-def test_up_down_plot_defaults_to_the_observed_gap(fitted_up_down_mock):
-    """The inherited expected-effect default would publish an empty impact panel."""
+def test_up_down_plot_defaults_to_expected_effect(fitted_up_down_mock):
+    """A counterfactual-only geo lift reports the default contrast unavailable."""
     simulated, result = fitted_up_down_mock
     geo = simulated.arms["up"][0]
     fig, axes = result.plot(treated_unit=geo, show=False)
+    assert axes[1].get_title() == "Expected effect unavailable"
+    assert axes[2].get_title() == "Cumulative expected effect unavailable"
+    plt.close(fig)
+
+    fig, axes = result.plot(treated_unit=geo, show=False, effect="observed_gap")
     assert axes[1].get_title() == "Observed gap"
     assert axes[2].get_title() == "Cumulative observed gap"
     pointwise = (
@@ -266,22 +271,16 @@ def test_up_down_plot_defaults_to_the_observed_gap(fitted_up_down_mock):
     )
     plt.close(fig)
 
-    fig, axes = result.plot(treated_unit=geo, show=False, effect="expected_effect")
-    assert axes[1].get_title() == "Expected effect unavailable"
-    assert axes[2].get_title() == "Cumulative expected effect unavailable"
-    plt.close(fig)
-
 
 @pytest.mark.integration
-def test_up_down_summary_defaults_to_the_observed_gap(fitted_up_down_mock):
-    """The inherited expected-effect default would publish an unavailable summary."""
+def test_up_down_summary_defaults_to_expected_effect(fitted_up_down_mock):
+    """A counterfactual-only geo lift reports the default contrast unavailable."""
     simulated, result = fitted_up_down_mock
     geo = simulated.arms["up"][0]
     default = result.effect_summary(treated_unit=geo)
+    assert "unavailable" in default.text.lower()
     explicit = result.effect_summary(treated_unit=geo, effect="observed_gap")
-    assert default.text == explicit.text
-    contrast = result.effect_summary(treated_unit=geo, effect="expected_effect")
-    assert "unavailable" in contrast.text.lower()
+    assert "unavailable" not in explicit.text.lower()
 
 
 @pytest.mark.integration

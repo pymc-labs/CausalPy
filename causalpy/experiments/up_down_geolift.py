@@ -25,7 +25,6 @@ from sklearn.base import RegressorMixin
 
 from causalpy.constants import HDI_PROB
 from causalpy.pymc_models import PyMCModel, SoftmaxWeightedSumFitter
-from causalpy.reporting import EffectSummary
 
 from .synthetic_control import SyntheticControl
 
@@ -60,10 +59,10 @@ class UpDownGeoLift(SyntheticControl):
 
     Notes
     -----
-    The three-panel :meth:`plot` and :meth:`effect_summary` default to the
-    realized gap, not the response-scale contrast. A counterfactual-only fit
-    has no treated mean, so ``effect="expected_effect"`` reports that contrast
-    unavailable. Axis labels come from ``data.attrs["unit"]`` when present. A
+    Inherited :meth:`plot` and :meth:`effect_summary` default to
+    ``expected_effect``. This counterfactual-only fit has no treated mean, so
+    that contrast is unavailable. Pass ``effect="observed_gap"`` for the
+    realized gap. Axis labels come from ``data.attrs["unit"]`` when present. A
     per-period unit such as ``USD/week`` becomes ``USD`` on the cumulative
     impact axis.
     """
@@ -112,149 +111,6 @@ class UpDownGeoLift(SyntheticControl):
             model=model,
             min_donor_correlation=min_donor_correlation,
             auto_scale_sigma=auto_scale_sigma,
-        )
-
-    def plot(
-        self,
-        *,
-        group: Literal["prior", "posterior"] = "posterior",
-        round_to: int | None = None,
-        treated_unit: str | None = None,
-        ci_prob: float = HDI_PROB,
-        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
-        ci_kind: Literal["hdi", "eti"] = "hdi",
-        num_samples: int = 50,
-        plot_predictors: bool = False,
-        figsize: tuple[float, float] = (7, 8),
-        show: bool = True,
-        legend_kwargs: dict[str, Any] | None = None,
-        effect: Literal["expected_effect", "observed_gap"] = "observed_gap",
-    ) -> tuple[plt.Figure, list[plt.Axes]] | tuple[plt.Figure, np.ndarray]:
-        """Plot revenue and the realized gap for one treated geo.
-
-        Parameters
-        ----------
-        group : {"prior", "posterior"}, default "posterior"
-            Which draw group to plot. ``"prior"`` is the reduced prior-check
-            panel and requires :meth:`sample_prior_predictive`. ``"posterior"``
-            is the three-panel figure and requires :meth:`fit`.
-        round_to : int, optional
-            Decimals used for the pre-intervention :math:`R^2` in the title.
-            ``None`` uses 2 significant figures.
-        treated_unit : str, optional
-            Treated geo to draw. ``None`` selects the first treated geo.
-        ci_prob : float, default 0.94
-            Interval mass. Must be in ``(0, 1]``.
-        kind : {"ribbon", "histogram", "spaghetti"}, default "ribbon"
-            How posterior uncertainty is rendered.
-        ci_kind : {"hdi", "eti"}, default "hdi"
-            Interval type when ``kind="ribbon"``.
-        num_samples : int, default 50
-            Draw lines when ``kind="spaghetti"``.
-        plot_predictors : bool, default False
-            Overlay donor trajectories on the revenue panel.
-        figsize : tuple of float, default (7, 8)
-            Figure size in inches.
-        show : bool, default True
-            Whether to display the figure.
-        legend_kwargs : dict, optional
-            Legend placement and styling. The existing legend is modified in
-            place.
-        effect : {"expected_effect", "observed_gap"}, default "observed_gap"
-            Headline series. The default is the realized gap. ``expected_effect``
-            requests the response-scale contrast and is annotated unavailable
-            when the fit has no treated mean.
-
-        Returns
-        -------
-        fig : :class:`~matplotlib.figure.Figure`
-            The figure that was created.
-        ax : list of :class:`~matplotlib.axes.Axes` or :class:`~numpy.ndarray`
-            Posterior axes are the three-panel ndarray. Prior axes are a
-            one-element list.
-        """
-        return super().plot(
-            group=group,
-            round_to=round_to,
-            treated_unit=treated_unit,
-            ci_prob=ci_prob,
-            kind=kind,
-            ci_kind=ci_kind,
-            num_samples=num_samples,
-            plot_predictors=plot_predictors,
-            figsize=figsize,
-            show=show,
-            legend_kwargs=legend_kwargs,
-            effect=effect,
-        )
-
-    def effect_summary(
-        self,
-        *,
-        group: Literal["prior", "posterior"] = "posterior",
-        window: Literal["post"] | tuple | slice = "post",
-        direction: Literal["increase", "decrease", "two-sided"] = "increase",
-        alpha: float = 0.05,
-        cumulative: bool = True,
-        relative: bool = True,
-        min_effect: float | None = None,
-        treated_unit: str | None = None,
-        period: Literal["intervention", "post", "comparison"] | None = None,
-        prefix: str = "Post-period",
-        effect: Literal["expected_effect", "observed_gap"] = "observed_gap",
-    ) -> EffectSummary:
-        """Summarize the realized gap for one treated geo.
-
-        Parameters
-        ----------
-        group : {"prior", "posterior"}, default "posterior"
-            Which draw group to summarize. ``"prior"`` requires
-            :meth:`sample_prior_predictive`. ``"posterior"`` requires
-            :meth:`fit`.
-        window : {"post"}, tuple, or slice, default "post"
-            Post-treatment window. A tuple is ``(start, end)``. A slice
-            selects integer positions.
-        direction : {"increase", "decrease", "two-sided"}, default "increase"
-            Observed-gap tail direction. Ignored for ``expected_effect``.
-        alpha : float, default 0.05
-            Observed-gap interval level (1-alpha). Ignored for
-            ``expected_effect``.
-        cumulative : bool, default True
-            Whether to include cumulative effect statistics.
-        relative : bool, default True
-            Whether the observed-gap summary includes relative statistics.
-            Ignored for ``expected_effect``.
-        min_effect : float, optional
-            Observed-gap ROPE threshold. Ignored for ``expected_effect``.
-        treated_unit : str, optional
-            Treated geo to summarize. ``None`` selects the first treated geo.
-        period : {"intervention", "post", "comparison"}, optional
-            Ignored. Geo lift is a two-period design; use ``window``.
-        prefix : str, default "Post-period"
-            Prefix for the observed-gap prose.
-        effect : {"expected_effect", "observed_gap"}, default "observed_gap"
-            Quantity to summarize. The default is the realized gap.
-            ``expected_effect`` requests the response-scale contrast and is
-            unavailable when the fit has no treated mean.
-
-        Returns
-        -------
-        EffectSummary
-            Object with ``.table`` and ``.text``. ``expected_effect`` text is
-            one headline line. ``observed_gap`` text is the detailed narrative.
-        """
-        return super().effect_summary(
-            group=group,
-            window=window,
-            direction=direction,
-            alpha=alpha,
-            cumulative=cumulative,
-            relative=relative,
-            min_effect=min_effect,
-            treated_unit=treated_unit,
-            period=period,
-            prefix=prefix,
-            effect=effect,
         )
 
     def _plot(

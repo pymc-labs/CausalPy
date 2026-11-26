@@ -1477,12 +1477,11 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             )
 
         if effect == "expected_effect":
-            from causalpy.experiments._expected_effect import align_expected_window
-
+            series = bundle.expected_effect
+            if series is not None:
+                series = series.sel(obs_ind=window_coords)
             return summarize_expected_effect(
-                align_expected_window(
-                    bundle.expected_effect, self.datapost.index, window_coords
-                ),
+                series,
                 reason=bundle.expected_effect_reason,
                 cumulative=cumulative,
                 group=group,

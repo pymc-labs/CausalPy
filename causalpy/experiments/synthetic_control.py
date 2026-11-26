@@ -769,10 +769,6 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             if series is not None and "treated_units" in series.dims:
                 series = series.sel(treated_units=unit)
             if series is not None:
-                from causalpy.experiments._expected_effect import (
-                    align_expected_window,
-                )
-
                 _impact, coords = _extract_window(
                     bundle.impact_post,
                     self.datapost.index,
@@ -780,7 +776,7 @@ class SyntheticControl(BaseExperiment[CausalResult]):
                     treated_unit=unit,
                 )
                 del _impact
-                series = align_expected_window(series, self.datapost.index, coords)
+                series = series.sel(obs_ind=coords)
             return summarize_expected_effect(
                 series,
                 reason=bundle.expected_effect_reason,

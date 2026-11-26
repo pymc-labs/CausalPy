@@ -124,52 +124,6 @@ def _select_unit(series: xr.DataArray, treated_unit: str | None) -> xr.DataArray
     return series.sel(treated_units=treated_unit)
 
 
-def align_expected_window(
-    series: xr.DataArray | None,
-    post_index: pd.Index,
-    window_coords: pd.Index,
-) -> xr.DataArray | None:
-    """Select ``window_coords`` from a post-period expected-effect series.
-
-    Label selection is used when the series shares ``obs_ind`` with the
-    post-period index. A full-post request keeps a stored series whose labels
-    differ. A shorter series of the same length as the post index is selected
-    by position.
-
-    Parameters
-    ----------
-    series : xarray.DataArray or None
-        Stored post-period expected effect. ``None`` is returned unchanged.
-    post_index : pandas.Index
-        Index of the experiment post-period.
-    window_coords : pandas.Index
-        Coordinates selected by the requested window.
-
-    Returns
-    -------
-    xarray.DataArray or None
-        The windowed series, or ``None`` when ``series`` is missing.
-
-    Raises
-    ------
-    ValueError
-        If a partial window cannot be aligned to ``series``.
-    """
-    if series is None:
-        return None
-    wanted = pd.Index(window_coords)
-    labels = series.coords["obs_ind"].to_index()
-    if wanted.isin(labels).all():
-        return series.sel(obs_ind=wanted)
-    if len(wanted) == len(post_index):
-        return series
-    if labels.size == len(post_index):
-        positions = post_index.get_indexer(wanted)
-        if (positions >= 0).all():
-            return series.isel(obs_ind=positions)
-    raise ValueError("expected_effect is not aligned to the post-period index")
-
-
 def response_contrast(
     mu_treated: xr.DataArray,
     mu_untreated: xr.DataArray,

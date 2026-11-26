@@ -24,7 +24,6 @@ from sklearn.linear_model import LinearRegression
 import causalpy as cp
 from causalpy.checks.prior_sensitivity import PriorSensitivity
 from causalpy.experiments._expected_effect import (
-    align_expected_window,
     cumulative_sum,
     cumulative_total,
     headline_mean,
@@ -220,7 +219,11 @@ def test_its_and_sc_labels_bump_and_unavailable_path():
     assert float(np.asarray(delta.isel(obs_ind=slice(1, None))).reshape(-1).sum()) == 0
     assert its.result.expected_effect is None
 
-    plotted = expected.expand_dims(chain=[0], draw=[0])
+    plotted = xr.DataArray(
+        [2.0, 3.0, 4.0, 5.0],
+        dims=("obs_ind",),
+        coords={"obs_ind": its.datapost.index},
+    ).expand_dims(chain=[0], draw=[0])
     its._assign_bundle(
         "posterior",
         replace(its.result, expected_effect=plotted, expected_effect_reason=None),
@@ -248,9 +251,19 @@ def test_its_and_sc_labels_bump_and_unavailable_path():
         if ydata.size == gap.size:
             assert not np.allclose(ydata, gap)
     figure.clf()
+    post = synthetic.datapost.index
+    synthetic_effect = xr.DataArray(
+        np.arange(1.0, len(post) + 1.0),
+        dims=("obs_ind",),
+        coords={"obs_ind": post},
+    ).expand_dims(chain=[0], draw=[0])
     synthetic._assign_bundle(
         "posterior",
-        replace(synthetic.result, expected_effect=plotted, expected_effect_reason=None),
+        replace(
+            synthetic.result,
+            expected_effect=synthetic_effect,
+            expected_effect_reason=None,
+        ),
     )
     assert "Expected effect" in synthetic.effect_summary().text
 
@@ -300,7 +313,7 @@ def test_bayesian_identity_does_not_read_the_outcome(monkeypatch):
 
 
 def test_contrast_helpers_and_guard_clauses():
-    """Cover weight, window, and unavailable-name branches the five designs share."""
+    """Cover weight and unavailable-name branches the five designs share."""
     treated = xr.DataArray([1.0, 3.0], dims=("obs_ind",))
     untreated = xr.DataArray([0.0, 1.0], dims=("obs_ind",))
     weights = xr.DataArray([1.0, 3.0], dims=("obs_ind",))
@@ -312,26 +325,12 @@ def test_contrast_helpers_and_guard_clauses():
     assert float(np.asarray(cumulative_sum(point))) == pytest.approx(4.0)
     assert cumulative_total(point) == pytest.approx(4.0)
 
-    labeled = xr.DataArray(
-        [1.0, 2.0, 3.0], dims=("obs_ind",), coords={"obs_ind": [10, 20, 30]}
-    )
-    windowed = align_expected_window(labeled, pd.Index([10, 20, 30]), pd.Index([20]))
-    assert float(np.asarray(windowed).reshape(-1)[0]) == pytest.approx(2.0)
-    positional = xr.DataArray(
-        [1.0, 2.0, 3.0], dims=("obs_ind",), coords={"obs_ind": [0, 1, 2]}
-    )
-    post = pd.Index(pd.to_datetime(["2020-01-01", "2020-01-02", "2020-01-03"]))
-    assert align_expected_window(positional, post, post) is positional
-    placed = align_expected_window(
-        positional, post, pd.Index(pd.to_datetime(["2020-01-02"]))
-    )
-    assert float(np.asarray(placed).reshape(-1)[0]) == pytest.approx(2.0)
     bundle = CausalResult(
-        predictions_pre=labeled,
-        predictions_post=labeled,
-        impact_pre=labeled,
-        impact_post=labeled,
-        impact_post_cumulative=labeled,
+        predictions_pre=treated,
+        predictions_post=treated,
+        impact_pre=treated,
+        impact_post=treated,
+        impact_post_cumulative=treated,
     )
     with pytest.raises(ValueError, match="effect must be"):
         select_headline_effect(bundle, "not-an-effect")
