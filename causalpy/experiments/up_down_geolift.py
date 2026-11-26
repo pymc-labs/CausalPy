@@ -59,9 +59,11 @@ class UpDownGeoLift(SyntheticControl):
 
     Notes
     -----
-    The inherited three-panel :meth:`plot` labels revenue and impact axes from
-    ``data.attrs["unit"]`` when present. A per-period unit such as ``USD/week``
-    becomes ``USD`` on the cumulative-impact axis.
+    The three-panel :meth:`plot` defaults to the realized gap, not the
+    response-scale contrast. A counterfactual-only fit has no treated mean, so
+    ``effect="expected_effect"`` annotates that contrast unavailable. Axis
+    labels come from ``data.attrs["unit"]`` when present. A per-period unit
+    such as ``USD/week`` becomes ``USD`` on the cumulative-impact axis.
     """
 
     supports_ols = False
@@ -108,6 +110,80 @@ class UpDownGeoLift(SyntheticControl):
             model=model,
             min_donor_correlation=min_donor_correlation,
             auto_scale_sigma=auto_scale_sigma,
+        )
+
+    def plot(
+        self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+        round_to: int | None = None,
+        treated_unit: str | None = None,
+        ci_prob: float = HDI_PROB,
+        kind: Literal["ribbon", "histogram", "spaghetti"] = "ribbon",
+        ci_kind: Literal["hdi", "eti"] = "hdi",
+        num_samples: int = 50,
+        plot_predictors: bool = False,
+        figsize: tuple[float, float] = (7, 8),
+        show: bool = True,
+        legend_kwargs: dict[str, Any] | None = None,
+        effect: Literal["expected_effect", "observed_gap"] = "observed_gap",
+    ) -> tuple[plt.Figure, list[plt.Axes]] | tuple[plt.Figure, np.ndarray]:
+        """Plot revenue and the realized gap for one treated geo.
+
+        Parameters
+        ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which draw group to plot. ``"prior"`` is the reduced prior-check
+            panel and requires :meth:`sample_prior_predictive`. ``"posterior"``
+            is the three-panel figure and requires :meth:`fit`.
+        round_to : int, optional
+            Decimals used for the pre-intervention :math:`R^2` in the title.
+            ``None`` uses 2 significant figures.
+        treated_unit : str, optional
+            Treated geo to draw. ``None`` selects the first treated geo.
+        ci_prob : float, default 0.94
+            Interval mass. Must be in ``(0, 1]``.
+        kind : {"ribbon", "histogram", "spaghetti"}, default "ribbon"
+            How posterior uncertainty is rendered.
+        ci_kind : {"hdi", "eti"}, default "hdi"
+            Interval type when ``kind="ribbon"``.
+        num_samples : int, default 50
+            Draw lines when ``kind="spaghetti"``.
+        plot_predictors : bool, default False
+            Overlay donor trajectories on the revenue panel.
+        figsize : tuple of float, default (7, 8)
+            Figure size in inches.
+        show : bool, default True
+            Whether to display the figure.
+        legend_kwargs : dict, optional
+            Legend placement and styling. The existing legend is modified in
+            place.
+        effect : {"expected_effect", "observed_gap"}, default "observed_gap"
+            Headline series. The default is the realized gap. ``expected_effect``
+            requests the response-scale contrast and is annotated unavailable
+            when the fit has no treated mean.
+
+        Returns
+        -------
+        fig : :class:`~matplotlib.figure.Figure`
+            The figure that was created.
+        ax : list of :class:`~matplotlib.axes.Axes` or :class:`~numpy.ndarray`
+            Posterior axes are the three-panel ndarray. Prior axes are a
+            one-element list.
+        """
+        return super().plot(
+            group=group,
+            round_to=round_to,
+            treated_unit=treated_unit,
+            ci_prob=ci_prob,
+            kind=kind,
+            ci_kind=ci_kind,
+            num_samples=num_samples,
+            plot_predictors=plot_predictors,
+            figsize=figsize,
+            show=show,
+            legend_kwargs=legend_kwargs,
+            effect=effect,
         )
 
     def _plot(

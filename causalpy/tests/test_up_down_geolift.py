@@ -244,6 +244,35 @@ def test_up_down_plot_labels_geo_and_revenue_units(fitted_up_down_mock):
 
 
 @pytest.mark.integration
+def test_up_down_plot_defaults_to_the_observed_gap(fitted_up_down_mock):
+    """The inherited expected-effect default would publish an empty impact panel."""
+    simulated, result = fitted_up_down_mock
+    geo = simulated.arms["up"][0]
+    fig, axes = result.plot(treated_unit=geo, show=False)
+    assert axes[1].get_title() == "Observed gap"
+    assert axes[2].get_title() == "Cumulative observed gap"
+    pointwise = (
+        result.result.impact_post.sel(treated_units=geo)
+        .mean(("chain", "draw"))
+        .to_numpy()
+    )
+    drawn = [
+        np.asarray(line.get_ydata(), dtype=float).ravel()
+        for line in axes[1].get_lines()
+    ]
+    assert any(
+        series.size == pointwise.size and np.allclose(series, pointwise)
+        for series in drawn
+    )
+    plt.close(fig)
+
+    fig, axes = result.plot(treated_unit=geo, show=False, effect="expected_effect")
+    assert axes[1].get_title() == "Expected effect unavailable"
+    assert axes[2].get_title() == "Cumulative expected effect unavailable"
+    plt.close(fig)
+
+
+@pytest.mark.integration
 @pytest.mark.correctness
 def test_up_down_mmm_export_matches_window_and_validates_spend(fitted_up_down):
     simulated, result = fitted_up_down
