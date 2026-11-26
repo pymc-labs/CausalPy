@@ -479,3 +479,51 @@ def _fit_sc():
         treated_units=["actual"],
         model=cp.skl_models.WeightedProportion(),
     ).fit()
+
+
+def test_prepost_extra_covariate_uses_each_rows_value():
+    """A covariate outside the pretest grid must not stop the contrast.
+
+    The plotted curves hold ``site`` at its mean. The stored contrast uses
+    each row's own ``site``, so it is not the effect evaluated at that mean.
+    """
+    rows = []
+    for group in (0, 1):
+        for site in (0.0, 2.0):
+            for region, pre in (("a", 1.0), ("b", 2.0), ("a", 3.0)):
+                rows.append(
+                    {
+                        "group": group,
+                        "pre": pre,
+                        "site": site,
+                        "region": region,
+                        "post": (
+                            1.5
+                            + 4.0 * group
+                            + 3.0 * group * site**2
+                            + 0.7 * pre
+                            + float(region == "b")
+                        ),
+                    }
+                )
+    frame = pd.DataFrame(rows)
+    own = 4.0 + 3.0 * float(np.mean(frame["site"].to_numpy() ** 2))
+    at_mean = 4.0 + 3.0 * float(frame["site"].mean()) ** 2
+    assert own != pytest.approx(at_mean)
+    result = cp.PrePostNEGD(
+        frame,
+        formula="post ~ 1 + C(group) * I(site ** 2) + pre + C(region)",
+        group_variable_name="group",
+        pretreatment_variable_name="pre",
+        model=_ClosedFormCoefficientModel(),
+    ).fit()
+    impact = float(np.asarray(result.result.causal_impact).reshape(-1)[0])
+    assert impact == pytest.approx(own)
+    assert impact != pytest.approx(at_mean)
+    plotted = result.result.scenario_control.inputs
+    assert plotted["site"].nunique() == 1
+    assert float(plotted["site"].iloc[0]) == pytest.approx(float(frame["site"].mean()))
+    assert set(plotted["region"].unique()) == {"a"}
+    result.data.loc[result.data.index[0], "post"] += 1
+    recomputed = float(np.asarray(result._expected_effect("posterior")).reshape(-1)[0])
+    assert recomputed == pytest.approx(own)

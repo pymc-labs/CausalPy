@@ -67,7 +67,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
     -----
     **Estimate extraction**
 
-    The reported ``causal_impact`` is the study-sample average treatment effect on the posttest. Each enrolled unit is predicted twice, once treated and once untreated, with its pretest and other covariates held fixed. Units are weighted equally. On an additive identity link this equals the group coefficient. ``expected_effect`` is an alias of ``causal_impact``.
+    The reported ``causal_impact`` is the study-sample average treatment effect on the posttest. Each enrolled unit is predicted twice, once treated and once untreated, with its pretest and other covariates held at that row's own values. Units are weighted equally. On an additive identity link this equals the group coefficient. ``expected_effect`` is an alias of ``causal_impact``. Plotted treated and untreated curves hold any other covariate at the sample mean when the column is numeric, and at its modal value otherwise. Those curves are not the stored contrast.
 
     Lazy lifecycle: construction only validates inputs and builds design
     matrices — nothing is sampled. Call :meth:`fit` to draw posterior
@@ -178,6 +178,44 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             build_coords(self.labels, X.shape[0]),
         )
 
+    def _scenario_references(self) -> dict[str, Any]:
+        """Stated plot reference for columns other than pretest and group.
+
+        Numeric columns use the sample mean. Every other column uses its modal
+        value. The stored contrast does not use this frame: it predicts each
+        enrolled row with that row's own covariates.
+        """
+        reserved = {
+            self.pretreatment_variable_name,
+            self.group_variable_name,
+            self.outcome_variable_name,
+        }
+        columns: set[str] = set()
+        for factor in self._x_design_info.factor_infos:
+            code = getattr(factor, "code", None) or factor.name()
+            for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", code):
+                if token in self.data.columns and token not in reserved:
+                    columns.add(token)
+        return {column: self._stated_reference(column) for column in sorted(columns)}
+
+    def _stated_reference(self, column: str) -> Any:
+        series = self.data[column]
+        if pd.api.types.is_bool_dtype(series) or not pd.api.types.is_numeric_dtype(
+            series
+        ):
+            modes = series.mode(dropna=True)
+            if modes.empty:
+                raise ValueError(
+                    f"Cannot plot a reference for {column!r}: the column has no values."
+                )
+            return modes.iloc[0]
+        value = float(series.mean())
+        if not np.isfinite(value):
+            raise ValueError(
+                f"Cannot plot a reference for {column!r}: the column has no finite values."
+            )
+        return value
+
     def _finalize(self, group: Literal["prior", "posterior"]) -> None:
         """Compute the group's result bundle from its draws and assign it.
 
@@ -200,19 +238,16 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
                 self.group_variable_name: np.zeros(self.pred_xi.shape),
             }
         )
+        for column, value in self._scenario_references().items():
+            x_pred_untreated[column] = value
         (new_x_untreated,) = build_design_matrices(
             [self._x_design_info], x_pred_untreated
         )
         pred_untreated = self._model_backend.predict(
             X=np.asarray(new_x_untreated), group=group
         )
-        # treated
-        x_pred_treated = pd.DataFrame(
-            {
-                self.pretreatment_variable_name: self.pred_xi,
-                self.group_variable_name: np.ones(self.pred_xi.shape),
-            }
-        )
+        x_pred_treated = x_pred_untreated.copy()
+        x_pred_treated[self.group_variable_name] = np.ones(self.pred_xi.shape)
         (new_x_treated,) = build_design_matrices([self._x_design_info], x_pred_treated)
         pred_treated = self._model_backend.predict(
             X=np.asarray(new_x_treated), group=group
