@@ -58,6 +58,8 @@ groups:
             notebook: multi-cell-geolift
           - title: "Multi-arm geo lift with PyMC: up, down, and control"
             notebook: up-down-control-geolift-pymc
+          - title: Geo spend bundles with randomized markets
+            notebook: synthetic-control-geo-spend-bundles-pymc
       - title: Difference in Differences
         intro: |
           Analysis where the treatment effect is estimated as a difference between treatment conditions in the differences between pre-treatment to post treatment observations.
@@ -80,6 +82,8 @@ groups:
             notebook: interrupted-time-series-covid
           - title: Lift Testing with Interrupted Time Series
             notebook: interrupted-time-series-lift-test
+          - title: National spend bundles with interrupted time series
+            notebook: interrupted-time-series-national-spend-bundles-pymc
           - title: "Placebo-in-time and falsification: a UK CO₂ case study"
             notebook: interrupted-time-series-placebo-in-time-analysis
       - title: Comparative Interrupted Time Series
