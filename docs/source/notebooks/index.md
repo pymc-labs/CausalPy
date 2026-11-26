@@ -173,6 +173,13 @@ Analysis where the treatment effect is estimated as a difference between treatme
 :link: staggered-difference-in-differences-pymc
 :link-type: doc
 :::
+
+:::{grid-item-card} Staggered difference-in-differences-in-differences
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/staggered-difference-in-differences-in-differences-sklearn.png
+:link: staggered-difference-in-differences-in-differences-sklearn
+:link-type: doc
+:::
 ::::
 
 ## Interrupted Time Series
@@ -492,6 +499,7 @@ up-down-control-geolift-pymc.ipynb
 difference-in-differences-pymc.ipynb
 difference-in-differences-banks-pymc.ipynb
 staggered-difference-in-differences-pymc.ipynb
+staggered-difference-in-differences-in-differences-sklearn.ipynb
 :::
 
 :::{toctree}

@@ -103,7 +103,9 @@ class StaggeredDifferenceInDifferences(
         ``ATT(g, t)``. A cohort is included when one of its post-treatment
         calendar periods lacks untreated support, or when none of its own units
         has an untreated observation.
-
+    cohorts : list
+        Sorted unique treatment times, excluding the never-treated value.
+        Available after construction, before :meth:`fit`.
     Notes
     -----
     **Estimate extraction**
@@ -152,6 +154,15 @@ class StaggeredDifferenceInDifferences(
     sampling happens. Call :meth:`fit` to sample posterior draws and
     populate :attr:`result`, or :meth:`sample_prior_predictive` to run a
     prior predictive check (inspect it via ``plot(group="prior")``).
+
+
+    **Public ATT draws**
+
+    :meth:`att_event_time_draws` returns the event-time ATT at each identified
+    event time before it is reduced to a table. :meth:`att_overall_draws`
+    returns the draw-wise overall post-treatment average. Bayesian draw means
+    reproduce the corresponding summary estimates. OLS returns the point
+    estimate only, with no chain or draw dimension and no interval.
 
     References
     ----------
@@ -671,6 +682,64 @@ class StaggeredDifferenceInDifferences(
         )
         self._assign_bundle(group, bundle)
 
+    def _event_time_att_components(
+        self, y_pred: xr.DataArray
+    ) -> list[tuple[int, np.ndarray, int]]:
+        """Draw-wise event-time ATTs from the Bayesian aggregation masks.
+
+        Each array has shape ``(chain, draw)`` and is the mean, over the
+        observations that enter that event-time cell, of observed minus
+        predicted outcome. Pre-treatment cells use every pre-treatment
+        observation at that event time. Post-treatment cells use
+        :meth:`_eligible_event_positions`. The event window matches
+        :meth:`_aggregate_effects_bayesian`. Callers apply identification
+        masking; this helper does not.
+        """
+        mu_draws = y_pred.isel(treated_units=0)
+        tau_draws_all = self._observed_outcome.to_numpy() - mu_draws.values
+        components: list[tuple[int, np.ndarray, int]] = []
+
+        pretreat_idx_positions = self._get_pretreatment_positions()
+        pretreatment_data = self.data.iloc[pretreat_idx_positions]
+        if len(pretreatment_data) > 0:
+            tau_draws_pretreat = tau_draws_all[:, :, pretreat_idx_positions]
+            event_time_pretreat = np.asarray(pretreatment_data["event_time"].values)
+            event_times_pre = np.unique(
+                event_time_pretreat[~np.isnan(event_time_pretreat)]
+            )
+            if self.event_window is not None:
+                event_times_pre = event_times_pre[
+                    (event_times_pre >= self.event_window[0])
+                    & (event_times_pre <= self.event_window[1])
+                ]
+            for event_time in sorted(event_times_pre):
+                event_mask = event_time_pretreat == event_time
+                if event_mask.sum() == 0:
+                    continue
+                positions = np.where(event_mask)[0]
+                tau_e = tau_draws_pretreat[:, :, positions].mean(axis=2)
+                components.append((int(event_time), tau_e, int(event_mask.sum())))
+
+        treated_indices = np.where(
+            ~np.asarray(self.data["_is_untreated"].values, dtype=bool)
+        )[0]
+        tau_draws_treated = tau_draws_all[:, :, treated_indices]
+        treated_data = self.data[~self.data["_is_untreated"]]
+        event_time_treated = np.asarray(treated_data["event_time"].values)
+        event_times_post = np.unique(event_time_treated[~np.isnan(event_time_treated)])
+        if self.event_window is not None:
+            event_times_post = event_times_post[
+                (event_times_post >= self.event_window[0])
+                & (event_times_post <= self.event_window[1])
+            ]
+        for event_time in sorted(event_times_post):
+            positions = self._eligible_event_positions(treated_data, event_time)
+            if positions.size == 0:
+                continue
+            tau_e = tau_draws_treated[:, :, positions].mean(axis=2)
+            components.append((int(event_time), tau_e, int(positions.size)))
+        return components
+
     def _aggregate_effects_bayesian(
         self,
         y_pred: xr.DataArray,
@@ -717,7 +786,6 @@ class StaggeredDifferenceInDifferences(
         treated_mask = ~_is_untreated
         treated_indices = np.where(treated_mask)[0]
         tau_draws_treated = tau_draws_all[:, :, treated_indices]
-        event_time_treated = np.asarray(treated_data["event_time"].values)
 
         # --- Group-time ATTs (post-treatment only) ---
         gt_groups = treated_data.groupby(
@@ -739,64 +807,16 @@ class StaggeredDifferenceInDifferences(
             )
         att_group_time = self._mark_non_identified_att_rows(pd.DataFrame(att_gt_rows))
 
-        # --- Event-time ATTs (including pre-treatment placebo) ---
-        att_et_rows: list[dict] = []
-
-        # Pre-treatment placebo effects (event_time < 0)
-        if len(pretreatment_data) > 0:
-            pretreat_idx_positions = self._get_pretreatment_positions()
-            tau_draws_pretreat = tau_draws_all[:, :, pretreat_idx_positions]
-            event_time_pretreat = np.asarray(pretreatment_data["event_time"].values)
-
-            event_times_pre = np.unique(
-                event_time_pretreat[~np.isnan(event_time_pretreat)]
-            )
-            # Apply event window filter if specified
-            if self.event_window is not None:
-                event_times_pre = event_times_pre[
-                    (event_times_pre >= self.event_window[0])
-                    & (event_times_pre <= self.event_window[1])
-                ]
-
-            for e in sorted(event_times_pre):
-                e_mask = event_time_pretreat == e
-                if e_mask.sum() == 0:
-                    continue
-                positions_arr = np.where(e_mask)[0]
-                tau_e = tau_draws_pretreat[:, :, positions_arr].mean(axis=2)
-                att_et_rows.append(
-                    {
-                        "event_time": int(e),
-                        "att": float(tau_e.mean()),
-                        "att_lower": float(np.percentile(tau_e, lower_pct)),
-                        "att_upper": float(np.percentile(tau_e, upper_pct)),
-                        "n_obs": int(e_mask.sum()),
-                    }
-                )
-
-        # Post-treatment effects (event_time >= 0)
-        event_times_post = np.unique(event_time_treated[~np.isnan(event_time_treated)])
-        if self.event_window is not None:
-            event_times_post = event_times_post[
-                (event_times_post >= self.event_window[0])
-                & (event_times_post <= self.event_window[1])
-            ]
-
-        for e in sorted(event_times_post):
-            positions_arr = self._eligible_event_positions(treated_data, e)
-            if positions_arr.size == 0:
-                continue
-            tau_e = tau_draws_treated[:, :, positions_arr].mean(axis=2)
-            att_et_rows.append(
-                {
-                    "event_time": int(e),
-                    "att": float(tau_e.mean()),
-                    "att_lower": float(np.percentile(tau_e, lower_pct)),
-                    "att_upper": float(np.percentile(tau_e, upper_pct)),
-                    "n_obs": int(positions_arr.size),
-                }
-            )
-
+        att_et_rows = [
+            {
+                "event_time": event_time,
+                "att": float(tau_e.mean()),
+                "att_lower": float(np.percentile(tau_e, lower_pct)),
+                "att_upper": float(np.percentile(tau_e, upper_pct)),
+                "n_obs": n_obs,
+            }
+            for event_time, tau_e, n_obs in self._event_time_att_components(y_pred)
+        ]
         # Name the columns. An empty event window has no rows, and
         # ``DataFrame([])`` would otherwise drop the schema that
         # ``summary()`` and ``effect_summary`` read.
@@ -1851,31 +1871,144 @@ class StaggeredDifferenceInDifferences(
         ``(chain, draw)``. ``None`` when no identified post-treatment event
         time remains.
         """
-        mu_draws = bundle.y_pred.isel(treated_units=0)
-        tau_draws_all = self._observed_outcome.to_numpy() - mu_draws.values
-        treated_indices = np.where(
-            ~np.asarray(self.data["_is_untreated"].values, dtype=bool)
-        )[0]
-        tau_draws_treated = tau_draws_all[:, :, treated_indices]
-        treated_data = self.data[~self.data["_is_untreated"]]
-        event_time_treated = np.asarray(treated_data["event_time"].values)
-        event_times_post = np.unique(event_time_treated[~np.isnan(event_time_treated)])
-        if self.event_window is not None:
-            event_times_post = event_times_post[
-                (event_times_post >= self.event_window[0])
-                & (event_times_post <= self.event_window[1])
-            ]
-
-        att_draws: list[np.ndarray] = []
-        for event_time in sorted(event_times_post):
-            if not self._is_event_time_att_identified(int(event_time)):
-                continue
-            positions = self._eligible_event_positions(treated_data, event_time)
-            tau_e = tau_draws_treated[:, :, positions].mean(axis=2)
-            att_draws.append(tau_e)
+        att_draws = [
+            tau_e
+            for event_time, tau_e, _n_obs in self._event_time_att_components(
+                bundle.y_pred
+            )
+            if event_time >= 0 and self._is_event_time_att_identified(event_time)
+        ]
         if not att_draws:
             return None
         return np.mean(np.stack(att_draws, axis=0), axis=0)
+
+    def att_event_time_draws(
+        self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+    ) -> xr.DataArray | pd.Series:
+        """Draws of ATT at each identified event time.
+
+        Bayesian draw means reproduce the ``att`` column of
+        ``result.att_event_time`` (or ``prior_result.att_event_time``) for
+        rows with ``identified=True``. The draws are the same event-time
+        averages :meth:`_aggregate_effects_bayesian` reduces to that table.
+        OLS returns those point estimates with no chain or draw dimension
+        and no interval.
+
+        Parameters
+        ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which sampled group to read. ``"prior"`` requires
+            :meth:`sample_prior_predictive`; ``"posterior"`` requires
+            :meth:`fit`.
+
+        Returns
+        -------
+        xarray.DataArray or pandas.Series
+            Bayesian draws have dimensions ``chain``, ``draw``, and
+            ``event_time``. OLS returns a Series indexed by ``event_time``.
+        """
+        bundle = self._require_bundle(group)
+        identified = bundle.att_event_time.loc[
+            bundle.att_event_time["identified"].astype(bool)
+        ]
+        event_times = [int(event_time) for event_time in identified["event_time"]]
+        if not has_posterior_draws(bundle.y_pred):
+            return pd.Series(
+                identified["att"].to_numpy(dtype=float),
+                index=pd.Index(event_times, name="event_time"),
+                name="att",
+            )
+
+        by_event = {
+            event_time: tau_e
+            for event_time, tau_e, _n_obs in self._event_time_att_components(
+                bundle.y_pred
+            )
+            if self._is_event_time_att_identified(event_time)
+        }
+        event_times = [
+            event_time for event_time in event_times if event_time in by_event
+        ]
+        if not event_times:
+            return xr.DataArray(
+                np.empty(
+                    (bundle.y_pred.sizes["chain"], bundle.y_pred.sizes["draw"], 0)
+                ),
+                dims=("chain", "draw", "event_time"),
+                coords={
+                    "chain": bundle.y_pred.coords["chain"],
+                    "draw": bundle.y_pred.coords["draw"],
+                    "event_time": np.array([], dtype=int),
+                },
+            )
+        stacked = np.stack(
+            [by_event[event_time] for event_time in event_times], axis=-1
+        )
+        return xr.DataArray(
+            stacked,
+            dims=("chain", "draw", "event_time"),
+            coords={
+                "chain": bundle.y_pred.coords["chain"],
+                "draw": bundle.y_pred.coords["draw"],
+                "event_time": event_times,
+            },
+        )
+
+    def att_overall_draws(
+        self,
+        *,
+        group: Literal["prior", "posterior"] = "posterior",
+    ) -> xr.DataArray | float:
+        """Draw-wise overall post-treatment ATT.
+
+        This is the unweighted mean of identified post-treatment event-time
+        ATTs that :meth:`effect_summary` reports. Bayesian draw means
+        reproduce that average. OLS returns the point estimate as a float,
+        with no chain or draw dimension and no interval.
+
+        Parameters
+        ----------
+        group : {"prior", "posterior"}, default "posterior"
+            Which sampled group to read. ``"prior"`` requires
+            :meth:`sample_prior_predictive`; ``"posterior"`` requires
+            :meth:`fit`.
+
+        Returns
+        -------
+        xarray.DataArray or float
+            Bayesian draws have dimensions ``chain`` and ``draw``.
+
+        Raises
+        ------
+        DataException
+            When no identified post-treatment event time remains.
+        """
+        bundle = self._require_bundle(group)
+        if not has_posterior_draws(bundle.y_pred):
+            post = bundle.att_event_time.loc[
+                bundle.att_event_time["identified"].astype(bool)
+                & (bundle.att_event_time["event_time"] >= 0),
+                "att",
+            ]
+            if len(post) == 0:
+                raise DataException(
+                    "No identified post-treatment event time to average."
+                )
+            return float(post.mean())
+
+        draws = self._identified_post_treatment_att_draws(bundle)
+        if draws is None:
+            raise DataException("No identified post-treatment event time to average.")
+        return xr.DataArray(
+            draws,
+            dims=("chain", "draw"),
+            coords={
+                "chain": bundle.y_pred.coords["chain"],
+                "draw": bundle.y_pred.coords["draw"],
+            },
+        )
 
     def effect_summary(
         self,
