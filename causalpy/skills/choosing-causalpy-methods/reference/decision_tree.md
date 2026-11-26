@@ -23,7 +23,7 @@ Use this file as the canonical routing algorithm for choosing a CausalPy experim
 
 4. If assignment is a common treated/control pre/post design, route to DifferenceInDifferences.
 
-   Use this when treated and control groups share one intervention timing and the estimand is the group-by-post interaction. If adoption timing differs by unit, switch to StaggeredDifferenceInDifferences. If there is only one baseline and one post outcome per unit, compare PrePostNEGD.
+Use this when treated and control groups share one intervention timing and the estimand is the post-treatment average treatment effect on the treated. On an additive identity link that contrast equals the group-by-post interaction. If adoption timing differs by unit, switch to StaggeredDifferenceInDifferences. If there is only one baseline and one post outcome per unit, compare PrePostNEGD.
 
 5. If assignment is staggered adoption, route to StaggeredDifferenceInDifferences only when treatment is absorbing.
 

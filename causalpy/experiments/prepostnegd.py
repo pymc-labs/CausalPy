@@ -239,9 +239,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
         )
         self._assign_bundle(group, bundle)
 
-    def _expected_effect(
-        self, group: Literal["prior", "posterior"]
-    ) -> xr.DataArray | float:
+    def _expected_effect(self, group: Literal["prior", "posterior"]) -> xr.DataArray:
         """Study-sample ATE from paired treated and untreated predictions.
 
         Each enrolled row is predicted with its own pretest and covariates,
@@ -268,7 +266,6 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
             mu_treated,
             mu_untreated,
             reduce_dims=("obs_ind", "treated_units"),
-            point=self._model_backend.is_ols,
         )
 
     def input_validation(self) -> None:
@@ -323,8 +320,6 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
     def _causal_impact_summary_stat(self, round_to: int | None = 2) -> str:
         """Computes the mean and credible interval bounds for the causal impact."""
         causal_impact = self.result.causal_impact
-        if not isinstance(causal_impact, xr.DataArray):
-            return f"Expected effect = {round_num(float(causal_impact), round_to)}"
         percentiles = causal_impact.quantile(
             [(1 - HDI_PROB) / 2, 1 - (1 - HDI_PROB) / 2]
         ).values
@@ -558,7 +553,7 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
 
         # Plot estimated causal impact / treatment effect
         impact = bundle.causal_impact
-        if isinstance(impact, xr.DataArray):
+        if {"chain", "draw"} <= set(impact.dims):
             plot_scalar_posterior(
                 impact,
                 ax=ax[1],
@@ -567,11 +562,12 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
                 round_to=round_to,
             )
         else:
-            ax[1].axvline(float(impact), c="C1", ls="--")
+            value = float(np.asarray(impact).reshape(()))
+            ax[1].axvline(value, c="C1", ls="--")
             ax[1].text(
                 0.5,
                 0.5,
-                f"Expected effect = {round_num(float(impact), round_to)}",
+                f"Expected effect = {round_num(value, round_to)}",
                 transform=ax[1].transAxes,
                 ha="center",
                 va="center",

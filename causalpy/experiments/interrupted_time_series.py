@@ -13,7 +13,6 @@
 #   limitations under the License.
 """Interrupted Time Series Analysis."""
 
-from types import SimpleNamespace
 from typing import Any, Literal
 
 import numpy as np
@@ -32,6 +31,7 @@ from causalpy.date_utils import (
 )
 from causalpy.experiments._expected_effect import (
     UNTREATED_ONLY_REASON,
+    select_headline_effect,
     summarize_expected_effect,
 )
 from causalpy.experiments._results import CausalResult
@@ -274,43 +274,8 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         self._assign_bundle(group, bundle)
 
     def _selected_effect(self, bundle: CausalResult, effect: str) -> Any:
-        """Choose the headline series for summaries and plots.
-
-        ``observed_gap`` keeps the realized-minus-counterfactual series.
-        ``expected_effect`` uses the stored response-scale contrast when a
-        treated mean was supplied, and otherwise reports why it is missing.
-        """
-        if effect == "observed_gap":
-            return SimpleNamespace(
-                pointwise=bundle.impact_post,
-                cumulative=bundle.impact_post_cumulative,
-                point_title="Observed gap",
-                cumulative_title="Cumulative observed gap",
-                reason=None,
-                shade_gap=True,
-            )
-        if effect != "expected_effect":
-            raise ValueError(
-                f"effect must be 'expected_effect' or 'observed_gap', got {effect!r}."
-            )
-        series = bundle.expected_effect
-        if series is None:
-            return SimpleNamespace(
-                pointwise=None,
-                cumulative=None,
-                point_title="Expected effect unavailable",
-                cumulative_title="Cumulative expected effect unavailable",
-                reason=bundle.expected_effect_reason,
-                shade_gap=False,
-            )
-        return SimpleNamespace(
-            pointwise=series,
-            cumulative=series.cumsum(dim="obs_ind"),
-            point_title="Expected effect",
-            cumulative_title="Cumulative expected effect",
-            reason=None,
-            shade_gap=False,
-        )
+        """Choose the headline series for summaries and plots."""
+        return select_headline_effect(bundle, effect)
 
     def _draw_effect_panel(
         self,

@@ -19,7 +19,6 @@ from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
-import xarray as xr
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 from plotnine import (
@@ -282,12 +281,7 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         pred_discon = self._model_backend.predict(X=self.x_discon_design, group=group)
         upper = pred_discon.isel(obs_ind=1, treated_units=0)
         lower = pred_discon.isel(obs_ind=0, treated_units=0)
-        discontinuity_at_threshold = response_contrast(
-            upper,
-            lower,
-            reduce_dims=(),
-            point=self._model_backend.is_ols,
-        )
+        discontinuity_at_threshold = response_contrast(upper, lower, reduce_dims=())
 
         score = None
         if group == "posterior":
@@ -373,8 +367,6 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         print("\nResults:")
         bundle = self.result
         discontinuity = bundle.discontinuity_at_threshold
-        if not isinstance(discontinuity, xr.DataArray):
-            discontinuity = _as_scalar(discontinuity)
         print(f"Discontinuity at threshold = {convert_to_string(discontinuity)}")
         print("\n")
         self.print_coefficients(round_to)
@@ -540,10 +532,6 @@ class RegressionDiscontinuity(BaseExperiment[DiscontinuityResult]):
         r2 = format_r2_score(bundle.score, round_to=round_to, context="on fit data")
         if with_uncertainty:
             discontinuity = bundle.discontinuity_at_threshold
-            if not isinstance(discontinuity, xr.DataArray):
-                raise TypeError(
-                    "Posterior discontinuity_at_threshold must be an xarray.DataArray."
-                )
             percentiles = discontinuity.quantile(
                 [(1 - ci_prob) / 2, 1 - (1 - ci_prob) / 2]
             ).values

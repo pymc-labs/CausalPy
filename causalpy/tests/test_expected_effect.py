@@ -43,16 +43,14 @@ def test_logit_contrast_helper_uses_known_response_means():
     """Known probabilities, not log-odds. No GLM is fit."""
     treated = xr.DataArray([1 / 3, 2 / 3], dims=("obs_ind",))
     untreated = xr.DataArray([0.2, 0.5], dims=("obs_ind",))
-    did = response_contrast(treated, untreated, reduce_dims=("obs_ind",), point=True)
-    assert did == pytest.approx(0.15)
-    assert did != pytest.approx(np.log(2))
+    did = response_contrast(treated, untreated, reduce_dims=("obs_ind",))
+    assert float(np.asarray(did)) == pytest.approx(0.15)
+    assert float(np.asarray(did)) != pytest.approx(np.log(2))
 
     mu_treated = xr.DataArray([1 / 3, 2 / 3, 1 / 3, 1 / 3], dims=("obs_ind",))
     mu_untreated = xr.DataArray([0.2, 0.5, 0.2, 0.2], dims=("obs_ind",))
-    pooled = response_contrast(
-        mu_treated, mu_untreated, reduce_dims=("obs_ind",), point=True
-    )
-    assert pooled == pytest.approx(17 / 120)
+    pooled = response_contrast(mu_treated, mu_untreated, reduce_dims=("obs_ind",))
+    assert float(np.asarray(pooled)) == pytest.approx(17 / 120)
 
 
 def test_identity_link_ols_did_equals_interaction():
@@ -90,15 +88,21 @@ def test_identity_link_ols_did_equals_interaction():
         ]
     )
     impact = result.result.causal_impact
-    assert isinstance(impact, float)
-    assert impact == pytest.approx(coefficient)
-    assert impact == pytest.approx(4.0)
-    assert result.result.expected_effect == pytest.approx(impact)
+    assert isinstance(impact, xr.DataArray)
+    assert impact.sizes.get("chain") == 1
+    assert impact.sizes.get("draw") == 1
+    assert float(np.asarray(impact).reshape(())) == pytest.approx(coefficient)
+    assert float(np.asarray(impact).reshape(())) == pytest.approx(4.0)
+    assert float(
+        np.asarray(result.result.expected_effect).reshape(())
+    ) == pytest.approx(float(np.asarray(impact).reshape(())))
 
     bumped = frame.copy()
     bumped.loc[bumped.index[-1], "y"] += 1
     result.data = bumped
-    assert result._expected_effect("posterior") == pytest.approx(impact)
+    assert float(
+        np.asarray(result._expected_effect("posterior")).reshape(())
+    ) == pytest.approx(float(np.asarray(impact).reshape(())))
 
 
 def test_identity_link_ols_prepost_equals_group_coefficient():
@@ -145,13 +149,17 @@ def test_rd_epsilon_contrast_uses_the_configured_rows():
         model=LinearRegression(fit_intercept=False),
     ).fit()
     effect = result.result.discontinuity_at_threshold
-    assert isinstance(effect, float)
-    assert effect == pytest.approx(3.4, abs=0.05)
-    assert result.result.expected_effect == pytest.approx(effect)
+    assert isinstance(effect, xr.DataArray)
+    assert effect.sizes.get("chain") == 1
+    assert effect.sizes.get("draw") == 1
+    assert float(np.asarray(effect).reshape(())) == pytest.approx(3.4, abs=0.05)
+    assert float(
+        np.asarray(result.result.expected_effect).reshape(())
+    ) == pytest.approx(float(np.asarray(effect).reshape(())))
     predicted = result._model_backend.predict(result.x_discon_design)
     upper = np.asarray(predicted.isel(obs_ind=1, treated_units=0)).reshape(-1)[0]
     lower = np.asarray(predicted.isel(obs_ind=0, treated_units=0)).reshape(-1)[0]
-    assert effect == pytest.approx(float(upper - lower))
+    assert float(np.asarray(effect).reshape(())) == pytest.approx(float(upper - lower))
 
 
 def test_its_and_sc_labels_bump_and_unavailable_path():
@@ -166,7 +174,7 @@ def test_its_and_sc_labels_bump_and_unavailable_path():
     realized = xr.DataArray(
         [10.0, 1.0, 1.0, 1.0], dims=("obs_ind",), coords={"obs_ind": index}
     )
-    expected = response_contrast(mu_treated, mu_untreated, reduce_dims=(), point=False)
+    expected = response_contrast(mu_treated, mu_untreated, reduce_dims=())
     gap = realized - mu_untreated
     assert list(np.asarray(expected)) == [2.0, 3.0, 4.0, 5.0]
     assert headline_mean(expected) == pytest.approx(3.5)

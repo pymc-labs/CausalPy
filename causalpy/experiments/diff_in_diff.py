@@ -289,7 +289,6 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             mu_treated,
             mu_untreated,
             reduce_dims=("obs_ind", "treated_units"),
-            point=self._model_backend.is_ols,
         )
 
     def input_validation(self) -> None:

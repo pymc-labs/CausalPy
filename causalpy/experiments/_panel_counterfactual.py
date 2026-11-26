@@ -49,6 +49,7 @@ from matplotlib import pyplot as plt
 
 from causalpy.constants import HDI_PROB, LEGEND_FONT_SIZE
 from causalpy.date_utils import _combine_datetime_indices, format_date_axes
+from causalpy.experiments._expected_effect import HeadlineEffect, select_headline_effect
 from causalpy.experiments._results import CausalResult
 from causalpy.plot_utils import (
     _PosteriorPlotStyle,
@@ -319,13 +320,7 @@ class WidePanel:
         style: _PosteriorPlotStyle,
         figsize: tuple[float, float],
         plot_predictors: bool,
-        impact_label: str = "Causal impact",
-        impact_title: str = "Causal Impact",
-        cumulative_title: str = "Cumulative Causal Impact",
-        shade_gap: bool = True,
-        post_effect: xr.DataArray | None = None,
-        post_effect_cumulative: xr.DataArray | None = None,
-        unavailable_reason: str | None = None,
+        effect: str = "expected_effect",
     ) -> tuple[plt.Figure, list[plt.Axes]] | tuple[plt.Figure, np.ndarray]:
         """Draw the prior-check figure or the three-panel posterior figure.
 
@@ -352,23 +347,10 @@ class WidePanel:
         plot_predictors : bool
             Whether to overlay donor trajectories.
 
-        impact_label : str, default "Causal impact"
-            Legend label for the middle-panel series.
-        impact_title : str, default "Causal Impact"
-            Title of the middle panel when the expected effect is present.
-        cumulative_title : str, default "Cumulative Causal Impact"
-            Title of the bottom panel when the expected effect is present.
-        shade_gap : bool, default True
-            Whether to shade the realized-minus-counterfactual region.
-        post_effect : xarray.DataArray, optional
-            Headline post-period series. When omitted, the stored impact is
-            drawn unless ``unavailable_reason`` is set. A missing expected
-            effect is annotated; it is not replaced by the realized gap.
-        post_effect_cumulative : xarray.DataArray, optional
-            Bottom-panel series. Defaults to the stored cumulative impact
-            unless the expected effect is missing.
-        unavailable_reason : str, optional
-            Annotation used when the headline expected effect is missing.
+        effect : {"expected_effect", "observed_gap"}, default "expected_effect"
+            Stored series drawn in the impact panels. ``observed_gap`` shades
+            realized minus counterfactual. A missing expected effect is
+            annotated and is not replaced by that gap.
 
         Returns
         -------
@@ -401,6 +383,7 @@ class WidePanel:
             )
         if group != "posterior":
             raise ValueError(f"group must be 'prior' or 'posterior', got {group!r}.")
+        headline = select_headline_effect(bundle, effect, treated_unit=unit)
         return _plot_counterfactual(
             pre_index=self.pre.index,
             post_index=self.post.index,
@@ -420,13 +403,7 @@ class WidePanel:
             style=style,
             figsize=figsize,
             plot_predictors=plot_predictors,
-            impact_label=impact_label,
-            impact_title=impact_title,
-            cumulative_title=cumulative_title,
-            shade_gap=shade_gap,
-            post_effect=post_effect,
-            post_effect_cumulative=post_effect_cumulative,
-            unavailable_reason=unavailable_reason,
+            headline=headline,
         )
 
     def plot_data(
@@ -681,13 +658,7 @@ def _plot_counterfactual(
     style: _PosteriorPlotStyle,
     figsize: tuple[float, float],
     plot_predictors: bool,
-    impact_label: str = "Causal impact",
-    impact_title: str = "Causal Impact",
-    cumulative_title: str = "Cumulative Causal Impact",
-    shade_gap: bool = True,
-    post_effect: xr.DataArray | None = None,
-    post_effect_cumulative: xr.DataArray | None = None,
-    unavailable_reason: str | None = None,
+    headline: HeadlineEffect,
 ) -> tuple[plt.Figure, np.ndarray]:
     """Render the three-panel counterfactual, impact, and cumulative figure.
 
@@ -695,6 +666,13 @@ def _plot_counterfactual(
     from ``plt.subplots``, not a list.
     """
     counterfactual_label = "Counterfactual"
+    impact_label = headline.label
+    impact_title = headline.point_title
+    cumulative_title = headline.cumulative_title
+    shade_gap = headline.shade_gap
+    post_effect = headline.pointwise
+    post_effect_cumulative = headline.cumulative
+    unavailable_reason = headline.reason
     with_uncertainty = has_posterior_draws(pre_pred)
     fig, ax = plt.subplots(3, 1, sharex=True, figsize=figsize)
     handles: list[Any] = []

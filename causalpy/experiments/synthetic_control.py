@@ -610,43 +610,8 @@ class SyntheticControl(BaseExperiment[CausalResult]):
             style=style,
             figsize=figsize,
             plot_predictors=plot_predictors,
-            **self._effect_plot_kwargs(bundle, treated_unit, effect),
+            effect=effect,
         )
-
-    def _effect_plot_kwargs(
-        self, bundle: CausalResult, treated_unit: str, effect: str
-    ) -> dict[str, Any]:
-        """Labels and series for the shared panel plotter."""
-        if effect == "observed_gap":
-            return {
-                "impact_label": "Observed gap",
-                "impact_title": "Observed gap",
-                "cumulative_title": "Cumulative observed gap",
-                "shade_gap": True,
-            }
-        if effect != "expected_effect":
-            raise ValueError(
-                f"effect must be 'expected_effect' or 'observed_gap', got {effect!r}."
-            )
-        series = bundle.expected_effect
-        if series is None:
-            return {
-                "impact_label": "Expected effect",
-                "impact_title": "Expected effect unavailable",
-                "cumulative_title": "Cumulative expected effect unavailable",
-                "shade_gap": False,
-                "unavailable_reason": bundle.expected_effect_reason,
-            }
-        if "treated_units" in series.dims:
-            series = series.sel(treated_units=treated_unit)
-        return {
-            "impact_label": "Expected effect",
-            "impact_title": "Expected effect",
-            "cumulative_title": "Cumulative expected effect",
-            "shade_gap": False,
-            "post_effect": series,
-            "post_effect_cumulative": series.cumsum(dim="obs_ind"),
-        }
 
     def get_plot_data(
         self,

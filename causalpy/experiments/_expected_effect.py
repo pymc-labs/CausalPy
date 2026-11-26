@@ -20,7 +20,7 @@ apply an inverse link, and does not fit a GLM.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -32,6 +32,96 @@ UNTREATED_ONLY_REASON = (
 )
 
 EffectChoice = Literal["expected_effect", "observed_gap"]
+
+
+class HeadlineEffect(NamedTuple):
+    """One resolved series for a plot or summary."""
+
+    pointwise: xr.DataArray | None
+    cumulative: xr.DataArray | None
+    point_title: str
+    cumulative_title: str
+    label: str
+    reason: str | None
+    shade_gap: bool
+
+
+def select_headline_effect(
+    bundle: Any,
+    effect: str,
+    *,
+    treated_unit: str | None = None,
+) -> HeadlineEffect:
+    """Resolve ``observed_gap`` or ``expected_effect`` once.
+
+    ``observed_gap`` is realized minus counterfactual. ``expected_effect`` is
+    the stored response-scale contrast, or the reason a counterfactual-only
+    fit cannot supply it. A treated unit is selected when that dimension is
+    present.
+
+    Parameters
+    ----------
+    bundle : CausalResult
+        Result whose impact and expected-effect fields are already stored.
+    effect : {"expected_effect", "observed_gap"}
+        Series to resolve.
+    treated_unit : str, optional
+        Unit selected when the series has a ``treated_units`` dimension.
+
+    Returns
+    -------
+    HeadlineEffect
+        Pointwise series, cumulative series, titles, and shade flag.
+
+    Raises
+    ------
+    ValueError
+        If ``effect`` is not one of the two stored series.
+    """
+    if effect == "observed_gap":
+        pointwise = _select_unit(bundle.impact_post, treated_unit)
+        cumulative = _select_unit(bundle.impact_post_cumulative, treated_unit)
+        return HeadlineEffect(
+            pointwise=pointwise,
+            cumulative=cumulative,
+            point_title="Observed gap",
+            cumulative_title="Cumulative observed gap",
+            label="Observed gap",
+            reason=None,
+            shade_gap=True,
+        )
+    if effect != "expected_effect":
+        raise ValueError(
+            f"effect must be 'expected_effect' or 'observed_gap', got {effect!r}."
+        )
+    series = getattr(bundle, "expected_effect", None)
+    if series is None:
+        reason = getattr(bundle, "expected_effect_reason", None)
+        return HeadlineEffect(
+            pointwise=None,
+            cumulative=None,
+            point_title="Expected effect unavailable",
+            cumulative_title="Cumulative expected effect unavailable",
+            label="Expected effect unavailable",
+            reason=reason,
+            shade_gap=False,
+        )
+    pointwise = _select_unit(series, treated_unit)
+    return HeadlineEffect(
+        pointwise=pointwise,
+        cumulative=pointwise.cumsum(dim="obs_ind"),
+        point_title="Expected effect",
+        cumulative_title="Cumulative expected effect",
+        label="Expected effect",
+        reason=None,
+        shade_gap=False,
+    )
+
+
+def _select_unit(series: xr.DataArray, treated_unit: str | None) -> xr.DataArray:
+    if treated_unit is None or "treated_units" not in series.dims:
+        return series
+    return series.sel(treated_units=treated_unit)
 
 
 def align_expected_window(
@@ -86,14 +176,14 @@ def response_contrast(
     *,
     weights: xr.DataArray | None = None,
     reduce_dims: tuple[str, ...] = ("obs_ind", "treated_units"),
-    point: bool = False,
-) -> xr.DataArray | float:
+) -> xr.DataArray:
     """Average ``mu_treated - mu_untreated`` over the target dimensions.
 
     Both arrays must already be response-scale expectations aligned on the
     shared sample dimensions. ``weights``, when given, are broadcast to the
-    difference and applied only on ``reduce_dims``. ``point=True`` drops
-    singleton ``chain`` and ``draw`` dimensions and returns a Python float.
+    difference and applied only on ``reduce_dims``. Singleton ``chain`` and
+    ``draw`` dimensions from an adapter prediction are kept. They are not
+    fabricated and are not squeezed to a Python float.
 
     Parameters
     ----------
@@ -105,13 +195,11 @@ def response_contrast(
         Weights broadcast onto ``reduce_dims``. Equal weights when omitted.
     reduce_dims : tuple of str, default ("obs_ind", "treated_units")
         Dimensions averaged before returning the contrast.
-    point : bool, default False
-        Drop singleton sampling dimensions and return a Python float.
 
     Returns
     -------
-    xarray.DataArray or float
-        The averaged contrast, or a float when ``point`` is true.
+    xarray.DataArray
+        The averaged contrast.
     """
     difference = mu_treated - mu_untreated
     present = tuple(dim for dim in reduce_dims if dim in difference.dims)
@@ -119,39 +207,10 @@ def response_contrast(
         aligned = weights.broadcast_like(difference)
         weighted = difference * aligned
         denominator = aligned.sum(dim=present)
-        reduced = weighted.sum(dim=present) / denominator
-    elif present:
-        reduced = difference.mean(dim=present)
-    else:
-        reduced = difference
-    if point:
-        return as_point(reduced)
-    return reduced
-
-
-def as_point(value: xr.DataArray) -> float:
-    """Return a Python float after dropping singleton sampling dimensions.
-
-    Parameters
-    ----------
-    value : xarray.DataArray
-        Contrast whose ``chain`` and ``draw`` sizes are 1 or absent.
-
-    Returns
-    -------
-    float
-        The point contrast.
-    """
-    squeezed = value
-    for dim in ("chain", "draw"):
-        if dim not in squeezed.dims:
-            continue
-        if squeezed.sizes[dim] != 1:
-            raise ValueError(
-                f"Point contrast still has {dim} size {int(squeezed.sizes[dim])}."
-            )
-        squeezed = squeezed.squeeze(dim, drop=True)
-    return float(np.asarray(squeezed).reshape(()))
+        return weighted.sum(dim=present) / denominator
+    if present:
+        return difference.mean(dim=present)
+    return difference
 
 
 def cumulative_sum(series: xr.DataArray) -> xr.DataArray:
@@ -172,40 +231,36 @@ def cumulative_sum(series: xr.DataArray) -> xr.DataArray:
     return series.cumsum(dim="obs_ind")
 
 
-def headline_mean(series: xr.DataArray | float) -> float:
-    """Posterior mean of within-draw window averages, or the point average.
+def headline_mean(series: xr.DataArray) -> float:
+    """Posterior mean of within-draw window averages.
 
     Parameters
     ----------
-    series : xarray.DataArray or float
-        Window of response-scale contrasts, or one point contrast.
+    series : xarray.DataArray
+        Window of response-scale contrasts.
 
     Returns
     -------
     float
-        Mean of within-draw averages, or the point average.
+        Mean of within-draw averages.
     """
-    if not isinstance(series, xr.DataArray):
-        return float(series)
     reduced = series.mean(dim="obs_ind") if "obs_ind" in series.dims else series
     return float(np.asarray(reduced.mean()).reshape(()))
 
 
-def cumulative_total(series: xr.DataArray | float) -> float:
-    """Posterior mean of within-draw sums, or the point sum.
+def cumulative_total(series: xr.DataArray) -> float:
+    """Posterior mean of within-draw sums.
 
     Parameters
     ----------
-    series : xarray.DataArray or float
-        Window of response-scale contrasts, or one point contrast.
+    series : xarray.DataArray
+        Window of response-scale contrasts.
 
     Returns
     -------
     float
-        Mean of within-draw sums, or the point sum.
+        Mean of within-draw sums.
     """
-    if not isinstance(series, xr.DataArray):
-        return float(series)
     if "obs_ind" not in series.dims:
         return headline_mean(series)
     total = series.sum(dim="obs_ind")
@@ -240,7 +295,7 @@ def unavailable_summary(
 
 
 def summarize_expected_effect(
-    series: xr.DataArray | float | None,
+    series: xr.DataArray | None,
     *,
     reason: str | None = None,
     cumulative: bool = True,
@@ -249,8 +304,8 @@ def summarize_expected_effect(
     """Headline the mean expected effect, or explain why it is unavailable.
 
     Callers slice ``series`` to the requested window before calling.
-    Bayesian series keep their sampling dimensions. A point series is
-    summarized by its window mean alone.
+    Bayesian series keep their sampling dimensions. A series without
+    ``obs_ind`` is summarized by its mean.
 
     Parameters
     ----------

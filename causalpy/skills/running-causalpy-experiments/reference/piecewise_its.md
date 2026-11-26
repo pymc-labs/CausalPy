@@ -58,4 +58,4 @@ result.plot()
 
 - Use this when intervention timing is known in advance, not for discovering changepoints.
 - Keep formulas interpretable: level-only, slope-only, or level-plus-slope changes.
-- Prefer `InterruptedTimeSeries` if the estimand is a post-period forecast gap from a pre-period model.
+- Prefer `InterruptedTimeSeries` if the estimand is a post-period forecast gap (`observed_gap`) from a pre-period model. The default `expected_effect` is unavailable for that counterfactual-only fit.
