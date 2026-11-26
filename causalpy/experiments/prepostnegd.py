@@ -280,10 +280,14 @@ class PrePostNEGD(BaseExperiment[CoefficientResult]):
 
         Each enrolled row is predicted with its own pretest and covariates,
         once with the group indicator set to treated and once to untreated.
-        The outcome column is not passed to ``predict``.
+        A plain outcome column is omitted. A transformed outcome such as
+        ``np.log(post)`` is not a column, so the raw column stays for the
+        formula.
         """
         group_name = self.group_variable_name
-        rows = self.data.drop(columns=[self.outcome_variable_name])
+        rows = self.data
+        if self.outcome_variable_name in rows.columns:
+            rows = rows.drop(columns=[self.outcome_variable_name])
         levels = sorted(self.data[group_name].unique(), key=lambda value: int(value))
         untreated_level, treated_level = levels[0], levels[1]
         treated = rows.copy()

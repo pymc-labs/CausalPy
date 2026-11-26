@@ -113,3 +113,34 @@ def test_prepostnegd_recovers_planted_group_shift(mock_pymc_sample):
     assert impact == pytest.approx(4.0)
     assert impact != pytest.approx(raw_contrast)
     assert impact != pytest.approx(0.0)
+
+
+def test_prepostnegd_transformed_outcome_returns_the_paired_contrast(
+    mock_pymc_sample,
+):
+    """A formula outcome that is not a column must not stop the contrast.
+
+    ``np.log(post) = 1 + 0.3 * group + 0.1 * pre``. The stored contrast is
+    that group shift on the modeled scale, not a missing-column error and
+    not the raw post difference.
+    """
+    del mock_pymc_sample
+    group = np.array([0, 0, 0, 1, 1, 1])
+    pre = np.array([0.0, 1.0, 2.0, 0.5, 1.5, 2.5])
+    log_post = 1.0 + 0.3 * group + 0.1 * pre
+    frame = pd.DataFrame({"group": group, "pre": pre, "post": np.exp(log_post)})
+    raw_contrast = float(
+        frame.loc[frame["group"] == 1, "post"].mean()
+        - frame.loc[frame["group"] == 0, "post"].mean()
+    )
+    experiment = cp.PrePostNEGD(
+        frame,
+        formula="np.log(post) ~ 1 + C(group) + pre",
+        group_variable_name="group",
+        pretreatment_variable_name="pre",
+        model=_ClosedFormCoefficientModel(),
+    )
+    experiment.fit()
+    impact = float(np.asarray(experiment.result.causal_impact).reshape(-1)[0])
+    assert impact == pytest.approx(0.3)
+    assert impact != pytest.approx(raw_contrast)

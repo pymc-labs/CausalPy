@@ -265,13 +265,14 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
 
         Every treated-group post-period row is weighted equally. Group, period,
         and covariates stay fixed; only the treatment interaction is switched
-        off. The outcome column is dropped before either prediction.
+        off. A plain outcome column is omitted. A transformed outcome is not a
+        column, so the raw column stays for the formula.
         """
-        rows = (
-            self.data.query(f"{self.group_variable_name} == 1")
-            .query(f"{self.post_treatment_variable_name} == True")
-            .drop(columns=[self.outcome_variable_name])
+        rows = self.data.query(f"{self.group_variable_name} == 1").query(
+            f"{self.post_treatment_variable_name} == True"
         )
+        if self.outcome_variable_name in rows.columns:
+            rows = rows.drop(columns=[self.outcome_variable_name])
         if rows.empty:
             raise ValueError("No treated post-period rows to contrast.")
         (design,) = build_design_matrices(

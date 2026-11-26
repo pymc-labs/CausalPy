@@ -1360,15 +1360,19 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
             - (start, end): Tuple of start and end times (handles both datetime and integer indices)
             - slice: Python slice object for integer indices
         direction : {"increase", "decrease", "two-sided"}, default="increase"
-            Direction for tail probability calculation (PyMC only, ignored for OLS).
+            Observed-gap tail direction (PyMC only). Ignored for
+            ``expected_effect`` and for OLS.
         alpha : float, default=0.05
-            Significance level for HDI/CI intervals (1-alpha confidence level).
+            Observed-gap interval level (1-alpha). Ignored for
+            ``expected_effect``.
         cumulative : bool, default=True
             Whether to include cumulative effect statistics.
         relative : bool, default=True
-            Whether to include relative effect statistics (% change vs counterfactual).
+            Whether the observed-gap summary includes relative effect
+            statistics. Ignored for ``expected_effect``.
         min_effect : float, optional
-            Region of Practical Equivalence (ROPE) threshold (PyMC only, ignored for OLS).
+            Observed-gap ROPE threshold (PyMC only). Ignored for
+            ``expected_effect`` and for OLS.
         treated_unit : str, optional
             Ignored for Interrupted Time Series (single unit).
         period : {"intervention", "post", "comparison"}, optional
@@ -1387,7 +1391,10 @@ class InterruptedTimeSeries(BaseExperiment[CausalResult]):
         -------
         EffectSummary
             Object with .table (DataFrame) and .text (str) attributes.
-            The .text attribute contains a detailed multi-paragraph narrative report.
+            ``expected_effect`` text is one headline line, plus the cumulative
+            sum when requested. ``observed_gap`` text is the detailed
+            multi-paragraph narrative. ``direction``, ``alpha``, ``relative``,
+            and ``min_effect`` apply only to ``observed_gap``.
         """
         if effect not in ("expected_effect", "observed_gap"):
             raise ValueError(
