@@ -397,7 +397,7 @@ Every CausalPy experiment can produce a self-contained HTML report summarising t
 
 ## Non-Bayesian OLS
 
-These notebooks fit scikit-learn models instead of PyMC models. Coverage is partial: only synthetic control, difference in differences, interrupted time series, and regression discontinuity have a scikit-learn example. Most of those fits are ordinary least squares. The sharp regression discontinuity notebook also includes a Gaussian process fit. Bayesian examples stay in the method sections above.
+These notebooks fit scikit-learn models instead of PyMC models. Coverage is partial: only synthetic control, difference in differences, difference in differences in differences, interrupted time series, and regression discontinuity have a scikit-learn example. Most of those fits are ordinary least squares. The sharp regression discontinuity notebook also includes a Gaussian process fit. Bayesian examples stay in the method sections above.
 
 ## scikit-learn examples
 
@@ -415,6 +415,13 @@ These notebooks fit scikit-learn models instead of PyMC models. Coverage is part
 :class-card: sd-card-h-100
 :img-top: ../_static/thumbnails/difference-in-differences-sklearn.png
 :link: difference-in-differences-sklearn
+:link-type: doc
+:::
+
+:::{grid-item-card} Difference in differences in differences with scikit-learn models
+:class-card: sd-card-h-100
+:img-top: ../_static/thumbnails/difference-in-differences-in-differences-sklearn.png
+:link: difference-in-differences-in-differences-sklearn
 :link-type: doc
 :::
 
@@ -590,6 +597,7 @@ reporting-demo.ipynb
 
 synthetic-control-sklearn.ipynb
 difference-in-differences-sklearn.ipynb
+difference-in-differences-in-differences-sklearn.ipynb
 interrupted-time-series-sklearn.ipynb
 regression-discontinuity-sklearn.ipynb
 regression-discontinuity-drinking-sklearn.ipynb

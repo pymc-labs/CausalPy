@@ -109,6 +109,8 @@ Each subclass's public `plot(*, ...)` delegates to `_render_plot()`, which calls
 | `InstrumentalVariable` | IV/2SLS | Bayes only | Non-standard `fit()` signature; no unified `plot()` |
 | `PanelRegression` | Panel FE | OLS + Bayes | No `_default_model_class`; model required |
 
+`DifferenceInDifferencesInDifferences` (`causalpy/experiments/difference_in_differences_in_differences.py`) is a wrapper, not a `BaseExperiment` subclass, so it is absent from the table above. It fits one `DifferenceInDifferences` per level of a pretreatment third dimension and reports `DiD(a) - DiD(b)`. It has no single model graph, result bundle, or unified `plot()` contract: each level keeps that level's ordinary difference-in-differences counterfactual, and contrast uncertainty is the spread of within-draw or unit-bootstrap differences rather than a difference of standard errors. Independent posterior draws are used only when no assignment unit appears in more than one analyzed level; otherwise the interval comes from a point-estimate model and `n_bootstrap`. It is a Tier 1 export from `causalpy/__init__.py`. It is not re-exported from `experiments/__init__.py`, because that manifest is the discovered `BaseExperiment` subclass list.
+
 ## PyMC Models
 
 - `LinearRegression` — ITS, DiD, RD, RKD, PrePostNEGD, PiecewiseITS, StaggeredDiD, PanelRegression

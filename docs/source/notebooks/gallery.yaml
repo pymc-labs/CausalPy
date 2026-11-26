@@ -160,7 +160,7 @@ groups:
 
   - title: Non-Bayesian OLS
     intro: |
-      These notebooks fit scikit-learn models instead of PyMC models. Coverage is partial: only synthetic control, difference in differences, interrupted time series, and regression discontinuity have a scikit-learn example. Most of those fits are ordinary least squares. The sharp regression discontinuity notebook also includes a Gaussian process fit. Bayesian examples stay in the method sections above.
+      These notebooks fit scikit-learn models instead of PyMC models. Coverage is partial: only synthetic control, difference in differences, difference in differences in differences, interrupted time series, and regression discontinuity have a scikit-learn example. Most of those fits are ordinary least squares. The sharp regression discontinuity notebook also includes a Gaussian process fit. Bayesian examples stay in the method sections above.
     categories:
       - title: scikit-learn examples
         toctree_caption: Non-Bayesian OLS
@@ -169,6 +169,8 @@ groups:
             notebook: synthetic-control-sklearn
           - title: Difference in Differences with scikit-learn models
             notebook: difference-in-differences-sklearn
+          - title: Difference in differences in differences with scikit-learn models
+            notebook: difference-in-differences-in-differences-sklearn
           - title: Interrupted Time Series (ITS) with scikit-learn models
             notebook: interrupted-time-series-sklearn
           - title: Sharp regression discontinuity with scikit-learn models
