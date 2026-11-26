@@ -16,6 +16,7 @@
 from typing import Any, Literal
 
 import numpy as np
+import pandas as pd
 import seaborn as sns
 import xarray as xr
 from matplotlib import pyplot as plt
@@ -171,6 +172,16 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
             build_coords(self.labels, X.shape[0]),
         )
 
+    def _without_outcome(self, frame: pd.DataFrame) -> pd.DataFrame:
+        """Drop a plain outcome column.
+
+        A transformed outcome such as ``np.log(y)`` is not a column, so the
+        raw column stays for the formula.
+        """
+        if self.outcome_variable_name in frame.columns:
+            return frame.drop(columns=[self.outcome_variable_name])
+        return frame
+
     def _finalize(self, group: Literal["prior", "posterior"]) -> None:
         """Compute the group's result bundle from its draws and assign it.
 
@@ -181,12 +192,11 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         the requested draw group.
         """
         # predicted outcome for control group
+        x_pred_control = self._without_outcome(
+            self.data.query(f"{self.group_variable_name} == 0")
+        )
         x_pred_control = (
-            self.data
-            # just the untreated group
-            .query(f"{self.group_variable_name} == 0")
-            # drop the outcome variable
-            .drop(self.outcome_variable_name, axis=1)
+            x_pred_control
             # We may have multiple units per time point, we only want one time point
             .groupby(self.time_variable_name, observed=True)
             .first()
@@ -198,12 +208,11 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         y_pred_control = self._model_backend.predict(np.asarray(new_x), group=group)
 
         # predicted outcome for treatment group
+        x_pred_treatment = self._without_outcome(
+            self.data.query(f"{self.group_variable_name} == 1")
+        )
         x_pred_treatment = (
-            self.data
-            # just the treated group
-            .query(f"{self.group_variable_name} == 1")
-            # drop the outcome variable
-            .drop(self.outcome_variable_name, axis=1)
+            x_pred_treatment
             # We may have multiple units per time point, we only want one time point
             .groupby(self.time_variable_name, observed=True)
             .first()
@@ -216,14 +225,13 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
 
         # predicted outcome for counterfactual. This is given by removing the influence
         # of the interaction term between the group and the post_treatment variable
+        x_pred_counterfactual = self._without_outcome(
+            self.data.query(f"{self.group_variable_name} == 1").query(
+                f"{self.post_treatment_variable_name} == True"
+            )
+        )
         x_pred_counterfactual = (
-            self.data
-            # just the treated group
-            .query(f"{self.group_variable_name} == 1")
-            # just the treatment period(s)
-            .query(f"{self.post_treatment_variable_name} == True")
-            # drop the outcome variable
-            .drop(self.outcome_variable_name, axis=1)
+            x_pred_counterfactual
             # We may have multiple units per time point, we only want one time point
             .groupby(self.time_variable_name, observed=True)
             .first()
@@ -271,8 +279,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         rows = self.data.query(f"{self.group_variable_name} == 1").query(
             f"{self.post_treatment_variable_name} == True"
         )
-        if self.outcome_variable_name in rows.columns:
-            rows = rows.drop(columns=[self.outcome_variable_name])
+        rows = self._without_outcome(rows)
         if rows.empty:
             raise ValueError("No treated post-period rows to contrast.")
         (design,) = build_design_matrices(

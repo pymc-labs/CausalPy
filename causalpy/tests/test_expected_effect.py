@@ -22,6 +22,7 @@ import xarray as xr
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
+from causalpy.checks.outcome_falsification import OutcomeFalsification
 from causalpy.checks.prior_sensitivity import PriorSensitivity
 from causalpy.experiments._expected_effect import (
     cumulative_sum,
@@ -526,3 +527,278 @@ def test_prepost_extra_covariate_uses_each_rows_value():
     result.data.loc[result.data.index[0], "post"] += 1
     recomputed = float(np.asarray(result._expected_effect("posterior")).reshape(-1)[0])
     assert recomputed == pytest.approx(own)
+
+
+def _broadcast_draws(array: xr.DataArray, n_draw: int = 4) -> xr.DataArray:
+    """Repeat a singleton draw so plotting takes the uncertainty path."""
+    point = array.isel(chain=0, draw=0, drop=True)
+    draws = [
+        (point + float(offset)).expand_dims(draw=[offset]) for offset in range(n_draw)
+    ]
+    return xr.concat(draws, dim="draw").expand_dims(chain=[0])
+
+
+def _assign_draws(experiment, n_draw: int = 4) -> None:
+    bundle = experiment.result
+    names = (
+        "predictions_pre",
+        "predictions_post",
+        "impact_pre",
+        "impact_post",
+        "impact_post_cumulative",
+    )
+    fields = {
+        name: _broadcast_draws(getattr(bundle, name), n_draw)
+        for name in names
+        if isinstance(getattr(bundle, name), xr.DataArray)
+    }
+    experiment._assign_bundle("posterior", replace(bundle, **fields))
+
+
+def _legend_labels(axis) -> list[str]:
+    legend = axis.get_legend()
+    if legend is None:
+        return []
+    return [text.get_text() for text in legend.get_texts()]
+
+
+def _line_values(axis, n_points: int, *, marker: str) -> np.ndarray:
+    matches = []
+    for line in axis.get_lines():
+        values = np.asarray(line.get_ydata(), dtype=float).reshape(-1)
+        if values.size == n_points and line.get_marker() == marker:
+            matches.append(values)
+    assert len(matches) == 1
+    return matches[0]
+
+
+def _series_mean(array: xr.DataArray) -> np.ndarray:
+    reduced = array
+    if "treated_units" in reduced.dims:
+        reduced = reduced.isel(treated_units=0)
+    return np.asarray(reduced.mean(("chain", "draw")).values, dtype=float).reshape(-1)
+
+
+def _fit_its_one_post():
+    time = np.arange(5)
+    outcome = np.concatenate([np.full(4, 1.0), [10.0]])
+    return cp.InterruptedTimeSeries(
+        pd.DataFrame({"t": time, "y": outcome}),
+        treatment_time=4,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+
+
+def test_point_estimate_panels_draw_the_mean_effect():
+    """Sklearn panels draw the stored mean and annotate only a stated reason."""
+    synthetic = _fit_sc()
+    gap = _series_mean(synthetic.result.impact_post)
+    cumulative = _series_mean(synthetic.result.impact_post_cumulative)
+    figure, axes = synthetic.plot(show=False, effect="observed_gap")
+    assert _line_values(axes[1], gap.size, marker=".") == pytest.approx(gap)
+    assert _line_values(axes[2], cumulative.size, marker="None") == pytest.approx(
+        cumulative
+    )
+    assert "model fit" in _legend_labels(axes[0])
+    assert axes[0].collections
+    figure.clf()
+
+    post_index = synthetic.datapost.index
+    series = xr.DataArray(
+        [1.0, 2.0, 4.0],
+        dims=("obs_ind",),
+        coords={"obs_ind": post_index},
+    ).expand_dims(chain=[0], draw=[0])
+    synthetic._assign_bundle(
+        "posterior",
+        replace(synthetic.result, expected_effect=series, expected_effect_reason=None),
+    )
+    figure, axes = synthetic.plot(show=False, effect="expected_effect")
+    assert _line_values(axes[1], 3, marker=".") == pytest.approx([1.0, 2.0, 4.0])
+    assert axes[1].get_title() == "Expected effect"
+    assert len(axes[0].texts) == 0
+    figure.clf()
+
+    synthetic._assign_bundle(
+        "posterior",
+        replace(
+            synthetic.result,
+            expected_effect=None,
+            expected_effect_reason="no treated mean in this fit",
+        ),
+    )
+    figure, axes = synthetic.plot(show=False, effect="expected_effect")
+    assert [text.get_text() for text in axes[0].texts] == [
+        "no treated mean in this fit"
+    ]
+    assert axes[1].texts
+    assert "no treated mean in this fit" in axes[1].texts[0].get_text()
+    figure.clf()
+
+
+def test_uncertainty_legend_names_the_gap_only_for_several_points():
+    """Several posterior points name the gap; one point draws the HDI marker."""
+    its = _fit_its()
+    _assign_draws(its)
+    figure, axes = its.plot(show=False, effect="observed_gap")
+    assert "Observed gap" in _legend_labels(axes[0])
+    assert list(axes[1].containers) == []
+    figure.clf()
+
+    one_post = _fit_its_one_post()
+    _assign_draws(one_post)
+    figure, axes = one_post.plot(show=False, effect="observed_gap")
+    labels = _legend_labels(axes[0])
+    assert "Observed gap" not in labels
+    assert "Counterfactual" in labels
+    assert len(axes[1].containers) == 1
+    figure.clf()
+
+    synthetic = _fit_sc()
+    _assign_draws(synthetic)
+    figure, axes = synthetic.plot(show=False, effect="observed_gap")
+    assert "Observed gap" in _legend_labels(axes[0])
+    figure.clf()
+
+
+def test_missing_reason_draws_no_unavailable_annotation():
+    """No reason means a blank panel, not a repeated title."""
+    its = _fit_its()
+    its._assign_bundle(
+        "posterior",
+        replace(its.result, expected_effect=None, expected_effect_reason=None),
+    )
+    figure, axes = its.plot(show=False, effect="expected_effect")
+    assert len(axes[1].texts) == 0
+    assert len(axes[2].texts) == 0
+    assert axes[1].get_title() == "Expected effect unavailable"
+    figure.clf()
+
+
+def test_expected_effect_summary_can_omit_the_cumulative_sum():
+    """cumulative=False keeps the headline mean and drops the running total."""
+    its = _fit_its()
+    plotted = xr.DataArray(
+        [2.0, 3.0, 4.0, 5.0],
+        dims=("obs_ind",),
+        coords={"obs_ind": its.datapost.index},
+    ).expand_dims(chain=[0], draw=[0])
+    its._assign_bundle(
+        "posterior",
+        replace(its.result, expected_effect=plotted, expected_effect_reason=None),
+    )
+    point = its.effect_summary(cumulative=False)
+    assert "cumulative_sum" not in point.table.columns
+    assert "Cumulative sum" not in point.text
+    assert float(point.table["mean"].iloc[0]) == pytest.approx(3.5)
+    full = its.effect_summary()
+    assert float(full.table["cumulative_sum"].iloc[0]) == pytest.approx(14.0)
+    assert "Cumulative sum" in full.text
+
+
+def test_transformed_outcome_is_not_dropped_before_the_contrast():
+    """np.log(y) is not a column, so the raw outcome stays for the formula."""
+    rows = []
+    for group in (0, 1):
+        for post in (0, 1):
+            log_outcome = 0.2 + 0.1 * group + 0.3 * post + 1.5 * group * post
+            for _copy in range(4):
+                rows.append(
+                    {
+                        "unit": f"u{len(rows)}",
+                        "t": post,
+                        "group": group,
+                        "post_treatment": post,
+                        "y": float(np.exp(log_outcome)),
+                    }
+                )
+    result = cp.DifferenceInDifferences(
+        pd.DataFrame(rows),
+        formula="np.log(y) ~ 1 + group * post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(fit_intercept=False),
+    ).fit()
+    assert result.outcome_variable_name == "np.log(y)"
+    assert "np.log(y)" not in result.data.columns
+    assert "y" in result.data.columns
+    impact = float(np.asarray(result.result.causal_impact).reshape(-1)[0])
+    assert impact == pytest.approx(1.5)
+
+
+def test_stated_reference_rejects_empty_or_nonfinite_columns():
+    """A plot reference fails closed when a covariate has no usable value."""
+    prepost = cp.PrePostNEGD(
+        pd.DataFrame(
+            {
+                "group": [0, 0, 1, 1],
+                "pre": [1.0, 2.0, 1.5, 2.5],
+                "post": [1.0, 2.0, 5.5, 6.5],
+            }
+        ),
+        formula="post ~ 1 + C(group) + pre",
+        group_variable_name="group",
+        pretreatment_variable_name="pre",
+        model=_ClosedFormCoefficientModel(),
+    ).fit()
+    prepost.data["region"] = pd.Series(
+        [None, None, None, None], index=prepost.data.index, dtype=object
+    )
+    with pytest.raises(ValueError, match="no values"):
+        prepost._stated_reference("region")
+    prepost.data["site"] = np.nan
+    with pytest.raises(ValueError, match="no finite values"):
+        prepost._stated_reference("site")
+
+
+def test_outcome_falsification_rejects_other_designs():
+    """The extractor names the three designs it can read."""
+    with pytest.raises(TypeError, match="InterruptedTimeSeries"):
+        OutcomeFalsification._extract_effect_stats(object(), alpha=0.05)
+
+
+def test_prior_sensitivity_omits_effect_for_other_designs():
+    """Difference-in-differences summaries do not take an effect argument."""
+    rows = []
+    for group in (0, 1):
+        for post in (0, 1):
+            rows.append(
+                {
+                    "unit": f"u{len(rows)}",
+                    "t": post,
+                    "group": group,
+                    "post_treatment": post,
+                    "y": 1.0 + group + post + 4.0 * group * post,
+                }
+            )
+    did = cp.DifferenceInDifferences(
+        pd.DataFrame(rows),
+        formula="y ~ 1 + group * post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(fit_intercept=False),
+    ).fit()
+    captured: dict[str, object] = {}
+    original = did.effect_summary
+
+    def _record(*args, **kwargs):
+        captured.update(kwargs)
+        return original(*args, **kwargs)
+
+    did.effect_summary = _record  # type: ignore[method-assign]
+
+    class _Refit:
+        def fit(self):
+            return did
+
+    context = PipelineContext(data=did.data)
+    context.experiment_config = {
+        "method": lambda *_args, **_kwargs: _Refit(),
+        "formula": "y ~ 1",
+    }
+    result = PriorSensitivity(
+        alternatives=[{"name": "alt", "model": LinearRegression()}]
+    ).run(did, context)
+    assert "effect" not in captured
+    assert "error" not in result.table.columns
