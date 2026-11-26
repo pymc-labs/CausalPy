@@ -97,6 +97,7 @@ def _experiments_with_plot() -> Iterable[type]:
 _OVERRIDING_SUBCLASSES = list(_experiments_with_plot())
 _EXPECTED_EXPERIMENTS = {
     "DifferenceInDifferences",
+    "EventStudy",
     "InstrumentalVariable",
     "InterruptedTimeSeries",
     "InversePropensityWeighting",
@@ -667,6 +668,7 @@ def test_base_experiment_owns_live_lifecycle_verbs() -> None:
 
 
 _GET_PLOT_DATA_EXPERIMENTS = {
+    "EventStudy",
     "InterruptedTimeSeries",
     "PanelRegression",
     "PiecewiseITS",
