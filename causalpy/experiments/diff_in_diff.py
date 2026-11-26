@@ -260,9 +260,7 @@ class DifferenceInDifferences(BaseExperiment[CoefficientResult]):
         )
         self._assign_bundle(group, bundle)
 
-    def _expected_effect(
-        self, group: Literal["prior", "posterior"]
-    ) -> xr.DataArray | float:
+    def _expected_effect(self, group: Literal["prior", "posterior"]) -> xr.DataArray:
         """Post-treatment ATT from paired response-scale predictions.
 
         Every treated-group post-period row is weighted equally. Group, period,
