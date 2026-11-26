@@ -273,6 +273,18 @@ def test_up_down_plot_defaults_to_the_observed_gap(fitted_up_down_mock):
 
 
 @pytest.mark.integration
+def test_up_down_summary_defaults_to_the_observed_gap(fitted_up_down_mock):
+    """The inherited expected-effect default would publish an unavailable summary."""
+    simulated, result = fitted_up_down_mock
+    geo = simulated.arms["up"][0]
+    default = result.effect_summary(treated_unit=geo)
+    explicit = result.effect_summary(treated_unit=geo, effect="observed_gap")
+    assert default.text == explicit.text
+    contrast = result.effect_summary(treated_unit=geo, effect="expected_effect")
+    assert "unavailable" in contrast.text.lower()
+
+
+@pytest.mark.integration
 @pytest.mark.correctness
 def test_up_down_mmm_export_matches_window_and_validates_spend(fitted_up_down):
     simulated, result = fitted_up_down
