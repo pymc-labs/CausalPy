@@ -157,8 +157,9 @@ When you use scikit-learn models (OLS regression), CausalPy performs classical f
 **Mean / Coefficient Estimate**
 
 - The estimated causal effect from the regression model
-- For scalar effects (DiD, RD): the response-scale expected effect, which equals the coefficient of interest on an additive identity link
-- For time-series effects (ITS, SC): the average or cumulative expected effect when the fit models the treated mean; otherwise the requested observed gap
+- For difference-in-differences and pretest/posttest designs: the response-scale expected effect, which equals the coefficient of interest on an additive identity link
+- For regression discontinuity: the epsilon-row response contrast at the cutoff, not the treated-side indicator coefficient
+- For interrupted time series and synthetic control: the average or cumulative expected effect when the fit models the treated mean; otherwise the requested observed gap
 - **Interpretation:** "The estimated effect is X"
 
 :::{note}

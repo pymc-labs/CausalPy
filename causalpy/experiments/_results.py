@@ -70,11 +70,6 @@ class CausalResult:
     expected_effect: xr.DataArray | None = None
     expected_effect_reason: str | None = None
 
-    @property
-    def observed_gap(self) -> xr.DataArray:
-        """Realized outcome minus the untreated counterfactual, in outcome units."""
-        return self.impact_post
-
 
 @dataclass(frozen=True)
 class SyntheticDifferenceInDifferencesResult(CausalResult):
@@ -103,8 +98,8 @@ class CoefficientResult:
 
     ``causal_impact`` is the response-scale expected effect. On an additive
     identity link it equals the treatment coefficient. Bayesian and OLS
-    results are both ``xarray.DataArray``; an OLS contrast has no fabricated
-    ``chain`` or ``draw`` dimension.
+    results are both ``xarray.DataArray``. OLS keeps the adapter's singleton
+    ``chain`` and ``draw`` dimensions; it is not a Python float.
     """
 
     causal_impact: xr.DataArray

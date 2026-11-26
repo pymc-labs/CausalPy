@@ -22,11 +22,17 @@ import xarray as xr
 from sklearn.linear_model import LinearRegression
 
 import causalpy as cp
+from causalpy.checks.prior_sensitivity import PriorSensitivity
 from causalpy.experiments._expected_effect import (
+    align_expected_window,
     cumulative_sum,
+    cumulative_total,
     headline_mean,
     response_contrast,
+    select_headline_effect,
 )
+from causalpy.experiments._results import CausalResult
+from causalpy.pipeline import PipelineContext
 from causalpy.tests.test_prepostnegd_planted import _ClosedFormCoefficientModel
 
 LIGHT_SAMPLE = {
@@ -291,6 +297,143 @@ def test_bayesian_identity_does_not_read_the_outcome(monkeypatch):
     again = experiment._expected_effect("posterior")
     assert calls
     assert again.equals(experiment.result.causal_impact)
+
+
+def test_contrast_helpers_and_guard_clauses():
+    """Cover weight, window, and unavailable-name branches the five designs share."""
+    treated = xr.DataArray([1.0, 3.0], dims=("obs_ind",))
+    untreated = xr.DataArray([0.0, 1.0], dims=("obs_ind",))
+    weights = xr.DataArray([1.0, 3.0], dims=("obs_ind",))
+    weighted = response_contrast(
+        treated, untreated, weights=weights, reduce_dims=("obs_ind",)
+    )
+    assert float(np.asarray(weighted)) == pytest.approx(1.75)
+    point = xr.DataArray(4.0)
+    assert float(np.asarray(cumulative_sum(point))) == pytest.approx(4.0)
+    assert cumulative_total(point) == pytest.approx(4.0)
+
+    labeled = xr.DataArray(
+        [1.0, 2.0, 3.0], dims=("obs_ind",), coords={"obs_ind": [10, 20, 30]}
+    )
+    windowed = align_expected_window(labeled, pd.Index([10, 20, 30]), pd.Index([20]))
+    assert float(np.asarray(windowed).reshape(-1)[0]) == pytest.approx(2.0)
+    positional = xr.DataArray(
+        [1.0, 2.0, 3.0], dims=("obs_ind",), coords={"obs_ind": [0, 1, 2]}
+    )
+    post = pd.Index(pd.to_datetime(["2020-01-01", "2020-01-02", "2020-01-03"]))
+    assert align_expected_window(positional, post, post) is positional
+    placed = align_expected_window(
+        positional, post, pd.Index(pd.to_datetime(["2020-01-02"]))
+    )
+    assert float(np.asarray(placed).reshape(-1)[0]) == pytest.approx(2.0)
+    bundle = CausalResult(
+        predictions_pre=labeled,
+        predictions_post=labeled,
+        impact_pre=labeled,
+        impact_post=labeled,
+        impact_post_cumulative=labeled,
+    )
+    with pytest.raises(ValueError, match="effect must be"):
+        select_headline_effect(bundle, "not-an-effect")
+    assert not hasattr(bundle, "observed_gap")
+
+    its = _fit_its()
+    figure, _axes = its.plot(show=False, effect="observed_gap")
+    figure.clf()
+    with pytest.raises(ValueError, match="effect must be"):
+        its.effect_summary(effect="not-an-effect")
+    three = cp.InterruptedTimeSeries(
+        pd.DataFrame({"t": np.arange(12), "y": np.ones(12)}),
+        treatment_time=4,
+        treatment_end_time=8,
+        formula="y ~ 1",
+        model=LinearRegression(),
+    ).fit()
+    with pytest.raises(ValueError, match="observed_gap"):
+        three.effect_summary(period="comparison")
+
+    synthetic = _fit_sc()
+    with pytest.warns(UserWarning, match="ignored"):
+        synthetic.effect_summary(effect="expected_effect", period="post")
+    with pytest.raises(ValueError, match="effect must be"):
+        synthetic.effect_summary(effect="not-an-effect")
+    plotted = xr.DataArray(
+        [[1.0, 2.0, 3.0]],
+        dims=("treated_units", "obs_ind"),
+        coords={"treated_units": ["actual"], "obs_ind": synthetic.datapost.index},
+    )
+    synthetic._assign_bundle(
+        "posterior",
+        replace(synthetic.result, expected_effect=plotted, expected_effect_reason=None),
+    )
+    assert "Expected effect" in synthetic.effect_summary(treated_unit="actual").text
+
+    rows = []
+    unit = 0
+    for group in (0, 1):
+        for post_flag in (0, 1):
+            rows.append(
+                {
+                    "unit": f"u{unit}",
+                    "t": post_flag,
+                    "group": group,
+                    "post_treatment": post_flag,
+                    "y": 1.0 + group + post_flag + 4.0 * group * post_flag,
+                }
+            )
+            unit += 1
+    did = cp.DifferenceInDifferences(
+        pd.DataFrame(rows),
+        formula="y ~ 1 + group * post_treatment",
+        time_variable_name="t",
+        group_variable_name="group",
+        model=LinearRegression(fit_intercept=False),
+    ).fit()
+    did.data = did.data.query("group == 0")
+    with pytest.raises(ValueError, match="No treated post-period"):
+        did._expected_effect("posterior")
+
+    prepost = cp.PrePostNEGD(
+        pd.DataFrame(
+            {
+                "group": [0, 0, 1, 1],
+                "pre": [1.0, 2.0, 1.5, 2.5],
+                "post": [1.0, 2.0, 5.5, 6.5],
+            }
+        ),
+        formula="post ~ 1 + C(group) + pre",
+        group_variable_name="group",
+        pretreatment_variable_name="pre",
+        model=_ClosedFormCoefficientModel(),
+    ).fit()
+    bare = prepost.result.causal_impact.squeeze(("chain", "draw"), drop=True)
+    prepost._assign_bundle("posterior", replace(prepost.result, causal_impact=bare))
+    figure, axes = prepost.plot(show=False)
+    assert any("Expected effect" in text.get_text() for text in axes[1].texts)
+    figure.clf()
+
+    captured: dict[str, object] = {}
+
+    class _Refit:
+        def fit(self):
+            return its
+
+    original = its.effect_summary
+
+    def _record(*args, **kwargs):
+        captured.update(kwargs)
+        return original(*args, **kwargs)
+
+    its.effect_summary = _record  # type: ignore[method-assign]
+    context = PipelineContext(data=its.data)
+    context.experiment_config = {
+        "method": lambda *_a, **_k: _Refit(),
+        "formula": "y ~ 1",
+    }
+    PriorSensitivity(alternatives=[{"name": "alt", "model": LinearRegression()}]).run(
+        its, context
+    )
+    assert captured.get("effect") == "observed_gap"
 
 
 def _assert_matches_coefficient(experiment, group: str) -> None:
