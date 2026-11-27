@@ -355,6 +355,7 @@ class ModelAdapter(ABC):
         coords: dict[str, Any] | None = None,
         out_of_sample: bool = False,
         group: Literal["prior", "posterior"] = "posterior",
+        var_names: list[str] | tuple[str, ...] | None = None,
     ) -> xr.DataArray:
         """Return expected outcomes with canonical prediction dimensions.
 
@@ -377,6 +378,11 @@ class ModelAdapter(ABC):
             reproduce the prediction machinery using the requested group's
             draws; point-estimate backends only ever have the (implicit)
             posterior atom.
+        var_names : list or tuple of str, optional
+            Predictive variables a sampling backend should draw before the
+            response-scale expectation is returned. ``None`` keeps that
+            backend's default. Non-sampling backends only return ``mu`` and
+            reject a request that excludes it.
 
         Returns
         -------
@@ -464,7 +470,7 @@ class ModelAdapter(ABC):
     @abstractmethod
     def score(
         self, X: Any, y: Any, *, coords: dict[str, Any] | None = None
-    ) -> pd.Series:
+    ) -> pd.Series | None:
         """Return per-unit :math:`R^2` scores in the canonical container.
 
         Every backend returns a :class:`pandas.Series` with one
@@ -655,6 +661,7 @@ class PyMCModelAdapter(ModelAdapter):
         coords: dict[str, Any] | None = None,
         out_of_sample: bool = False,
         group: Literal["prior", "posterior"] = "posterior",
+        var_names: list[str] | tuple[str, ...] | None = None,
     ) -> xr.DataArray:
         """Predict expected outcomes using the PyMC model.
 
@@ -671,6 +678,9 @@ class PyMCModelAdapter(ModelAdapter):
             always land in the ``posterior_predictive`` group (PyMC's output
             location regardless of conditioning group) but carry the
             conditioning group's ``chain``/``draw`` sizes.
+        var_names : list of str, optional
+            Posterior variables to draw. ``None`` keeps the model default,
+            which includes response-scale ``mu``.
 
         Returns
         -------
@@ -682,15 +692,19 @@ class PyMCModelAdapter(ModelAdapter):
         Reading ``posterior_predictive`` here is correct for prior-conditioned
         output too; do not "fix" it to read ``idata[group]``.
         """
-        return _extract_mu(
-            self._model.predict(
-                X=X, coords=coords, out_of_sample=out_of_sample, group=group
-            )
-        )
+        predict_kwargs: dict[str, Any] = {
+            "X": X,
+            "coords": coords,
+            "out_of_sample": out_of_sample,
+            "group": group,
+        }
+        if var_names is not None:
+            predict_kwargs["var_names"] = var_names
+        return _extract_mu(self._model.predict(**predict_kwargs))
 
     def score(
         self, X: Any, y: Any, *, coords: dict[str, Any] | None = None
-    ) -> pd.Series:
+    ) -> pd.Series | None:
         """Score predictions from the PyMC model.
 
         Parameters
@@ -875,6 +889,7 @@ class SklearnModelAdapter(ModelAdapter):
         coords: dict[str, Any] | None = None,
         out_of_sample: bool = False,
         group: Literal["prior", "posterior"] = "posterior",
+        var_names: list[str] | tuple[str, ...] | None = None,
     ) -> xr.DataArray:
         """Return point predictions as singleton posterior draws.
 
@@ -890,6 +905,9 @@ class SklearnModelAdapter(ModelAdapter):
             Only the implicit posterior atom exists on point-estimate
             backends; requesting ``"prior"`` raises the group-not-sampled
             error naming :meth:`sample_prior_predictive`.
+        var_names : list or tuple of str, optional
+            Ignored when ``None`` or when it includes ``mu``. This backend
+            has no predictive variables to select and only returns ``mu``.
 
         Returns
         -------
@@ -904,6 +922,11 @@ class SklearnModelAdapter(ModelAdapter):
                 "PriorPredictiveNotSupportedException for this backend — or "
                 "use a Bayesian model for prior checks.",
                 group=group,
+            )
+        if var_names is not None and "mu" not in var_names:
+            raise ValueError(
+                "Point-estimate backends only return response-scale mu; "
+                f"got var_names={list(var_names)}."
             )
         values = np.asarray(self._model.predict(X=_sklearn_array(X)))
         if values.ndim == 1:
@@ -1225,6 +1248,7 @@ class PyMCForecastAdapter(ModelAdapter):
         coords: dict[str, Any] | None = None,
         out_of_sample: bool = False,
         group: Literal["prior", "posterior"] = "posterior",
+        var_names: list[str] | tuple[str, ...] | None = None,
     ) -> xr.DataArray:
         """Predict in-sample or forecast the counterfactual.
 
@@ -1242,6 +1266,10 @@ class PyMCForecastAdapter(ModelAdapter):
             Only posterior draws exist on this backend; requesting
             ``"prior"`` raises the group-not-sampled error naming
             :meth:`sample_prior_predictive`.
+        var_names : list or tuple of str, optional
+            Accepted for the shared predict contract. This adapter always
+            returns response-scale ``mu`` and rejects a request that
+            excludes it.
 
         Returns
         -------
@@ -1254,6 +1282,11 @@ class PyMCForecastAdapter(ModelAdapter):
                 "Call sample_prior_predictive() first — which itself raises "
                 "PriorPredictiveNotSupportedException for this backend.",
                 group=group,
+            )
+        if var_names is not None and "mu" not in var_names:
+            raise ValueError(
+                "Forecast adapters only return response-scale mu; "
+                f"got var_names={list(var_names)}."
             )
         return _extract_mu(
             self._model.predict(X=X, coords=coords, out_of_sample=out_of_sample)
