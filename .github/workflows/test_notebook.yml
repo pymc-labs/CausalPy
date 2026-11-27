@@ -31,10 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    timeout-minutes: 180
+    timeout-minutes: 60
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         include:
           - name: gallery-pymc
