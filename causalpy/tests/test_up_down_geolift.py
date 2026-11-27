@@ -37,6 +37,7 @@ def test_up_down_simulator_reproducible_and_exposes_potential_outcomes():
         pd.testing.assert_frame_equal(getattr(first, field), getattr(second, field))
     assert first.arms == second.arms
     assert first.treatment_time == second.treatment_time
+    assert first.treatment_end_time is None
     pd.testing.assert_frame_equal(first.revenue - first.no_intervention, first.effects)
     up = first.arms["up"]
     down = first.arms["down"]
@@ -44,6 +45,7 @@ def test_up_down_simulator_reproducible_and_exposes_potential_outcomes():
     post = first.effects.loc[first.treatment_time :]
     assert (post[up] > 0).all().all()
     assert (post[down] < 0).all().all()
+    assert (post.diff().iloc[1:] == 0).all().all()
     assert (post[controls] == 0).all().all()
     assert (first.effects.loc[: first.treatment_time].iloc[:-1] == 0).all().all()
     baseline_search = first.spend_baseline.xs("search", axis=1, level="channel").iloc[0]
@@ -74,17 +76,120 @@ def test_up_down_simulator_reproducible_and_exposes_potential_outcomes():
         - first.spend_baseline.loc[first.treatment_time :, pd.IndexSlice[:, "search"]]
     )
     assert np.allclose(planned_change.sum(axis=1), 0)
+    assert np.allclose(planned_change.loc[:, pd.IndexSlice[up, "search"]], 8)
+    assert np.allclose(planned_change.loc[:, pd.IndexSlice[down, "search"]], -8)
 
 
-def test_up_down_simulator_no_effect_and_no_delivery():
-    no_effect = generate_up_down_geolift_data(seed=123, effect_scale=0)
+@pytest.mark.parametrize("design", [{}, {"n_active": 8, "half_life_weeks": 3}])
+def test_up_down_simulator_no_effect_and_no_delivery(design):
+    no_effect = generate_up_down_geolift_data(seed=123, effect_scale=0, **design)
     assert (no_effect.effects == 0).all().all()
     pd.testing.assert_frame_equal(no_effect.revenue, no_effect.no_intervention)
-    no_delivery = generate_up_down_geolift_data(seed=123, delivery_fraction=0)
+    no_delivery = generate_up_down_geolift_data(seed=123, delivery_fraction=0, **design)
     assert (no_delivery.effects == 0).all().all()
     pd.testing.assert_frame_equal(
         no_delivery.spend_realized, no_delivery.spend_baseline
     )
+
+
+@pytest.fixture
+def carryover_design():
+    return {"seed": 415, "n_pre": 52, "n_post": 17, "n_active": 8, "n_control": 5}
+
+
+def test_up_down_simulator_restores_spend_after_eight_weeks(carryover_design):
+    simulated = generate_up_down_geolift_data(**carryover_design, half_life_weeks=3)
+    repeated = generate_up_down_geolift_data(**carryover_design, half_life_weeks=3)
+    time = simulated.revenue.index
+
+    assert len(time) == 69
+    assert simulated.treatment_time == repeated.treatment_time == time[52]
+    assert simulated.treatment_end_time == repeated.treatment_end_time == time[60]
+    assert simulated.arms == repeated.arms
+    for field in (
+        "revenue",
+        "no_intervention",
+        "effects",
+        "spend_baseline",
+        "spend_planned",
+        "spend_realized",
+    ):
+        frame = getattr(simulated, field)
+        pd.testing.assert_index_equal(frame.index, time)
+        pd.testing.assert_frame_equal(frame, getattr(repeated, field))
+    np.testing.assert_allclose(
+        simulated.revenue - simulated.no_intervention, simulated.effects, atol=1e-12
+    )
+    assert (simulated.effects.iloc[:52] == 0).all().all()
+    assert (simulated.effects[simulated.arms["control"]] == 0).all().all()
+
+    for spend, shift in (
+        (simulated.spend_planned, 8.0),
+        (simulated.spend_realized, 7.2),
+    ):
+        expected = simulated.spend_baseline.copy()
+        for arm, sign in (("up", 1), ("down", -1)):
+            for geo in simulated.arms[arm]:
+                expected.loc[time[52:60], (geo, "search")] += sign * shift
+        pd.testing.assert_frame_equal(spend, expected)
+
+    immediate = generate_up_down_geolift_data(**carryover_design)
+    assert (immediate.effects.iloc[60:] == 0).all().all()
+    sustained = generate_up_down_geolift_data(**(carryover_design | {"n_active": 17}))
+    assert sustained.treatment_end_time is None
+    assert (sustained.effects.iloc[-1].loc[simulated.arms["up"]] > 0).all()
+
+
+def test_up_down_simulator_applies_geometric_adstock_before_saturation(
+    carryover_design,
+):
+    simulated = generate_up_down_geolift_data(**carryover_design, half_life_weeks=3)
+    alpha = 2 ** (-1 / 3)
+    active = simulated.effects.iloc[52:60]
+    tail = simulated.effects.iloc[59:]
+    for arm, sign in (("up", 1), ("down", -1)):
+        geos = simulated.arms[arm]
+        assert (sign * simulated.effects[geos].iloc[52:] > 0).all().all()
+        assert (sign * active[geos].diff().iloc[1:] > 0).all().all()
+        assert (sign * tail[geos].diff().iloc[1:] < 0).all().all()
+
+    # At steady baseline, the closed-form excess adstock is the full
+    # delivered shift times (1 - alpha**8) at switch-off, and half that
+    # three weeks later. Feed those effective shifts to the immediate
+    # response to check the identity without assuming linear saturation.
+    for week, fraction in (
+        (1, 1 - alpha),
+        (8, 1 - alpha**8),
+        (11, (1 - alpha**8) / 2),
+        (14, (1 - alpha**8) / 4),
+        (17, (1 - alpha**8) / 8),
+    ):
+        immediate = generate_up_down_geolift_data(
+            **carryover_design, delivery_fraction=0.9 * fraction
+        )
+        np.testing.assert_allclose(
+            simulated.effects.iloc[51 + week], immediate.effects.iloc[52], atol=1e-12
+        )
+
+
+@pytest.mark.parametrize(
+    ("n_pre", "n_post", "n_active"),
+    [
+        (120, 12, np.int8(8)),
+        (np.int64(40), 12, np.uint64(8)),
+        (np.int8(120), np.int64(12), 8),
+    ],
+)
+def test_up_down_simulator_accepts_numpy_integer_durations(n_pre, n_post, n_active):
+    expected = generate_up_down_geolift_data(
+        n_pre=int(n_pre), n_post=int(n_post), n_active=int(n_active)
+    )
+    result = generate_up_down_geolift_data(
+        n_pre=n_pre, n_post=n_post, n_active=n_active
+    )
+
+    assert result.treatment_end_time == expected.treatment_end_time
+    pd.testing.assert_frame_equal(result.spend_realized, expected.spend_realized)
 
 
 @pytest.mark.parametrize(
@@ -94,6 +199,14 @@ def test_up_down_simulator_no_effect_and_no_delivery():
         ({"n_control": 1}, "At least two control geos"),
         ({"effect_scale": -1}, "effect_scale"),
         ({"delivery_fraction": 1.2}, "delivery_fraction"),
+        ({"n_active": 0}, "n_active"),
+        ({"n_active": 13}, "n_active"),
+        ({"n_active": 2.5}, "n_active"),
+        ({"n_active": True}, "n_active"),
+        ({"half_life_weeks": 0}, "half_life_weeks"),
+        ({"half_life_weeks": -3}, "half_life_weeks"),
+        ({"half_life_weeks": np.inf}, "half_life_weeks"),
+        ({"half_life_weeks": np.nan}, "half_life_weeks"),
     ],
 )
 def test_up_down_simulator_rejects_invalid_design(settings, message):

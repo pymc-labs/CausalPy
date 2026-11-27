@@ -16,6 +16,7 @@ Functions that generate data sets used in examples
 """
 
 from dataclasses import dataclass
+from math import expm1, log
 
 import numpy as np
 import pandas as pd
@@ -33,6 +34,8 @@ class UpDownGeoLiftSimulation:
     Spend frames have a common time index and ``(geo, channel)`` columns. Revenue
     and effect frames have one column per geo. Spend and revenue are simulated
     USD per week, recorded in each frame's ``attrs['unit']``.
+    ``treatment_end_time`` is the first observed week back at baseline spend,
+    or ``None`` if there is no observed follow-up.
     """
 
     revenue: pd.DataFrame
@@ -44,6 +47,19 @@ class UpDownGeoLiftSimulation:
     arms: dict[str, list[str]]
     treatment_time: pd.Timestamp
     tested_channel: str
+    treatment_end_time: pd.Timestamp | None = None
+
+
+def _geometric_adstock(
+    spend: np.ndarray, initial_spend: float, new_spend_weight: float
+) -> np.ndarray:
+    """Smooth weekly spend starting from the business-as-usual steady state."""
+    adstock = np.empty_like(spend)
+    previous = initial_spend
+    for week, amount in enumerate(spend):
+        previous += new_spend_weight * (amount - previous)
+        adstock[week] = previous
+    return adstock
 
 
 def generate_up_down_geolift_data(
@@ -56,16 +72,25 @@ def generate_up_down_geolift_data(
     n_down: int = 2,
     effect_scale: float = 150.0,
     delivery_fraction: float = 0.9,
+    n_active: int | None = None,
+    half_life_weeks: float | None = None,
 ) -> UpDownGeoLiftSimulation:
     """Simulate weekly revenue and two-channel spend for an up/down/control test.
 
     The tested channel is ``search``. Its realized change starts at the common
-    intervention date; ``display`` is unchanged. Treated business-as-usual
+    intervention date, and ``display`` is unchanged. Treated business-as-usual
     revenue is a convex combination of control revenue plus idiosyncratic noise.
     Control geos span smaller and larger sizes than treated geos, producing
     correspondingly lower and higher baseline spend and revenue. Effects are
     differences in geo-specific saturating response to realized and baseline
-    search spend, with no carryover. Set ``effect_scale=0`` for a no-effect case.
+    search spend. Set ``effect_scale=0`` for a no-effect case.
+
+    ``n_post`` counts all observations from launch. Set ``n_active`` to change
+    spend for only the first ``n_active`` of those weeks. It defaults to
+    ``n_post``. With a finite positive ``half_life_weeks``, both spend paths
+    are geometrically smoothed from baseline steady state before saturation,
+    so revenue effects can persist after spend returns to baseline. The
+    default response is immediate.
     """
     if min(n_pre, n_post, n_control, n_up, n_down) < 1:
         raise ValueError("All geo and period counts must be positive.")
@@ -77,19 +102,35 @@ def generate_up_down_geolift_data(
         raise ValueError("effect_scale must be finite and nonnegative.")
     if not np.isfinite(delivery_fraction) or not 0 <= delivery_fraction <= 1:
         raise ValueError("delivery_fraction must lie between 0 and 1.")
+    if n_active is not None and (
+        not isinstance(n_active, (int, np.integer))
+        or isinstance(n_active, bool)
+        or not 1 <= n_active <= n_post
+    ):
+        raise ValueError("n_active must be an integer between 1 and n_post.")
+    active_weeks = n_post if n_active is None else n_active
+    new_spend_weight = None
+    if half_life_weeks is not None:
+        if not np.isfinite(half_life_weeks) or half_life_weeks <= 0:
+            raise ValueError("half_life_weeks must be finite and positive.")
+        # Compute 1 - alpha accurately even for a very long half-life.
+        new_spend_weight = -expm1(-log(2) / float(half_life_weeks))
 
     rng = np.random.default_rng(seed)
     time = pd.date_range(
         "2024-01-07", periods=n_pre + n_post, freq="W-SUN", name="time"
     )
     treatment_time = time[n_pre]
+    end_index = int(n_pre) + int(active_weeks)
+    treatment_end_time = time[end_index] if active_weeks < n_post else None
     arms = {
         "up": [f"up_{i + 1}" for i in range(n_up)],
         "down": [f"down_{i + 1}" for i in range(n_down)],
         "control": [f"control_{i + 1}" for i in range(n_control)],
     }
     geos = arms["control"] + arms["up"] + arms["down"]
-    post = np.arange(len(time)) >= n_pre
+    active = np.zeros(len(time), dtype=bool)
+    active[n_pre:end_index] = True
 
     common = 110 + 0.18 * np.arange(len(time)) + 4 * np.sin(np.arange(len(time)) / 5)
     # Geo size creates distinct spend and revenue levels. Controls span the
@@ -135,8 +176,8 @@ def generate_up_down_geolift_data(
     for arm, sign in (("up", 1), ("down", -1)):
         for geo in arms[arm]:
             baseline = spend_baseline[(geo, "search")].to_numpy()
-            planned = baseline + np.where(post, sign * 8.0, 0.0)
-            realized = baseline + np.where(post, sign * 8.0 * delivery_fraction, 0.0)
+            planned = baseline + np.where(active, sign * 8.0, 0.0)
+            realized = baseline + np.where(active, sign * 8.0 * delivery_fraction, 0.0)
             spend_planned[(geo, "search")] = planned
             spend_realized[(geo, "search")] = realized
 
@@ -144,8 +185,12 @@ def generate_up_down_geolift_data(
     for geo in arms["up"] + arms["down"]:
         half_saturation = rng.uniform(25, 55)
         geo_scale = effect_scale * rng.uniform(0.85, 1.15)
-        baseline = spend_baseline[(geo, "search")]
-        realized = spend_realized[(geo, "search")]
+        baseline = spend_baseline[(geo, "search")].to_numpy()
+        realized = spend_realized[(geo, "search")].to_numpy()
+        if new_spend_weight is not None:
+            initial_spend = baseline[0]
+            baseline = _geometric_adstock(baseline, initial_spend, new_spend_weight)
+            realized = _geometric_adstock(realized, initial_spend, new_spend_weight)
         effects[geo] = geo_scale * (
             realized / (half_saturation + realized)
             - baseline / (half_saturation + baseline)
@@ -172,6 +217,7 @@ def generate_up_down_geolift_data(
         arms=arms,
         treatment_time=treatment_time,
         tested_channel="search",
+        treatment_end_time=treatment_end_time,
     )
 
 
