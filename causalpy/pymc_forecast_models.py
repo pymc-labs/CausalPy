@@ -42,21 +42,23 @@ causalpy[forecast]``).
 
 Notes
 -----
-Causal impact uses upstream ``expected_observation`` / ``expected_observation_future`` when provided: the conditional expected outcome in observed units, including parameter and latent uncertainty but excluding observation-level noise. Otherwise CausalPy uses ``mu`` / ``mu_future`` under the model author's responsibility that this latent is already an outcome-scale expectation. Models with a link function should pass ``expected_observation=inverse_link(latent)`` to ``pymc_forecast.predict``. The adapter never infers or inverts links. The draw-level posterior predictive of the observed variable is reported separately as ``y_hat``. One posterior subsample is drawn at fit time and shared by every predictive call, so draw *i* of the pre-period fit and draw *i* of the counterfactual come from the same parameter draw (upstream ``posterior=`` passthrough).
+Causal impact uses upstream ``expected_observation`` / ``expected_observation_future`` when provided: the conditional expected outcome in observed units, including parameter and latent uncertainty but excluding observation-level noise. Otherwise CausalPy uses ``mu`` / ``mu_future`` under the model author's responsibility that this latent is already an outcome-scale expectation. Models with a link function should pass ``expected_observation=inverse_link(latent)`` to ``pymc_forecast.predict``. The adapter never infers or inverts links. The draw-level posterior predictive of the observed variable is reported separately as ``y_hat``. The posterior used for prediction is fixed at fit time and shared by every predictive call, so draw *i* of the pre-period fit and draw *i* of the counterfactual come from the same parameter draw (upstream ``posterior=`` passthrough). By default that is the sampled posterior. An explicit ``num_samples`` thins a materialized posterior, or draws that many samples from a variational approximation.
 
 ``StatespaceForecaster`` models are rejected for now: their upstream outputs
 carry no separate noise-free latent, so the impact convention above cannot be
 honoured without silently substituting the noisy predictive. Tracked upstream
 as `pymc-forecast#50 <https://github.com/pymc-labs/pymc-forecast/issues/50>`_.
 
-Inference diagnostics: :attr:`PyMCForecastModel.idata` holds the thinned,
-draw-coherent posterior subsample used for prediction; the *full* fit result
-(e.g. the complete NUTS ``DataTree`` with sample stats) is exposed as
-:attr:`PyMCForecastModel.fit_idata`.
+Inference diagnostics: :attr:`PyMCForecastModel.idata` holds the posterior
+shared by every predictive call. By default that is the sampled posterior,
+not a thinned subset. An explicit ``num_samples`` stores that thinned subset
+instead. The full fit result (for example the complete NUTS ``DataTree`` with
+sample stats) is exposed as :attr:`PyMCForecastModel.fit_idata`.
 """
 
 from __future__ import annotations
 
+import multiprocessing
 from contextlib import nullcontext
 from importlib import metadata
 from typing import Any
@@ -108,6 +110,46 @@ def _import_pymc_forecast():
     return pymc_forecast
 
 
+_APPROXIMATION_DRAWS = 500
+
+
+def _pymc_chain_count() -> int:
+    """Chains ``pm.sample`` uses when ``chains`` and ``cores`` are omitted.
+
+    Mirrors ``pymc.sample``: ``cores = min(4, cpu_count // 2)`` and
+    ``chains = max(2, cores)``. ``cpu_count // 2`` is PyMC's own CPU guess,
+    not ``os.cpu_count()``.
+    """
+    try:
+        cpus = multiprocessing.cpu_count() // 2
+    except NotImplementedError:
+        cpus = 1
+    return max(2, min(4, cpus))
+
+
+def _posterior_for_prediction(
+    forecaster: Any,
+    num_samples: int | None,
+    random_seed: int | None,
+) -> xr.Dataset:
+    """Return the posterior every predictive call will share.
+
+    An explicit ``num_samples`` thins a materialized posterior, or draws that
+    many samples from a variational approximation. ``None`` keeps a
+    materialized posterior whole. A variational fit has no finite posterior,
+    so ``None`` draws ``_APPROXIMATION_DRAWS`` from the approximation.
+    """
+    if num_samples is not None:
+        return forecaster.draw_posterior(num_samples, random_seed=random_seed)
+    idata = getattr(forecaster, "idata", None)
+    if idata is not None:
+        group = idata.posterior
+        if isinstance(group, xr.Dataset):
+            return group
+        return group.to_dataset()
+    return forecaster.draw_posterior(_APPROXIMATION_DRAWS, random_seed=random_seed)
+
+
 class PyMCForecastModel:
     """Wrap a ``pymc_forecast`` model as a CausalPy time-series backend.
 
@@ -127,15 +169,22 @@ class PyMCForecastModel:
         Extra keyword arguments for the forecaster constructor (e.g.
         ``{"draws": 500}`` for MCMC, ``{"num_steps": 20_000}`` for ADVI, or
         ``{"progressbar": True}`` — accepted uniformly by every forecaster).
-        The forecaster is constructed immediately (unfitted), so invalid
-        options fail at construction rather than at experiment time.
-    num_samples : int, default 500
-        Number of posterior draws, drawn once at fit time and shared by every
-        predictive call so that in-sample prediction and counterfactual are
-        conditioned on the same parameter draws.
+        Omitted ``chains`` on the default HMC forecaster is set to the chain
+        count :func:`pymc.sample` resolves when ``chains`` and ``cores`` are
+        omitted. A caller-supplied ``chains`` is kept. Other forecasters do
+        not receive ``chains``. The forecaster is constructed immediately
+        (unfitted), so invalid options fail at construction rather than at
+        experiment time.
+    num_samples : int, optional
+        Posterior draws stored for prediction. ``None`` (the default) keeps a
+        materialized posterior whole, so an HMC fit is not thinned. A
+        variational fit has no finite posterior, so ``None`` draws 500 samples
+        from the approximation. An integer thins a materialized posterior, or
+        draws that many approximation samples, and is shared by every
+        predictive call.
     random_seed : int, optional
-        Seed passed to fitting, the posterior subsample, and every predictive
-        call.
+        Seed passed to fitting, an explicit posterior subsample, and every
+        predictive call.
 
     Examples
     --------
@@ -167,7 +216,7 @@ class PyMCForecastModel:
         model_fn: Any,
         forecaster: type | None = None,
         forecaster_kwargs: dict[str, Any] | None = None,
-        num_samples: int = 500,
+        num_samples: int | None = None,
         random_seed: int | None = None,
     ) -> None:
         self._pf = _import_pymc_forecast()
@@ -191,6 +240,12 @@ class PyMCForecastModel:
             )
         self.forecaster_cls = forecaster
         self.forecaster_kwargs = dict(forecaster_kwargs or {})
+        if (
+            isinstance(self.forecaster_cls, type)
+            and issubclass(self.forecaster_cls, self._pf.HMCForecaster)
+            and "chains" not in self.forecaster_kwargs
+        ):
+            self.forecaster_kwargs["chains"] = _pymc_chain_count()
         self.num_samples = num_samples
         self.random_seed = random_seed
         # deferred-fit construction (pymc-forecast >= 0.2): hold a real
@@ -227,8 +282,9 @@ class PyMCForecastModel:
 
         For the default NUTS backend this is the complete MCMC
         ``DataTree`` (posterior, sample stats, diagnostics) — as
-        distinct from :attr:`idata`, which holds the thinned posterior
-        subsample shared by every predictive call for draw coherence.
+        distinct from :attr:`idata`, which holds the posterior shared by
+        every predictive call. That posterior is the sampled posterior
+        unless ``num_samples`` thins it.
 
         Raises
         ------
@@ -282,8 +338,8 @@ class PyMCForecastModel:
         covariates = self._as_covariates(X)
         self._has_covariates = covariates is not None
         self.forecaster.fit(data, covariates, random_seed=self.random_seed)
-        # one posterior subsample, shared by every predictive call: draw i of
-        # the pre-period fit and draw i of the counterfactual come from the
+        # one posterior, shared by every predictive call: draw i of the
+        # pre-period fit and draw i of the counterfactual come from the
         # same parameter draw
         posterior_context = (
             self.forecaster.model
@@ -291,8 +347,8 @@ class PyMCForecastModel:
             else nullcontext()
         )
         with posterior_context:
-            self._posterior = self.forecaster.draw_posterior(
-                self.num_samples, random_seed=self.random_seed
+            self._posterior = _posterior_for_prediction(
+                self.forecaster, self.num_samples, self.random_seed
             )
         self.idata = xr.DataTree.from_dict({"posterior": self._posterior})
         return self.idata
