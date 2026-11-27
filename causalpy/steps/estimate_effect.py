@@ -120,7 +120,7 @@ class EstimateEffect:
 
         Returns
         -------
-        PipelineContext
+        ~causalpy.pipeline.PipelineContext
             Updated context with ``experiment``, ``experiment_config``,
             and (if available) ``effect_summary`` populated.
         """

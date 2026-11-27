@@ -146,7 +146,7 @@ class GenerateReport:
 
         Returns
         -------
-        PipelineContext
+        ~causalpy.pipeline.PipelineContext
             The same context with ``report`` populated.
         """
         env = Environment(
