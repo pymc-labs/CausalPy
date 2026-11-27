@@ -24,8 +24,7 @@
   skl_models
   pymc_forecast_models
   experiments
-  design
-  historical_validation
+  planning
   pipeline
   reporting
   steps
